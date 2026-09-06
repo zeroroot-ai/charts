@@ -76,7 +76,11 @@ fails if it disagrees with `.release-please-manifest.json`.
 
 ## Air-gap mirroring
 
-1. **Mirror images.** `images/images.txt` lists every image the chart pulls.
+1. **Mirror images.** `images/images.txt` lists every image the chart pulls,
+   plus the `dispatchTime` group: the images setec pulls when a mission
+   dispatches a tool, an agent or a connector. Those never appear in a
+   render. They are read from the daemon's component catalog at the gibson
+   commit in `images/gibson-catalog.ref`.
 
    It is **generated**, not hand-maintained — `images/generate-image-list.py`
    renders the umbrella across every `ci/` profile and derives the list, and
@@ -90,16 +94,34 @@ fails if it disagrees with `.release-please-manifest.json`.
    are resolved at mirror time: run `images/resolve-digests.sh` after
    `docker login ghcr.io`.
 
+   Use `cosign copy`, not `crane copy`: it moves the cosign signature with
+   the image, so the verifier inside the perimeter can still check it.
+
    ```sh
    while read -r img; do
      [ "${img#\#}" = "$img" ] || continue
-     crane copy "$img" "registry.il.example.mil/${img#*/}"
+     cosign copy "$img" "registry.il.example.mil/${img#*/}"
    done < images/images.txt
    ```
 
-2. **Mirror the chart.** `helm pull oci://ghcr.io/zeroroot-ai/charts/gibson
-   --version <the tag in package/ocirepository.yaml>`, then `helm push` to the
-   internal OCI registry.
+2. **Mirror the chart, with its signature.** The publish workflow signs
+   every chart with cosign keyless and stores the Rekor bundle on the
+   signature, so verification needs no network once the signature travels
+   with the chart. Copy the chart the same way and verify it offline:
+
+   ```sh
+   ver="$(grep -oE 'tag: "[^"]+"' package/ocirepository.yaml | cut -d'"' -f2)"
+   cosign copy "ghcr.io/zeroroot-ai/charts/gibson:${ver}" \
+     "registry.il.example.mil/zeroroot-ai/charts/gibson:${ver}"
+   cosign verify --offline \
+     --certificate-identity-regexp '^https://github\.com/zeroroot-ai/charts/\.github/workflows/publish-umbrella-chart\.yml@' \
+     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+     "registry.il.example.mil/zeroroot-ai/charts/gibson:${ver}"
+   ```
+
+   `cosign verify --offline` still needs the Sigstore trust root. Fetch it
+   once on a connected host with `cosign initialize` and carry
+   `~/.sigstore/root` across.
 
 3. **Repoint sources.** In `package/ocirepository.yaml` set `url` to the
    mirrored chart and add `secretRef: { name: private-registry }`; in
@@ -110,6 +132,14 @@ fails if it disagrees with `.release-please-manifest.json`.
 4. **Override image repos** to the mirror via the customer overlay /
    `HelmRelease.spec.values` (the umbrella keys image repositories per
    sub-chart in `helm/gibson*/values.yaml`).
+
+5. **Mirror the trivy databases.** The tool runner's trivy fetches its
+   vulnerability database from `ghcr.io/aquasecurity/trivy-db:2` and its
+   Java index from `ghcr.io/aquasecurity/trivy-java-db:1` at scan time.
+   Copy both OCI artifacts with `oras cp`, then pass the mirror to every
+   trivy call with `--db-repository` and `--java-db-repository`. The
+   executor's argument policy accepts an image reference there and nothing
+   else.
 
 ### Hardening notes
 

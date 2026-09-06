@@ -15,9 +15,14 @@
 # (ghcr.io/zeroroot-ai/*, mirror included), so pinning needs registry auth:
 # run `./resolve-digests.sh` after `docker login ghcr.io` at mirror time.
 #
-# Mirror loop:
+# The dispatchTime group is not rendered by the chart: it is read from the
+# daemon's component catalog (zeroroot-ai/gibson, see gibson-catalog.ref),
+# because setec pulls those images at dispatch time, not at install time.
+#
+# Mirror loop. `cosign copy` moves the signature alongside the image, which
+# `crane copy` does not, so an air-gapped verifier can still check it:
 #   while read -r img; do [ "${img#\#}" = "$img" ] || continue
-#     crane copy "$img" "registry.il.example.mil/${img#*/}"; done < images.txt
+#     cosign copy "$img" "registry.il.example.mil/${img#*/}"; done < images.txt
 #
 # DELIBERATELY ABSENT — checked, not forgotten:
 #
@@ -108,3 +113,13 @@ quay.io/jetstack/cert-manager-controller:v1.21.1
 quay.io/jetstack/cert-manager-webhook:v1.21.1
 registry.k8s.io/external-dns/external-dns:v0.21.0
 registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.9.4
+
+# Dispatch-time images (private first-party plus one public upstream).
+# Named by the daemon's component catalog, pulled by setec when a mission
+# dispatches a tool, an agent or a connector. Absent from every render.
+ghcr.io/stackloklabs/osv-mcp/server
+ghcr.io/zeroroot-ai/cve-triage@sha256:42a624868aa641cd612e0c7b1e6c51275f2051a362cfc2c79d0224e504695bf6
+ghcr.io/zeroroot-ai/gibson-executor@sha256:1c923f35d43e63d11300b4c86e79dfe6ee572304124fa8c175bfee32cc1a5cb8
+ghcr.io/zeroroot-ai/zerocool-agent@sha256:b2c9b32f0d755b2d05ac753674903c86c86925fc6dcea4891fcd1a1eedd77eff
+# needs api.anthropic.com or a claude.ai login at run time; no in-perimeter option
+ghcr.io/zeroroot-ai/zerocool-claude-agent@sha256:0db3d0bea674c9697baa79b7f1082f1f515c4b0a714073130a9fec35bf9b0824

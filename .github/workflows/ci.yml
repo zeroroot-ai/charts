@@ -59,3 +59,33 @@ jobs:
       # since tools/cross-chart-check was deleted (ADR-0014).
       - name: make check
         run: make check
+
+  # The air-gap manifest is generated from the chart render and gibson's
+  # component catalog. This job proves the committed copy is current; without
+  # it the manifest drifts silently, which is deploy#1171 all over again. The
+  # job lived in the deleted deploy repo as airgap-image-list.yml and did not
+  # move with the chart.
+  airgap-image-list:
+    name: airgap-image-list
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5
+        with:
+          version: v3.18.4
+
+      # Same reason as ci-required: the generator vendors the sub-charts from
+      # ghcr, and an anonymous pull is rate-limited by IP.
+      - name: Log in to ghcr.io
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # GH_TOKEN lifts the anonymous GitHub API rate limit for the catalog
+      # read; the gibson repo is public, so no wider scope is needed.
+      - name: Air-gap image manifest matches the chart and gibson's catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./bigbang/images/generate-image-list.py --check
