@@ -43,7 +43,9 @@ echo "▶ vendoring working tree"
 repack "$ROOT" || { echo "working-tree chart-deps FAILED"; exit 1; }
 
 render() { # $1=root $2=profile $3=out
-  helm template gibson "$1/helm/gibson" -f "$1/helm/gibson/$2" --namespace gibson >"$3" 2>"$3.err"
+  # Every file but values-vanilla.yaml is an overlay and renders on top of it.
+  base=(); [ "$2" = values-vanilla.yaml ] || base=(-f "$1/helm/gibson/values-vanilla.yaml")
+  helm template gibson "$1/helm/gibson" "${base[@]}" -f "$1/helm/gibson/$2" --namespace gibson >"$3" 2>"$3.err"
 }
 
 # kinds+names, one per line, so the diff is resource-level not text-level
