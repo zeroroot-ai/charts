@@ -62,12 +62,15 @@ DEP_CHARTS = ["helm/gibson-operators", "helm/gibson-workloads", "helm/gibson"]
 # Every profile a consumer can install from this repo. The manifest is the
 # union. The SaaS profiles (ci/values-staging, ci/values-saas) live in the
 # hosted repo now and are not part of the air-gap package.
+# The substrate and guest files are overlays: they render only on top of
+# values-vanilla.yaml, the way the README installs them.
+VANILLA = "helm/gibson/values-vanilla.yaml"
 PROFILES = [
-    ("self-hosted", "helm/gibson/values-vanilla.yaml"),
-    ("eks", "helm/gibson/values-eks.yaml"),
-    ("gke", "helm/gibson/values-gke.yaml"),
-    ("aks", "helm/gibson/values-aks.yaml"),
-    ("guest", "helm/gibson/values-guest.yaml"),
+    ("self-hosted", [VANILLA]),
+    ("eks", [VANILLA, "helm/gibson/values-eks.yaml"]),
+    ("gke", [VANILLA, "helm/gibson/values-gke.yaml"]),
+    ("aks", [VANILLA, "helm/gibson/values-aks.yaml"]),
+    ("guest", [VANILLA, "helm/gibson/values-guest.yaml"]),
 ]
 
 IMAGE_LINE_RX = re.compile(r'^\s+(?:image|customImage):\s*"?([^"\s]+)"?\s*$')
@@ -215,7 +218,7 @@ def render_images() -> dict[str, set[str]]:
         out = run(
             [
                 "helm", "template", "gibson", "helm/gibson",
-                "--values", values,
+                *[arg for v in values for arg in ("--values", v)],
                 "--namespace", "gibson",
                 # Rendering helm-test hooks too: an air-gapped operator running
                 # `helm test` needs those images mirrored as well.
