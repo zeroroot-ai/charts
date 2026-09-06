@@ -32,6 +32,18 @@ ordered because gibson-workloads' own gibson-common dependency must exist
 before the umbrella can package gibson-workloads at all; without it the render
 fails outright with `no template "gibson.fullname"`.
 
+WHY IT ALSO READS GIBSON'S COMPONENT CATALOG. The chart renders the platform,
+not the work it dispatches. The daemon carries a component catalog
+(gibson: internal/platform/componentcatalog/manifests/*.yaml, embedded in the
+binary) that names the images setec pulls at dispatch time: the tool runner,
+the CVE triage agent, the two zerocool sandboxes and the OSV MCP server. None
+of them appears in any `helm template`, so a mirror built from the render
+alone comes up and then dispatches nothing. The `dispatchTime` group is
+derived from those manifests at the gibson commit recorded in
+gibson-catalog.ref. A plain run moves that pin to gibson's current main and
+rewrites the file; `--check` reads the committed pin, so CI is deterministic
+and the pin moves only when the manifest is regenerated (release time).
+
 DIGESTS ARE NOT RESOLVED HERE. Almost every image is now private
 (ghcr.io/zeroroot-ai/*, including the mirror), so pinning needs registry auth
 and a network round trip per image. That stays in resolve-digests.sh, run at
@@ -42,17 +54,25 @@ generator's job is that the *set* is right and complete.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
+import os
 import pathlib
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 IMAGES_TXT = HERE / "images.txt"
 IMAGES_YAML = HERE / "images.yaml"
 MANIFEST = ROOT / ".release-please-manifest.json"
+CATALOG_REF = HERE / "gibson-catalog.ref"
+GIBSON_REPO = "zeroroot-ai/gibson"
+GIBSON_CATALOG_DIR = "internal/platform/componentcatalog/manifests"
+GITHUB_API = "https://api.github.com"
 OCIREPOSITORY = ROOT / "bigbang" / "package" / "ocirepository.yaml"
 
 # Ordered: gibson-common must exist before gibson-workloads can be packaged,
@@ -136,6 +156,17 @@ NOTES: dict[str, dict[str, str]] = {
         "role": "SMTP capture",
         "hardening": "DEV/TEST ONLY — exclude from a federal mirror",
     },
+    # Dispatch-time images, from gibson's component catalog.
+    "ghcr.io/zeroroot-ai/gibson-executor": {
+        "role": "tool runner: one image hosting every CLI parser (nmap, nuclei, trivy, ...)"
+    },
+    "ghcr.io/zeroroot-ai/cve-triage": {"role": "CVE triage agent"},
+    "ghcr.io/zeroroot-ai/zerocool-agent": {"role": "zerocool sandbox agent (opencode)"},
+    "ghcr.io/zeroroot-ai/zerocool-claude-agent": {
+        "role": "zerocool sandbox agent (Claude Code)",
+        "hardening": "needs api.anthropic.com or a claude.ai login at run time; no in-perimeter option",
+    },
+    "ghcr.io/stackloklabs/osv-mcp/server": {"role": "OSV MCP server (connector: osv)"},
     "ghcr.io/zitadel/zitadel": {"role": "Zitadel IdP (core)"},
     "ghcr.io/spiffe/spire-server": {"role": "SPIRE server (SVID issuance)"},
     "ghcr.io/spiffe/spire-agent": {"role": "SPIRE agent"},
@@ -238,6 +269,57 @@ def render_images() -> dict[str, set[str]]:
     return found
 
 
+def github_get(path: str) -> bytes:
+    """One GitHub REST call. A token is optional for the public gibson repo but
+    lifts the anonymous rate limit; CI passes github.token as GH_TOKEN."""
+    req = urllib.request.Request(
+        GITHUB_API + path,
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "generate-image-list"},
+    )
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.read()
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"GitHub API {path}: {exc}") from exc
+
+
+def committed_catalog_ref() -> str:
+    if not CATALOG_REF.exists():
+        raise SystemExit(f"{CATALOG_REF.relative_to(ROOT)} is missing; run without --check to create it")
+    ref = CATALOG_REF.read_text(encoding="utf-8").strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", ref):
+        raise SystemExit(f"{CATALOG_REF.relative_to(ROOT)} must hold one 40-hex commit sha, got {ref!r}")
+    return ref
+
+
+def current_catalog_ref() -> str:
+    """gibson's main HEAD, the pin a plain run records."""
+    data = json.loads(github_get(f"/repos/{GIBSON_REPO}/commits/main"))
+    return data["sha"]
+
+
+def catalog_images(ref: str) -> dict[str, set[str]]:
+    """repository -> set of references named by gibson's component catalog at ref."""
+    listing = json.loads(github_get(f"/repos/{GIBSON_REPO}/contents/{GIBSON_CATALOG_DIR}?ref={ref}"))
+    found: dict[str, set[str]] = {}
+    for entry in listing:
+        if not entry["name"].endswith(".yaml"):
+            continue
+        body = github_get(f"/repos/{GIBSON_REPO}/contents/{GIBSON_CATALOG_DIR}/{entry['name']}?ref={ref}")
+        raw = json.loads(body)
+        text = base64.b64decode(raw["content"]).decode("utf-8")
+        for line in text.splitlines():
+            m = IMAGE_LINE_RX.match(line)
+            if m and m.group(1):
+                found.setdefault(repo_of(m.group(1)), set()).add(m.group(1))
+    if not found:
+        raise SystemExit(f"no image references found in {GIBSON_REPO}@{ref}:{GIBSON_CATALOG_DIR}")
+    return found
+
+
 def repo_of(ref: str) -> str:
     return re.split(r"[:@]", ref, maxsplit=1)[0] if not ref.startswith("sha256") else ref
 
@@ -302,9 +384,14 @@ HEADER_TXT = """\
 # (ghcr.io/zeroroot-ai/*, mirror included), so pinning needs registry auth:
 # run `./resolve-digests.sh` after `docker login ghcr.io` at mirror time.
 #
-# Mirror loop:
+# The dispatchTime group is not rendered by the chart: it is read from the
+# daemon's component catalog (zeroroot-ai/gibson, see gibson-catalog.ref),
+# because setec pulls those images at dispatch time, not at install time.
+#
+# Mirror loop. `cosign copy` moves the signature alongside the image, which
+# `crane copy` does not, so an air-gapped verifier can still check it:
 #   while read -r img; do [ "${img#\\#}" = "$img" ] || continue
-#     crane copy "$img" "registry.il.example.mil/${img#*/}"; done < images.txt
+#     cosign copy "$img" "registry.il.example.mil/${img#*/}"; done < images.txt
 #
 """ + EXCLUSIONS
 
@@ -325,6 +412,10 @@ HEADER_YAML = """\
 # digest: intentionally empty. Almost every image is private, so pinning needs
 # registry auth — run ./resolve-digests.sh at mirror time.
 #
+# The dispatchTime group is not rendered by the chart: it is read from the
+# daemon's component catalog (zeroroot-ai/gibson, see gibson-catalog.ref),
+# because setec pulls those images at dispatch time, not at install time.
+#
 """ + EXCLUSIONS
 
 SECTION_TITLES = {
@@ -339,13 +430,20 @@ SECTION_TITLES = {
         "# The SPIRE/SPIFFE entries ARE the platform auth edge preserved by this\n"
         "# package — they are not replaced by Istio."
     ),
+    "dispatchTime": (
+        "Dispatch-time images (private first-party plus one public upstream).\n"
+        "# Named by the daemon's component catalog, pulled by setec when a mission\n"
+        "# dispatches a tool, an agent or a connector. Absent from every render."
+    ),
 }
+
+GROUP_ORDER = ("firstParty", "mirrored", "thirdParty", "dispatchTime")
 
 
 def build_txt(version: str, groups: dict[str, list[str]]) -> str:
     out = [HEADER_TXT, "", "# Helm OCI chart (the deployable artifact)",
            f"ghcr.io/zeroroot-ai/charts/gibson:{version}", ""]
-    for kind in ("firstParty", "mirrored", "thirdParty"):
+    for kind in GROUP_ORDER:
         refs = groups.get(kind, [])
         if not refs:
             continue
@@ -359,15 +457,19 @@ def build_txt(version: str, groups: dict[str, list[str]]) -> str:
     return "\n".join(out).rstrip() + "\n"
 
 
-def build_yaml(version: str, groups: dict[str, list[str]]) -> str:
+def build_yaml(version: str, groups: dict[str, list[str]], catalog_ref: str) -> str:
     lines = [HEADER_YAML, "", "chart:",
              f"  - ref: ghcr.io/zeroroot-ai/charts/gibson:{version}",
              '    digest: ""',
-             "    role: umbrella-helm-chart", ""]
-    for kind in ("firstParty", "mirrored", "thirdParty"):
+             "    role: umbrella-helm-chart", "",
+             "# The gibson commit whose component catalog the dispatchTime group is",
+             "# derived from (bigbang/images/gibson-catalog.ref).",
+             f"gibsonCatalogRef: {catalog_ref}"]
+    for kind in GROUP_ORDER:
         refs = groups.get(kind, [])
         if not refs:
             continue
+        lines.append("")
         lines.append("# " + SECTION_TITLES[kind])
         lines.append(f"{kind}:")
         for ref in refs:
@@ -379,29 +481,31 @@ def build_yaml(version: str, groups: dict[str, list[str]]) -> str:
             # A moving tag is not mirrorable reproducibly. Say so — unless the
             # note already says it, so the line does not repeat itself.
             if (
-                tag_of(ref) in MUTABLE_TAGS
+                (tag_of(ref) in MUTABLE_TAGS or tag_of(ref) == "")
                 and "@sha256:" not in ref
                 and "MUTABLE" not in (hardening or "")
             ):
+                shown = tag_of(ref) or "latest (no tag given)"
                 mutable = (
-                    f"MUTABLE TAG `:{tag_of(ref)}` — a federal build MUST pin a digest"
+                    f"MUTABLE TAG `:{shown}` — a federal build MUST pin a digest"
                 )
                 hardening = f"{hardening}; {mutable}" if hardening else mutable
             if hardening:
                 lines.append(f'    hardening: "{hardening}"')
-        lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 
-def generate() -> tuple[str, str]:
+def generate(catalog_ref: str) -> tuple[str, str]:
     version = chart_version()
     by_repo = render_images()
     groups: dict[str, list[str]] = {}
     for repo, refs in by_repo.items():
         groups.setdefault(classify(repo), []).extend(sorted(refs))
+    for refs in catalog_images(catalog_ref).values():
+        groups.setdefault("dispatchTime", []).extend(sorted(refs))
     for kind in groups:
         groups[kind] = sorted(set(groups[kind]))
-    return build_txt(version, groups), build_yaml(version, groups)
+    return build_txt(version, groups), build_yaml(version, groups, catalog_ref)
 
 
 def main(argv: list[str]) -> int:
@@ -415,7 +519,13 @@ def main(argv: list[str]) -> int:
     if not args.skip_deps:
         build_dependencies()
 
-    txt, yml = generate()
+    if args.check:
+        catalog_ref = committed_catalog_ref()
+    else:
+        catalog_ref = current_catalog_ref()
+        CATALOG_REF.write_text(catalog_ref + "\n", encoding="utf-8")
+
+    txt, yml = generate(catalog_ref)
 
     if args.check:
         stale = [

@@ -87,10 +87,14 @@ jobs:
         with:
           version: v3.18.4
 
-      # No --skip-deps, matching airgap-image-list.yml's own step: charts/*.tgz
+      # No --skip-deps, matching ci.yml's airgap-image-list job: charts/*.tgz
       # is gitignored, so a fresh checkout has no packaged dependencies and the
-      # generator must build them.
+      # generator must build them. GH_TOKEN lifts the GitHub API rate limit
+      # for the gibson component-catalog read; a plain run also moves
+      # bigbang/images/gibson-catalog.ref to gibson's current main.
       - name: Regenerate the air-gap image manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ./bigbang/images/generate-image-list.py
 
       - name: Commit and push if the manifest changed
