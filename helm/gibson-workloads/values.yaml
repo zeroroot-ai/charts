@@ -370,7 +370,7 @@ gibson:
     # on the SPIRE socket — so the fga-init Job hangs in dump-model until
     # its deadline and the whole install wedges. Verified on this digest:
     # `gibson dump-fga-model` exits 0 in under a second with the model.
-    tag: "v0.134.0@sha256:df148db2ab862be1ac75ad0c6eb857022809fd0b1a77a4f6170d4ca387ffb068"
+    tag: "v0.134.1@sha256:9864b44ddf689d21a725b243d3aed83bcf575bcba0e587137e33661372cc84d2"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     # Empty by default: first-party pins are hand-committed in the combined
@@ -693,7 +693,7 @@ gibson:
       # deploy#789: digest-pinned to the published v0.1.1 for
       # staging/prod immutability (kind keeps :main, exempt). Re-resolve via
       #   gh api /orgs/zeroroot-ai/packages/container/gibson-belief-sidecar/versions
-      tag: "v0.1.1@sha256:f559cc08880e9d01a1ffab2dde050f2f7eb25157f9675d5077aae35966aacff2"
+      tag: "sha-ff1cd19@sha256:412de2006c9a36b0d5bb69b0002ead15eb30f1f988e64002a97eb312ec6aa1b9"
       # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
       digest: ""
       pullPolicy: IfNotPresent
@@ -1117,7 +1117,7 @@ dashboard:
     # v1.11.0), so the digest below is the current `main` (staging/prod deploy
     # reality). kind keeps a moving :main tag (values-kind.yaml), exempt.
     # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/dashboard/versions
-    tag: "main@sha256:f04c87fb3f882a21aacebb725d24a1a55eb34b0585c918e2985ffdb0c73c342b"
+    tag: "main@sha256:6f52127ef0b5559c4070c23dad510d027e42081c186bb5beec09ebf5e9a43954"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -1560,12 +1560,12 @@ docs:
     # from); kubelet pulls by digest below. Kept in sync by the fan-out, not
     # hand-edited — see the block comment above for why clearing it does not
     # activate AppVersion version-matching.
-    tag: "0be6da751977cd39924b5a90866b40590458da8a"
+    tag: "docs-site-v0.6.3"
     # digest — set, so it overrides tag: image: repo@digest (kubelet pull
     # target). Bumped automatically by the image-published fan-out; see the
     # block comment above. Manual resolve/audit:
     # `gh api /orgs/zeroroot-ai/packages/container/docs-site/versions`.
-    digest: "sha256:fab0a860efe210cc9ac805b517d519cdfd2cc366c335233682945a3f5b60a82f"
+    digest: "sha256:63faf8a980415ede4fdaa6fa3535871f5fec4a85ef697fd607d04f1d81c87b5a"
     pullPolicy: IfNotPresent
   replicas: 1
   resources:
@@ -2183,7 +2183,7 @@ extAuthz:
     # EXT_AUTHZ_CGJWT_KEYS_URL. It moves in lockstep with the daemon pin above
     # and with the https/:8086 value in ext-authz/deployment.yaml (deploy#1386)
     # — the three are one change, in both directions.
-    tag: "sha-3af964a@sha256:1d381d24bc51ec0e248a5003e887f40f61ece6cecf0194cf2bdd4cd847babb55"
+    tag: "v0.134.1@sha256:d75415c42ebf2f994993114f43c71ea4b808b6f2d6abfc53a24a84233087d9f5"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -3725,7 +3725,7 @@ tenantOperator:
     # Tenant CR never reached Ready (deploy#1766, run 33600876035). The
     # package publishes main/latest/sha-* only, so the commit sha tag is the
     # honest provenance.
-    tag: "sha-ee35187@sha256:fb19509f541530645ded2f5fc58c81d98a8581639ff09390814b7928e45904fb"
+    tag: "v0.134.1@sha256:6212651429efe40b5d2e30ba2b07954477f815a9e9bfe4d5a0732f0e5b35604d"
     pullPolicy: IfNotPresent
   # ServiceAccount — IRSA annotations injected via serviceAccount.annotations
   # in the prod overlay. The SA name is fixed to "gibson-tenant-operator"
@@ -4222,11 +4222,11 @@ setec:
   # and ignores it, and an idle bank member reserves its whole limit again.
   image:
     repository: ghcr.io/zeroroot-ai/setec
-    tag: "v0.113.0@sha256:37e8303bc2de91ddefc3abbea36caea415b2c192ce76f8821951822d887744eb"
+    tag: "sha-cc37bdb@sha256:406caa641ecf67f94bcd764bcc8bccc3817ff9f1184fff9bbe4b797a7f0f23d6"
   runtimeAgent:
     image:
       repository: ghcr.io/zeroroot-ai/setec-runtime-agent
-      tag: "v0.113.0@sha256:adfa0fd94e50a3c346eed665b20c79395f0fef518b687d03ec90ada46a9e7585"
+      tag: "sha-cc37bdb@sha256:1405efe741ed89572ba3888d7aee30e07af97d169cb1ddf06538f972ede987e3"
     # Published runtime-agent images are amd64-only (setec#132): without this
     # constraint the tolerate-everything DaemonSet ImagePullBackOffs forever
     # on arm64 (Graviton system) nodes and the release never converges. Drop
@@ -4247,7 +4247,7 @@ setec:
   nodeAgent:
     image:
       repository: ghcr.io/zeroroot-ai/setec-node-agent
-      tag: "v0.113.0@sha256:8c0d728214c4d3cb41f467febea9e2ca5d408ff7efcd130dec0dcfffabe3ecfc"
+      tag: "sha-cc37bdb@sha256:8850c692aa09a43852926b09b5a7d062c2b03e3539c26dd81b29da277f9f224a"
 
   # installer — the portable node-prep DaemonSet (setec#187). It
   # lays the bundled Kata+Firecracker release onto any x86 KVM node and
@@ -4269,7 +4269,7 @@ setec:
     enabled: true
     image:
       repository: ghcr.io/zeroroot-ai/setec-installer
-      tag: "v0.113.0@sha256:bf29e99f0fe5a4a94ec6187bf36d4d39eba9daed22b238eb9630022e6cf8abd0"
+      tag: "sha-cc37bdb@sha256:c4274121eec50e1e201d29d68856331d74de280d2ecdf30d829aa81d8f175a98"
 
   # ---------------------------------------------------------------------
   # ISOLATION BACKENDS (deploy#1105)
@@ -4664,7 +4664,7 @@ setec:
       # v0.113.0 release build as the operator and runtime-agent above, so
       # the setec images never skew across a breaking release.
       # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/setec-frontend/versions
-      tag: "v0.113.0@sha256:b009edc1a1e7a468c756fac710271ef581b4f684da45fa93039857b3c30e09d2"
+      tag: "sha-cc37bdb@sha256:0a3afb4202fb3b0cdcb965a0dd079f1d237536a492edf612012cab1043a7eb25"
       pullPolicy: IfNotPresent
     # sandboxNamespace (setec#158, chart v0.110.0) renders --sandbox-namespace
     # onto the frontend: every Sandbox lands in this one fixed namespace
@@ -4793,7 +4793,7 @@ bootstrap:
     # CreateHumanUser", every first-admin attempt exited 1, and the install
     # died at the hook deadline with the whole platform Ready (deploy#1766,
     # measured live 2026-09-02). The previous pin was built 2026-08-21.
-    tag: "sha-080d9e8@sha256:8cdb89c7b4b6770820a7a1e699c799e0a6be7051eea940bf658be8bfe62a3ddf"
+    tag: "sha-ff1cd19@sha256:9b6df8d38f04e0c4ece33505fd746c8556052a95a1a78fdfcbf691580d3d9064"
     pullPolicy: IfNotPresent
 
   # activeDeadlineSeconds caps the Job runtime. 10 min covers a fresh
