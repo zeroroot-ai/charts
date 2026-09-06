@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.123.0](https://github.com/zeroroot-ai/charts/compare/v0.122.2...v0.123.0) (2026-09-06)
+
+
+### Features
+
+* **airgap:** list the dispatch-time images and check the manifest in CI ([#8](https://github.com/zeroroot-ai/charts/issues/8)) ([ea5f2fc](https://github.com/zeroroot-ai/charts/commit/ea5f2fcb214863233546e5cb274bdfadf185fbf0))
+
 ## [0.122.2](https://github.com/zeroroot-ai/charts/compare/v0.122.1...v0.122.2) (2026-09-06)
 
 
