@@ -1,0 +1,156 @@
+{{/* deploy#788: bringup Jobs + RBAC folded from gitops apps/manifests. All post-install (umbrella deps are in-release main resources); hook-weight preserves PreSync<Sync<PostSync order; jobs self-wait for readiness. */}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: signup-bot-pat-minter
+  namespace: gibson
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '3'
+    helm.sh/hook-delete-policy: before-hook-creation
+    # Argo: Sync-phase at wave 0, NOT PostSync. In the single umbrella
+    # Application PostSync only fires once the app is Healthy — but the
+    # dashboard's wait-for-signup-bot-pat init NEEDS this Job's output to
+    # become Ready, so PostSync deadlocks (same class as the openfga
+    # migrate, gitops#140 / deploy#820). The Job self-waits in-pod for
+    # iam-admin-pat + Zitadel, so running concurrently with the wave-0
+    # batch is safe, and it is idempotent (re-validates the existing PAT).
+    # SA/Role/RoleBinding ride the same wave; kind-ordering applies them
+    # before the Job. helm.sh hooks kept for plain-helm installs.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: signup-bot-pat-minter
+  namespace: gibson
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '3'
+    helm.sh/hook-delete-policy: before-hook-creation
+    # Argo: Sync-phase at wave 0, NOT PostSync. In the single umbrella
+    # Application PostSync only fires once the app is Healthy — but the
+    # dashboard's wait-for-signup-bot-pat init NEEDS this Job's output to
+    # become Ready, so PostSync deadlocks (same class as the openfga
+    # migrate, gitops#140 / deploy#820). The Job self-waits in-pod for
+    # iam-admin-pat + Zitadel, so running concurrently with the wave-0
+    # batch is safe, and it is idempotent (re-validates the existing PAT).
+    # SA/Role/RoleBinding ride the same wave; kind-ordering applies them
+    # before the Job. helm.sh hooks kept for plain-helm installs.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  resourceNames:
+  - iam-admin-pat
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - create
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  - update
+  - patch
+  resourceNames:
+  - gibson-zitadel-signup-bot-pat
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: signup-bot-pat-minter
+  namespace: gibson
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '3'
+    helm.sh/hook-delete-policy: before-hook-creation
+    # Argo: Sync-phase at wave 0, NOT PostSync. In the single umbrella
+    # Application PostSync only fires once the app is Healthy — but the
+    # dashboard's wait-for-signup-bot-pat init NEEDS this Job's output to
+    # become Ready, so PostSync deadlocks (same class as the openfga
+    # migrate, gitops#140 / deploy#820). The Job self-waits in-pod for
+    # iam-admin-pat + Zitadel, so running concurrently with the wave-0
+    # batch is safe, and it is idempotent (re-validates the existing PAT).
+    # SA/Role/RoleBinding ride the same wave; kind-ordering applies them
+    # before the Job. helm.sh hooks kept for plain-helm installs.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+subjects:
+- kind: ServiceAccount
+  name: signup-bot-pat-minter
+  namespace: gibson
+roleRef:
+  kind: Role
+  name: signup-bot-pat-minter
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: signup-bot-pat-minter
+  namespace: gibson
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    # Weight 3, directly after zitadel-setup (weight 2) which mints the
+    # iam-admin-pat this Job self-waits for — and BEFORE first-admin
+    # (weight 10). Helm runs post-install hooks serially by weight, so at
+    # the old weight 100 this Job could not run until first-admin
+    # finished, while the dashboard's wait-for-signup-bot-pat init
+    # blocked on this Job's output for first-admin's whole deadline.
+    # On a fresh install the dashboard could not become Ready before the
+    # hook that installs the owner had already timed out (deploy#1766).
+    # Producers run before consumers; the Argo path is unchanged
+    # (Sync wave 0, concurrent, self-waiting).
+    helm.sh/hook-weight: '3'
+    helm.sh/hook-delete-policy: before-hook-creation
+    # Argo: Sync-phase at wave 0, NOT PostSync. In the single umbrella
+    # Application PostSync only fires once the app is Healthy — but the
+    # dashboard's wait-for-signup-bot-pat init NEEDS this Job's output to
+    # become Ready, so PostSync deadlocks (same class as the openfga
+    # migrate, gitops#140 / deploy#820). The Job self-waits in-pod for
+    # iam-admin-pat + Zitadel, so running concurrently with the wave-0
+    # batch is safe, and it is idempotent (re-validates the existing PAT).
+    # SA/Role/RoleBinding ride the same wave; kind-ordering applies them
+    # before the Job. helm.sh hooks kept for plain-helm installs.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        # deploy#1365: pod-template label so the bringup-jobs
+        # NetworkPolicy can select this Job's pods under the
+        # gibson namespace default-deny (unlabelled = severed).
+        app.kubernetes.io/component: signup-bot-pat-minter
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: signup-bot-pat-minter
+      containers:
+      - name: minter
+        image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+        command:
+        - bash
+        - -ec
+        args:
+        - "set -euo pipefail\n\n# Wait for iam-admin-pat Secret to be available (may not exist yet\n# on a fresh cluster while Zitadel + PlatformBootstrap reconcile for\n# the first time). 180\xD75s = 15m tolerates a cold-start Zitadel on a\n# loaded host; the old 5m window exhausted before iam-admin-pat\n# appeared and churned the hook through its backoffLimit (deploy#773).\necho \"waiting for iam-admin-pat...\"\nfor i in $(seq 1 180); do\n  if kubectl -n gibson get secret iam-admin-pat > /dev/null 2>&1; then\n    echo \"iam-admin-pat ready\"\n    break\n  fi\n  echo \"  attempt $i/180...\"\n  sleep 5\ndone\n\nPAT=$(kubectl -n gibson get secret iam-admin-pat -o jsonpath='{.data.pat}' | base64 -d | tr -d '\\r\\n')\nZH=\"{{ .Values.zitadel.zitadel.configmapConfig.ExternalDomain | default (printf `app.%s` .Values.global.domain) }}{{ if ne (int .Values.zitadel.zitadel.configmapConfig.ExternalPort) 443 }}:{{ .Values.zitadel.zitadel.configmapConfig.ExternalPort }}{{ end }}\"\nZ=\"http://gibson-zitadel:8080\"\nROLES_JSON='[\"IAM_USER_MANAGER\",\"IAM_LOGIN_CLIENT\"]'\n\n# --- Step 1: look up or create the machine user ---\necho \"looking up gibson-signup-bot...\"\nRESP=$(curl -sS -X POST \\\n  -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"queries\":[{\"userNameQuery\":{\"userName\":\"gibson-signup-bot\"}}]}' \\\n  \"$Z/v2/users\")\nUSER_ID=$(echo \"$RESP\" | jq -r '.result[0].userId // empty')\n\nif [ -z \"$USER_ID\" ]; then\n  echo \"creating gibson-signup-bot machine user...\"\n  CREATE=$(curl -sS -X POST \\\n    -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n    -H \"Content-Type: application/json\" \\\n    -d '{\"userName\":\"gibson-signup-bot\",\"name\":\"Gibson Signup Bot\",\"description\":\"IAM_USER_MANAGER + IAM_LOGIN_CLIENT for dashboard signup flow\",\"accessTokenType\":\"ACCESS_TOKEN_TYPE_BEARER\"}' \\\n    \"$Z/management/v1/users/machine\")\n  USER_ID=$(echo \"$CREATE\" | jq -r '.userId // empty')\n  if [ -z \"$USER_ID\" ]; then\n    echo \"ERROR: machine user create failed: $CREATE\"; exit 1\n  fi\n  echo \"created user: $USER_ID\"\nelse\n  echo \"signup-bot user exists: $USER_ID\"\nfi\n\n# --- Step 2: reconcile IAM roles (idempotent) ---\necho \"reconciling IAM roles: $ROLES_JSON...\"\nGRANT=$(curl -sS -w \"%{http_code}\" -o /tmp/grant.out -X POST \\\n  -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\\\"userId\\\":\\\"$USER_ID\\\",\\\"roles\\\":$ROLES_JSON}\" \\\n  \"$Z/admin/v1/members\")\nif [ \"$GRANT\" = \"200\" ]; then\n  echo \"IAM member created with roles $ROLES_JSON\"\nelif [ \"$GRANT\" = \"409\" ] || grep -qi \"already exist\" /tmp/grant.out; then\n  echo \"IAM member exists; updating role set to $ROLES_JSON...\"\n  UPDATE=$(curl -sS -w \"%{http_code}\" -o /tmp/update.out -X PUT \\\n    -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"roles\\\":$ROLES_JSON}\" \\\n    \"$Z/admin/v1/members/$USER_ID\")\n  if [ \"$UPDATE\" != \"200\" ]; then\n    echo \"ERROR: IAM member update returned HTTP $UPDATE: $(cat /tmp/update.out)\"; exit 1\n  fi\n  echo \"IAM member roles updated to $ROLES_JSON\"\nelse\n  echo \"ERROR: IAM member grant returned HTTP $GRANT: $(cat /tmp/grant.out)\"; exit 1\nfi\n\n# --- Step 3: validate existing PAT against Zitadel ---\n# The old minter used a length-only check that accepted\n# the invalid 8_ZQ\u2026 format. Validate live instead.\nEXISTING=$(kubectl -n gibson get secret gibson-zitadel-signup-bot-pat \\\n  -o jsonpath='{.data.pat}' 2>/dev/null | base64 -d 2>/dev/null \\\n  | tr -d '\\r\\n' || true)\n\nif [ -n \"$EXISTING\" ] && [ ${#EXISTING} -gt 20 ]; then\n  STATUS=$(curl -sS -o /dev/null -w \"%{http_code}\" \\\n    -H \"Host: $ZH\" -H \"Authorization: Bearer $EXISTING\" \\\n    \"$Z/auth/v1/policies/passwords/complexity\")\n  if [ \"$STATUS\" = \"200\" ]; then\n    echo \"Existing PAT valid (HTTP 200) \u2014 skipping re-mint.\"\n    echo \"SIGNUP_BOT_ROLES_RECONCILED user_id=$USER_ID\"\n    exit 0\n  fi\n  echo \"Existing PAT invalid (HTTP $STATUS) \u2014 re-minting.\"\nelse\n  echo \"No existing PAT found \u2014 minting fresh.\"\nfi\n\n# --- Step 4: mint a new PAT ---\necho \"minting PAT (5-year expiry)...\"\nMINT=$(curl\
+          \ -sS -X POST \\\n  -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"expirationDate\":\"2031-01-01T00:00:00Z\"}' \\\n  \"$Z/management/v1/users/$USER_ID/pats\")\nNEW_PAT=$(echo \"$MINT\" | jq -r '.token // empty')\nif [ -z \"$NEW_PAT\" ]; then\n  echo \"ERROR: PAT mint failed: $MINT\"; exit 1\nfi\n\n# --- Step 5: write to Secret ---\necho \"writing gibson-zitadel-signup-bot-pat Secret...\"\nkubectl -n gibson create secret generic gibson-zitadel-signup-bot-pat \\\n  --from-literal=pat=\"$NEW_PAT\" \\\n  --dry-run=client -o yaml | kubectl apply -f -\n\necho \"SIGNUP_BOT_PAT_MINTED user_id=$USER_ID pat_len=${#NEW_PAT} roles=$ROLES_JSON\"\n"

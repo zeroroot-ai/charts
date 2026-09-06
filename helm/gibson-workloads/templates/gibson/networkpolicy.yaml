@@ -1,0 +1,149 @@
+{{/*
+NetworkPolicy isolating the Gibson daemon.
+
+Spec: unified-identity-and-authorization Phase H/8.5 (Requirements 3.5, 3.7).
+
+Restricts ingress to the daemon's Service ports so that the gRPC API surface
+is only reachable from:
+  - Envoy gateway pods (the sole external path post-cutover) —
+    podSelector matches `app.kubernetes.io/component: envoy`
+  - Prometheus (metrics scrape on the metrics port) —
+    podSelector matches `app.kubernetes.io/component: prometheus`
+Everything else is denied by Kubernetes' default-deny-when-policy-applies
+semantics: this policy lists the only allowed ingress sources; any other
+pod is dropped at the CNI layer.
+
+Egress is left unrestricted — the daemon initiates connections to Redis,
+Neo4j, Postgres, Vault, OpenFGA, and LLM providers. Restricting
+those is out of scope for Phase H/8.5 (egress hardening tracked separately).
+
+DEFAULT FLIPPED in Phase H/8.5: gibson.networkPolicy.enabled defaults to
+TRUE so secure-by-default posture is the chart shape, not an opt-in.
+Opt-out path: dev.networkPolicy.disabled=true for Kind clusters whose CNI
+doesn't implement NetworkPolicies — this also bypasses
+validateAllPathsViaEnvoy (templates/_validators.tpl). The dev override
+exists ONLY for that cluster shape; production overlays must keep it false.
+
+The componentIngress path (templates/gibson/ingress-grpc.yaml) is no longer
+compatible — validateAllPathsViaEnvoy refuses to render the chart when it
+is enabled (Envoy is required infrastructure — deploy#200). If you need
+component registration from outside the cluster, route it through the Envoy
+edge listener.
+
+gibson daemon is structural infrastructure (one-code-path /
+deploy#188). The previous outer `.Values.gibson.enabled` half of the
+compound gate has been deleted; the inner `networkPolicy.enabled`
+sub-feature flag (and the `dev.networkPolicy.disabled` escape hatch)
+are preserved.
+*/}}
+{{- if .Values.gibson.networkPolicy.enabled }}
+{{- /* dev.networkPolicy.disabled escape hatch: render NOTHING when set,
+       same as gibson.networkPolicy.enabled=false. */ -}}
+{{- $devDisabled := false -}}
+{{- with .Values.dev -}}{{- with .networkPolicy -}}{{- $devDisabled = .disabled -}}{{- end -}}{{- end -}}
+{{- if not $devDisabled -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "gibson.fullname" . }}-daemon
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: daemon
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: daemon
+  policyTypes:
+    - Ingress
+    - Egress
+  {{- /* deploy#1365: the namespace default-deny
+         (namespace-isolation/default-deny.yaml) isolates every pod in
+         both directions; this allow-all egress preserves the daemon's
+         pre-existing egress posture (Redis, Neo4j, Postgres, Vault,
+         OpenFGA, LLM providers). Per-component egress tightening is
+         tracked separately (deploy#1462). */}}
+  egress:
+    - {}
+  ingress:
+    # Envoy gateway → daemon gRPC (the only authenticated external path).
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "gibson.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: envoy
+      ports:
+        - protocol: TCP
+          port: {{ include "gibson.grpc.port" . }}
+        - protocol: TCP
+          port: {{ .Values.gibson.service.callback.port | default 50001 }}
+        - protocol: TCP
+          port: {{ .Values.gibson.service.registration.port | default 50100 }}
+        # gibson#623 — unauthenticated native-login bootstrap listener
+        # (GET /.well-known/gibson-login). Envoy publishes it on a public route;
+        # the hop Envoy→daemon:8085 must be allowed here.
+        - protocol: TCP
+          port: 8085
+    # ext-authz → daemon listeners reached directly (not via Envoy):
+    #   :8085 — per-kid Capability-Grant key descriptor (ext-authz#103); serves only public keys.
+    #   :8086 — mTLS authz-registry endpoint (deploy#852); ext-authz fetches
+    #           the daemon's compiled-in authz policy here at startup.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "gibson.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: ext-authz
+      ports:
+        - protocol: TCP
+          port: 8085
+        - protocol: TCP
+          port: {{ .Values.gibson.service.authzRegistry.port | default 8086 }}
+    {{- if (.Values.gibson.e2eRunner).enabled }}
+    # e2e-runner → daemon gRPC (TEST PROFILES ONLY, gated on the same flag as
+    # the runner's ServiceAccount and ClusterSPIFFEID).
+    #
+    # The exit-test suite cannot dial the daemon from a CI runner: the gRPC
+    # listener speaks SPIFFE mTLS and refuses a non-loopback plaintext listener
+    # (zero-trust-hardening Req 1.2), so the suite runs as a Pod in the mesh
+    # with an attested SVID. Being in the mesh is not enough on its own — this
+    # policy admits Envoy, ext-authz and Prometheus only, so the runner's
+    # packets were DROPPED and every assertion failed with
+    #   dial tcp <daemon>:50051: i/o timeout
+    # measured on gibson run 33753973696. mTLS still authenticates the peer;
+    # this only stops the packets being discarded before the handshake.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "gibson.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: e2e-runner
+      ports:
+        - protocol: TCP
+          port: {{ .Values.gibson.service.grpc.port | default 50051 }}
+    {{- end }}
+    # Prometheus → daemon metrics (read-only scrape).
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "gibson.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: prometheus
+      ports:
+        - protocol: TCP
+          port: {{ .Values.gibson.service.metrics.port | default 9090 }}
+    # NOTE: first-party plugins do NOT appear here. A plugin reaches the daemon
+    # ONLY through the Envoy edge (GIBSON_URL = api host; capability-grant enrol
+    # AND the ComponentService gRPC both flow through Envoy + ext-authz), never a
+    # direct daemon channel — the same invariant as the dashboard. So the daemon
+    # ingress needs no plugin-selector rule; Envoy is already admitted above.
+    # NOTE: the dashboard does NOT appear here. Spec dashboard-admin-via-envoy
+    # moved the dashboard's admin RPC path (previously a direct pod-to-pod
+    # call) through the Envoy gateway. Envoy remains the sole ingress to the
+    # daemon, matching the original trust-boundary invariant from
+    # zitadel-envoy-gateway-migration task 11.
+    {{- /* Operator escape hatch: additional ingress sources (e.g. legacy component
+            registration paths). Append-only; the gateway path above remains. */}}
+    {{- with .Values.gibson.networkPolicy.additionalIngressFrom }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- end }}

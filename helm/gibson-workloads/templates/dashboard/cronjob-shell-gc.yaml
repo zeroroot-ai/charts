@@ -1,0 +1,85 @@
+{{- /*
+  dashboard is structural infrastructure (one-code-path /
+  deploy#188). The previous outer `.Values.dashboard.enabled`
+  gate has been deleted; the inner `dashboard.jobs.shellGC.enabled`
+  sub-feature flag is preserved (legitimate sub-feature toggle).
+*/}}
+{{- if .Values.dashboard.jobs.shellGC.enabled }}
+# Shell-user garbage collection CronJob.
+#
+# Deletes shell-user rows created by the tenant-operator's shell-user
+# auto-create path that were never claimed within `olderThanDays`. See
+# enterprise/platform/dashboard/src/lib/jobs/unclaimed-shell-gc.ts for the
+# authoritative selection query.
+#
+# Gate: dashboard.jobs.shellGC.enabled (default true). Flip to false in
+# environments that prefer manual cleanup (e.g. long-form enterprise trials).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-dashboard-shell-gc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboard-shell-gc
+spec:
+  schedule: {{ .Values.dashboard.jobs.shellGC.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: {{ .Values.dashboard.jobs.shellGC.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.dashboard.jobs.shellGC.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "gibson.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: dashboard-shell-gc
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ .Values.dashboard.serviceAccount.name | default "gibson-dashboard" }}
+          {{- include "gibson.imagePullSecrets" . | nindent 10 }}
+          containers:
+            - name: shell-gc
+              image: "{{ .Values.dashboard.image.repository }}:{{ .Values.dashboard.image.tag }}"
+              imagePullPolicy: {{ .Values.dashboard.image.pullPolicy | default "IfNotPresent" }}
+              command:
+                - node
+                - scripts/shell-gc.mjs
+              args:
+                {{- if .Values.dashboard.jobs.shellGC.dryRun }}
+                - --dry-run
+                {{- end }}
+                - --older-than-days
+                - {{ .Values.dashboard.jobs.shellGC.olderThanDays | default 30 | quote }}
+              env:
+                {{- if .Values.dashboard.postgres.enabled }}
+                - name: DASHBOARD_DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.secrets.databases.existingSecret | default (include "gibson.dbSecrets.name" .) }}
+                      key: DASHBOARD_DB_PASSWORD
+                - name: DATABASE_URL
+                  {{- /* sslmode=require is hardcoded — Spec first-deploy-unblock-and-ha R7. */}}
+                  value: {{ printf "postgres://%s:$(DASHBOARD_DB_PASSWORD)@%s:%v/%s?sslmode=require"
+                    (.Values.dashboard.postgres.username | default "dashboard")
+                    (include "gibson.dashboard.dbHost" .)
+                    (.Values.dashboard.postgres.port | default 5432)
+                    (.Values.dashboard.postgres.database | default "dashboard") }}
+                {{- end }}
+              resources:
+                {{- toYaml .Values.dashboard.jobs.shellGC.resources | nindent 16 }}
+              securityContext:
+                # Match the main dashboard container's UID — the image's
+                # USER directive is the named `nextjs` user, which kubelet
+                # can't verify as non-root without a numeric UID.
+                runAsNonRoot: true
+                runAsUser: 1001
+                runAsGroup: 1001
+                readOnlyRootFilesystem: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+{{- end }}

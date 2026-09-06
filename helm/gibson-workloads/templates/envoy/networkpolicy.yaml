@@ -1,0 +1,50 @@
+{{/* Envoy NetworkPolicy (Week 2 §3 R17). Envoy is the ingress edge; allow from anywhere on
+     the public ports (the LoadBalancer/Ingress controller is the de-facto gate).
+
+     Envoy is required infrastructure — deploy#200. The NP still gates on
+     envoy.networkPolicy.enabled (operators may disable NPs in Kind clusters
+     without a NP-aware CNI). */}}
+{{- if ne (include "gibson.trueUnlessSet" (((.Values.envoy).networkPolicy).enabled)) "false" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-envoy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: envoy
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: envoy
+  policyTypes:
+    - Ingress
+    - Egress
+  {{- /* deploy#1365: allow-all egress under the namespace default-deny
+         (namespace-isolation/default-deny.yaml) — preserves this
+         component's pre-existing unrestricted-egress posture; per-
+         component egress tightening is tracked separately (deploy#1462). */}}
+  egress:
+    - {}
+  ingress:
+    # Public listener — open to the cluster (LB target) and any-namespace browser traffic.
+    # NetworkPolicy ports filter on the POD-side port (containerPort), not the Service /
+    # NodePort. NodePort and Service traffic both DNAT to the pod's containerPort 10000
+    # ("https") before the NP is evaluated, so we must allow 10000 here. The Service can
+    # still be defined with httpsPort=443 or 30443; that only affects the Service object.
+    - ports:
+        - protocol: TCP
+          port: 10000
+    # Admin/health from prometheus scrapers
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        - podSelector:
+            matchLabels:
+              app: grafana-agent
+      ports:
+        - protocol: TCP
+          port: 9901
+{{- end }}

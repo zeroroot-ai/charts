@@ -1,0 +1,46 @@
+# gibson-crds values. Every first-party CRD renders unconditionally.
+# Sync targets:
+#   make sync-crds — re-copies CRDs from sibling tenant-operator +
+#                    platform-operator config/crd/bases/.
+
+# prometheus-operator-crds: only the CRDs the platform renders CRs for
+# (ServiceMonitor x5, PrometheusRule x5 in the umbrella). The other eight are
+# 3.8 MB of schema the platform never instantiates, and this release is a Helm
+# release: its record is one Secret with a 1 MiB cap, which the vendored
+# operator CRDs (files/crds/, deploy#1728) already fill most of. These are
+# not services and no code path reads them. A cluster that runs the
+# Prometheus Operator brings its own full set.
+prometheus-operator-crds:
+  crds:
+    alertmanagerconfigs:
+      enabled: false
+    alertmanagers:
+      enabled: false
+    podmonitors:
+      enabled: false
+    probes:
+      enabled: false
+    prometheusagents:
+      enabled: false
+    prometheuses:
+      enabled: false
+    prometheusrules:
+      enabled: true
+    scrapeconfigs:
+      enabled: false
+    servicemonitors:
+      enabled: true
+    thanosrulers:
+      enabled: false
+
+# Operator-substitution seams, matching the umbrella. Default true so a
+# greenfield install needs to set nothing. A cluster that already owns
+# cert-manager, External Secrets, CloudNativePG or Prometheus Operator sets the
+# matching key false and keeps its own CRDs — a CRD is cluster-scoped, so
+# shipping one to a cluster that has it replaces the customer's copy underneath
+# their running controller.
+gibson-operator-crds:
+  enabled: true
+
+prometheus-operator-crds:
+  enabled: true

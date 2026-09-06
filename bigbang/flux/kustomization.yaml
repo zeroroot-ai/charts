@@ -1,0 +1,11 @@
+---
+# The GitOps bootstrap layer: the GitRepository source + the Flux Kustomization
+# that points Big Bang's Flux at bigbang/package. Apply this once (or fold it
+# into the customer's Big Bang `packages:` registration) to onboard Gibson.
+#
+# Renders standalone with: kustomize build bigbang/flux
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - gitrepository.yaml
+  - flux-kustomization.yaml

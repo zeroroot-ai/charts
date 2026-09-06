@@ -1,0 +1,429 @@
+{{/*
+ClusterSPIFFEID resources for every Gibson platform workload.
+
+Spec: unified-identity-and-authorization, Phase H / Task 8.1.
+Requirements: 2.1, 2.5, 2.6, 2.8.
+
+The SPIRE controller-manager watches ClusterSPIFFEID CRDs and reconciles them
+into SPIRE Server registration entries. Each entry binds a SPIFFE ID template
+to a (podSelector, namespaceSelector) pair so workloads transparently receive
+SVIDs over the Workload API socket at .Values.spire.agent.workloadApiSocket
+(default `/run/spire/agent-sockets/api.sock` per the new layout; existing
+overlays still resolve to /run/spire/sockets/agent.sock through the older
+agent.workloadApiSocket key — both are accepted).
+
+Trust domain comes from .Values.spire.server.trustDomain (default zeroroot.ai).
+
+deploy#201: SPIRE is REQUIRED infrastructure — the `.Values.spire.enabled`
+toggle is gone. ClusterSPIFFEID CRs are always rendered (the controller-
+manager handles them whether the SPIRE server is in-chart or installed as
+a sibling Application).
+
+===========================================================================
+WORKLOAD SELECTORS — READ THIS BEFORE EDITING `workloadSelectorTemplates`
+===========================================================================
+
+Every entry below MUST be a Helm-rendered LITERAL string. A Go template
+referencing `.PodSpec`, `.PodMeta` or `.NodeSpec` is not merely weak, it is
+a provable no-op. From spire-controller-manager's
+pkg/spireentry/entries.go::renderPodEntry:
+
+    selectors := []spireapi.Selector{
+        {Type: "k8s", Value: fmt.Sprintf("pod-uid:%s", pod.UID)},
+    }
+    ...
+    data.PodMeta = &pod.ObjectMeta
+    data.PodSpec = &pod.Spec
+    ...
+    for _, tmpl := range spec.WorkloadSelectorTemplates {
+        selector, _ := renderSelector(tmpl, data)
+        selectors = append(selectors, selector)
+    }
+
+The controller mints ONE registration entry PER MATCHING POD, already pinned
+to that pod by `k8s:pod-uid:<uid>`, and then renders every selector template
+against THAT SAME pod. So a selector like
+`k8s:sa:<dot>PodSpec.ServiceAccountName` is satisfied by construction and
+can never fail — it would look like a control while enforcing nothing.
+
+Only a literal adds anything: the SPIRE agent re-derives the calling pod's
+real namespace and ServiceAccount from kubelet at attestation time and
+requires the entry's selector set to be a subset of what it observes.
+`k8s:sa:gibson-envoy` on a pod running as SA `evil` therefore yields no SVID.
+
+What the literal selectors DO buy:
+  - a pod that lands on the component label by accident (another chart, a
+    copied manifest) gets no platform SVID;
+  - the SA name becomes a stable, admission-checkable key.
+What they do NOT buy: protection from a principal that can create pods in
+this namespace. Kubernetes has had no `serviceaccounts/use` RBAC check since
+PodSecurityPolicy was removed, so such a principal simply sets
+`serviceAccountName: gibson-envoy` itself. That gap is closed by
+templates/spire-server/platform-identity-admission.yaml, which keys on
+`request.userInfo.username` — the one attribute a pod cannot self-assert.
+
+tests/clusterspiffeid-selectors.bats enforces both halves of this: no
+template syntax may survive into a rendered selector, and each `k8s:sa:`
+value must equal the `serviceAccountName` of the pod template carrying the
+matching component label.
+*/}}
+{{- /* ClusterSPIFFEID CRs are reconciled by the SPIRE controller-manager
+       belonging to the standalone hardened `spire` release — the single
+       SPIRE owner (the in-chart server was removed in deploy#751). These
+       registrations are umbrella-owned and render unconditionally now that
+       SPIRE is a hard requirement; without them the external SPIRE server
+       would have no workload registrations. */}}
+{{- $trustDomain := .Values.spire.server.trustDomain | default "zeroroot.ai" -}}
+{{- $ns := .Release.Namespace -}}
+{{- $className := .Values.spire.controllerManager.className | default "gibson-gibson-spire" -}}
+{{/*
+Helper invocation pattern below: each ClusterSPIFFEID matches pods by the
+canonical `app.kubernetes.io/component` label that all chart templates set,
+AND by literal namespace + ServiceAccount workload selectors. That label is
+stable; the bare release name is NOT (chart can be installed under any
+release name) so we deliberately avoid release-name selectors here —
+workload identity is per-component, not per-release.
+
+The daemon's SA name IS release-derived (`gibson.serviceAccountName` =
+`gibson.fullname` = chart+release composition, e.g. `gibson-gibson-workloads`
+under release `gibson`). It must come from the helper, never a hardcoded
+"gibson-daemon".
+*/}}
+
+# ============================================================================
+# Platform workloads — long-lived, one identity per component.
+# ============================================================================
+
+# --- gibson daemon ---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-daemon
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/daemon"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: daemon
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ include "gibson.serviceAccountName" . }}"
+---
+# --- ext-authz ---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-ext-authz
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/ext-authz"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: ext-authz
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ include "gibson.extAuthzServiceAccountName" . }}"
+---
+# --- ratelimit (deploy#1657) ---
+# The pod's Envoy mTLS sidecar presents this SVID to the edge Envoy, whose
+# ratelimit_grpc cluster pins the SAN to exactly platform/ratelimit.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-ratelimit
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/ratelimit"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: ratelimit
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ include "gibson.ratelimitServiceAccountName" . }}"
+---
+# --- dashboard ---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-dashboard
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/dashboard"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: dashboard
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ include "gibson.dashboardServiceAccountName" . }}"
+---
+{{- /* The tenant-operator workload lives in the gibson-operators sub-chart,
+       whose Deployment hardcodes `serviceAccountName: gibson-tenant-operator`
+       (its ClusterRoleBinding, its webhook and the
+       OPERATOR_SERVICE_ACCOUNT_NAME env var all depend on that literal).
+       gibson-workloads/values.yaml carries the same name under
+       tenantOperator.serviceAccount.name so the two charts agree; the bats
+       guard renders both charts and cross-checks them. */}}
+# --- tenant-operator ---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-tenant-operator
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/tenant-operator"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: tenant-operator
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ include "gibson.tenantOperatorServiceAccountName" . }}"
+---
+{{- /* The connector-operator (gibson-operators sub-chart) is the second
+       direct-dial peer of the daemon: its ConnectorInstance
+       finalizer revokes the connector grant through
+       DaemonOperatorService.RevokeConnectorGrant (§5, gibson#1566).
+       The daemon's method policy admits this SVID for exactly that RPC. The
+       ServiceAccount literal matches the gibson-operators Deployment. */}}
+# --- connector-operator ---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-connector-operator
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/connector-operator"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: connector-operator
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ include "gibson.connectorOperatorServiceAccountName" . }}"
+---
+{{- /* Envoy holds the highest-trust SVID in the platform: it is in
+       spiffe.callbackPeerSVIDs, so the daemon accepts identity headers from
+       any peer presenting it. Until templates/envoy/serviceaccount.yaml
+       existed, the Envoy pod ran under the namespace `default`
+       ServiceAccount and this selector would have degraded to
+       `k8s:sa:default` — which every other SA-less pod in the namespace
+       also satisfies. The ServiceAccount and this selector must ship
+       together, in one commit: the selector landing first costs Envoy its
+       SVID, which takes down the edge gateway AND daemon mTLS. */}}
+# --- envoy edge gateway ---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-envoy
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/envoy"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: envoy
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ include "gibson.envoyServiceAccountName" . }}"
+---
+{{- /* The openbao SA name is composed in-chart (auth/openbao-deployment.yaml
+       declares both the ServiceAccount and the pod's serviceAccountName as
+       `<release>-openbao`), hence the dedicated helper — so all three sites
+       render one expression. */}}
+# --- openbao (in-chart OpenBao for KMS-mediated CG-JWT signing) ---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-openbao
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/openbao"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: openbao
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ include "gibson.openbaoServiceAccountName" . }}"
+{{- /*
+DELETED in the workload-attestation hardening change:
+
+  gibson-platform-openfga     — matched NOTHING. The vendored openfga chart
+      stamps `app.kubernetes.io/component: authorization-controller`
+      (charts/openfga-0.3.4.tgz templates/_helpers.tpl), never `openfga`.
+  gibson-platform-tool-runner — matched NOTHING. No tool-runner workload
+      exists in any chart; untrusted execution moved into setec microVMs
+      (gibson-executor).
+
+Neither SVID is consumed anywhere in this repo, in spiffe.callbackPeerSVIDs
+or in spiffe.allowedPeerIDs. Rendering them meant two unclaimed platform
+identities sat in the trust domain that any pod wearing the right component
+label could have claimed. Do NOT re-add a ClusterSPIFFEID before the
+workload it names actually exists — an entry with no workload is a free
+identity, not a placeholder.
+
+The entitlements-svc ClusterSPIFFEID lives in the SaaS overlay chart
+(helm/saas-overlay/entitlements-svc) / deploy#1032; the core
+umbrella carries zero closed/SaaS component registrations.
+*/}}
+---
+{{- /* The SVID-fetching helm test.
+
+       It used to wear `app.kubernetes.io/component: daemon` and run as the
+       daemon's ServiceAccount, so it held a genuine full daemon SVID for as
+       long as it ran, and the installer identity had to be allow-listed by
+       the platform-identity admission policy for the test to pass under
+       Deny. Allow-listing the installer partly reopened the hole this all
+       exists to close: anyone who can run `helm install` against the release
+       could then mint a daemon identity.
+
+       It has its own identity now. `platform/helm-test` appears in no
+       `spiffe.callbackPeerSVIDs` and no `spiffe.allowedPeerIDs`, so it
+       authorises nothing — which is exactly what makes it a valid probe:
+       it proves the SPIRE agent issues SVIDs to correctly-attested pods
+       without conferring any privilege. Do not add it to either list, and
+       do not add `helm-test` to the admission policy's protected lists —
+       that would put the installer back in the allow-list. */}}
+# --- helm test (SVID issuance probe; no privileges) ---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-helm-test
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/helm-test"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: helm-test
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ include "gibson.helmTestServiceAccountName" . }}"
+{{- /* --- first-party plugins ---
+       One ClusterSPIFFEID per ENABLED plugin. The JWT-SVID is the plugin's
+       capability-grant enrollment credential — it replaces the bootstrap token
+       so no autonomous minter is needed (/ no-autonomous-bootstrap-
+       token stays intact). All plugins share component=plugin, so the per-vendor
+       gibson.zeroroot.ai/plugin label is the podSelector discriminator; the
+       literal k8s:ns + k8s:sa workloadSelectorTemplates are the real attested
+       boundary (see this file's header). Rendered only for enabled plugins. */}}
+{{- range $vendor, $p := .Values.plugins }}
+{{- if $p.enabled }}
+---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: {{ printf "gibson-plugin-%s" $vendor }}
+  labels:
+    {{- include "gibson.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/plugin/{{ $vendor }}"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: plugin
+      gibson.zeroroot.ai/plugin: {{ $vendor | quote }}
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ printf "%s-plugin-%s" $.Release.Name $vendor }}"
+{{- end }}
+{{- end }}
+{{/*
+  --- e2e exit-test runner (TEST PROFILES ONLY) -------------------------------
+
+  The daemon's gRPC listener speaks SPIFFE mTLS and refuses to bind a
+  non-loopback plaintext listener at all (zero-trust-hardening Req 1.2). An
+  exit test therefore cannot reach it over a port-forward from a CI runner —
+  it has to be a peer inside the mesh with an attested SVID. This is that
+  identity.
+
+  Gated on gibson.e2eRunner.enabled, which no shipped profile sets. It exists
+  in the kind test overlay and nowhere else, so a production install renders
+  nothing here. The matching method policy lives in the gibson daemon behind
+  the test_fixtures build tag, so even if this identity were somehow minted
+  against a production daemon, that daemon has no policy for it and refuses
+  the peer at boot (validateAllowedPeerPolicies).
+
+  Selectors follow this file's rule: the pod label alone is not enough, so the
+  namespace and ServiceAccount are pinned too. An entry with no workload is a
+  free identity.
+*/}}
+{{- if (.Values.gibson.e2eRunner).enabled }}
+---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-e2e-runner
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/e2e-runner"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: e2e-runner
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ printf "%s-e2e-runner" .Release.Name }}"
+{{- end }}
+
+{{- if .Values.spire.tenantAgents.enabled }}
+{{- fail "spire.tenantAgents.enabled is set, but the wildcard tenant-agents ClusterSPIFFEID was removed. It issued spiffe://<td>/tenant/<namespace>/agents/<pod-name> to any pod wearing app.kubernetes.io/component=agent in any tenant-labelled namespace, it carried NO workloadSelectorTemplates (so the namespace/ServiceAccount were never re-derived from kubelet), and nothing in this workspace consumes that SPIFFE ID — grep for `/agents/` returns no parser. By this file's own rule, an entry with no workload is a free identity, not a placeholder. The correct shape is one ClusterSPIFFEID per tenant, written by the tenant-operator with the literal tenant id, a namespaceSelector pinned to that tenant namespace and literal k8s:ns/k8s:sa workload selectors. Build that before re-enabling anything here." }}
+{{- end }}

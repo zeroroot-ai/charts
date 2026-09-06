@@ -1,0 +1,277 @@
+{{/*
+openbao-jwt-auth-init — enables the JWT auth method on the in-cluster
+Vault and configures it against the SPIRE OIDC discovery provider's
+JWKS, with `bound_issuer` set to the SPIRE OIDC issuer URL.
+
+Without this Job, the tenant-operator's `EnsureTenantNamespace` saga
+step fails permanently at the per-tenant role write
+(`POST /v1/auth/jwt/role/gibson-plugin-<id>` → 404, no handler for
+route). At runtime the **daemon** is the sole Vault-auth caller; it
+presents a SPIRE JWT-SVID at `auth/jwt/login` which Vault validates
+against the JWKS configured here. Plugins do NOT speak to Vault
+directly — they receive secret material from the daemon over the
+in-cluster broker channel.
+
+tenant-operator#132 documents the live-cluster repro. The original
+slice was tenant-operator#133 + deploy#350;'s amendment
+("Vault auth/jwt mount is SPIRE-only") supersedes the two-issuer
+approach because Vault 1.18.3 has a single string-valued
+`bound_issuer` per mount — there is no `bound_issuers` (plural).
+After audit, no runtime path exchanges a Zitadel JWT for a Vault
+token; Zitadel-on-Vault was vestigial wiring.
+
+TLS approach (path b from the amendment): the SPIRE OIDC discovery
+provider serves JWKS over HTTPS with a SPIRE-issued cert rotated by
+spiffe-helper. Vault validates that cert via `jwks_ca_pem` derived
+from the `spire-bundle` ConfigMap (k8s_configmap BundlePublisher
+output, JWKS form). The Job extracts the `x5c` entries and PEM-wraps
+them at runtime — no additional sub-chart configuration required.
+
+Vault is STRUCTURAL per the one-code-path epic (deploy#223). This
+Job has no `.Values.openbao.jwtAuth.enabled` toggle for the same
+reason — the chart fails render LOUDLY when the JWKS / issuer
+values are empty (see `| required` below). Operators who don't
+want JWT auth must remove the template, not toggle a flag.
+*/}}
+{{- /*
+  spireOidcIssuer is the public OIDC issuer URL the SPIRE OIDC
+  discovery provider advertises at /.well-known/openid-configuration.
+  Both kind and prod overlays set this to https://oidc-discovery.zeroroot.ai,
+  the upstream SPIRE chart's default jwt_issuer.
+*/ -}}
+{{- $spireOidcIssuer := required "vault.jwtAuth.spireOidcIssuer is REQUIRED (amendment, supersedes deploy#350). Set to the SPIRE OIDC discovery provider's `issuer` value (the same string served at /.well-known/openid-configuration). Both kind and prod overlays set this to https://oidc-discovery.zeroroot.ai. This is the `iss` claim Vault enforces on every JWT presented at auth/jwt/login — and the sole caller is the daemon, presenting a SPIRE JWT-SVID." ((.Values.openbao).jwtAuth).spireOidcIssuer -}}
+{{- $spireOidcJwksURL := default (printf "%s/keys" $spireOidcIssuer) ((.Values.openbao).jwtAuth).spireOidcJwksURL -}}
+{{- $spireBundleConfigMap := default "spire-bundle" ((.Values.openbao).jwtAuth).spireBundleConfigMap -}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-openbao-jwt-auth-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao-jwt-auth-init
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "gibson.fullname" . }}-openbao-jwt-auth-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao-jwt-auth-init
+  annotations:
+    # Sync hook: Argo deletes the old Job before creating a new one
+    # (BeforeHookCreation). The succeeded Job then lingers as a hook — hooks
+    # are excluded from drift detection, so there is no OutOfSync from a
+    # "missing" Job (the concern that originally motivated HookSucceeded).
+    # HookSucceeded is deliberately NOT used: it makes Argo add an
+    # `argocd.argoproj.io/hook-finalizer` and defer deletion, which deadlocks
+    # the sync if the finalizer is never removed (deploy#673). The
+    # wait-for-vault init container ensures ordering: the Job doesn't reach its
+    # main container until Vault is unsealed.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 10
+  {{- /* Wall-clock from JOB CREATION, and it counts the wait for
+         prerequisites that converge slowly on a cold bring-up (deploy#1766:
+         the SPIRE OIDC JWKS behind the spire server and discovery provider
+         reached t+8-9m on a loaded workstation, measured 2026-09-02). A fired
+         deadline is permanent on a plain helm install and wedges everything
+         downstream, so the value covers the worst measured cold bring-up with
+         headroom. The deadline stays for Argo sync hygiene. */}}
+  activeDeadlineSeconds: 1200
+  template:
+    metadata:
+      labels:
+        {{- include "gibson.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: openbao-jwt-auth-init
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ .Release.Name }}-openbao-jwt-auth-init
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-for-vault
+          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+          command: ['sh', '-c']
+          args:
+            - |
+              set -e
+              BAO_ADDR="http://{{ .Release.Name }}-openbao:{{ .Values.openbao.service.port }}"
+              echo "Waiting for Vault at ${BAO_ADDR}/v1/sys/health ..."
+              i=0
+              while [ $i -lt 90 ]; do
+                # Vault returns 200 if healthy + unsealed, 429 if standby,
+                # 472/473 for dr-secondary modes — all "responsive". Only
+                # 503 (sealed) or transport failure should keep us waiting.
+                code=$(curl -sS -o /dev/null -w '%{http_code}' "${BAO_ADDR}/v1/sys/health" || echo "000")
+                case "$code" in
+                  200|429|472|473) echo "Vault ready (HTTP $code)"; exit 0 ;;
+                esac
+                i=$((i+1))
+                echo "  not ready (HTTP $code, ${i}/90), retrying in 2s ..."
+                sleep 2
+              done
+              echo "ERROR: Vault did not become ready in 180s"
+              exit 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: jwt-auth-init
+          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+          command: ['sh', '-c']
+          args:
+            - |
+              set -e
+              BAO_ADDR="http://{{ .Release.Name }}-openbao:{{ .Values.openbao.service.port }}"
+              JWKS_URL="{{ $spireOidcJwksURL }}"
+              BOUND_ISSUER="{{ $spireOidcIssuer }}"
+              # Read the Vault admin token from the projected Secret
+              # volume mount. Length-based file reads are NUL-transparent
+              # — unlike env-var bindings, which Kubernetes silently
+              # truncates at the first 0x00. Cross-chart-check Class 16
+              # (deploy#316) flagged the prior env binding; deploy#325
+              # tracks this migration.
+              if [ ! -s /etc/vault-init/VAULT_ADMIN_TOKEN ]; then
+                echo "FATAL: /etc/vault-init/VAULT_ADMIN_TOKEN missing or empty"
+                exit 1
+              fi
+              VAULT_ADMIN_TOKEN="$(cat /etc/vault-init/VAULT_ADMIN_TOKEN)"
+              TOKEN_HEADER="X-Vault-Token: ${VAULT_ADMIN_TOKEN}"
+              CT='Content-Type: application/json'
+
+              echo "=== openbao-jwt-auth-init ==="
+              echo "  vault: ${BAO_ADDR}"
+              echo "  jwks_url: ${JWKS_URL}"
+              echo "  bound_issuer (SPIRE OIDC): ${BOUND_ISSUER}"
+
+              # Step 0: build a CA bundle (PEM) from the SPIRE root trust
+              # bundle. The SPIRE Server's k8s_configmap BundlePublisher
+              # writes JWKS form into /etc/spire-bundle/bundle.spiffe;
+              # extract the x509-svid x5c entries and PEM-wrap each.
+              echo "--- Step 0: build SPIRE root CA PEM bundle ---"
+              if [ ! -s /etc/spire-bundle/bundle.spiffe ]; then
+                echo "FATAL: /etc/spire-bundle/bundle.spiffe missing or empty"
+                echo "       SPIRE Server's k8s_configmap BundlePublisher must"
+                echo "       have published into ConfigMap {{ $spireBundleConfigMap }}"
+                echo "       before this Job runs."
+                exit 1
+              fi
+              jq -r '.keys[] | select(.use=="x509-svid") | .x5c[]' \
+                /etc/spire-bundle/bundle.spiffe \
+                | awk 'BEGIN{print "-----BEGIN CERTIFICATE-----"} \
+                       {gsub(/.{64}/, "&\n"); print; print "-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----"} \
+                       END{print "-----END CERTIFICATE-----"}' \
+                | awk '/-----BEGIN CERTIFICATE-----/{block=""} \
+                       {block = block $0 "\n"} \
+                       /-----END CERTIFICATE-----/{if (block !~ /^-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n$/) printf "%s", block; block=""}' \
+                > /tmp/spire-ca.pem
+              if [ ! -s /tmp/spire-ca.pem ]; then
+                echo "FATAL: produced empty SPIRE CA PEM bundle"
+                exit 1
+              fi
+              echo "  CA bundle bytes: $(wc -c < /tmp/spire-ca.pem)"
+
+              # Step 1: enable JWT auth method at auth/jwt/. 400 with
+              # "path is already in use" is treated as success — the
+              # method was enabled by a previous run of this Job.
+              echo "--- Step 1: enable JWT auth method ---"
+              code=$(curl -sS -o /tmp/enable.json -w '%{http_code}' \
+                -X POST -H "$TOKEN_HEADER" -H "$CT" \
+                -d '{"type":"jwt"}' \
+                "${BAO_ADDR}/v1/sys/auth/jwt")
+              if [ "$code" = "204" ] || [ "$code" = "200" ]; then
+                echo "  enabled (HTTP $code)"
+              elif [ "$code" = "400" ] && grep -q 'path is already in use' /tmp/enable.json; then
+                echo "  already enabled (idempotent)"
+              else
+                echo "FATAL: enable jwt failed (HTTP $code): $(cat /tmp/enable.json)"
+                exit 1
+              fi
+
+              # Step 2: write/overwrite the JWKS + bound_issuer config.
+              # POST against the same path is always an overwrite on Vault,
+              # so this is unconditionally idempotent. Vault 1.18.3 takes a
+              # single scalar `bound_issuer` (no `bound_issuers` plural).
+              echo "--- Step 2: configure JWKS + bound_issuer (SPIRE-only) ---"
+              # jq -Rs '.' reads the PEM file as a JSON string with proper
+              # escaping; embedding the multi-line PEM via heredoc would
+              # break JSON parsing.
+              JWKS_CA_PEM_JSON=$(jq -Rs '.' /tmp/spire-ca.pem)
+              cat > /tmp/jwt-config.json <<JSON
+              {
+                "jwks_url": "${JWKS_URL}",
+                "bound_issuer": "${BOUND_ISSUER}",
+                "jwks_ca_pem": ${JWKS_CA_PEM_JSON}
+              }
+              JSON
+              code=$(curl -sS -o /tmp/cfg.json -w '%{http_code}' \
+                -X POST -H "$TOKEN_HEADER" -H "$CT" \
+                --data-binary "@/tmp/jwt-config.json" \
+                "${BAO_ADDR}/v1/auth/jwt/config")
+              if [ "$code" = "204" ] || [ "$code" = "200" ]; then
+                echo "  configured (HTTP $code)"
+              else
+                echo "FATAL: write auth/jwt/config failed (HTTP $code): $(cat /tmp/cfg.json)"
+                exit 1
+              fi
+
+              # Step 3: read-back assertion. Surface mismatches loudly so
+              # operators don't ship a half-configured Vault.
+              echo "--- Step 3: read-back assertion ---"
+              curl -sS -H "$TOKEN_HEADER" "${BAO_ADDR}/v1/auth/jwt/config" > /tmp/got.json
+              GOT_JWKS=$(jq -r .data.jwks_url /tmp/got.json)
+              GOT_ISSUER=$(jq -r .data.bound_issuer /tmp/got.json)
+              if [ "$GOT_JWKS" != "$JWKS_URL" ] || [ "$GOT_ISSUER" != "$BOUND_ISSUER" ]; then
+                echo "FATAL: read-back mismatch"
+                echo "  want jwks=${JWKS_URL} issuer=${BOUND_ISSUER}"
+                echo "  got  jwks=${GOT_JWKS} issuer=${GOT_ISSUER}"
+                exit 1
+              fi
+              echo "  read-back ok: jwks=${GOT_JWKS} issuer=${GOT_ISSUER}"
+
+              echo "=== openbao-jwt-auth-init: OK ==="
+          volumeMounts:
+            # gibson-openbao-keys is ESO-managed (templates/secrets/vault-keys.yaml).
+            # kubelet projects each key in the Secret as a file under
+            # mountPath; the script reads VAULT_ADMIN_TOKEN with cat above.
+            - name: openbao-admin-token
+              mountPath: /etc/vault-init
+              readOnly: true
+            # spire-bundle ConfigMap is published by SPIRE Server's
+            # k8s_configmap BundlePublisher (chart upstream). Read-only
+            # mount; the script converts the JWKS form to PEM for Vault's
+            # `jwks_ca_pem` field at runtime.
+            - name: spire-bundle
+              mountPath: /etc/spire-bundle
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # writes /tmp/*.json
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: openbao-admin-token
+          secret:
+            secretName: gibson-openbao-keys
+            defaultMode: 0o400
+        - name: spire-bundle
+          configMap:
+            name: {{ $spireBundleConfigMap | quote }}
+            defaultMode: 0o444

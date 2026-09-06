@@ -1,0 +1,64 @@
+---
+# Flux HelmRelease wrapping the OCI umbrella chart as a Big Bang package.
+#
+# This is the federal / DoD Platform One distribution path (deploy#795,
+# parent deploy#784). It is BB-compatible, NOT BB-native: it does
+# not adopt Big Bang's Istio mesh, monitoring, or policy stack — the platform
+# keeps its own Envoy + ext-authz + SPIRE/SPIFFE edge (see the namespace's
+# istio-injection: disabled label).
+#
+# The chart source is the versioned OCIRepository in this same package
+# (chartRef), so a release is a single immutable OCI artifact.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: gibson
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/part-of: gibson
+spec:
+  interval: 10m
+  timeout: 20m
+  releaseName: gibson
+  # Source the chart from the OCIRepository (Flux v2 GA chartRef). This keeps
+  # the package wired to a single versioned/digest-pinned OCI artifact rather
+  # than a live HelmRepository index.
+  chartRef:
+    kind: OCIRepository
+    name: gibson-umbrella
+    namespace: gibson
+  install:
+    remediation:
+      retries: 3
+    # CRDs are NOT in this chart. They install as their own gibson-crds
+    # release, which must already exist — Helm validates every manifest's kind
+    # against the live API before applying, so a CRD and a CR of that CRD
+    # cannot share a release (deploy#1627). `crds:` is kept at CreateReplace
+    # because it is Flux's handling of any CRDs a chart does carry, and it
+    # stays correct if one ever appears here; it is not what registers the
+    # platform's CRDs.
+    crds: CreateReplace
+  upgrade:
+    remediation:
+      retries: 3
+      remediateLastFailure: true
+    crds: CreateReplace
+    cleanupOnFail: true
+  # Per-environment shape (replicas, resources, secretBackend, image digests)
+  # is supplied by the customer's overlay; only the cross-cutting, must-set
+  # values live here. These mirror the umbrella's real value keys
+  # (helm/gibson/values.yaml + gibson-common's gibson.domain helper) — no
+  # invented knobs.
+  values:
+    global:
+      # Single source of truth for the external platform host (deploy#630).
+      # Replace with the customer's IL domain, e.g. gibson.apps.il5.example.mil.
+      domain: example.mil
+      scheme: https
+      # Air-gap: every first-party image is private (ghcr.io/zeroroot-ai/*).
+      # Federal clusters pull from a mirrored registry; reference its
+      # dockerconfigjson pull secret here. The chart's validateGhcrCredentials
+      # guard FAILS the render if private images are pulled without this.
+      imagePullSecrets:
+        - name: private-registry

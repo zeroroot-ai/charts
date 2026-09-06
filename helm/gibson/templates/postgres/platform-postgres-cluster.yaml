@@ -1,0 +1,293 @@
+{{- /*
+deploy#1389 (one-code-path, #802 stories 1/2): the in-cluster CNPG
+Cluster is folded into the umbrella so `helm install gibson` stands up its own
+Postgres. Previously the CR lived only in gitops (envs/dev postgres-clusters
+Application), so the chart's own -6 setup Jobs — which block on
+`Cluster.status.currentPrimary` (spire-postgres-setup-job.yaml) — could never
+succeed on kind or a customer self-host without an out-of-band manifest.
+
+ (deploy#1730): this Cluster renders on EVERY profile. Aurora left the
+platform, and with it the `externalPostgres` knob that used to suppress this
+CR on the AWS profiles. The tombstone below fails any render that still sets
+the key, so a stale overlay is a loud render error and never a second
+Postgres beside a managed one.
+
+Bare CNPG Cluster. Knows NOTHING about any specific app: per-app postgres
+setup (CREATE ROLE / DATABASE / GRANT) is owned by the postgres-setup Jobs in
+templates/jobs/*, which run against this cluster's `platform-postgres-rw`
+Service via the postgres-exec ServiceAccount (platform-primitives-exec-rbac,
+wave -7). Adding/removing an app requires zero edits here.
+
+Superuser secret: CNPG-OWNED here (deploy#652). enableSuperuserAccess: true
+with NO spec.superuserSecret — CNPG generates `platform-postgres-superuser`
+(= <cluster>-superuser, type basic-auth) and SETS the postgres role to it on
+every bootstrap, including re-initdb. The umbrella's PlatformBootstrap
+postgresBundle reads that same secret name, so it always matches.
+*/ -}}
+{{- if hasKey .Values "externalPostgres" }}
+  {{- fail "externalPostgres was deleted (deploy#1730). Every profile renders the in-cluster CNPG Cluster; there is no managed-Postgres branch to select. Remove the key from the values file." }}
+{{- end }}
+{{- $pg := .Values.platformPostgres }}
+{{- $backup := $pg.backup }}
+{{- /* The durable bucket is a substrate input: the archive
+       destination is REQUIRED and must sit under the `backups/` prefix, the
+       one prefix whose lifecycle rule preflight proves. Both credential
+       Secret names are REQUIRED too. Half a credential pair produces a
+       Cluster that comes up healthy and then fails every archive_command —
+       WAL grows until the volume fills. Fail the render instead. */ -}}
+{{- $dest := required "platformPostgres.backup.destinationPath is REQUIRED: s3://<durable-bucket>/backups/postgres/ (deploy#1730)." $backup.destinationPath }}
+{{- if not (regexMatch "^s3://[^/]+/backups/" $dest) }}
+  {{- fail (printf "platformPostgres.backup.destinationPath %q must be s3://<durable-bucket>/backups/<prefix>: backups/ is the prefix the durable bucket's lifecycle rule covers and preflight proves (deploy#1730)." $dest) }}
+{{- end }}
+{{- $_ := required "platformPostgres.backup.s3Credentials.accessKeyIdSecret.name is REQUIRED (deploy#1730)." ($backup.s3Credentials.accessKeyIdSecret).name }}
+{{- $_ := required "platformPostgres.backup.s3Credentials.secretAccessKeySecret.name is REQUIRED (deploy#1730)." ($backup.s3Credentials.secretAccessKeySecret).name }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: platform-postgres
+  namespace: gibson
+  labels:
+    # Desired state, excluded from the Velero backup (deploy#1735, CONTEXT.md
+    # § Velero backup). The chart renders this CR on every sync, and Postgres
+    # data travels through its own barman archive. A restore that carried
+    # this CR, or a file-system copy of its volumes restored over a
+    # `bootstrap.recovery`, would re-initialize the database over the
+    # recovered one. `inheritedMetadata` below puts the same label on every
+    # pod and PVC the operator derives from this CR, which is what keeps
+    # those volumes out of the file-system backup. The guard is
+    # helm/gibson/tests/velero-exclude-label.bats.
+    velero.io/exclude-from-backup: "true"
+  annotations:
+    # Regular resource (never a hook — a hook-delete-policy would delete the
+    # database cluster) at wave -7: with the postgres-exec RBAC (-7), after
+    # the folded ExternalSecrets (-8), and BEFORE the -6 Sync-hook setup Jobs
+    # that poll this CR's .status.currentPrimary. See the wave ordering note
+    # in values.yaml (deploy#820).
+    argocd.argoproj.io/sync-wave: "-7"
+    # The CNPG CRD ships in the same sync (cnpg dependency alias, wave 0), so
+    # the first dry-run can land before the CRD is registered. Tolerate it and
+    # let the Application's retry converge — same belt-and-suspenders the old
+    # gitops postgres-clusters Application carried. ServerSideApply matches
+    # how that Application applied this CR.
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true,ServerSideApply=true
+spec:
+  # Every object the CNPG operator derives from this CR (the instance pods,
+  # the data and WAL PVCs) is desired state with its data in the barman
+  # archive, so it carries the same Velero exclude label the CR itself does.
+  # Without this, `defaultVolumesToFsBackup` copies the live Postgres volumes
+  # into the backup, and a restore lays them over a `bootstrap.recovery`
+  # (deploy#1735).
+  inheritedMetadata:
+    labels:
+      velero.io/exclude-from-backup: "true"
+{{- $instances := int $pg.instances }}
+{{- /* The redundancy posture (deploy#1729). Aurora leaves the
+       platform only because this Cluster carries the same durability, so
+       every setting below is a plain value with the prod shape as its
+       default. kind sets instances: 1 as a profile value and nothing else
+       changes: no flag gates any of these fields. */}}
+  instances: {{ $instances }}
+  # A primary roll promotes a replica first, then restarts the old primary as
+  # a replica. `restart` would take the primary down before anything else.
+  primaryUpdateMethod: {{ $pg.primaryUpdateMethod }}
+  # The operator performs that switchover on its own. `supervised` waits for
+  # a human, which no recreate has.
+  primaryUpdateStrategy: {{ $pg.primaryUpdateStrategy }}
+  # The operator's PodDisruptionBudgets: a drain cannot evict the primary and
+  # cannot take the last replica.
+  enablePDB: {{ $pg.enablePDB }}
+  storage:
+    size: {{ $pg.storage.size }}
+    {{- with $pg.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  # WAL on its own volume: a full data volume never stops WAL, and a WAL burst
+  # never fills the data volume.
+  walStorage:
+    size: {{ $pg.walStorage.size }}
+    {{- with $pg.walStorage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  # One instance per topology domain, enforced, not preferred. A node with no
+  # label for the key matches no rule, so kind and a single-node self-host
+  # schedule every instance anyway.
+  affinity:
+    enablePodAntiAffinity: true
+    podAntiAffinityType: {{ $pg.affinity.podAntiAffinityType }}
+    topologyKey: {{ $pg.affinity.topologyKey }}
+  postgresql:
+    # postgresql.conf. archive_timeout is the recovery point objective for
+    # unplanned loss (docs/bringup.md § Cadence): a WAL segment is shipped to
+    # the durable bucket at least every 300 s, even when the platform writes
+    # too little to fill one. Rendered on every profile, including one
+    # instance on kind.
+    parameters:
+      {{- toYaml $pg.parameters | nindent 6 }}
+{{- if gt $instances 1 }}
+  {{- $number := int $pg.synchronous.number }}
+  {{- if ge $number $instances }}
+    {{- fail (printf "platformPostgres.synchronous.number (%d) must be less than platformPostgres.instances (%d): a cluster cannot wait for more standbys than it has, and CNPG rejects the CR (deploy#1729)." $number $instances) }}
+  {{- end }}
+    # A commit returns only after `number` standbys have the WAL on disk, and
+    # `required` keeps that true when a standby is down: writes then wait
+    # rather than land on one copy. Rendered only above one instance, because
+    # a single instance has no standby to wait for and CNPG rejects
+    # number >= instances.
+    synchronous:
+      method: {{ $pg.synchronous.method }}
+      number: {{ $number }}
+      dataDurability: {{ $pg.synchronous.dataDurability }}
+{{- end }}
+  # CNPG-owned superuser secret (deploy#652) — see the header note.
+  enableSuperuserAccess: true
+  resources:
+    {{- toYaml $pg.resources | nindent 4 }}
+{{- /* No empty-string fallback here. The parenthesised access is already
+       nil-safe when `recovery` is unset, and `if` treats nil as false, so a
+       fallback would be redundant as well as forbidden by check-cross-chart,
+       which reads such a fallback as hiding a missing required value.
+       Absence is MEANINGFUL: no backup named means bootstrap empty
+, not a misconfiguration. */ -}}
+{{- $recoveryID := ($pg.recovery).backupID }}
+{{- if $recoveryID }}
+  # RESTORE-ON-BRINGUP (deploy#1739). `make recreate
+  # RESTORE_FROM=<name>` read this base backup id OUT of the named Velero
+  # backup, so the database recovers from the backup that was NAMED. With no
+  # id the branch below renders `bootstrap.initdb` and the database is empty,
+  # always, even when this same catalog holds a hundred base backups. There
+  # is no `latest` and no auto-detect: that is the whole of.
+  #
+  # No recoveryTarget time or LSN: recovery starts at this base backup and
+  # replays every WAL segment archived after it, so the environment comes
+  # back at the instant the preserve teardown took it, not at the instant the
+  # base backup began.
+  bootstrap:
+    recovery:
+      source: platform-postgres-archive
+      recoveryTarget:
+        backupID: {{ $recoveryID | quote }}
+  # The archive to read, which is the archive this cluster also writes. The
+  # server name is stated because the external cluster is named differently:
+  # barman reads <destinationPath>/<serverName>/, and the writer was a
+  # cluster called platform-postgres. Recovery promotes onto a new timeline,
+  # so the cluster's own archiving continues into the same prefix with no
+  # collision.
+  externalClusters:
+    - name: platform-postgres-archive
+      barmanObjectStore:
+        serverName: platform-postgres
+        destinationPath: {{ $dest | quote }}
+        {{- with $backup.endpointURL }}
+        endpointURL: {{ . | quote }}
+        {{- end }}
+        s3Credentials:
+          accessKeyId:
+            name: {{ $backup.s3Credentials.accessKeyIdSecret.name | quote }}
+            key: {{ $backup.s3Credentials.accessKeyIdSecret.key | quote }}
+          secretAccessKey:
+            name: {{ $backup.s3Credentials.secretAccessKeySecret.name | quote }}
+            key: {{ $backup.s3Credentials.secretAccessKeySecret.key | quote }}
+        wal:
+          maxParallel: {{ $backup.wal.maxParallel }}
+{{- else }}
+  bootstrap:
+    initdb:
+      database: postgres
+      owner: postgres
+{{- end }}
+  # Continuous backup to the durable bucket (deploy#1496,
+  # deploy#1730). Setting barmanObjectStore is what turns on WAL archiving:
+  # CNPG rewrites archive_command to ship every completed segment here. A
+  # base backup without its WAL restores only to the instant it was taken,
+  # and WAL without a base backup restores nothing, so the ScheduledBackup
+  # below is the other half. An UNREACHABLE destination fills the WAL volume
+  # and eventually stops Postgres accepting writes, which is why the
+  # destination and both credential Secrets are required at render time.
+  #
+  # No retentionPolicy, on purpose. Barman prunes the object store FROM THE
+  # INSTANCE PODS, which needs a credential that can delete. The platform
+  # credential cannot (preflight proves it): a compromised primary must not
+  # be able to destroy the copies that would have recovered it. Retention is
+  # the durable bucket's lifecycle rule on backups/ and nothing else.
+  backup:
+    # prefer-standby takes the base backup from a replica, so the primary
+    # never carries it. It falls back to the primary on its own at
+    # instances: 1 (kind), so one value is correct for every profile.
+    target: {{ $backup.target | quote }}
+    barmanObjectStore:
+      destinationPath: {{ $dest | quote }}
+      {{- with $backup.endpointURL }}
+      # An S3-compatible store that is not AWS (MinIO on kind). Empty means
+      # the AWS endpoint for the bucket's region.
+      endpointURL: {{ . | quote }}
+      {{- end }}
+      # No `encryption:` key. Server-side encryption is the bucket's default
+      # and naming an algorithm here would override it with a weaker one.
+      # The credential is the bucket member of the bringup keyring, written
+      # into this namespace by the bringup BEFORE the chart syncs. The chart
+      # renders no Secret for it.
+      s3Credentials:
+        accessKeyId:
+          name: {{ $backup.s3Credentials.accessKeyIdSecret.name | quote }}
+          key: {{ $backup.s3Credentials.accessKeyIdSecret.key | quote }}
+        secretAccessKey:
+          name: {{ $backup.s3Credentials.secretAccessKeySecret.name | quote }}
+          key: {{ $backup.s3Credentials.secretAccessKeySecret.key | quote }}
+      wal:
+        compression: {{ $backup.wal.compression | quote }}
+        maxParallel: {{ $backup.wal.maxParallel }}
+      data:
+        compression: {{ $backup.data.compression | quote }}
+        jobs: {{ $backup.data.jobs }}
+---
+{{- /* The base-backup half. WAL archiving alone is not a restorable backup:
+       continuous WAL with no base backup to replay onto restores nothing. */}}
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: platform-postgres-scheduled
+  namespace: gibson
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true,ServerSideApply=true
+    # deploy#1761. This kind is applied AFTER gibson-webhook-gate has proved
+    # the webhook that admits it answers. Helm sorts manifest kinds it does not
+    # know alphabetically, so this one lands after the webhook configurations
+    # and is refused on a fresh install unless it is ordered behind the gate.
+    # Both axes: hook weight for a plain `helm install`, which has no barrier
+    # inside its main phase, and sync-wave for Argo, which orders hooks and
+    # ordinary resources together. scripts/check-webhook-ordering.py computes
+    # which kinds need this from Helm's own install order and fails the build
+    # on one that is missing it, or one that carries it without needing it.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "20"
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "20"
+    #
+    # It used to sync at wave -7 with the Cluster it points at. That is too
+    # early: `mscheduledbackup.cnpg.io` is failurePolicy: Fail, and on a fresh
+    # install the CNPG operator is still starting when wave -7 applies, so the
+    # write was refused (deploy#1761, four errors on one `make vanilla-fresh`).
+    # The Cluster itself stays at -7 because `Cluster` sorts BEFORE
+    # `MutatingWebhookConfiguration` in Helm's install order, so it lands while
+    # no CNPG webhook exists and is never refused.
+    #
+    # On a plain `helm upgrade` Helm deletes and recreates a hook resource.
+    # With backupOwnerReference: self that discards this schedule's Backup CRs
+    # and takes one fresh base backup. Neither is a loss: the backups
+    # themselves live in the durable bucket, which outlives the cluster
+    #, and a teardown discards those CRs anyway. Under Argo the
+    # Sync hook above is applied, not recreated, so nothing is discarded there.
+spec:
+  # SIX fields — CNPG's cron parser takes a leading seconds field, unlike a
+  # Kubernetes CronJob. A five-field expression is rejected by the webhook.
+  schedule: {{ $backup.scheduledBackup.schedule | quote }}
+  # Take one immediately, so a fresh install is restorable now rather than
+  # after the first tick. NO `| default true` here (deploy#1220): sprig treats
+  # `false` as empty, so a truthy fallback would swallow an explicit
+  # `immediate: false` and the knob could never be turned off. values.yaml
+  # always supplies it, and Helm's values merge keeps it supplied.
+  immediate: {{ $backup.scheduledBackup.immediate }}
+  backupOwnerReference: {{ $backup.scheduledBackup.backupOwnerReference | quote }}
+  target: {{ $backup.target | quote }}
+  cluster:
+    name: platform-postgres

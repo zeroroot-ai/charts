@@ -1,0 +1,37 @@
+apiVersion: v2
+name: gibson-common
+description: |
+  Library chart of Helm template helpers shared across every Gibson chart.
+
+  Exists to eliminate the cross-chart drift class that produced:
+    - deploy#169 / #171 (envoy.service.clusterIP pinned independently in
+      gibson-workloads and gibson-operators values-kind.yaml; drift broke
+      hostAliases-driven OIDC discovery)
+    - tenant-operator#70 (operators chart hardcoded "gibson:50051" while
+      the workloads chart's Service was renamed to "gibson-workloads")
+
+  See zeroroot-ai/tenant-operator#76 PRD Module 6 / deploy#179.
+
+  Single source of truth: every chart importing this library uses the
+  helpers below instead of duplicating values. The companion cross-chart
+  CI check (deploy#180) will refuse a chart that bypasses them.
+
+# Library chart — templates here are never rendered directly; consumers
+# pull them in via the dependencies block in their Chart.yaml and call
+# them with `include "gibson.helperName" .`.
+type: library
+version: 0.2.0
+appVersion: "0.1.0"
+
+home: https://github.com/zeroroot-ai/deploy
+sources:
+  - https://github.com/zeroroot-ai/deploy
+
+maintainers:
+  - name: zeroroot-ai
+    url: https://github.com/zeroroot-ai
+
+keywords:
+  - gibson
+  - library
+  - helpers

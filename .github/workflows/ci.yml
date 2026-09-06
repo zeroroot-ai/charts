@@ -1,0 +1,61 @@
+# ----------------------------------------------------------------------------
+# The merge gate. Every other workflow in this repo runs on push to main, on a
+# schedule, or on a release — so until this file existed, nothing at all ran on
+# a pull request and any change could merge.
+#
+# That was not a deliberate choice. exit-test-vanilla-install.yml says in its
+# own header "The merge gate is the ten-minute set in ci.yml", written when this
+# repo was still `deploy`. The chart source moved here in the 2026-09-04 split
+# (ADR-0086) and ci.yml did not come with it.
+#
+# What it runs is `make check`, the offline gate set, unchanged: the golden
+# snapshots for every profile, the vendored-attribution guard, and the
+# cloud-free assertion. Those already existed and already passed. The defect
+# was that nothing invoked them before a merge.
+#
+# ADR-0012: exit tests never run on a pull request. This is not an exit test. It
+# needs no cluster, no cloud and no secret, which is exactly why it can gate.
+# ----------------------------------------------------------------------------
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The ruleset requires the context `ci-required`. Keep this job's name in step
+  # with rulesets/repo/charts.json in zeroroot-ai/.github, or the branch blocks
+  # on a check that never reports.
+  ci-required:
+    name: ci-required
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5
+        with:
+          version: v3.18.4
+
+      # `make check` runs `chart-deps`, which pulls subcharts from ghcr. The
+      # packages are public, but an unauthenticated pull is rate-limited by IP
+      # and shared runners exhaust that quota. Logging in costs nothing and
+      # removes a class of flake that looks like a chart error.
+      - name: Log in to ghcr.io
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # golden + attribution + cloud-free. Any drift in a rendered profile fails
+      # here as a snapshot diff, which is also what carries the randAlphaNum ban
+      # since tools/cross-chart-check was deleted (ADR-0014).
+      - name: make check
+        run: make check

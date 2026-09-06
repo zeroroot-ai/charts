@@ -1,0 +1,287 @@
+{{- /*
+PlatformBootstrap CR — one per cluster. Instructs the platform-operator
+to reconcile every cross-cluster bootstrap handshake:
+
+  * Zitadel project + service users
+  * OIDCClient child CRs (one per spec.oidcClients[] entry)
+  * OpenFGA model load
+  * Vault transit init
+  * Plan sync
+  * Master-key Secret generation (operator owns; idempotent)
+  * Postgres database ownership + public-schema GRANTs
+
+Lives in gibson-operators (not gibson-workloads) because the CRD is owned
+by the platform-operator that this chart deploys. Workloads consume the
+Secrets the operator mints — they shouldn't apply the CR that drives
+that minting.
+
+PlatformBootstrap is required infrastructure (one-code-path epic /
+deploy#187). The previous `.Values.platformBootstrap.enabled` toggle was
+a degradation surface and has been deleted; this CR always renders, and
+overlays MUST supply `platformBootstrap.zitadel.issuer` (the `required`
+pipeline below fails chart render loudly otherwise).
+*/}}
+apiVersion: gibson.zeroroot.ai/v1alpha1
+kind: PlatformBootstrap
+metadata:
+  name: platform
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    # Desired state, excluded from the Velero backup (deploy#1735, CONTEXT.md
+    # § Velero backup). The chart renders this CR on every sync, so a restore
+    # that carried it would fight the live copy. Velero's item collector
+    # skips any object with this label. The guard is
+    # helm/gibson/tests/velero-exclude-label.bats.
+    velero.io/exclude-from-backup: "true"
+spec:
+  zitadel:
+    issuer: {{ required "platformBootstrap.zitadel.issuer is required (one-code-path/187): set to the OIDC issuer URL the platform-operator should reconcile against (e.g. http://gibson-zitadel:8080 in kind, https://app.<domain> in EKS — the auth.<domain> host is retired)." .Values.platformBootstrap.zitadel.issuer | quote }}
+    # Host header the operator forges onto in-cluster Zitadel requests
+    # (it dials Service DNS via platformBootstrap.zitadel.issuer but Zitadel
+    # routes by Host). Derives from global.domain (app host + external port);
+    # override only for an off-domain Zitadel edge.
+    externalDomain: {{ .Values.platformBootstrap.zitadel.externalDomain | default (include "gibson.zitadelHostPort" .) | quote }}
+    adminTokenRef:
+      name: {{ .Values.platformBootstrap.zitadel.adminTokenRef.name | default "iam-admin-pat" | quote }}
+      {{- if .Values.platformBootstrap.zitadel.adminTokenRef.namespace }}
+      namespace: {{ .Values.platformBootstrap.zitadel.adminTokenRef.namespace | quote }}
+      {{- end }}
+      key: {{ .Values.platformBootstrap.zitadel.adminTokenRef.key | default "pat" | quote }}
+    project:
+      name: {{ .Values.platformBootstrap.zitadel.project.name | default "gibson" | quote }}
+      ensureExists: {{ include "gibson.trueUnlessSet" ((.Values.platformBootstrap.zitadel.project).ensureExists) }}
+    {{- with .Values.platformBootstrap.zitadel.systemClient }}
+    {{- /*
+      systemClient activates the TrustedDomainReady reconcile step
+      (platform-operator#29). The operator signs a JWT with
+      the mounted RSA key, exchanges it at /oauth/v2/token for a
+      SYSTEM_OWNER access token, then calls /system/v1/instances/me/
+      domains to register the cluster Service hostname. The default
+      derivation (<cr-name>-zitadel.<ns>.svc.cluster.local) is wrong
+      for this chart — the Service is `gibson-zitadel`, not
+      `<release>-zitadel` — so kind values explicitly pin
+      trustedClusterDomain.
+    */}}
+    systemClient:
+      {{- with .systemUserName }}
+      systemUserName: {{ . | quote }}
+      {{- end }}
+      {{- with .keyPath }}
+      keyPath: {{ . | quote }}
+      {{- end }}
+      {{- with .trustedClusterDomain }}
+      trustedClusterDomain: {{ . | quote }}
+      {{- end }}
+      {{- /*
+        apiURL — the address the operator DIALS for /system/v1/* calls
+        (GHSA-534c, gibson#1275). It MUST stay cluster-internal: the
+        System API is the instance-superuser surface, so the Envoy edge
+        deliberately publishes no /system/v1/ route any more. Dialling
+        spec.zitadel.issuer here would send instance-superuser traffic
+        out to the internet-facing edge and back, which is exactly what
+        the CRD's `^https?://` field exists to prevent; the API rejects
+        nothing, so the chart has to be explicit.
+
+        Emitted unconditionally (not `with`-gated) whenever a
+        trustedClusterDomain is known, because the operator's own
+        fallback derivation is "<cr-name>-zitadel.<ns>.svc.cluster.local"
+        — and this chart's CR is named `platform` while the Service is
+        `gibson-zitadel`. Relying on that derivation yields
+        platform-zitadel.<ns>, which resolves to nothing.
+
+        Zitadel routes by Host, so the client still forges Host to
+        spec.zitadel.externalDomain (system_client.go) — the dial address
+        and the routed vhost are independent, which is what makes the
+        in-cluster dial work at all. Do not remove externalDomain.
+      */}}
+      {{- $apiURL := .apiURL }}
+      {{- if and (not $apiURL) .trustedClusterDomain }}
+      {{- /* 8080 is the Zitadel Service port this chart exposes in-cluster and
+             the operator's own defaultSystemAPIPort. Override the whole URL via
+             platformBootstrap.zitadel.systemClient.apiURL for a non-default
+             port or an off-chart Zitadel. */}}
+      {{- $apiURL = printf "http://%s:8080" .trustedClusterDomain }}
+      {{- end }}
+      {{- with $apiURL }}
+      apiURL: {{ . | quote }}
+      {{- end }}
+    {{- end }}
+    {{- if .Values.platformBootstrap.zitadel.serviceUsers }}
+    serviceUsers:
+      {{- range .Values.platformBootstrap.zitadel.serviceUsers }}
+      - name: {{ .name | quote }}
+        roles:
+          {{- range .roles }}
+          - {{ . | quote }}
+          {{- end }}
+        patSecretRef:
+          name: {{ .patSecretRef.name | quote }}
+          key: {{ .patSecretRef.key | default "pat" | quote }}
+          {{- if .patSecretRef.namespace }}
+          namespace: {{ .patSecretRef.namespace | quote }}
+          {{- end }}
+      {{- end }}
+    {{- end }}
+  {{- if .Values.platformBootstrap.oidcClients }}
+  oidcClients:
+    {{- range .Values.platformBootstrap.oidcClients }}
+    - name: {{ .name | quote }}
+      {{- if .applicationType }}
+      applicationType: {{ .applicationType | quote }}
+      {{- end }}
+      {{- /* The gibson-dashboard client's URIs derive from global.domain
+             (deploy#682): when an overlay leaves them empty, default to the
+             helper-built callback + origin so they always match the values the
+             dashboard itself derives (deploy#678). $ = root context for the
+             helpers; . = the current oidcClient. */}}
+      {{- $redirects := .redirectURIs }}
+      {{- if and (not $redirects) (eq .name "gibson-dashboard") }}
+      {{- $redirects = list (include "gibson.dashboardCallbackURI" $) }}
+      {{- end }}
+      {{- with $redirects }}
+      redirectURIs:
+        {{- range . }}
+        - {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      {{- $postLogout := .postLogoutRedirectURIs }}
+      {{- if and (not $postLogout) (eq .name "gibson-dashboard") }}
+      {{- $postLogout = list (include "gibson.externalOrigin" $) }}
+      {{- end }}
+      {{- with $postLogout }}
+      postLogoutRedirectURIs:
+        {{- range . }}
+        - {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      {{- with .grantTypes }}
+      grantTypes:
+        {{- range . }}
+        - {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      {{- if .accessTokenLifetimeSeconds }}
+      accessTokenLifetimeSeconds: {{ .accessTokenLifetimeSeconds }}
+      {{- end }}
+      secretRef:
+        name: {{ .secretRef.name | quote }}
+        key: {{ .secretRef.key | default "client_secret" | quote }}
+        {{- if .secretRef.namespace }}
+        namespace: {{ .secretRef.namespace | quote }}
+        {{- end }}
+    {{- end }}
+  {{- end }}
+  {{- /*
+    OpenFGA model load is structural / [[feedback-no-service-is-optional]].
+    The previous `{{- if .apiEndpoint }}` empty-skip gate has been deleted
+    (companion rip to platform-operator's FGADisabled short-circuit).
+    Overlays MUST set apiEndpoint; chart render fails LOUD otherwise.
+  */}}
+  fgaModel:
+    apiEndpoint: {{ required "platformBootstrap.fgaModel.apiEndpoint is required (OpenFGA is structural infrastructure / one-code-path; set to the in-cluster FGA URL, typically https://gibson-openfga.gibson.svc:8080 (server TLS since deploy#1382))." ((.Values.platformBootstrap.fgaModel).apiEndpoint) | quote }}
+    storeNameRef:
+      name: {{ (((.Values.platformBootstrap.fgaModel).storeNameRef).name) | default "gibson-fga-config" | quote }}
+      key: {{ (((.Values.platformBootstrap.fgaModel).storeNameRef).key) | default "store_id" | quote }}
+      {{- with (((.Values.platformBootstrap.fgaModel).storeNameRef).namespace) }}
+      namespace: {{ . | quote }}
+      {{- end }}
+    modelConfigMapRef:
+      name: {{ (((.Values.platformBootstrap.fgaModel).modelConfigMapRef).name) | default "gibson-fga-model" | quote }}
+      key: {{ (((.Values.platformBootstrap.fgaModel).modelConfigMapRef).key) | default "model.json" | quote }}
+      {{- with (((.Values.platformBootstrap.fgaModel).modelConfigMapRef).namespace) }}
+      namespace: {{ . | quote }}
+      {{- end }}
+  {{- /*
+    Vault transit + master-kek is structural infrastructure per
+ one-code-path. The previous `vaultTransit.enabled` gate
+    has been deleted (platform-operator: rip-vault-toggle). The
+    operator always mounts the transit engine and creates the
+    master-kek key on this address; CRD validation enforces
+    non-empty address and tokenRef.
+  */}}
+  vaultTransit:
+    address: {{ required "platformBootstrap.vaultTransit.address is required (Vault is structural infrastructure / one-code-path; set to the in-cluster Vault Service URL, typically http://gibson-workloads-vault.gibson.svc:8200)." (.Values.platformBootstrap.vaultTransit).address | quote }}
+    tokenRef:
+      name: {{ required "platformBootstrap.vaultTransit.tokenRef.name is required (Vault admin token Secret)." (((.Values.platformBootstrap.vaultTransit).tokenRef).name) | quote }}
+      key: {{ (((.Values.platformBootstrap.vaultTransit).tokenRef).key) | default "VAULT_ADMIN_TOKEN" | quote }}
+      {{- with (((.Values.platformBootstrap.vaultTransit).tokenRef).namespace) }}
+      namespace: {{ . | quote }}
+      {{- end }}
+    keyName: {{ ((.Values.platformBootstrap.vaultTransit).keyName) | default "master-kek" | quote }}
+  {{- with .Values.platformBootstrap.planSync }}
+  planSync:
+    plansConfigMapRef:
+      name: {{ .plansConfigMapRef.name | default "gibson-tenant-operator-plans" | quote }}
+      key: {{ .plansConfigMapRef.key | default "plans.yaml" | quote }}
+      {{- if .plansConfigMapRef.namespace }}
+      namespace: {{ .plansConfigMapRef.namespace | quote }}
+      {{- end }}
+  {{- end }}
+  {{- /*
+    Master-key Secret is structural . The previous
+    `{{- if .secretName }}` skip gate has been deleted; the operator
+    always owns this Secret and the chart must name it.
+  */}}
+  masterKey:
+    secretName: {{ required "platformBootstrap.masterKey.secretName is required (master-key Secret is structural / one-code-path)." ((.Values.platformBootstrap.masterKey).secretName) | quote }}
+    {{- with ((.Values.platformBootstrap.masterKey).namespace) }}
+    namespace: {{ . | quote }}
+    {{- end }}
+    {{- with ((.Values.platformBootstrap.masterKey).key) }}
+    key: {{ . | quote }}
+    {{- end }}
+  {{- /*
+    Unseal-key escrow (deploy#1629) is satisfied by construction since the
+    static seal (deploy#1731). Nothing mints an unseal key into
+    the cluster any more: the seal key is a member of the bringup keyring,
+    held outside the cluster before the first sync, and the chart only
+    mounts it. So there is nothing to escrow and `managedExternally` is
+    the true statement on every profile. The `volume` destination, the
+    escrow mount and the source Secret that pointed at the deleted
+    `<release>-openbao-unseal-keys` Secret are gone. The CRD field stays
+    until the platform-operator drops it (gibson follow-up).
+
+    sourceSecret MUST render, and non-empty (deploy#1766). The operator
+    round-trips the CR through its Go types on every write and those types
+    serialize sourceSecret even when the chart omits it, as empty strings.
+    The CRD requires minLength 1 on both fields, so a CR rendered without
+    a sourceSecret is valid at creation and invalid on the operator's
+    FIRST update: the operator cannot add its finalizer, every reconcile
+    fails, and no bootstrap step (master-key, OIDC clients, postgres
+    bundle) ever runs. The value is the true one: since the static seal
+    the seal key lives in the bringup keyring Secret.
+  */}}
+  unsealEscrow:
+    destination: managedExternally
+    sourceSecret:
+      name: {{ required "platformBootstrap.unsealEscrow.sourceSecret.name is required and must be non-empty (deploy#1766): the operator round-trips the CR and the CRD rejects an empty sourceSecret, wedging every reconcile. The static seal key lives in the bringup-keyring Secret." (((.Values.platformBootstrap.unsealEscrow).sourceSecret).name) | quote }}
+      key: {{ required "platformBootstrap.unsealEscrow.sourceSecret.key is required and must be non-empty (deploy#1766): the operator round-trips the CR and the CRD rejects an empty sourceSecret, wedging every reconcile. The static seal key lives under the openbao-seal-key key." (((.Values.platformBootstrap.unsealEscrow).sourceSecret).key) | quote }}
+  {{- /*
+    PostgresBundle is structural . The previous
+    `{{- if .cluster }}` skip-when-unset gate has been deleted.
+    Overlays MUST supply postgresBundle.cluster.host and
+    superuserSecretRef.name; chart render fails LOUD otherwise.
+  */}}
+  postgresBundle:
+    cluster:
+      host: {{ required "platformBootstrap.postgresBundle.cluster.host is required (postgres is structural / one-code-path; set to the in-cluster CNPG -rw Service, typically platform-postgres-rw.gibson.svc.cluster.local)." (((.Values.platformBootstrap.postgresBundle).cluster).host) | quote }}
+      {{- with (((.Values.platformBootstrap.postgresBundle).cluster).port) }}
+      port: {{ . }}
+      {{- end }}
+      superuserSecretRef:
+        name: {{ required "platformBootstrap.postgresBundle.cluster.superuserSecretRef.name is required (CNPG superuser Secret)." ((((.Values.platformBootstrap.postgresBundle).cluster).superuserSecretRef).name) | quote }}
+        key: {{ ((((.Values.platformBootstrap.postgresBundle).cluster).superuserSecretRef).key) | default "password" | quote }}
+        {{- with ((((.Values.platformBootstrap.postgresBundle).cluster).superuserSecretRef).namespace) }}
+        namespace: {{ . | quote }}
+        {{- end }}
+    databases:
+      {{- range ((.Values.platformBootstrap.postgresBundle).databases) }}
+      - name: {{ .name | quote }}
+        owner: {{ .owner | quote }}
+        {{- with .grants }}
+        grants:
+          {{- range . }}
+          - {{ . | quote }}
+          {{- end }}
+        {{- end }}
+      {{- end }}

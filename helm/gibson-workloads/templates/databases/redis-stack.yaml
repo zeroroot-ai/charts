@@ -1,0 +1,267 @@
+{{/* In-chart Redis-Stack StatefulSet.
+
+     Redis is structural infrastructure (deploy#224 deleted
+     the `redis.provider` enum and `redis.external` substitution).
+
+     Auth password: the chart NEVER renders the password Secret. ESO
+     materialises `gibson-workloads-redis-stack` from `gibson-redis-password`
+     (key: password) in the external-secrets-backend namespace (or the
+     AWS Secrets Manager mirror in EKS). Consumer wiring flows through
+     `gibson.redisPasswordSecretName` / `gibson.redisPasswordSecretKey`
+     helpers — only the producer changed.
+
+     See deploy and PRD deploy#255 for why the prior
+     `lookup`-then-`randAlphaNum` idiom was deleted (Argo's repo-server
+     can't `lookup`; every reconcile re-minted; running Redis env froze at
+     boot; WRONGPASS loop took sign-in down).
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-redis-stack-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+data:
+  redis-stack.conf: |
+    # Redis Stack Configuration
+    bind 0.0.0.0
+    port 6379
+
+    # Authentication via ACL file (deploy#518). The init-acl init container
+    # writes /etc/redis-acl/users.acl at pod start from the current Secret.
+    # During password rotation the rotation CronJob (deploy#517) temporarily
+    # adds the previous password to the in-memory ACL so existing clients keep
+    # authenticating while they are being rolled.
+    aclfile /etc/redis-acl/users.acl
+
+    # Data directory
+    dir /data
+
+    # Persistence
+    appendonly yes
+    appendfsync everysec
+    appenddirname appendonlydir
+
+    # Memory management
+    maxmemory-policy noeviction
+
+    # Modules are loaded automatically by redis-stack image
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-redis-stack
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  serviceName: {{ .Release.Name }}-redis-stack
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "gibson.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: redis
+      annotations:
+        # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). The redis-stack
+        # image bakes the REQUIREPASS value from $REDIS_PASSWORD into its
+        # internal ACL at startup and does NOT re-read the env var when the
+        # backing Secret rotates; the Reloader controller watches the
+        # explicitly-named Secret and rolls this StatefulSet whenever it
+        # changes. The prior checksum-annotation pattern (computing a
+        # sha256sum of a lookup-loaded Secret) was broken under Argo's offline
+        # `helm template` render — lookup returned nil, the checksum never
+        # changed, the pod never rolled on rotation, and the WRONGPASS loop
+        # took sign-in down. See PRD deploy#255 for the incident.
+        secret.reloader.stakater.com/reload: "{{ .Release.Name }}-redis-stack"
+    spec:
+      {{- $pcn := include "gibson.priorityClassName" (dict "component" "openfga") }}
+      {{- if $pcn }}
+      priorityClassName: {{ $pcn }}
+      {{- end }}
+      securityContext:
+        fsGroup: 0
+        runAsUser: 0
+        runAsGroup: 0
+        runAsNonRoot: false
+      initContainers:
+        - name: init-permissions
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          command: ['sh', '-c']
+          args:
+            - |
+              mkdir -p /data/appendonlydir
+              chmod -R 777 /data
+              echo "Permissions set for Redis data directory"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+        # Writes /etc/redis-acl/users.acl from the current password Secret.
+        # Redis starts with this file; the rotation CronJob (deploy#517) adds
+        # the previous password in-memory during the rolling-restart window
+        # via `ACL SETUSER`, so it never appears on disk.
+        - name: init-acl
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          command: ['sh', '-c']
+          args:
+            - |
+              printf 'user default on >%s ~* &* +@all\n' "$REDIS_PASSWORD" \
+                > /etc/redis-acl/users.acl
+              echo "[init-acl] ACL file written"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.redisPasswordSecretName" . }}
+                  key: {{ include "gibson.redisPasswordSecretKey" . }}
+          volumeMounts:
+            - name: redis-acl
+              mountPath: /etc/redis-acl
+          securityContext:
+            allowPrivilegeEscalation: false
+      containers:
+        - name: redis-stack
+          image: "{{ .Values.redis.image.registry }}/{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          imagePullPolicy: {{ .Values.redis.image.pullPolicy | default "IfNotPresent" }}
+          # Redis auth is always on (one-code-path epic / deploy#199);
+          # `redis.auth.enabled` was deleted as a configuration toggle.
+          # ACL auth is declared in the conf file via `aclfile` (deploy#518).
+          # The init-acl init container writes the ACL file before this
+          # container starts. No --requirepass flag needed.
+          #
+          # --dir /data (durable-Timeline, deploy#1063): the redis-stack-server
+          # wrapper script unconditionally passes --dir /var/lib/redis-stack as
+          # a CLI flag, which overrides the `dir /data` in the conf file — the
+          # AOF log would land on the ephemeral overlay, not the PVC. Passing
+          # --dir /data as a trailing arg ($* in the script) wins because Redis
+          # applies CLI flags left-to-right and last-one-wins for duplicates.
+          command:
+            - sh
+            - -c
+            - 'exec redis-stack-server /etc/redis-stack/redis-stack.conf --dir /data'
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.redisPasswordSecretName" . }}
+                  key: {{ include "gibson.redisPasswordSecretKey" . }}
+          resources:
+            {{- toYaml .Values.redis.master.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/redis-stack
+            - name: data
+              mountPath: /data
+            - name: redis-acl
+              mountPath: /etc/redis-acl
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli -a "$REDIS_PASSWORD" ping | grep -q PONG
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli -a "$REDIS_PASSWORD" ping | grep -q PONG
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+        {{- if default false ((.Values.redis).metrics).enabled }}
+        # redis-exporter sidecar for Prometheus metrics (deploy#516).
+        # Exposes redis_up, redis_connected_clients, redis_commands_total, etc.
+        # on :9121/metrics. Authenticates with REDIS_PASSWORD (same Secret as
+        # the main container). Enable via redis.metrics.enabled=true.
+        - name: redis-exporter
+          image: "{{ default "oliver006/redis_exporter" ((((.Values.redis).metrics).exporter).repository) }}:{{ default "v1.63.0" ((((.Values.redis).metrics).exporter).tag) }}"
+          imagePullPolicy: {{ default "IfNotPresent" ((((.Values.redis).metrics).exporter).pullPolicy) }}
+          ports:
+            - name: redis-exporter
+              containerPort: 9121
+              protocol: TCP
+          env:
+            - name: REDIS_ADDR
+              value: "redis://localhost:6379"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.redisPasswordSecretName" . }}
+                  key: {{ include "gibson.redisPasswordSecretKey" . }}
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+        {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-redis-stack-config
+        - name: redis-acl
+          emptyDir: {}
+  volumeClaimTemplates:
+    {{/* Spec 2 R14 fix: prefer redis.persistence.* (canonical), fall back to
+         redis.master.persistence.* for backward compat with the legacy block. */}}
+    {{- $persistence := .Values.redis.persistence | default .Values.redis.master.persistence | default dict }}
+    {{- if $persistence.enabled }}
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if $persistence.storageClass }}
+        storageClassName: {{ $persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $persistence.size | default "8Gi" }}
+    {{- else }}
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+    {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-redis-stack
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  type: {{ .Values.redis.service.type | default "ClusterIP" }}
+  ports:
+    - name: redis
+      port: {{ .Values.redis.service.port | default 6379 }}
+      targetPort: redis
+      protocol: TCP
+      {{- if and (eq .Values.redis.service.type "NodePort") .Values.redis.service.nodePort }}
+      nodePort: {{ .Values.redis.service.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "gibson.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis

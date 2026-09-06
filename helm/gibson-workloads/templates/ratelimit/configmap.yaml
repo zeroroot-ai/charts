@@ -1,0 +1,160 @@
+{{- /*
+ratelimit configuration (deploy#1657). Two files, one ConfigMap.
+
+config.yaml — the envoyproxy/ratelimit descriptor tree. Every quota here
+  mirrors a `rate_limits` action in files/envoy/public-chain.yaml (or, later,
+  envoy.yaml): Envoy sends the descriptor, this file says the number. The
+  numbers come from envoy.rateLimit.perClient in values.yaml, next to the
+  local_ratelimit FUSE each one sits under, and tests/ratelimit-service.bats
+  asserts every quota is below its fuse.
+
+envoy.yaml — the bootstrap for the pod's Envoy mTLS sidecar. ratelimit can
+  only load static certificate files, so the sidecar terminates SPIFFE mTLS
+  through SPIRE SDS (auto-rotating) on :{{ .Values.ratelimit.ports.grpc | default 8081 }},
+  requires a client certificate, pins the client SAN to platform/envoy, and
+  tcp_proxies to ratelimit's plaintext gRPC on 127.0.0.1:{{ .Values.ratelimit.ports.local | default 8082 }}.
+  Same image and same SDS shape as the edge Envoy's own clusters.
+*/}}
+{{- $rl := .Values.envoy.rateLimit -}}
+{{- $pc := $rl.perClient -}}
+{{- $td := .Values.spire.server.trustDomain | default "zeroroot.ai" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gibson-ratelimit-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ratelimit
+data:
+  config.yaml: |
+    domain: {{ $pc.domain }}
+    descriptors:
+      # POST /signup on the app vhost, by client address.
+      # Envoy action: generic_key route=app_signup_submit + masked_remote_address.
+      - key: route
+        value: app_signup_submit
+        descriptors:
+          - key: masked_remote_address
+            rate_limit:
+              unit: {{ $pc.appSignupSubmit.unit }}
+              requests_per_unit: {{ $pc.appSignupSubmit.requestsPerUnit }}
+      # OIDC login routes on the app vhost, by client address.
+      - key: route
+        value: app_login
+        descriptors:
+          - key: masked_remote_address
+            rate_limit:
+              unit: {{ $pc.appLogin.unit }}
+              requests_per_unit: {{ $pc.appLogin.requestsPerUnit }}
+      # Everything else on app., by client address.
+      - key: route
+        value: app_catch_all
+        descriptors:
+          - key: masked_remote_address
+            rate_limit:
+              unit: {{ $pc.appCatchAll.unit }}
+              requests_per_unit: {{ $pc.appCatchAll.requestsPerUnit }}
+      # api. pre-auth discovery documents, by client address.
+      - key: route
+        value: api_discovery
+        descriptors:
+          - key: masked_remote_address
+            rate_limit:
+              unit: {{ $pc.apiDiscovery.unit }}
+              requests_per_unit: {{ $pc.apiDiscovery.requestsPerUnit }}
+      # api. registration, by client address.
+      - key: route
+        value: api_register
+        descriptors:
+          - key: masked_remote_address
+            rate_limit:
+              unit: {{ $pc.apiRegister.unit }}
+              requests_per_unit: {{ $pc.apiRegister.requestsPerUnit }}
+      # Authenticated api. RPCs, by (tenant, subject) as ext-authz asserted.
+      - key: route
+        value: api_authenticated
+        descriptors:
+          - key: tenant
+            descriptors:
+              - key: subject
+                rate_limit:
+                  unit: {{ $pc.apiAuthenticated.unit }}
+                  requests_per_unit: {{ $pc.apiAuthenticated.requestsPerUnit }}
+  envoy.yaml: |
+    admin:
+      address:
+        socket_address: { address: 127.0.0.1, port_value: 9902 }
+    static_resources:
+      listeners:
+        - name: mtls_ingress
+          address:
+            socket_address: { address: 0.0.0.0, port_value: {{ .Values.ratelimit.ports.grpc | default 8081 }} }
+          filter_chains:
+            - transport_socket:
+                name: envoy.transport_sockets.tls
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+                  require_client_certificate: true
+                  common_tls_context:
+                    alpn_protocols: ["h2"]
+                    tls_certificate_sds_secret_configs:
+                      - name: "default"
+                        sds_config:
+                          resource_api_version: V3
+                          api_config_source:
+                            api_type: GRPC
+                            transport_api_version: V3
+                            grpc_services:
+                              - envoy_grpc:
+                                  cluster_name: spire_agent
+                    combined_validation_context:
+                      default_validation_context:
+                        # Only the edge Envoy may ask for a quota decision.
+                        match_typed_subject_alt_names:
+                          - san_type: URI
+                            matcher:
+                              exact: "spiffe://{{ $td }}/platform/envoy"
+                      validation_context_sds_secret_config:
+                        name: "ROOTCA"
+                        sds_config:
+                          resource_api_version: V3
+                          api_config_source:
+                            api_type: GRPC
+                            transport_api_version: V3
+                            grpc_services:
+                              - envoy_grpc:
+                                  cluster_name: spire_agent
+              filters:
+                - name: envoy.filters.network.tcp_proxy
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                    stat_prefix: ratelimit_local
+                    cluster: ratelimit_local
+      clusters:
+        - name: spire_agent
+          type: STATIC
+          connect_timeout: 0.25s
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              explicit_http_config:
+                http2_protocol_options: {}
+          load_assignment:
+            cluster_name: spire_agent
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        pipe:
+                          path: {{ .Values.envoy.spiffe.workloadApiSocket | default "/run/spire/sockets/api.sock" }}
+        - name: ratelimit_local
+          type: STATIC
+          connect_timeout: 0.25s
+          load_assignment:
+            cluster_name: ratelimit_local
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: 127.0.0.1, port_value: {{ .Values.ratelimit.ports.local | default 8082 }} }

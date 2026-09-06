@@ -1,0 +1,122 @@
+# =============================================================================
+# Kind Cluster Configuration for Gibson
+# =============================================================================
+# This configuration creates a Kind cluster optimized for running Gibson.
+#
+# Usage: kind create cluster --config kind-config.yaml --name gibson
+# =============================================================================
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: gibson
+
+# Single control-plane node with extra port mappings
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.31.0
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # Gibson Core Services
+      - containerPort: 30002  # Gibson gRPC (ComponentService)
+        hostPort: 30002
+        protocol: TCP
+      - containerPort: 30910  # Gibson Metrics
+        hostPort: 30910
+        protocol: TCP
+
+      # Dashboard
+      - containerPort: 30081  # Dashboard
+        hostPort: 30081
+        protocol: TCP
+
+      # Databases
+      - containerPort: 30379  # Redis
+        hostPort: 30379
+        protocol: TCP
+      - containerPort: 30432  # Dashboard PostgreSQL
+        hostPort: 30432
+        protocol: TCP
+      - containerPort: 30474  # Neo4j HTTP
+        hostPort: 30474
+        protocol: TCP
+      - containerPort: 30687  # Neo4j Bolt
+        hostPort: 30687
+        protocol: TCP
+
+      # Observability
+      - containerPort: 30686  # Jaeger UI
+        hostPort: 30686
+        protocol: TCP
+      - containerPort: 30909  # Prometheus
+        hostPort: 30909
+        protocol: TCP
+      - containerPort: 30030  # Grafana
+        hostPort: 30030
+        protocol: TCP
+
+      # Authentication
+      - containerPort: 30200  # Vault
+        hostPort: 30200
+        protocol: TCP
+
+      # Spec: zitadel-envoy-gateway-migration — Envoy + ext-authz.
+      # Zitadel is no longer exposed directly; all browser/dashboard traffic
+      # to Zitadel flows through Envoy on 30443 (SNI-routed by hostname).
+      - containerPort: 30082  # ext-authz gRPC (Envoy ExtAuthz + MintCapabilityGrant)
+        hostPort: 30082
+        protocol: TCP
+      - containerPort: 30083  # ext-authz HTTP (JWKS + healthz + ValidateAPIKey REST shim)
+        hostPort: 30083
+        protocol: TCP
+      - containerPort: 30443  # Envoy HTTPS (SaaS edge — fronts dashboard, daemon, AND Zitadel)
+        hostPort: 30443
+        protocol: TCP
+      # The SAME edge, also published on the standard HTTPS port.
+      #
+      # Zitadel builds asset URLs from its instance domain, and Zitadel domains
+      # carry no port — so the login page requests
+      # https://app.zeroroot.ai/assets/v1/.../logo-dark-... with no port and
+      # gets nothing, leaving the branding broken on kind only (deploy#1224).
+      # Setting ExternalPort does not help: it governs other URL construction,
+      # not the asset prefix.
+      #
+      # Publishing 443 makes those portless URLs resolve and makes kind match
+      # prod, where the edge genuinely is 443 — the same URL works in both.
+      # 30443 stays mapped for anything that hardcodes it.
+      - containerPort: 30443  # Envoy HTTPS on the standard port (see above)
+        hostPort: 443
+        protocol: TCP
+
+    extraMounts:
+      # Mount for persistent volumes. MUST live outside /tmp — Debian/Ubuntu's
+      # systemd-tmpfiles-setup.service wipes /tmp contents on every boot
+      # (D directive in /usr/lib/tmpfiles.d/tmp.conf), which would torch every
+      # local-path-provisioner PV (postgres pgdata, OpenFGA tuples, Zitadel
+      # state, etc.) across host reboots.
+      #
+      # __KIND_PV_DIR__ is substituted by the Makefile from KIND_PV_DIR
+      # (default /bulk/pvc). kind itself does not expand env vars in this
+      # file — the Makefile sed-renders it before `kind create cluster`.
+      - hostPath: __KIND_PV_DIR__
+        containerPath: /var/local-path-provisioner
+
+# Networking configuration
+networking:
+  # Use Calico or default kindnet
+  disableDefaultCNI: false
+  # Pod subnet
+  podSubnet: "10.244.0.0/16"
+  # Service subnet
+  serviceSubnet: "10.96.0.0/12"
+
+
+# Container registry config (optional, for private registries)
+# containerdConfigPatches:
+#   - |-
+#     [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry.example.com"]
+#       endpoint = ["https://registry.example.com"]

@@ -1,0 +1,22 @@
+# gitleaks configuration for charts. Read by the gitleaks gate in the reusable
+# CI (zeroroot-ai/.github, attic#18) and by anyone running `gitleaks dir .`.
+title = "charts secret detection"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Rendered goldens and seed-key placeholders that are shaped like credentials but are not"
+# The golden snapshots are rendered charts: checksum annotations (hex digests)
+# and the documented placeholder values from values files. They are compared
+# byte for byte, so they cannot carry inline allow comments.
+paths = [
+  '''^helm/testdata/golden/''',
+  '''\.gitleaks\.toml$''',
+]
+# The OpenBao seed-key list names the Stripe TEST key slot with a placeholder
+# (sk_test_placeholder, pk_test_placeholder); hex digests are checksums.
+regexes = [
+  '''^(sk|pk|rk|whsec)_(test|live)_placeholder$''',
+  '''^[0-9a-f]{22,64}$''',
+]

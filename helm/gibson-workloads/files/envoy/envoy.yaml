@@ -1,0 +1,1772 @@
+# Envoy bootstrap config — Gibson SaaS edge gateway.
+#
+# Spec: unified-identity-and-authorization Phase H/8.8.
+# Supersedes the per-credential filter chain from
+# zitadel-envoy-gateway-migration task 10. The new shape is:
+#
+#   - Single ingress listener (:10000 internally, :443 externally) with
+#     HTTP/2 + gRPC multiplexing for ALL services: daemon user RPCs,
+#     tenant/platform/user admin RPCs, dashboard provisioning callbacks,
+#     future tool-runner control RPCs.
+#   - jwt_authn validates Zitadel JWTs only. The capability-grant JWT is
+#     validated INSIDE ext_authz, which resolves its signing key per-kid from
+#     the daemon (GET /capabilitygrant/v1/keys/{kid}) and interprets
+#     the allowed_rpcs claim.
+#     The spiffe in-cluster JWT-SVID provider is REMOVED — every caller
+#     (in-cluster or external) presents a Zitadel JWT end-to-end.
+#   - ext_authz makes the FGA decision and injects the trusted
+#     x-gibson-identity-* headers on the upstream (no HMAC; SPIFFE mTLS
+#     between Envoy and the daemon is the channel guarantee).
+#   - The legacy gsk_ API key Lua filter is REMOVED. Service callers use
+#     Zitadel client_credentials grants → bearer JWTs.
+#
+# The api.<domain> and app.<domain> filter chains are still SNI-dispatched
+# on the same TLS listener so cert-manager can mint one wildcard or several
+# SANs without changing this file. (The auth.<domain> filter chain was
+# retired in the single-host consolidation — see "auth.<domain> RETIRED"
+# below.)
+#
+# Templated via `.Files.Get` + `tpl` from templates/envoy/configmap.yaml so
+# the domain, JWKS URLs, and upstream cluster names are injected at chart
+# render time.
+
+admin:
+  address:
+    # Bind to 0.0.0.0 so the kubelet liveness/readiness probes (which
+    # connect from the pod IP, not localhost) can reach /ready.
+    socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+static_resources:
+  listeners:
+    # -------------------------------------------------------------------------
+    # Single TLS listener on :10000 (mapped to :443 in the Service). Filter
+    # chain match dispatches by SNI — api/app/apex/docs share one listener
+    # and one cert source. This is THE edge, on every substrate:
+    # the L4 load balancer in front of it preserves the client IP, and every
+    # HTTP connection manager below trusts the socket peer only
+    # (use_remote_address: true, xff_num_trusted_hops: 0). There is no second
+    # listener, no ALB, no CloudFront, and no PROXY protocol.
+    # -------------------------------------------------------------------------
+    - name: edge_tls
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 10000 }
+      listener_filters:
+        - name: envoy.filters.listener.tls_inspector
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.listener.tls_inspector.v3.TlsInspector
+      filter_chains:
+
+        # =====================================================================
+        # api.<domain> — single multiplexed surface for ALL services:
+        #   - gibson.daemon.v1.DaemonService          (user/member RPCs)
+        #   - gibson.daemon.operator.v1.DaemonOperatorService (ZD-internal operator RPCs)
+        #   - gibson.tenant.v1.TenantAdminService     (tenant admin RPCs)
+        #   - gibson.user.v1.UserService              (user profile RPCs)
+        #   - gibson.budget.v1.BudgetService          (budget RPCs)
+        #   - gibson.component.v1.ComponentService    (component reg / tool runner)
+        #   - gibson.harness.v1.HarnessCallbackService (agent + off-cluster
+        #       component callbacks — the ONE service here whose upstream is
+        #       NOT the daemon's main gRPC port; see gibson_daemon_callback)
+        #   - gibson.intelligence.v1.IntelligenceService (mission orchestrator)
+        #   - /api/admin/provisioning/*               (tenant-operator → dashboard)
+        # All h2/h2c (gRPC + HTTP/2 multiplex). HTTP/1.1 fallback for
+        # browser clients hitting /.well-known/.
+        # =====================================================================
+        - filter_chain_match:
+            server_names: ["{{ .domains.api }}"]
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_certificates:
+                  - certificate_chain: { filename: /etc/envoy/tls/tls.crt }
+                    private_key:       { filename: /etc/envoy/tls/tls.key }
+                alpn_protocols: ["h2", "http/1.1"]
+              # External callers use Zitadel JWT over server-side TLS only;
+              # SPIFFE mTLS is the in-cluster Envoy → daemon hop, not the
+              # client → Envoy hop.
+              require_client_certificate: false
+          filters:
+            # -----------------------------------------------------------------
+            # L4 connection admission (deploy#1189). Runs BEFORE the HTTP
+            # connection manager, so a connection flood is dropped before Envoy
+            # spends anything on HTTP parsing, jwt_authn or ext_authz.
+            #
+            # This is the connection-level half of the edge limiter; the
+            # per-route HTTP buckets below are the priority half. Together with
+            # the HCM's max_concurrent_streams they bound how much one client
+            # can extract per connection AND how fast it can open new ones.
+            #
+            # The network filter's `runtime_enabled` defaults to ENABLED when
+            # omitted (unlike the HTTP filter's filter_enabled/filter_enforced,
+            # which default to 0% — see the note on that filter below), so the
+            # bucket alone is sufficient here.
+            #
+            # Not keyed on anything: see the envoy.rateLimit block in
+            # values.yaml for why this edge has no trustworthy client address.
+            # -----------------------------------------------------------------
+            - name: envoy.filters.network.local_ratelimit
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.local_ratelimit.v3.LocalRateLimit
+                stat_prefix: api_edge_connections
+                token_bucket:
+                  max_tokens: {{ .rateLimit.apiConnections.maxTokens }}
+                  tokens_per_fill: {{ .rateLimit.apiConnections.tokensPerFill }}
+                  fill_interval: {{ .rateLimit.apiConnections.fillIntervalSeconds }}s
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: api_ingress
+                codec_type: AUTO
+                # Client-IP contract. The L4 load balancer preserves
+                # the client IP, so the socket peer IS the client. Trust it and
+                # nothing else: never a client-supplied x-forwarded-for, and no
+                # trusted-hop count, which is only correct behind an ALB.
+                use_remote_address: true
+                xff_num_trusted_hops: 0
+                # deploy#1189 — Envoy's downstream default is 2147483647, i.e.
+                # a single HTTP/2 connection may open unlimited concurrent
+                # streams. That is the cheapest amplification available at a
+                # TLS edge: one handshake, unbounded in-flight requests. h2
+                # clients honour SETTINGS_MAX_CONCURRENT_STREAMS by queueing,
+                # so this bounds amplification without failing legitimate
+                # multiplexed callers (the dashboard's server-side gRPC pool,
+                # `gibson` CLI streams).
+                http2_protocol_options:
+                  max_concurrent_streams: {{ .rateLimit.http2MaxConcurrentStreams }}
+                  #. The NLB drops any flow with no bytes for 350
+                  # seconds and that value is NOT configurable on an NLB, so a
+                  # mission that goes quiet longer than that has its TCP flow
+                  # removed underneath it — neither peer notices until the next
+                  # write. These PINGs keep the flow warm. They are also what
+                  # reaps a stream whose client vanished without a FIN, which
+                  # matters now that the daemon routes carry idle_timeout: 0s
+                  # and nothing else would ever collect them.
+                  connection_keepalive:
+                    interval: {{ .streamKeepalive.intervalSeconds }}s
+                    timeout: {{ .streamKeepalive.timeoutSeconds }}s
+                #. Stated explicitly rather than inherited: Envoy's
+                # default is 5 minutes, and this listener carries app/docs
+                # as well as api. (one edge on every substrate).
+                # Browser streams SHOULD still be reaped — holding one open at
+                # no cost is free amplification. The mission streams opt out
+                # per-route instead, via idle_timeout: 0s on the /gibson.
+                # routes, which overrides this for exactly those paths.
+                stream_idle_timeout: {{ .streamKeepalive.browserIdleTimeoutSeconds }}s
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        json_format:
+                          start_time: "%START_TIME%"
+                          method: "%REQ(:METHOD)%"
+                          path: "%REQ(:PATH)%"
+                          response_code: "%RESPONSE_CODE%"
+                          response_flags: "%RESPONSE_FLAGS%"
+                          duration_ms: "%DURATION%"
+                          upstream_host: "%UPSTREAM_HOST%"
+                          upstream_cluster: "%UPSTREAM_CLUSTER%"
+                          # Presence-only indicator: "-" when no Authorization,
+                          # anything else means one was attached. We deliberately
+                          # do NOT log the bearer value.
+                          authorization_present: "%REQ(AUTHORIZATION)%"
+                          # Decoded Zitadel JWT claims surfaced by jwt_authn under
+                          # the `zitadel` metadata key.
+                          zitadel_sub: "%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:zitadel:sub)%"
+                          zitadel_aud: "%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:zitadel:aud)%"
+                          zitadel_iss: "%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:zitadel:iss)%"
+                          # ext_authz identity headers it added on ALLOW.
+                          gibson_subject: "%REQ(X-GIBSON-IDENTITY-SUBJECT)%"
+                          gibson_tenant: "%REQ(X-GIBSON-IDENTITY-TENANT)%"
+                          gibson_cred_type: "%REQ(X-GIBSON-IDENTITY-CREDENTIAL-TYPE)%"
+                          user_agent: "%REQ(USER-AGENT)%"
+                          x_request_id: "%REQ(X-REQUEST-ID)%"
+                route_config:
+                  name: api_routes
+                  # NOTE: previously had request_headers_to_remove for
+                  # the x-gibson-identity-* set, intending to strip
+                  # client-supplied identity headers. That config sits
+                  # at the route_config level, which Envoy applies in
+                  # the router filter — AFTER the ext_authz HTTP filter
+                  # runs — so it was stripping the trusted headers
+                  # ext_authz had just added. The daemon then saw zero
+                  # identity headers and rejected every request with
+                  # PermissionDenied. The strip is removed; ext_authz's
+                  # OkHttpResponse.headers default action overwrites any
+                  # client-supplied versions, which is the protection
+                  # this strip was trying to provide.
+                  virtual_hosts:
+                    - name: api
+                      # Both port-less and port-ful Host headers, since
+                      # clients hitting a non-443 port (dev Kind uses
+                      # :30443) send the port in Host and Envoy doesn't
+                      # strip it by default.
+                      domains: ["{{ .domains.api }}", "{{ .domains.api }}:{{ .envoyHttpsPort }}"]
+                      routes:
+                        # ---------------------------------------------------
+                        # Daemon gRPC services. Each RPC method falls under
+                        # its FQN prefix; ext_authz looks up the per-method
+                        # authz rule from the SDK-generated registry.
+                        # ---------------------------------------------------
+                        - match: { prefix: "/gibson.daemon.v1.DaemonService/" }
+                          route:
+                            cluster: gibson_daemon_grpc
+                            timeout: 0s
+                            idle_timeout: 0s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.apiAuthenticated, by the
+                            # identity ext-authz asserted. skip_if_absent so a
+                            # route ext-authz did not label (none today) is not
+                            # silently unlimited under a half-descriptor.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_authenticated
+                                  - request_headers:
+                                      header_name: x-gibson-identity-tenant
+                                      descriptor_key: tenant
+                                      skip_if_absent: false
+                                  - request_headers:
+                                      header_name: x-gibson-identity-subject
+                                      descriptor_key: subject
+                                      skip_if_absent: false
+                        # ---------------------------------------------------
+                        # DaemonOperatorService — strictly ZD-internal operator
+                        # RPCs split out of the member-facing DaemonService into
+                        # a distinct platform-sdk-published service (parent epic zeroroot-ai/.github#143). The prefix MUST
+                        # appear before the /gibson. catch-all below so the more-
+                        # specific match wins. Per-RPC FGA rules live in the
+                        # ext-authz registry; member JWTs are rejected at
+                        # the FGA check, not at jwt_authn.
+                        # ---------------------------------------------------
+                        - match: { prefix: "/gibson.daemon.operator.v1.DaemonOperatorService/" }
+                          route:
+                            cluster: gibson_daemon_grpc
+                            timeout: 0s
+                            idle_timeout: 0s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.apiAuthenticated, by the
+                            # identity ext-authz asserted. skip_if_absent so a
+                            # route ext-authz did not label (none today) is not
+                            # silently unlimited under a half-descriptor.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_authenticated
+                                  - request_headers:
+                                      header_name: x-gibson-identity-tenant
+                                      descriptor_key: tenant
+                                      skip_if_absent: false
+                                  - request_headers:
+                                      header_name: x-gibson-identity-subject
+                                      descriptor_key: subject
+                                      skip_if_absent: false
+                        # ---------------------------------------------------
+                        # Admin/identity surfaces
+                        # (spec: agent-service-credentials task 13,
+                        # admin-services-completion). Each gets the same
+                        # jwt_authn + ext_authz filter chain as the daemon
+                        # user-RPC route above — only the route prefix
+                        # differs. Per-RPC FGA rules live in the SDK
+                        # registry; ext-authz looks them up by method FQN.
+                        # ---------------------------------------------------
+                        - match: { prefix: "/gibson.tenant.v1.TenantAdminService/" }
+                          route:
+                            cluster: gibson_daemon_grpc
+                            timeout: 0s
+                            idle_timeout: 0s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.apiAuthenticated, by the
+                            # identity ext-authz asserted. skip_if_absent so a
+                            # route ext-authz did not label (none today) is not
+                            # silently unlimited under a half-descriptor.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_authenticated
+                                  - request_headers:
+                                      header_name: x-gibson-identity-tenant
+                                      descriptor_key: tenant
+                                      skip_if_absent: false
+                                  - request_headers:
+                                      header_name: x-gibson-identity-subject
+                                      descriptor_key: subject
+                                      skip_if_absent: false
+                        - match: { prefix: "/gibson.user.v1.UserService/" }
+                          route:
+                            cluster: gibson_daemon_grpc
+                            timeout: 0s
+                            idle_timeout: 0s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.apiAuthenticated, by the
+                            # identity ext-authz asserted. skip_if_absent so a
+                            # route ext-authz did not label (none today) is not
+                            # silently unlimited under a half-descriptor.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_authenticated
+                                  - request_headers:
+                                      header_name: x-gibson-identity-tenant
+                                      descriptor_key: tenant
+                                      skip_if_absent: false
+                                  - request_headers:
+                                      header_name: x-gibson-identity-subject
+                                      descriptor_key: subject
+                                      skip_if_absent: false
+                        - match: { prefix: "/gibson.budget.v1.BudgetService/" }
+                          route:
+                            cluster: gibson_daemon_grpc
+                            timeout: 0s
+                            idle_timeout: 0s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.apiAuthenticated, by the
+                            # identity ext-authz asserted. skip_if_absent so a
+                            # route ext-authz did not label (none today) is not
+                            # silently unlimited under a half-descriptor.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_authenticated
+                                  - request_headers:
+                                      header_name: x-gibson-identity-tenant
+                                      descriptor_key: tenant
+                                      skip_if_absent: false
+                                  - request_headers:
+                                      header_name: x-gibson-identity-subject
+                                      descriptor_key: subject
+                                      skip_if_absent: false
+                        - match: { prefix: "/gibson.component.v1.ComponentService/" }
+                          route:
+                            cluster: gibson_daemon_grpc
+                            timeout: 0s
+                            idle_timeout: 0s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.apiAuthenticated, by the
+                            # identity ext-authz asserted. skip_if_absent so a
+                            # route ext-authz did not label (none today) is not
+                            # silently unlimited under a half-descriptor.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_authenticated
+                                  - request_headers:
+                                      header_name: x-gibson-identity-tenant
+                                      descriptor_key: tenant
+                                      skip_if_absent: false
+                                  - request_headers:
+                                      header_name: x-gibson-identity-subject
+                                      descriptor_key: subject
+                                      skip_if_absent: false
+                        # ---------------------------------------------------
+                        # HarnessCallbackService — the ONLY route on this vhost
+                        # that does NOT go to gibson_daemon_grpc (gibson#1450).
+                        #
+                        # The daemon registers this service on its harness
+                        # callback listener alone (gibson
+                        # internal/engine/harness/callback_server.go); :50051
+                        # does not serve it and has no UnknownServiceHandler, so
+                        # while this route pointed at gibson_daemon_grpc every
+                        # off-cluster component call passed jwt_authn, ext_authz
+                        # and FGA and then got Unimplemented from grpc-go. The
+                        # session-context RPCs (gibson#1184) were unreachable by
+                        # the component they were built for.
+                        #
+                        # Fronting the callback listener rather than moving the
+                        # service onto :50051 is deliberate: the callback
+                        # listener applies a per-peer method policy on top of
+                        # ext_authz/FGA, so the RPCs with no handler stay denied
+                        # even though this prefix routes them.
+                        # ---------------------------------------------------
+                        - match: { prefix: "/gibson.harness.v1.HarnessCallbackService/" }
+                          route:
+                            cluster: gibson_daemon_callback
+                            timeout: 0s
+                            idle_timeout: 0s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.apiAuthenticated, by the
+                            # identity ext-authz asserted. skip_if_absent so a
+                            # route ext-authz did not label (none today) is not
+                            # silently unlimited under a half-descriptor.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_authenticated
+                                  - request_headers:
+                                      header_name: x-gibson-identity-tenant
+                                      descriptor_key: tenant
+                                      skip_if_absent: false
+                                  - request_headers:
+                                      header_name: x-gibson-identity-subject
+                                      descriptor_key: subject
+                                      skip_if_absent: false
+                        - match: { prefix: "/gibson.intelligence.v1.IntelligenceService/" }
+                          route:
+                            cluster: gibson_daemon_grpc
+                            timeout: 0s
+                            idle_timeout: 0s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.apiAuthenticated, by the
+                            # identity ext-authz asserted. skip_if_absent so a
+                            # route ext-authz did not label (none today) is not
+                            # silently unlimited under a half-descriptor.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_authenticated
+                                  - request_headers:
+                                      header_name: x-gibson-identity-tenant
+                                      descriptor_key: tenant
+                                      skip_if_absent: false
+                                  - request_headers:
+                                      header_name: x-gibson-identity-subject
+                                      descriptor_key: subject
+                                      skip_if_absent: false
+                        # Catch-all for additional gibson.* services added by
+                        # the SDK without a chart bump. The daemon's startup
+                        # self-check (Req 4.8) panics if a method without an
+                        # ext-authz registry entry is registered, so this
+                        # remains safe — there's no ext-authz bypass.
+                        - match: { prefix: "/gibson." }
+                          route:
+                            cluster: gibson_daemon_grpc
+                            timeout: 0s
+                            idle_timeout: 0s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.apiAuthenticated, by the
+                            # identity ext-authz asserted. skip_if_absent so a
+                            # route ext-authz did not label (none today) is not
+                            # silently unlimited under a half-descriptor.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_authenticated
+                                  - request_headers:
+                                      header_name: x-gibson-identity-tenant
+                                      descriptor_key: tenant
+                                      skip_if_absent: false
+                                  - request_headers:
+                                      header_name: x-gibson-identity-subject
+                                      descriptor_key: subject
+                                      skip_if_absent: false
+                        # ---------------------------------------------------
+                        # OIDC discovery — agent/tool registration
+                        # (`gibson component register`) bootstraps the issuer
+                        # by fetching <gibson-url>/.well-known/openid-configuration,
+                        # where <gibson-url> is this daemon API host. Post-#630
+                        # single-host consolidation OIDC lives on the app vhost,
+                        # so we proxy discovery to Zitadel here, rewriting Host
+                        # to the app domain (Zitadel's instance router matches on
+                        # its registered ExternalDomain). The returned document's
+                        # `issuer` is the app origin, so the subsequent token
+                        # exchange (/oauth/v2/token) targets the app host — token
+                        # endpoints are deliberately NOT exposed on this daemon
+                        # host. Pre-auth surface: jwt_authn allows-missing (rule
+                        # below) and ext_authz is disabled per-route — OIDC
+                        # discovery is public by design (mirrors the in-cluster
+                        # cluster_oidc vhost). deploy#661.
+                        - match: { prefix: "/.well-known/openid-configuration" }
+                          route:
+                            cluster: zitadel_upstream
+                            host_rewrite_literal: "{{ .domains.app }}{{ if and (eq .envoyServiceType "NodePort") .envoyServiceNodePort }}:{{ .envoyServiceNodePort }}{{ end }}"
+                            timeout: 30s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.apiDiscovery, by address.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_discovery
+                                  - masked_remote_address:
+                                      v4_prefix_mask_len: 32
+                                      v6_prefix_mask_len: 64
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
+                            # Pre-auth discovery bucket (deploy#1189). This route carries
+                            # neither jwt_authn nor ext_authz, so this is the only
+                            # thing standing between the internet and the daemon's
+                            # :8085 pre-auth listener. Its own bucket instance —
+                            # identical numbers, one per route — so a flood on one
+                            # discovery path cannot starve the others.
+                            envoy.filters.http.local_ratelimit:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                              stat_prefix: api_pre_auth_discovery
+                              token_bucket:
+                                max_tokens: {{ .rateLimit.preAuthDiscovery.maxTokens }}
+                                tokens_per_fill: {{ .rateLimit.preAuthDiscovery.tokensPerFill }}
+                                fill_interval: {{ .rateLimit.preAuthDiscovery.fillIntervalSeconds }}s
+                              # Both REQUIRED: each defaults to 0% when omitted,
+                              # which renders a limiter that enforces nothing.
+                              filter_enabled:
+                                default_value: { numerator: 100, denominator: HUNDRED }
+                              filter_enforced:
+                                default_value: { numerator: 100, denominator: HUNDRED }
+                              response_headers_to_add:
+                                - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                                  header: { key: retry-after, value: "{{ .rateLimit.preAuthDiscovery.fillIntervalSeconds }}" }
+                        # ---------------------------------------------------
+                        # Native-login bootstrap (gibson#623) — `gibson login`
+                        # (and any native client) fetches {issuer, client_id,
+                        # scopes} here BEFORE it holds any credentials.
+                        # Unauthenticated by design: jwt_authn allow_missing
+                        # (rule below) + ext_authz disabled per-route. Served by
+                        # the daemon's dedicated :8085 plaintext HTTP listener
+                        # (non-secret data only).
+                        # ---------------------------------------------------
+                        - match: { prefix: "/.well-known/gibson-login" }
+                          route:
+                            cluster: gibson_native_login
+                            timeout: 5s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.apiDiscovery, by address.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_discovery
+                                  - masked_remote_address:
+                                      v4_prefix_mask_len: 32
+                                      v6_prefix_mask_len: 64
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
+                            # Pre-auth discovery bucket (deploy#1189). This route carries
+                            # neither jwt_authn nor ext_authz, so this is the only
+                            # thing standing between the internet and the daemon's
+                            # :8085 pre-auth listener. Its own bucket instance —
+                            # identical numbers, one per route — so a flood on one
+                            # discovery path cannot starve the others.
+                            envoy.filters.http.local_ratelimit:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                              stat_prefix: api_pre_auth_discovery
+                              token_bucket:
+                                max_tokens: {{ .rateLimit.preAuthDiscovery.maxTokens }}
+                                tokens_per_fill: {{ .rateLimit.preAuthDiscovery.tokensPerFill }}
+                                fill_interval: {{ .rateLimit.preAuthDiscovery.fillIntervalSeconds }}s
+                              # Both REQUIRED: each defaults to 0% when omitted,
+                              # which renders a limiter that enforces nothing.
+                              filter_enabled:
+                                default_value: { numerator: 100, denominator: HUNDRED }
+                              filter_enforced:
+                                default_value: { numerator: 100, denominator: HUNDRED }
+                              response_headers_to_add:
+                                - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                                  header: { key: retry-after, value: "{{ .rateLimit.preAuthDiscovery.fillIntervalSeconds }}" }
+                        # ---------------------------------------------------
+                        # Capability-Grant registration (epic unified-cg-identity,
+                        # gibson#648). External components fetch the
+                        # discovery document, then POST an Ed25519 host
+                        # registration. Both are served on the daemon's pre-auth
+                        # :8085 listener (gibson_native_login cluster) — a
+                        # component holds no Capability Grant yet, so the bootstrap
+                        # credential (not a daemon JWT) authenticates first
+                        # registration. Unauthenticated at the gateway by design:
+                        # jwt_authn allow_missing (rule below) + ext_authz
+                        # disabled per-route, mirroring /.well-known/gibson-login.
+                        # ---------------------------------------------------
+                        - match: { prefix: "/.well-known/agent-configuration" }
+                          route:
+                            cluster: gibson_native_login
+                            timeout: 5s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.apiDiscovery, by address.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_discovery
+                                  - masked_remote_address:
+                                      v4_prefix_mask_len: 32
+                                      v6_prefix_mask_len: 64
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
+                            # Pre-auth discovery bucket (deploy#1189). This route carries
+                            # neither jwt_authn nor ext_authz, so this is the only
+                            # thing standing between the internet and the daemon's
+                            # :8085 pre-auth listener. Its own bucket instance —
+                            # identical numbers, one per route — so a flood on one
+                            # discovery path cannot starve the others.
+                            envoy.filters.http.local_ratelimit:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                              stat_prefix: api_pre_auth_discovery
+                              token_bucket:
+                                max_tokens: {{ .rateLimit.preAuthDiscovery.maxTokens }}
+                                tokens_per_fill: {{ .rateLimit.preAuthDiscovery.tokensPerFill }}
+                                fill_interval: {{ .rateLimit.preAuthDiscovery.fillIntervalSeconds }}s
+                              # Both REQUIRED: each defaults to 0% when omitted,
+                              # which renders a limiter that enforces nothing.
+                              filter_enabled:
+                                default_value: { numerator: 100, denominator: HUNDRED }
+                              filter_enforced:
+                                default_value: { numerator: 100, denominator: HUNDRED }
+                              response_headers_to_add:
+                                - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                                  header: { key: retry-after, value: "{{ .rateLimit.preAuthDiscovery.fillIntervalSeconds }}" }
+                        - match: { prefix: "/capabilitygrant/v1/register" }
+                          route:
+                            cluster: gibson_native_login
+                            timeout: 10s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.apiRegister, by address.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_register
+                                  - masked_remote_address:
+                                      v4_prefix_mask_len: 32
+                                      v6_prefix_mask_len: 64
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
+                            # Pre-auth REGISTRATION bucket (deploy#1189) — the tight one.
+                            # A failed host+jwt attempt reaches Postgres BEFORE
+                            # signature verification, so unauthenticated traffic on
+                            # this route drives DB load directly; it is also the
+                            # bootstrap-token replay surface (gibson#1215), where an
+                            # unthrottled route turns a leaked token into unlimited
+                            # identity minting. Registration is a once-per-host
+                            # event, so this bucket is ~5 orders of magnitude above
+                            # legitimate use and still bounds both abuses.
+                            envoy.filters.http.local_ratelimit:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                              stat_prefix: api_pre_auth_register
+                              token_bucket:
+                                max_tokens: {{ .rateLimit.preAuthRegister.maxTokens }}
+                                tokens_per_fill: {{ .rateLimit.preAuthRegister.tokensPerFill }}
+                                fill_interval: {{ .rateLimit.preAuthRegister.fillIntervalSeconds }}s
+                              # Both REQUIRED: each defaults to 0% when omitted,
+                              # which renders a limiter that enforces nothing.
+                              filter_enabled:
+                                default_value: { numerator: 100, denominator: HUNDRED }
+                              filter_enforced:
+                                default_value: { numerator: 100, denominator: HUNDRED }
+                              response_headers_to_add:
+                                - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                                  header: { key: retry-after, value: "{{ .rateLimit.preAuthRegister.fillIntervalSeconds }}" }
+                        # ---------------------------------------------------
+                        # Connector OAuth callback. The vendor redirects
+                        # the operator's browser here with ?code=&state= after
+                        # consent — it carries NO bearer (a vendor redirect cannot).
+                        # Pre-auth by design: the daemon validates `state` against
+                        # the pending authorization (CSRF binding) and completes the
+                        # code exchange with the daemon-held PKCE verifier, so the
+                        # authentication is state+PKCE, not a JWT. jwt_authn
+                        # allow_missing (rule below) + ext_authz disabled per-route,
+                        # served by the daemon's :8085 pre-auth listener
+                        # (gibson_native_login), mirroring the routes above.
+                        # ---------------------------------------------------
+                        - match: { prefix: "/connectors/oauth/callback" }
+                          route: { cluster: gibson_native_login, timeout: 10s }
+                          typed_per_filter_config:
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
+                            # Own pre-auth bucket instance (deploy#1189): the
+                            # callback is rare/human-driven but triggers a vendor
+                            # token exchange, so it is throttled like the other
+                            # pre-auth routes.
+                            envoy.filters.http.local_ratelimit:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                              # preAuthDiscovery, not the tighter register bucket: an
+                              # unauthenticated flood here hits a cheap in-memory CSRF-state
+                              # miss and is rejected before any work. The backend token
+                              # exchange runs only on a valid, single-use, CSRF-bound state
+                              # an attacker cannot forge — so this is the cheap-reject
+                              # pre-auth class, not register's Postgres-before-verification
+                              # class, which stays uniquely tightest (deploy#1189 test 150).
+                              stat_prefix: api_connector_oauth_callback
+                              token_bucket:
+                                max_tokens: {{ .rateLimit.preAuthDiscovery.maxTokens }}
+                                tokens_per_fill: {{ .rateLimit.preAuthDiscovery.tokensPerFill }}
+                                fill_interval: {{ .rateLimit.preAuthDiscovery.fillIntervalSeconds }}s
+                              filter_enabled:
+                                default_value: { numerator: 100, denominator: HUNDRED }
+                              filter_enforced:
+                                default_value: { numerator: 100, denominator: HUNDRED }
+                              response_headers_to_add:
+                                - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                                  header: { key: retry-after, value: "{{ .rateLimit.preAuthDiscovery.fillIntervalSeconds }}" }
+                        # NO /capabilitygrant/v1/keys/ ROUTE. DO NOT ADD ONE
+                        # (GHSA-88fg, GHSA-9q4v, gibson#648).
+                        #
+                        # The per-kid endpoint answers GET .../keys/{agentID}
+                        # with that component's daemon-asserted principal_ref
+                        # and tenant_id. Published here it was unauthenticated
+                        # — ext_authz disabled, jwt_authn allow_missing — so
+                        # anyone on the internet could resolve a component's
+                        # tenant and principal from its agent id, and use the
+                        # 404-vs-200 split as an oracle to enumerate valid
+                        # agent ids. Non-secret key material, but not
+                        # non-sensitive metadata.
+                        #
+                        # Its ONE consumer is the ext-authz sidecar, and
+                        # ext-authz never uses the edge: it dials the daemon
+                        # directly on the pod network, which the daemon
+                        # NetworkPolicy opens for exactly that (see
+                        # templates/gibson/networkpolicy.yaml, "ext-authz →
+                        # daemon listeners reached directly (not via Envoy)").
+                        # No SDK, sdk-ts, ADK CLI, gibson-executor or dashboard
+                        # path reads it — the discovery document advertises
+                        # only `register` and `jwks_uri`, and a registering
+                        # component already holds its own private key, so it
+                        # has nothing to read back. The key fetch is strictly
+                        # the verifier's half of the handshake and the verifier
+                        # is always in-cluster.
+                        #
+                        # Guarded by tests/envoy-no-public-cg-keys.bats and by
+                        # tools/envoy-header-trust (the route is out of the
+                        # reviewed ext_authz-disable allowlist).
+                        # ---------------------------------------------------
+                        # deploy#1205: the tenant-operator → dashboard
+                        # provisioning callback route
+                        # (`/api/admin/provisioning/` → gibson_dashboard) is
+                        # DELETED. It was dead three times over:
+                        #
+                        #   1. It ran through ext_authz, which resolves authz
+                        #      by per-RPC registry key (/pkg.Service/Method).
+                        #      An HTTP path never matches, so the route
+                        #      default-denied every request — it could not
+                        #      succeed.
+                        #   2. The dashboard serves no handler under
+                        #      /api/admin/provisioning/ any more (the
+                        #      entitlements endpoints were retired).
+                        #   3. Its only caller, the tenant operator's
+                        #      EntitlementsHTTPClient, posts to DASHBOARD_URL
+                        #      (http://gibson-dashboard:3000 — helm/
+                        #      gibson-operators/templates/tenant-operator/
+                        #      deployment.yaml), i.e. straight at the
+                        #      dashboard Service. It never traversed this edge.
+                        #
+                        # Deleting it drops an unreachable dashboard-admin
+                        # prefix off the public api host; requests now fall to
+                        # the explicit 404 below. The jwt_authn `/api/admin/`
+                        # rule is deliberately KEPT so anything re-added under
+                        # that prefix inherits the S2S audience requirement by
+                        # default rather than starting unguarded.
+                        # ---------------------------------------------------
+                        # ---------------------------------------------------
+                        # Default — 404 with a precise message so a
+                        # misrouted client doesn't think auth was the
+                        # problem.
+                        # ---------------------------------------------------
+                        - match: { prefix: "/" }
+                          direct_response:
+                            status: 404
+                            body:
+                              inline_string: |
+                                {"error":"unknown route","message":"no Envoy route matched. Verify the gRPC method FQN starts with /gibson.* or the HTTP path is one of the documented surfaces."}
+                http_filters:
+                  # 0. Edge rate limiting (deploy#1189). FIRST in the chain, on
+                  # purpose: a refused request must cost a JWKS verification, an
+                  # ext_authz RPC and two FGA Checks LESS than an accepted one.
+                  # Putting the limiter after jwt_authn/ext_authz would let a
+                  # flood pay for exactly the work it is meant to protect. It is
+                  # also why the limiter cannot be the thing that consumes
+                  # budget on already-refused requests: nothing upstream of it
+                  # has refused anything yet.
+                  #
+                  # This entry carries the BASELINE bucket for the whole api
+                  # chain, deliberately NOT a vhost-level config: Envoy resolves
+                  # per-filter config most-specific-first, so a filter-level
+                  # bucket is the floor that any virtual host added to
+                  # api_routes later inherits WITHOUT having to remember to ask.
+                  # A vhost-level baseline would leave the next vhost silently
+                  # unlimited. The six pre-auth routes each override it with a
+                  # tighter bucket; an override REPLACES this one rather than
+                  # stacking, so a flood on one pre-auth route drains only that
+                  # route's bucket and the authenticated /gibson.* surface keeps
+                  # serving. That containment is the difference between a fuse
+                  # and "one source locks everyone out".
+                  #
+                  # filter_enabled / filter_enforced are set explicitly and MUST
+                  # stay at 100%: BOTH DEFAULT TO 0% WHEN OMITTED. A
+                  # local_ratelimit that looks fully configured but lacks these
+                  # two fields enforces nothing while reporting as configured —
+                  # the exact "renders fine when wrong" class this change exists
+                  # to close. tests/envoy-edge-rate-limiting.bats asserts
+                  # 100/HUNDRED on every local_ratelimit config in the rendered
+                  # file, so a hand-written copy that drops them fails the build.
+                  #
+                  # No descriptors — see envoy.rateLimit in values.yaml for why
+                  # this edge has no trustworthy client address to key on.
+                  - name: envoy.filters.http.local_ratelimit
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                      stat_prefix: api_baseline
+                      token_bucket:
+                        max_tokens: {{ .rateLimit.apiBaseline.maxTokens }}
+                        tokens_per_fill: {{ .rateLimit.apiBaseline.tokensPerFill }}
+                        fill_interval: {{ .rateLimit.apiBaseline.fillIntervalSeconds }}s
+                      filter_enabled:
+                        default_value: { numerator: 100, denominator: HUNDRED }
+                      filter_enforced:
+                        default_value: { numerator: 100, denominator: HUNDRED }
+                      # This chain is almost entirely gRPC. Envoy's default maps
+                      # a local rate limit to UNAVAILABLE (14), which generated
+                      # clients retry straight away; RESOURCE_EXHAUSTED (8) is
+                      # the code that means "back off".
+                      rate_limited_as_resource_exhausted: true
+                      response_headers_to_add:
+                        - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          header: { key: retry-after, value: "{{ .rateLimit.apiBaseline.fillIntervalSeconds }}" }
+
+                  # 1. Zitadel JWT validation. The CG-JWT and any other
+                  # short-lived bearer formats are validated INSIDE
+                  # ext_authz so the daemon never sees an unverified token.
+                  # deploy#1660 — the Edge WAF on api., request
+                  # bodies NOT inspected (files/coraza/api.conf). AHEAD of
+                  # jwt_authn on purpose: a scanner is blocked and logged
+                  # whether or not it holds a token, and a token never buys a
+                  # way past the rule set. Behind the fuse, so a flood pays
+                  # the cheap limiter before CRS inspection. It reads headers
+                  # and the URI and writes nothing, so it cannot touch the
+                  # x-gibson-identity-* headers ext_authz sets later.
+                  - name: envoy.filters.http.wasm
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm
+                      config:
+                        name: coraza-api
+                        root_id: ""
+                        fail_open: false
+                        configuration:
+                          "@type": type.googleapis.com/google.protobuf.StringValue
+                          value: |
+                            {
+                              "directives_map": { "api": {{ .waf.apiDirectives }} },
+                              "default_directives": "api",
+                              "metric_labels": { "chain": "api" }
+                            }
+                        vm_config:
+                          runtime: envoy.wasm.runtime.v8
+                          vm_id: coraza
+                          code:
+                            local:
+                              filename: /etc/envoy/wasm/coraza.wasm
+                  - name: envoy.filters.http.jwt_authn
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                      # Spec 3 R8 — providers split per audience. zitadel_s2s
+                      # accepts gibson-platform (service-acting); zitadel_dashboard
+                      # accepts gibson-dashboard (browser sessions). Per-route
+                      # rules below pin which provider matches each prefix so
+                      # a leaked dashboard JWT cannot call S2S RPCs.
+                      providers:
+                        zitadel_s2s:
+                          issuer: "{{ .domains.zitadelIssuer }}"
+                          forward: true
+                          forward_payload_header: "x-jwt-payload"
+                          payload_in_metadata: zitadel
+                          audiences:
+                            - gibson-platform
+                          remote_jwks:
+                            http_uri:
+                              # Spec eliminate-permissive-authz Req 1 — JWKS
+                              # fetch over HTTPS unconditionally. The scheme
+                              # is no longer configurable; the upstream
+                              # `zitadel_jwks` cluster terminates TLS with
+                              # a validation_context against the in-cluster
+                              # trust bundle.
+                              uri: "{{ .domains.zitadelJwksUri }}"
+                              cluster: zitadel_jwks
+                              timeout: 5s
+                            cache_duration: { seconds: 600 }
+                            async_fetch: { fast_listener: true }
+                            retry_policy:
+                              retry_back_off:
+                                base_interval: 1s
+                                max_interval: 30s
+                              num_retries: 60
+                        zitadel_dashboard:
+                          issuer: "{{ .domains.zitadelIssuer }}"
+                          forward: true
+                          forward_payload_header: "x-jwt-payload"
+                          payload_in_metadata: zitadel
+                          audiences:
+                            # Symbolic name accepted by older clients that
+                            # set aud=gibson-dashboard explicitly.
+                            - gibson-dashboard
+                            # Live OAuth client_id — Zitadel always emits
+                            # this in the JWT aud claim. The chart emits the
+                            # literal placeholder `${DASHBOARD_CLIENT_ID}`
+                            # here; the Envoy pod's `render-envoy-config`
+                            # initContainer substitutes it from Secret
+                            # `gibson-dashboard-oidc` (key `client_id`,
+                            # owned by platform-operator) at pod startup.
+                            # Stakater Reloader rolls Envoy when the Secret
+                            # changes. zeroroot-ai/deploy#130.
+                            - {{ .zitadelDashboardClientId | quote }}
+                            # gibson#693 — native-login (gibson login) client_id.
+                            # `gibson login` runs a device-grant against this
+                            # public client; its user tokens carry this audience.
+                            # Accepted by the SAME user-flow provider as the
+                            # dashboard, so CLI traffic flows through ext_authz +
+                            # the FGA (user,member,tenant) check — never a bypass.
+                            # Substituted from gibson-native-login-oidc at startup.
+                            - {{ .zitadelNativeLoginClientId | quote }}
+                          remote_jwks:
+                            http_uri:
+                              # Spec eliminate-permissive-authz Req 1 — JWKS
+                              # fetch over HTTPS unconditionally (parallel to
+                              # the zitadel_s2s provider above).
+                              uri: "{{ .domains.zitadelJwksUri }}"
+                              cluster: zitadel_jwks
+                              timeout: 5s
+                            cache_duration: { seconds: 600 }
+                            async_fetch: { fast_listener: true }
+                            retry_policy:
+                              retry_back_off:
+                                base_interval: 1s
+                                max_interval: 30s
+                              num_retries: 60
+                      rules:
+                        # OIDC discovery (proxied to Zitadel above) is a
+                        # pre-auth bootstrap endpoint — no bearer required.
+                        # deploy#661.
+                        - match: { prefix: "/.well-known/openid-configuration" }
+                          requires:
+                            allow_missing: {}
+                        # Native-login bootstrap (gibson#623) — pre-auth, no bearer.
+                        - match: { prefix: "/.well-known/gibson-login" }
+                          requires:
+                            allow_missing: {}
+                        # Capability-Grant registration (gibson#648) — pre-auth:
+                        # a component holds no daemon JWT at first registration,
+                        # the bootstrap credential authenticates it at the daemon.
+                        - match: { prefix: "/.well-known/agent-configuration" }
+                          requires:
+                            allow_missing: {}
+                        # The register POST carries a daemon-signed CG bootstrap
+                        # token in Authorization: Bearer — NOT a Zitadel JWT. It
+                        # is verified by the daemon, not jwt_authn. allow_missing
+                        # only passes when no JWT is present; a present-but-non-
+                        # Zitadel token would otherwise fail jwt_authn ("Jwt
+                        # issuer is not configured"). allow_missing_or_failed lets
+                        # it through so the daemon does the bootstrap check.
+                        - match: { prefix: "/capabilitygrant/v1/register" }
+                          requires:
+                            allow_missing_or_failed: {}
+                        # Connector OAuth callback — the vendor redirect
+                        # carries no bearer; the daemon authenticates via the state
+                        # (CSRF binding) + daemon-held PKCE. Pre-auth, no JWT.
+                        - match: { prefix: "/connectors/oauth/callback" }
+                          requires:
+                            allow_missing: {}
+                        # No jwt_authn rule for /capabilitygrant/v1/keys/ —
+                        # the route itself is gone (GHSA-88fg / GHSA-9q4v; see
+                        # the api_routes comment above). Re-adding a rule here
+                        # without a route is harmless but misleading; re-adding
+                        # both republishes the tenant/principal oracle.
+                        # Spec 3 R8 — dashboard SPAs and Auth.js callbacks pin
+                        # the dashboard provider (audience: gibson-dashboard).
+                        - match: { prefix: "/dashboard/" }
+                          requires:
+                            provider_name: zitadel_dashboard
+                        - match: { prefix: "/api/auth/" }
+                          requires:
+                            provider_name: zitadel_dashboard
+                        # All gRPC paths accept EITHER a user-flow Zitadel JWT
+                        # (audience: dashboard client_id, issued by the OIDC
+                        # code flow Auth.js drives) OR an S2S Zitadel JWT
+                        # (audience: gibson-platform, issued by the
+                        # client_credentials grant for machine users like
+                        # gibson-dashboard-service / signup-bot).
+                        # ext_authz + FGA do the actual authorization based
+                        # on the JWT's `sub` claim — the per-method registry
+                        # decides whether a given subject can call a given
+                        # RPC. Restricting the audience here would just
+                        # double-gate, and the previous "S2S only" rule was
+                        # actively wrong: dashboard-side server actions
+                        # (e.g. ListMyMemberships) forward the user's access
+                        # token, which has the dashboard audience, not S2S.
+                        # DaemonOperatorService — ZD-internal operator RPCs.
+                        # Accepts the same provider set as the user-RPC route
+                        # (FGA in ext_authz enforces member-vs-operator
+                        # separation per method). Listed explicitly so the
+                        # more-specific match wins over the /gibson. catch-all
+                        # below; this also gives ops a clear seam for tightening
+                        # the required provider set later without touching the
+                        # member-facing route.
+                        - match: { prefix: "/gibson.daemon.operator.v1.DaemonOperatorService/" }
+                          requires:
+                            requires_any:
+                              requirements:
+                                - provider_name: zitadel_dashboard
+                                - provider_name: zitadel_s2s
+                        # Component-callable RPCs (ext-authz#103) —
+                        # scoped loosening (decision A). A component (agent/tool/
+                        # plugin) presents its self-signed CG-JWT in
+                        # x-capability-grant with NO Authorization, so a Zitadel
+                        # JWT is absent: allow_missing_or_failed lets the request
+                        # reach ext_authz, which verifies the component token by
+                        # kid + runs the per-method FGA check (FGA is the
+                        # boundary). Humans calling the same RPC still send a
+                        # valid Zitadel JWT (validated when present). Listed
+                        # before the /gibson. catch-all so this scoped rule wins;
+                        # the rest of /gibson. keeps the hard Zitadel requirement.
+                        # Expand this prefix set as more client RPCs move onto the
+                        # CG-JWT (gibson#647); start with inspect (WhoAmI).
+                        - match: { prefix: "/gibson.identity.v1.IdentityService/" }
+                          requires:
+                            allow_missing_or_failed: {}
+                        # Component (plugin / tool / agent / connector) runtime
+                        # channel: a CG component registers via ComponentService
+                        # and polls work + resolves credentials + searches tools
+                        # via HarnessCallbackService, all authenticated by its
+                        # CG-JWT in x-capability-grant (NOT a Zitadel JWT). Without
+                        # allow_missing_or_failed here the /gibson. catch-all
+                        # rejects these with "Jwt is missing" before ext_authz can
+                        # verify the CG-JWT, breaking external/process-mode bridge
+                        # registration + GetCredential (deploy#778).
+                        - match: { prefix: "/gibson.component.v1.ComponentService/" }
+                          requires:
+                            allow_missing_or_failed: {}
+                        - match: { prefix: "/gibson.harness.v1.HarnessCallbackService/" }
+                          requires:
+                            allow_missing_or_failed: {}
+                        # A dispatched component renews its own task grant with
+                        # that grant as its only credential (gibson#1605). It has
+                        # no Zitadel JWT, so the /gibson. catch-all would reject
+                        # it with "Jwt is missing" before ext_authz can verify the
+                        # grant, and a long-running bank member could not keep
+                        # its grant alive (deploy#1756). An exact path match, not
+                        # a prefix: only this one RPC loosens. ext_authz still
+                        # verifies the grant against the daemon's key and refuses
+                        # one that does not list the method.
+                        - match: { path: "/gibson.daemon.v1.DaemonService/RenewCapabilityGrant" }
+                          requires:
+                            allow_missing_or_failed: {}
+                        - match: { prefix: "/gibson." }
+                          requires:
+                            requires_any:
+                              requirements:
+                                - provider_name: zitadel_dashboard
+                                - provider_name: zitadel_s2s
+                        - match: { prefix: "/api/admin/" }
+                          requires:
+                            provider_name: zitadel_s2s
+                        # Default catch-all — service-acting audience.
+                        - match: { prefix: "/" }
+                          requires:
+                            provider_name: zitadel_s2s
+
+                  # 2. External Authorization — FGA decision via ext_authz.
+                  # Fails CLOSED. ExtAuthz reads the per-method registry
+                  # entry, calls FGA, and on ALLOW injects the trusted
+                  # x-gibson-identity-* headers via headers_to_add. CG-JWT
+                  # validation (X-Capability-Grant header) is also done
+                  # here — ext_authz fetches the daemon's JWKS and
+                  # short-circuits FGA when the requested method is in
+                  # the CG's allowed_rpcs.
+                  - name: envoy.filters.http.ext_authz
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                      transport_api_version: V3
+                      failure_mode_allow: false
+                      grpc_service:
+                        envoy_grpc:
+                          cluster_name: ext_authz_grpc
+                        # deploy#1203 — this is the WHOLE budget ext-authz gets
+                        # to reach a decision, and it must exceed the FGA work it
+                        # funds. One request runs up to TWO SEQUENTIAL FGA Check
+                        # calls:
+                        #
+                        #   • OIDC user  : per-RPC registry Check + the
+                        #                  deliberately-uncached active_session
+                        #                  gate (gibson internal/server/extauthz/
+                        #                  fga/check.go CheckActiveSession).
+                        #   • Service acct: CheckPlatformOperator (cross-tenant
+                        #                  gate) + the per-RPC registry Check.
+                        #
+                        # Each call carries its own floor —
+                        # EXT_AUTHZ_FGA_PER_CALL_TIMEOUT, default 1500ms
+                        # (gibson cmd/ext-authz/main.go, authz.DefaultPerCallTimeout)
+                        # — so the worst-case serial floor is 2 × 1500ms = 3000ms.
+                        # At the old 2s this filter timed out BEFORE the per-call
+                        # floors expired, and with failure_mode_allow:false that
+                        # converts any FGA latency blip into a cluster-wide 403
+                        # storm instead of a bounded per-call failure.
+                        #
+                        # 5s is not a round number picked here: it is the
+                        # platform-wide contract constant
+                        # authz.EnvoyExtAuthzBudgetDefault (gibson
+                        # internal/infra/authz/authz.go), which the daemon
+                        # ENFORCES — internal/server/daemon/authz_init.go refuses
+                        # to start when authz.fga.timeout_ms >= 5000. The chart's
+                        # own daemon config comment (templates/gibson/configmap.yaml,
+                        # authz.fga.timeout_ms) already asserted that 5000ms budget
+                        # while this filter contradicted it at 2s. Keep all three in
+                        # lockstep: per-call floor < daemon fga.timeout_ms < this.
+                        timeout: 5s
+                      include_peer_certificate: true
+
+                  # deploy#1659 — the per-client layer on api.
+                  # AFTER ext_authz, because the authenticated routes key on
+                  # the x-gibson-identity-subject / -tenant headers ext-authz
+                  # sets (headers_to_set: a client-supplied copy is
+                  # overwritten —), and the pre-auth routes key on
+                  # the client address. FAIL-OPEN under the fuse, like the
+                  # browser chain's; the same ratelimit service answers.
+                  - name: envoy.filters.http.ratelimit
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ratelimit.v3.RateLimit
+                      domain: {{ .rateLimit.perClient.domain }}
+                      stage: 0
+                      request_type: external
+                      timeout: {{ divf .rateLimit.perClient.timeoutMs 1000 }}s
+                      failure_mode_deny: false
+                      enable_x_ratelimit_headers: DRAFT_VERSION_03
+                      stat_prefix: api_per_client
+                      rate_limit_service:
+                        transport_api_version: V3
+                        grpc_service:
+                          envoy_grpc:
+                            cluster_name: ratelimit_grpc
+
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+
+        # =====================================================================
+        # app / apex / docs — the browser chain, on the one edge listener.
+        #
+        # Matched by SNI, on every substrate. The chain body lives
+        # in files/envoy/public-chain.yaml and is rendered once by
+        # configmap.yaml, so it is one definition wherever it is read.
+        # =====================================================================
+        - filter_chain_match:
+            server_names:
+              - "{{ .domains.app }}"
+              - "{{ .domains.apex }}"
+              - "{{ .domains.docs }}"
+{{ .publicChain }}
+
+        # =====================================================================
+        # (apex filter chain removed — apex is now served by the merged public
+        # filter chain's apex virtual_host, so HTTP/2 coalescing across app/apex
+        # can no longer misroute to a chain that lacks the request's :authority.
+        # deploy#865. www is off-cluster .)
+        # =====================================================================
+        # auth.<domain> RETIRED (deploy#630 single-host consolidation): Zitadel
+        # is now served under the app.<domain> vhost (reserved /ui/, /oauth/,
+        # /oidc/, /.well-known/openid-configuration, /idps/, /saml/ prefixes).
+        # No separate auth. vhost, no dual-serving.
+        # =====================================================================
+
+        # =====================================================================
+        # gibson-envoy.<ns>.svc.cluster.local — in-cluster OIDC discovery hop.
+        # Spec tier-2-host-aliases-cluster-dns. The daemon's IdP admin client
+        # uses idp.zitadel.discoveryURL to dial envoy by its Service FQDN so
+        # cluster DNS (not a fragile hostAlias to a rotating ClusterIP) is the
+        # rendezvous. The Zitadel instance router only matches its registered
+        # ExternalDomain in the Host header, so we rewrite Host to the public
+        # app.<domain> name before proxying upstream.
+        #
+        # Pre-auth surface only — /.well-known/openid-configuration and
+        # /oauth/v2/* + /management/v1/* (machine-user OAuth client_credentials
+        # + Zitadel admin API for the daemon's IdP admin client). No
+        # ext_authz / no jwt_authn on this chain — these endpoints exist to
+        # bootstrap auth, they can't depend on it.
+        #
+        # deploy#1204 — this chain shares the public :10000 listener, and
+        # filter-chain selection keys on the connection's SNI. Nothing stopped
+        # an internet client from opening a TLS connection to the public edge
+        # with SNI `gibson-envoy.<ns>.svc.cluster.local` (the certificate will
+        # not validate for that name, but nothing forces the client to care)
+        # and landing on an auth-free chain. Two independent restrictions now
+        # apply:
+        #
+        #   1. source_prefix_ranges below — chain selection additionally
+        #      requires an in-cluster source address. Envoy evaluates
+        #      source_prefix_ranges as part of filter_chain_match, so a
+        #      connection from outside the configured ranges never selects this
+        #      chain and falls through to SNI-appropriate chains (i.e. no
+        #      match → connection closed). Populated from
+        #      envoy.internalChain.sourcePrefixRanges; see that value for why
+        #      the default must be narrowed on EKS, where the internet-facing
+        #      NLB's ENI address is itself RFC1918.
+        #
+        #   2. the virtual host's `domains` (below) — no longer ["*"]. This one
+        #      does not depend on source IP at all: a request must carry an
+        #      :authority of Envoy's in-cluster Service name to match any route
+        #      here. That is what stops this auth-free vhost from silently
+        #      inheriting any route added to it later, which is the durable
+        #      risk. Keep BOTH — (1) is defence in depth, (2) is the invariant.
+        - filter_chain_match:
+            server_names:
+              - "gibson-envoy.{{ .namespace | default "gibson" }}.svc.cluster.local"
+              - "gibson-envoy.{{ .namespace | default "gibson" }}.svc"
+            source_prefix_ranges:
+{{- range .internalChainSourcePrefixRanges }}
+              - address_prefix: {{ .address_prefix | quote }}
+                prefix_len: {{ .prefix_len }}
+{{- end }}
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_certificates:
+                  - certificate_chain: { filename: /etc/envoy/tls/tls.crt }
+                    private_key:       { filename: /etc/envoy/tls/tls.key }
+                alpn_protocols: ["h2", "http/1.1"]
+          filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: cluster_oidc_ingress
+                codec_type: AUTO
+                # Client-IP contract. The L4 load balancer preserves
+                # the client IP, so the socket peer IS the client. Trust it and
+                # nothing else: never a client-supplied x-forwarded-for, and no
+                # trusted-hop count, which is only correct behind an ALB.
+                use_remote_address: true
+                xff_num_trusted_hops: 0
+                route_config:
+                  name: cluster_oidc_routes
+                  virtual_hosts:
+                    - name: cluster_oidc
+                      # deploy#1204 — was ["*"]. An auth-free wildcard vhost
+                      # matches every :authority, so any route added here later
+                      # becomes reachable by anything that reaches the chain.
+                      # Pinned to the in-cluster Service names the daemon's IdP
+                      # admin client actually dials (idp.zitadel.discoveryURL,
+                      # recommended value
+                      # https://gibson-envoy.<ns>.svc.cluster.local:<httpsPort>),
+                      # with and without the explicit port, since a non-443
+                      # httpsPort (kind uses 30443) is carried in the Host
+                      # header and Envoy does not strip it. Anything else gets
+                      # no vhost match → 404, never an unauthenticated route.
+                      domains:
+                        - "gibson-envoy.{{ .namespace | default "gibson" }}.svc.cluster.local"
+                        - "gibson-envoy.{{ .namespace | default "gibson" }}.svc.cluster.local:{{ .envoyHttpsPort }}"
+                        - "gibson-envoy.{{ .namespace | default "gibson" }}.svc"
+                        - "gibson-envoy.{{ .namespace | default "gibson" }}.svc:{{ .envoyHttpsPort }}"
+                      routes:
+                        - match: { prefix: "/.well-known/" }
+                          route:
+                            cluster: zitadel_upstream
+                            host_rewrite_literal: "{{ .domains.app }}{{ if and (eq .envoyServiceType "NodePort") .envoyServiceNodePort }}:{{ .envoyServiceNodePort }}{{ end }}"
+                            timeout: 30s
+                        - match: { prefix: "/oauth/v2/" }
+                          route:
+                            cluster: zitadel_upstream
+                            host_rewrite_literal: "{{ .domains.app }}{{ if and (eq .envoyServiceType "NodePort") .envoyServiceNodePort }}:{{ .envoyServiceNodePort }}{{ end }}"
+                            timeout: 30s
+                        - match: { prefix: "/management/v1/" }
+                          route:
+                            cluster: zitadel_upstream
+                            host_rewrite_literal: "{{ .domains.app }}{{ if and (eq .envoyServiceType "NodePort") .envoyServiceNodePort }}:{{ .envoyServiceNodePort }}{{ end }}"
+                            timeout: 30s
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  # ===========================================================================
+  # Upstream clusters.
+  # ===========================================================================
+
+  clusters:
+    # SPIRE Workload API over the agent UDS — Envoy uses SDS against this
+    # cluster to fetch its own SVID (name: "default") and the trust bundle
+    # (name: "ROOTCA"). Required for the SPIFFE-validated upstream TLS on
+    # gibson_daemon_grpc and gibson_dashboard below.
+    - name: spire_agent
+      type: STATIC
+      connect_timeout: 0.25s
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: spire_agent
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    pipe:
+                      path: /run/spire/sockets/api.sock
+
+    - name: gibson_daemon_grpc
+      type: STRICT_DNS
+      connect_timeout: 5s
+      # deploy#864: re-resolve the daemon Service quickly so a rolled pod's
+      # new endpoint is picked up promptly.
+      dns_refresh_rate: 5s
+      respect_dns_ttl: false
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          # deploy#864: drain idle connections so a long-lived HTTP/2 connection
+          # cannot outlive the daemon pod it was pinned to.
+          common_http_protocol_options:
+            idle_timeout: 30s
+          explicit_http_config:
+            http2_protocol_options:
+              # deploy#864: PING-based liveness. When the daemon StatefulSet
+              # rolls (nightly standup / image bump), its pod is replaced and
+              # the existing HTTP/2 connection (pinned to the old pod via
+              # conntrack on the Service ClusterIP) goes dead silently — new
+              # streams blackhole with UF until something forces a reconnect,
+              # which previously needed a manual `kubectl rollout restart
+              # deploy/gibson-envoy`. Keepalive PINGs detect the dead
+              # connection within ~interval+timeout and recycle it to the new
+              # pod automatically. (outlier_detection is NOT used: this cluster
+              # has a single ClusterIP endpoint, so ejecting it would drop the
+              # only host instead of recycling the connection.)
+              connection_keepalive:
+                interval: 10s
+                timeout: 5s
+      # Envoy → daemon mTLS via SPIRE SDS. Spec Reqs 2.3, 3.7.
+      #
+      # Envoy presents its own SPIFFE SVID `spiffe://<td>/platform/envoy`
+      # (sds_secret_configs entry with name "default" — go-spiffe SDS server
+      # convention) and validates the daemon's serving cert against the SPIRE
+      # trust bundle (validation_context_sds_secret_config name "ROOTCA").
+      # match_typed_subject_alt_names locks acceptance to the daemon's SPIFFE
+      # ID only.
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          # SNI must match what the daemon's serving cert SAN expects. The
+          # daemon's SPIFFE serving cert has only a URI SAN
+          # (URI:spiffe://<td>/platform/daemon) and no DNS SAN, so SNI is
+          # informational here; match_typed_subject_alt_names below is what
+          # actually enforces identity.
+          sni: "{{ .gibsonService }}"
+          common_tls_context:
+            tls_certificate_sds_secret_configs:
+              - name: "default"
+                sds_config:
+                  resource_api_version: V3
+                  api_config_source:
+                    api_type: GRPC
+                    transport_api_version: V3
+                    grpc_services:
+                      - envoy_grpc:
+                          cluster_name: spire_agent
+            combined_validation_context:
+              default_validation_context:
+                match_typed_subject_alt_names:
+                  - san_type: URI
+                    matcher:
+                      exact: "spiffe://{{ .domains.spiffeTrustDomain }}/platform/daemon"
+              validation_context_sds_secret_config:
+                name: "ROOTCA"
+                sds_config:
+                  resource_api_version: V3
+                  api_config_source:
+                    api_type: GRPC
+                    transport_api_version: V3
+                    grpc_services:
+                      - envoy_grpc:
+                          cluster_name: spire_agent
+      load_assignment:
+        cluster_name: gibson_daemon_grpc
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      # Daemon Service name comes from the same gibson.fullname
+                      # helper that names templates/gibson/service.yaml, so it
+                      # tracks the Service in every install shape:
+                      # "gibson-workloads" when the chart is its own release
+                      # (gitops/kind), "gibson-gibson-workloads" under the
+                      # umbrella release "gibson". The bare release name is NOT
+                      # the daemon there — it's the neo4j subchart's Service,
+                      # and dialing it blackholed all daemon traffic
+                      # (deploy#879, staging signup outage 2026-06-12).
+                      address: "{{ .gibsonService }}"
+                      port_value: {{ .gibsonGrpcPort }}
+
+    # -------------------------------------------------------------------------
+    # gibson_daemon_callback — the daemon's HARNESS CALLBACK listener
+    # (gibson.service.callback.port, 50001), NOT the main gRPC port.
+    #
+    # gibson#1450: HarnessCallbackService is registered on that listener only
+    # (gibson internal/engine/harness/callback_server.go). Routing its prefix to
+    # gibson_daemon_grpc reached a listener with no such service registered and
+    # no UnknownServiceHandler, so every off-cluster component call returned
+    # codes.Unimplemented AFTER passing jwt_authn, ext_authz and FGA — the
+    # service had no working ingress for the components it exists to serve.
+    #
+    # Same pod, same Service, same SPIFFE identity as gibson_daemon_grpc; only
+    # the port differs. It is a separate cluster rather than a second endpoint
+    # on the existing one because the two ports serve disjoint service sets and
+    # an endpoint list would load-balance across them at random.
+    #
+    # The callback listener is wrapped in SPIFFE mTLS with
+    # AuthorizeOneOf(GIBSON_CALLBACK_PEER_SVIDS...) and admits Envoy by its
+    # SVID, then applies a per-peer METHOD policy on top of the ext_authz/FGA
+    # decision made at this edge. That second gate is why the fix fronts this
+    # listener instead of registering the service on :50051: RPCs the daemon has
+    # no handler for (DevboxExec, GetPlanContext, ReportStepHints) stay denied
+    # at the listener even though the route above forwards their prefix.
+    # -------------------------------------------------------------------------
+    - name: gibson_daemon_callback
+      type: STRICT_DNS
+      connect_timeout: 5s
+      # Matches gibson_daemon_grpc: re-resolve quickly so a rolled daemon pod's
+      # new endpoint is picked up (deploy#864).
+      dns_refresh_rate: 5s
+      respect_dns_ttl: false
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          common_http_protocol_options:
+            idle_timeout: 30s
+          explicit_http_config:
+            http2_protocol_options:
+              # Same PING-based liveness as gibson_daemon_grpc — this cluster
+              # is pinned to the same StatefulSet pod and goes dead the same way
+              # when it rolls (deploy#864).
+              connection_keepalive:
+                interval: 10s
+                timeout: 5s
+      # Envoy → daemon mTLS via SPIRE SDS, identical to gibson_daemon_grpc:
+      # Envoy presents spiffe://<td>/platform/envoy (which is what the callback
+      # listener's AuthorizeOneOf allowlist admits) and pins the daemon's SVID.
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: "{{ .gibsonService }}"
+          common_tls_context:
+            tls_certificate_sds_secret_configs:
+              - name: "default"
+                sds_config:
+                  resource_api_version: V3
+                  api_config_source:
+                    api_type: GRPC
+                    transport_api_version: V3
+                    grpc_services:
+                      - envoy_grpc:
+                          cluster_name: spire_agent
+            combined_validation_context:
+              default_validation_context:
+                match_typed_subject_alt_names:
+                  - san_type: URI
+                    matcher:
+                      exact: "spiffe://{{ .domains.spiffeTrustDomain }}/platform/daemon"
+              validation_context_sds_secret_config:
+                name: "ROOTCA"
+                sds_config:
+                  resource_api_version: V3
+                  api_config_source:
+                    api_type: GRPC
+                    transport_api_version: V3
+                    grpc_services:
+                      - envoy_grpc:
+                          cluster_name: spire_agent
+      load_assignment:
+        cluster_name: gibson_daemon_callback
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      # Same Service as gibson_daemon_grpc (see the naming note
+                      # there — the bare release name is the neo4j subchart's
+                      # Service, not the daemon's).
+                      address: "{{ .gibsonService }}"
+                      port_value: {{ .gibsonCallbackPort }}
+
+    - name: gibson_dashboard
+      type: STRICT_DNS
+      connect_timeout: 5s
+      # Plain HTTP/1.1 upstream to the dashboard. The Next.js standalone
+      # server runs Node http (HTTP/1.1, no h2c) and has no SPIFFE TLS
+      # terminating sidecar in the dashboard pod, so an SDS-mediated mTLS
+      # handshake fails with WRONG_VERSION_NUMBER. Browser→Envoy at
+      # app.<domain>:30443 still terminates TLS at the edge with the
+      # cert-manager-issued cert; Envoy→dashboard is intra-cluster plain
+      # HTTP (NetworkPolicy + the cluster network plane gate access).
+      #
+      # If a future hardening spec adds a SPIFFE-aware sidecar (envoy
+      # sidecar or spiffe-helper) to the dashboard pod, restore the
+      # transport_socket + http2 explicit_http_config blocks here.
+      load_assignment:
+        cluster_name: gibson_dashboard
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: "{{ .release }}-dashboard"
+                      port_value: {{ .dashboardPort }}
+
+    # deploy#1034 — docs site (core optional-by-toggle docs-svc).
+    # ghcr.io/zeroroot-ai/docs-site (Apache-2.0). Core component: present in
+    # self-hosted AND SaaS. When docs is toggled off (.Values.docs.enabled=false),
+    # no docs-svc Service exists → STRICT_DNS yields no endpoints → 503.
+    # The dashboard's DOCS_URL env var provides the fail-safe public link.
+    - name: gibson_docs_svc
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: gibson_docs_svc
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: "gibson-docs-svc"
+                      port_value: 8080
+
+    # gibson#798/#800 — the closed billing tier's Stripe webhook receiver.
+    # Plain HTTP/1.1 (Go net/http). Deployed only in hosted overlays
+    # (gibson-billing-webhook, gitops apps/manifests/gibson-workloads); on-prem
+    # has no such Service so STRICT_DNS yields no endpoints and the route 503s,
+    # which is fine — on-prem receives no Stripe webhooks.
+    - name: gibson_billing_webhook
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: gibson_billing_webhook
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: "gibson-billing-webhook"
+                      port_value: 8090
+
+    # gibson#623 — daemon's dedicated native-login bootstrap listener (:8085).
+    # Plaintext HTTP/1.1: the endpoint is unauthenticated by design and serves
+    # only non-secret data (issuer, public client id, scopes), so unlike the
+    # gRPC and metrics listeners it carries no SPIFFE mTLS. Edge TLS still
+    # terminates at Envoy; Envoy→daemon:8085 is intra-cluster plain HTTP.
+    - name: gibson_native_login
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: gibson_native_login
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      # Same daemon Service as gibson_daemon_grpc (deploy#879).
+                      address: "{{ .gibsonService }}"
+                      port_value: 8085
+
+    - name: zitadel_upstream
+      type: STRICT_DNS
+      connect_timeout: 5s
+      dns_refresh_rate: 5s
+      respect_dns_ttl: false
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          common_http_protocol_options:
+            idle_timeout: 30s
+          explicit_http_config:
+            # deploy#864: HTTP/2 keepalive so a Zitadel pod roll doesn't leave
+            # Envoy pinned to a dead connection (would break the whole auth
+            # flow). Same rationale as gibson_daemon_grpc above.
+            http2_protocol_options:
+              connection_keepalive:
+                interval: 10s
+                timeout: 5s
+      load_assignment:
+        cluster_name: zitadel_upstream
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: "gibson-zitadel"
+                      port_value: 8080
+
+    # Zitadel v4 login UI — a Next.js app serving /ui/v2/login/*.
+    # HTTP/1.1 (NOT h2c) unlike the Zitadel API pod.
+    - name: zitadel_login
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: zitadel_login
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: "gibson-zitadel-login"
+                      port_value: 3000
+
+    - name: zitadel_jwks
+      type: STRICT_DNS
+      connect_timeout: 5s
+      # Spec kind-dashboard-bringup-e2e (D3) — JWKS fetched directly from
+      # the in-cluster Zitadel Service. Decoupling the JWKS endpoint from
+      # the public issuer URL removes the previous loopback-through-Envoy
+      # dance that depended on auth.<domain> resolving inside the cluster.
+      # Envoy validates the JWT's `iss` claim as a literal string against
+      # the configured public issuer, independent of where it fetches
+      # JWKS from — so this is safe.
+      #
+      # Per-environment overrides live on .Values.envoy.zitadel.jwks
+      # (rendered into .domains.zitadelJwksHost / port / scheme / uri at
+      # template time). Default targets gibson-zitadel:8080 (plain HTTP),
+      # which is appropriate in both Kind and EKS where the Zitadel
+      # service is namespace-scoped behind NetworkPolicy.
+      load_assignment:
+        cluster_name: zitadel_jwks
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: "{{ .domains.zitadelJwksHost }}"
+                      port_value: {{ .domains.zitadelJwksPort }}
+
+    # deploy#1657 — the shared per-client quota service. Envoy →
+    # ratelimit pod over SPIFFE mTLS via SPIRE SDS, exactly like ext_authz_grpc
+    # below; the pod's own Envoy sidecar terminates it and pins OUR SAN to
+    # platform/envoy. The filter that calls this cluster is fail-open
+    # (failure_mode_deny: false): an unreachable quota service degrades to the
+    # per-pod local_ratelimit fuse, and envoy_ratelimit_failure_mode_allowed
+    # counts every request that passed unchecked.
+    - name: ratelimit_grpc
+      type: STRICT_DNS
+      connect_timeout: 1s
+      dns_refresh_rate: 5s
+      respect_dns_ttl: false
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: "gibson-ratelimit"
+          common_tls_context:
+            alpn_protocols: ["h2"]
+            tls_certificate_sds_secret_configs:
+              - name: "default"
+                sds_config:
+                  resource_api_version: V3
+                  api_config_source:
+                    api_type: GRPC
+                    transport_api_version: V3
+                    grpc_services:
+                      - envoy_grpc:
+                          cluster_name: spire_agent
+            combined_validation_context:
+              default_validation_context:
+                match_typed_subject_alt_names:
+                  - san_type: URI
+                    matcher:
+                      exact: "spiffe://{{ .domains.spiffeTrustDomain }}/platform/ratelimit"
+              validation_context_sds_secret_config:
+                name: "ROOTCA"
+                sds_config:
+                  resource_api_version: V3
+                  api_config_source:
+                    api_type: GRPC
+                    transport_api_version: V3
+                    grpc_services:
+                      - envoy_grpc:
+                          cluster_name: spire_agent
+      load_assignment:
+        cluster_name: ratelimit_grpc
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: gibson-ratelimit
+                      port_value: {{ .ratelimitPort }}
+
+    - name: ext_authz_grpc
+      type: STRICT_DNS
+      connect_timeout: 2s
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      # Envoy → ext-authz SPIFFE mTLS via SPIRE SDS. ext-authz's gRPC
+      # listener is RequireAndVerifyClientCert (the deployment template
+      # mounts gibson-ext-authz-grpc-tls and SPIRE-issued client certs);
+      # without a transport_socket here Envoy connects plain TCP, the
+      # TLS handshake EOFs, every ext_authz check errors, and Envoy's
+      # failure_mode_allow:false returns grpc-status:7 (permission_denied)
+      # with an empty body to the caller. Mirrors the gibson_daemon_grpc
+      # cluster's SDS setup directly above — only the SAN matcher differs.
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: "gibson-ext-authz"
+          common_tls_context:
+            tls_certificate_sds_secret_configs:
+              - name: "default"
+                sds_config:
+                  resource_api_version: V3
+                  api_config_source:
+                    api_type: GRPC
+                    transport_api_version: V3
+                    grpc_services:
+                      - envoy_grpc:
+                          cluster_name: spire_agent
+            combined_validation_context:
+              default_validation_context:
+                match_typed_subject_alt_names:
+                  - san_type: URI
+                    matcher:
+                      exact: "spiffe://{{ .domains.spiffeTrustDomain }}/platform/ext-authz"
+              validation_context_sds_secret_config:
+                name: "ROOTCA"
+                sds_config:
+                  resource_api_version: V3
+                  api_config_source:
+                    api_type: GRPC
+                    transport_api_version: V3
+                    grpc_services:
+                      - envoy_grpc:
+                          cluster_name: spire_agent
+      load_assignment:
+        cluster_name: ext_authz_grpc
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      # The ext-authz Service template hardcodes
+                      # `name: gibson-ext-authz` (no release prefix). The
+                      # chart's mix of release-prefixed and non-prefixed
+                      # names predates the gibson-workloads split; the
+                      # Service name is the load-bearing identity here, so
+                      # this dial address matches it directly. Previously
+                      # this read `{{ .release }}-ext-authz` (= e.g.
+                      # gibson-workloads-ext-authz), which has no Service
+                      # → Envoy's ext_authz cluster had zero healthy
+                      # endpoints → every authenticated daemon RPC failed
+                      # with empty grpc-status 7 (permission_denied) from
+                      # the ext_authz failure_mode_allow:false path.
+                      address: "gibson-ext-authz"
+                      port_value: {{ .extAuthzGrpcPort }}

@@ -1,0 +1,211 @@
+{{- /*
+ratelimit Deployment (deploy#1657) — the shared per-client quota.
+
+Two containers:
+  ratelimit  envoyproxy/ratelimit, counting in Redis Stack under rl:*. Its
+             gRPC listens on 127.0.0.1 only; nothing reaches it but the sidecar.
+  envoy      the mTLS terminator: SPIFFE mTLS through SPIRE SDS on the pod's
+             public port, client SAN pinned to platform/envoy, tcp_proxy to
+             loopback. See templates/ratelimit/configmap.yaml for why a sidecar
+             rather than certificate files.
+
+Core, always-on: no `.enabled`. Replicas FOLLOW envoy.replicas so the quota
+service is never a lone single point behind an HA edge (CONTEXT.md § Edge
+rate limit, grill Q10).
+*/}}
+{{- $ports := .Values.ratelimit.ports -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gibson-ratelimit
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ratelimit
+spec:
+  replicas: {{ .Values.envoy.replicas }}
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ratelimit
+  template:
+    metadata:
+      labels:
+        {{- include "gibson.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ratelimit
+      annotations:
+        # A quota change is a ConfigMap change; roll the pod so ratelimit
+        # re-reads it (RUNTIME_WATCH_ROOT is off: watching a projected
+        # ConfigMap is racy across the kubelet's symlink swap).
+        checksum/config: {{ include (print $.Template.BasePath "/ratelimit/configmap.yaml") . | sha256sum }}
+    spec:
+      {{- include "gibson.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "gibson.ratelimitServiceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- include "gibson.spread" (dict "ctx" . "component" "ratelimit") | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        # distroless nonroot; the Envoy sidecar overrides to its own uid 101.
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        {{- /* deploy#201: SPIRE is REQUIRED infrastructure — block pod start
+               until the agent socket is reachable, exactly as ext-authz does. */}}
+        {{- include "gibson.waitForSpireSocket" . | nindent 8 }}
+      containers:
+        - name: ratelimit
+          image: "{{ .Values.ratelimit.image.repository }}:{{ .Values.ratelimit.image.tag }}"
+          imagePullPolicy: {{ .Values.ratelimit.image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: LOG_LEVEL
+              value: {{ .Values.ratelimit.logLevel | default "info" | quote }}
+            - name: LOG_FORMAT
+              value: "json"
+            # Stats to Prometheus, not statsd and not the log sink (which
+            # would flush every counter into stdout at debug level).
+            - name: USE_STATSD
+              value: "false"
+            - name: USE_PROMETHEUS
+              value: "true"
+            - name: PROMETHEUS_ADDR
+              value: ":{{ $ports.metrics | default 9090 }}"
+            - name: PROMETHEUS_PATH
+              value: "/metrics"
+            # HTTP (/healthcheck) on all interfaces for the probes and the
+            # NetworkPolicy-gated scrapers; gRPC on loopback ONLY. The sidecar
+            # is the sole path to the gRPC port, and it requires a client
+            # certificate.
+            - name: HOST
+              value: "0.0.0.0"
+            - name: PORT
+              value: {{ $ports.http | default 8080 | quote }}
+            - name: GRPC_HOST
+              value: "127.0.0.1"
+            - name: GRPC_PORT
+              value: {{ $ports.local | default 8082 | quote }}
+            - name: RUNTIME_ROOT
+              value: "/data"
+            - name: RUNTIME_SUBDIRECTORY
+              value: "ratelimit"
+            - name: RUNTIME_IGNOREDOTFILES
+              value: "true"
+            - name: RUNTIME_WATCH_ROOT
+              value: "false"
+            # Unhealthy until the descriptor config has loaded, so a pod with
+            # no quotas never receives traffic and fails open at the edge.
+            - name: HEALTHY_WITH_AT_LEAST_ONE_CONFIG_LOADED
+              value: "true"
+            - name: REDIS_SOCKET_TYPE
+              value: "tcp"
+            - name: REDIS_URL
+              value: "{{ .Release.Name }}-redis-stack:{{ .Values.redis.service.port | default 6379 }}"
+            - name: REDIS_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.redisPasswordSecretName" . }}
+                  key: {{ include "gibson.redisPasswordSecretKey" . }}
+          ports:
+            - name: http
+              containerPort: {{ $ports.http | default 8080 }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ $ports.metrics | default 9090 }}
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthcheck
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthcheck
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.ratelimit.resources | nindent 12 }}
+          volumeMounts:
+            {{- /* ONLY config.yaml may reach the runtime directory. ratelimit
+                   parses EVERY file under RUNTIME_ROOT/RUNTIME_SUBDIRECTORY as
+                   a quota config. With the whole ConfigMap mounted here it read
+                   the sidecar's envoy.yaml too, the parse failed ("unknown key
+                   'admin'"), the health server never left unhealthy under
+                   HEALTHY_WITH_AT_LEAST_ONE_CONFIG_LOADED, and the liveness
+                   probe killed the container every ~45s, forever. Measured on
+                   the shipped image: /healthcheck answers 500 with envoy.yaml
+                   in the directory and 200 without it (deploy#1766). */}}
+            - name: quota-config
+              mountPath: /data/ratelimit/config
+              readOnly: true
+        - name: envoy
+          image: "{{ .Values.envoy.image.repository }}:{{ .Values.envoy.image.tag }}"
+          imagePullPolicy: {{ .Values.envoy.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - "-c"
+            - "/etc/envoy/envoy.yaml"
+            - "--service-cluster"
+            - "gibson-ratelimit"
+            - "--service-node"
+            - "gibson-ratelimit"
+            - "--log-level"
+            - {{ .Values.envoy.logLevel | default "info" | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 101
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: grpc
+              containerPort: {{ $ports.grpc | default 8081 }}
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.ratelimit.sidecar.resources | nindent 12 }}
+          volumeMounts:
+            - name: envoy-bootstrap
+              mountPath: /etc/envoy
+              readOnly: true
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        {{- /* One ConfigMap, two projections (deploy#1766): the quota tree for
+               the ratelimit runtime loader, the bootstrap for the Envoy
+               sidecar. Never mount the whole ConfigMap on the runtime path. */}}
+        - name: quota-config
+          configMap:
+            name: gibson-ratelimit-config
+            items:
+              - key: config.yaml
+                path: config.yaml
+        - name: envoy-bootstrap
+          configMap:
+            name: gibson-ratelimit-config
+            items:
+              - key: envoy.yaml
+                path: envoy.yaml
+        - name: spire-agent-socket
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        - name: tmp
+          emptyDir: {}

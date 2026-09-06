@@ -1,0 +1,25 @@
+{{/* Redis-Stack PodDisruptionBudget (Week 2 §3 R9). Single-replica StatefulSet
+     by default — PDB is omitted unless explicitly opted in (a 1-replica PDB
+     blocks node drains). When the operator switches to a multi-replica
+     redis cluster image, set redis.podDisruptionBudget.enabled=true. */}}
+{{- $pdb := .Values.redis.podDisruptionBudget | default dict }}
+{{- if $pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-redis-stack
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  {{- if $pdb.maxUnavailable }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ $pdb.minAvailable | default 1 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+{{- end }}

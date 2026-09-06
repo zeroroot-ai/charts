@@ -1,0 +1,47 @@
+{{/* Dashboard NetworkPolicy (Week 2 §3 R17). Allow ingress from Envoy + ingress controllers.
+
+     dashboard is structural infrastructure (one-code-path / deploy#188).
+     The previous outer `.Values.dashboard.enabled` gate has been deleted;
+     the inner `networkPolicy.enabled` sub-feature flag is preserved
+     (legitimate sub-feature toggle). */}}
+{{- if ne (include "gibson.trueUnlessSet" (((.Values.dashboard).networkPolicy).enabled)) "false" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboard
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dashboard
+  policyTypes:
+    - Ingress
+    - Egress
+  {{- /* deploy#1365: allow-all egress under the namespace default-deny
+         (namespace-isolation/default-deny.yaml) — preserves this
+         component's pre-existing unrestricted-egress posture; per-
+         component egress tightening is tracked separately (deploy#1462). */}}
+  egress:
+    - {}
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "gibson.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: envoy
+      ports:
+        - protocol: TCP
+          port: 3000
+    # Allow scrapers
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        - podSelector:
+            matchLabels:
+              app: grafana-agent
+{{- end }}

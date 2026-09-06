@@ -1,0 +1,186 @@
+# Velero for the gibson platform (deploy#1734).
+#
+# Two blocks: `bucket` is the substrate seam this chart owns, and `velero` is
+# the pinned upstream sub-chart. Nothing here is a feature flag: the chart
+# renders the same shape on every substrate, and only the bucket values
+# change (kind: the stage 0 MinIO; AWS: S3 with an empty endpoint).
+
+# ---------------------------------------------------------------------------
+# The durable bucket. Stage 0 creates it and preflight proves it
+# live, so this chart never asks whether it exists. `make recreate` fills
+# these from substrate.env, the same way it fills
+# platformPostgres.backup.* for the CNPG Cluster (deploy#1730).
+# ---------------------------------------------------------------------------
+bucket:
+  # The bucket stage 0 created. gibson-kind is kind's.
+  name: "gibson-kind"
+  # The S3 API endpoint. EMPTY means AWS S3 for the region below. kind's
+  # MinIO listens on the last-but-two address of the kind Docker subnet,
+  # which kind/substrate/substrate.sh pins.
+  endpoint: "http://172.18.255.250:9000"
+  region: "us-east-1"
+  # The prefix under the bucket. It MUST sit under backups/, the prefix the
+  # bucket lifecycle rule covers; the render fails otherwise. Retention is
+  # that rule and nothing else.
+  prefix: "backups/velero"
+  # MinIO addresses buckets by path, S3 by host. True is correct for both:
+  # AWS still serves path-style addressing.
+  forcePathStyle: true
+  # How often the server re-validates the location.
+  validationFrequency: "1h"
+
+# ---------------------------------------------------------------------------
+# The credentials the BRINGUP writes into this namespace before the release
+# installs. This chart renders no Secret: both values come from
+# the bringup keyring, which never lives in a cluster except as these two
+# objects (scripts/keyring-to-cluster.sh, run by `make recreate ENV=kind`
+# and by scripts/vanilla-up.sh — deploy#1737).
+#
+#   velero-bucket-credential   key `cloud`, an AWS shared-credentials file.
+#                              MOUNTED into the pods, so reading it needs no
+#                              RBAC at all.
+#   velero-repo-credentials    key `repository-password`, the kopia
+#                              repository password (keyring member
+#                              VELERO_REPO_PASSWORD). Velero READS this one
+#                              through the API, which is the only reason the
+#                              namespaced Role names `secrets` at all. The
+#                              name and the key are hardcoded by Velero
+#                              (pkg/repository/keys/keys.go); they are stated
+#                              here because the RBAC and the guard name them.
+# ---------------------------------------------------------------------------
+credentials:
+  bucketSecret: "velero-bucket-credential"
+  bucketSecretKey: "cloud"
+  repositorySecret: "velero-repo-credentials"
+  repositorySecretKey: "repository-password"
+
+# ---------------------------------------------------------------------------
+# The one hourly Schedule (deploy#1735), rendered by templates/schedule.yaml.
+# The backup spec itself (namespaces, the secrets exclusion, the exclude
+# label, the Neo4j checkpoint hooks) is pinned in the template and is not a
+# knob. Only the numbers live here.
+# ---------------------------------------------------------------------------
+schedule:
+  # Hourly is the recovery point objective for Neo4j graphs, OpenBao and the
+  # tenant CRs (docs/bringup.md § Cadence). Postgres has a five minute RPO
+  # through its own WAL archive and is excluded from this backup.
+  cron: "0 * * * *"
+  # Velero's garbage collector deletes a backup whose ttl expired. Retention
+  # belongs to the bucket lifecycle rule: `backups/` expires at 180 days.
+  # This ttl states the SAME 180 days (4320h) so the two mechanisms agree.
+  # Change the lifecycle rule and this value together, or Velero prunes what
+  # the bucket keeps, or keeps records for objects the bucket expired.
+  ttl: "4320h0m0s"
+  # How long one Neo4j `CALL db.checkpoint()` may take before the hook, and
+  # with onError Fail the pod's backup, fails. A checkpoint flushes dirty
+  # pages, so a busy store needs minutes, not seconds.
+  checkpointTimeout: "5m"
+
+# ---------------------------------------------------------------------------
+# The upstream chart. Pinned in Chart.yaml; every value below is a deliberate
+# departure from its defaults.
+# ---------------------------------------------------------------------------
+velero:
+  image:
+    repository: ghcr.io/zeroroot-ai/mirror/velero
+    tag: v1.18.1
+    pullPolicy: IfNotPresent
+
+  # The object-store plugin, copied into the shared /plugins volume at
+  # startup. v1.14.x is the line compatible with Velero v1.18.x (the
+  # upstream compatibility matrix). It speaks S3 and MinIO alike.
+  initContainers:
+    - name: velero-plugin-for-aws
+      image: ghcr.io/zeroroot-ai/mirror/velero-plugin-for-aws:v1.14.2
+      imagePullPolicy: IfNotPresent
+      volumeMounts:
+        - mountPath: /target
+          name: plugins
+
+  # THE deploy#1193 SETTING. The upstream default binds this ServiceAccount
+  # to cluster-admin AND gives it apiGroups/resources/verbs `*` in its own
+  # namespace. Both are off, and templates/rbac.yaml carries the scoped
+  # replacement. tests/velero-rbac.bats fails the render if either comes
+  # back.
+  rbac:
+    create: false
+
+  serviceAccount:
+    server:
+      create: true
+      name: velero-server
+
+  # The bucket credential as a MOUNTED file (AWS_SHARED_CREDENTIALS_FILE),
+  # written by the bringup. `existingSecret` stops the chart rendering a
+  # Secret of its own.
+  credentials:
+    useSecret: true
+    existingSecret: "velero-bucket-credential"
+
+  # The BackupStorageLocation is rendered by templates/, not by the
+  # sub-chart: it is the one object whose shape this platform pins (the
+  # backups/ prefix rule), and the sub-chart's list form cannot be asserted
+  # or overridden one field at a time.
+  backupsEnabled: false
+
+  # No CSI volume snapshots: a snapshot is a cloud-specific path
+  # that does not exist on kind or on a customer cluster, so the platform has
+  # exactly one volume mechanism, file-system backup with kopia.
+  snapshotsEnabled: false
+
+  # The node-agent is that mechanism: it reads and writes pod volumes on each
+  # node. Without it a backup carries objects and no data.
+  deployNodeAgent: true
+
+  configuration:
+    uploaderType: kopia
+    # Every volume of a backed-up pod, with no per-pod annotation. With
+    # snapshots off this is the only mechanism there is, so an un-annotated
+    # volume must not fall through to nothing. A backup spec can still set
+    # `defaultVolumesToFsBackup` for itself.
+    defaultVolumesToFsBackup: true
+    defaultBackupStorageLocation: default
+    # A backup is deleted from the bucket by the bucket lifecycle rule, never
+    # by Velero on its own clock. The default ttl for a backup that states
+    # none is therefore the SAME 180 day horizon the lifecycle rule owns and
+    # the Schedule states (schedule.ttl above): one horizon, stated in three
+    # places, tied together by tests/velero-schedule.bats. A shorter default
+    # would have the garbage collector pruning an ad-hoc backup the bucket
+    # still keeps.
+    defaultBackupTTL: 4320h
+    logLevel: info
+
+  # The CRD jobs are OFF. `upgradeCRDs` runs a pre-install Job under a second
+  # ServiceAccount with its own ClusterRole, and `cleanUpCRDs` deletes every
+  # velero.io CR in the cluster on `helm uninstall`. The CRDs ship in the
+  # chart's crds/ directory, which Helm applies before the release, so
+  # neither job has anything to do here.
+  upgradeCRDs: false
+  cleanUpCRDs: false
+
+  # Requests that fit the smallest substrate (a 2-vCPU runner) and still let
+  # kopia stream. Limits are deliberately absent on the node-agent: an OOM
+  # kill mid-upload leaves a partial snapshot.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  nodeAgent:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+
+  metrics:
+    # No Prometheus on kind, and the ServiceMonitor CRD is a gibson-crds
+    # concern. The metrics endpoint itself stays up; only the CRs are off.
+    enabled: true
+    serviceMonitor:
+      enabled: false
+    nodeAgentPodMonitor:
+      enabled: false
+    prometheusRule:
+      enabled: false

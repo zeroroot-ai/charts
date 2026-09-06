@@ -1,0 +1,47 @@
+{{- /*
+RBAC: grants the gibson-ext-authz ServiceAccount read access to ConfigMaps in
+the release namespace. Required by the wait-for-fga-config init container
+(deploy#190 M4) which uses `kubectl get configmap gibson-fga-config` to block
+pod start until the fga-init Job has populated the ConfigMap.
+
+Scope is intentionally minimal: read-only, scoped to the release namespace,
+no wildcards. The previous alternative was `optional: true` on
+EXT_AUTHZ_FGA_STORE_ID / EXT_AUTHZ_FGA_MODEL_ID env refs, which meant the
+binary had to handle empty-string env vars and retry internally. The init
+container approach is the correct one-code-path pattern.
+
+ext-authz is structural infrastructure (deploy#188).
+*/}}
+{{- if .Values.extAuthz.serviceAccount.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gibson-ext-authz-fga-config-reader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ext-authz
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["gibson-fga-config"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gibson-ext-authz-fga-config-reader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ext-authz
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gibson-ext-authz-fga-config-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.extAuthz.serviceAccount.name | default "gibson-ext-authz" }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

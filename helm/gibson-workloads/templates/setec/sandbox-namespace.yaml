@@ -1,0 +1,81 @@
+{{/*
+=============================================================================
+The namespace Sandboxes run in.
+=============================================================================
+
+Sandboxes run untrusted code, so where they run is a containment decision,
+not a placement detail. This namespace exists to be the one place they run,
+and to be a namespace that holds nothing else.
+
+WHY A NAMESPACE OF ITS OWN, AND NOT A TENANT NAMESPACE
+
+The obvious alternative is to put Sandboxes in the gibson tenant namespace
+`tenant-<name>`. That is worse, for a reason that is not obvious until the
+policies are read together.
+
+The tenant-operator writes `gibson-tenant-default-deny` into every tenant
+namespace (gibson: operators/tenant/internal/controller/tenant_namespace.go,
+ensureNetworkPolicy). Despite the name it is not a deny-all: it selects
+every Pod in the namespace and then ALLOWS egress to the whole platform
+namespace on 8080 / 50100 / 50002, and to kube-system on 53. NetworkPolicies
+union, so a Sandbox Pod placed in that namespace would inherit that allow,
+and no policy the setec chart writes can subtract it. Untrusted code would
+get a route to the daemon and to ext-authz. Putting Sandboxes anywhere near
+a tenant namespace hands them the platform.
+
+The second reason is that a Sandbox namespace has to be a namespace nothing
+else lives in. The baseline policy the setec subchart renders here uses
+`podSelector: {}` — it denies every Pod in the namespace, present and
+future, with no label-based exemption (any label an exempt Pod could wear,
+an adversarial Pod could wear too). A namespace shared with ordinary
+workloads cannot carry that policy.
+
+Neither reason is about tenancy, and that matches: tenant
+isolation is gibson's boundary, untrusted-code execution is setec's, and
+the two are orthogonal. setec is deliberately tenancy-unaware.
+
+WHAT THIS NAMESPACE DOES, VIA setec.sandboxNamespaces
+
+Naming it in `setec.sandboxNamespaces` is one decision with two effects,
+both rendered by the subchart:
+
+  1. templates/sandbox-namespace-baseline-netpol.yaml renders the
+     namespace-wide default-deny NetworkPolicy here.
+  2. templates/sandbox-namespace-rbac.yaml binds the operator's Pod- and
+     NetworkPolicy-WRITE verbs here with a RoleBinding, instead of
+     cluster-wide. Cluster-wide `pods: create` is a cluster-admin path on
+     its own. Reads stay cluster-wide for the controller-runtime cache.
+
+WHAT IT DOES NOT DO
+
+It does not set Pod Security Admission labels, and that is deliberate
+rather than an oversight. PSA is the only control that reaches a
+`hostNetwork: true` Pod, which runs in the node network namespace and is
+outside NetworkPolicy enforcement entirely. But the legitimate Sandbox Pod
+adds NET_RAW and NET_ADMIN (setec: internal/podspec/builder.go,
+sandboxCapabilities), and the PSA `baseline` level permits neither. Setting
+`enforce: baseline` here would reject every real Sandbox while blocking the
+hostNetwork case. Closing that gap needs an admission policy that can gate
+hostNetwork without gating capabilities — Kyverno, Gatekeeper or a
+ValidatingAdmissionPolicy — which this chart does not own.
+
+Sync-wave -10 puts the Namespace ahead of the RoleBinding and the
+NetworkPolicy that target it. Argo's default kind ordering already places
+Namespace first; the wave states the dependency rather than relying on it.
+*/}}
+{{- if .Values.setec.enabled }}
+{{- range $ns := (.Values.setec.sandboxNamespaces | default list) }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns | quote }}
+  labels:
+    app.kubernetes.io/managed-by: {{ $.Release.Service }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    app.kubernetes.io/component: sandbox
+    setec.zeroroot.ai/sandbox-namespace: "true"
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+{{- end }}
+{{- end }}

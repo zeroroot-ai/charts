@@ -1,0 +1,28 @@
+{{/*
+docs-svc Service — core optional-by-toggle docs surface.
+
+ClusterIP on port 8080 → containerPort 8080 (nginx-unprivileged).
+The Envoy gibson_docs_svc cluster connects to this Service at port 8080.
+
+ / deploy#1034.
+*/}}
+{{- if ne ((.Values.docs).enabled | toString) "false" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: gibson-docs-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: docs-svc
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: docs-svc
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

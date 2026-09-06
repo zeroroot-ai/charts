@@ -1,0 +1,142 @@
+{{/*
+helm-test pod: zitadel-auth-probe
+
+Asserts the Zitadel OIDC endpoint is reachable AND exchanges a
+client_credentials grant for the platform-operator MACHINE_USER successfully.
+
+Why this matters: the entire dashboard sign-in flow + the platform-operator's
+Zitadel reconcile depend on:
+
+  1. Zitadel's /oauth/v2/.well-known/openid-configuration being reachable
+  2. The MACHINE_USER's PAT secret being valid (Zitadel hasn't revoked it)
+  3. The PAT exchange returning a valid JWT (not opaque) — chart issue
+     deploy#132/#133 root-caused the `Audiences in Jwt are not allowed`
+     class of failure to PAT misconfiguration
+
+Conditional execution:
+
+  - The PAT Secret comes from platformBootstrap.zitadel.serviceUsers[0].patSecretRef.
+  - If that Secret is missing in the namespace (e.g. an overlay disables
+    serviceUsers — currently forbidden by design but defensive coding),
+    the test logs `SKIPPED` and exits 0.
+
+Provenance: deploy#355 (slice 5.10 of production-readiness epic).
+Related: deploy#132/#133 (Envoy JWT vhost + audience), platform-operator#21
+(PAT mint reconcile).
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "gibson.fullname" . }}-test-zitadel-auth-probe"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson-workloads.tests.labels" . | nindent 4 }}
+    app.kubernetes.io/component: helm-test
+  annotations:
+    {{- include "gibson-workloads.tests.annotations" . | nindent 4 }}
+    "helm.sh/hook-weight": "5"
+spec:
+  restartPolicy: Never
+  serviceAccountName: "{{ include "gibson.fullname" . }}-test-bootstrap-reader"
+  containers:
+    - name: probe
+      image: "{{ include "gibson-workloads.tests.kubectlImage" . }}"
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          ERR='{{ include "gibson-workloads.tests.errorPrefix" . }}'
+          NS='{{ .Release.Namespace }}'
+
+          # Resolve the Zitadel issuer.
+          # platformBootstrap.* lives in the sibling gibson-operators chart;
+          # this workload chart's tests block carries an override knob.
+          # Default `http://gibson-zitadel:8080` matches the kind-dev Service.
+          ISSUER='{{ (.Values.tests.zitadel).issuer | default "http://gibson-zitadel:8080" }}'
+
+          # 1. .well-known/openid-configuration reachable.
+          code=$(curl -ksS -o /tmp/wk -w '%{http_code}' --max-time 10 \
+            "${ISSUER}/.well-known/openid-configuration" || echo "000")
+          if [ "$code" != "200" ]; then
+            echo "$ERR zitadel-auth-probe: discovery endpoint returned HTTP $code"
+            [ -s /tmp/wk ] && echo "[zitadel-auth-probe] body: $(head -c 400 /tmp/wk)"
+            exit 1
+          fi
+          echo "[zitadel-auth-probe] discovery OK"
+
+          # 2. Find the dashboard MACHINE_USER PAT secret.
+          # Default `gibson-zitadel-dashboard` matches gibson-operators
+          # values; override via .tests.zitadel.dashboardPatSecret.
+          PAT_SECRET='{{ (.Values.tests.zitadel).dashboardPatSecret | default "gibson-zitadel-dashboard" }}'
+          PAT_KEY='{{ (.Values.tests.zitadel).dashboardPatKey | default "pat" }}'
+
+          if ! kubectl -n "$NS" get secret "$PAT_SECRET" >/dev/null 2>&1 ; then
+            echo "[zitadel-auth-probe] SKIPPED: MACHINE_USER PAT secret $PAT_SECRET not found"
+            echo "[zitadel-auth-probe] (operator may not have minted it yet; this is non-fatal during initial bringup)"
+            exit 0
+          fi
+
+          PAT=$(kubectl -n "$NS" get secret "$PAT_SECRET" \
+            -o "jsonpath={.data.${PAT_KEY}}" 2>/dev/null | base64 -d 2>/dev/null || echo "")
+          if [ -z "$PAT" ]; then
+            echo "$ERR zitadel-auth-probe: PAT Secret $PAT_SECRET key '$PAT_KEY' is empty"
+            exit 1
+          fi
+
+          # 3. Probe /management/v1/info with the PAT. A 200 OK proves Zitadel
+          # accepts the token + can route the management API. If we get 401
+          # the PAT is wrong; 403 means missing role grants.
+          code=$(curl -ksS -o /tmp/info -w '%{http_code}' --max-time 10 \
+            -H "Authorization: Bearer ${PAT}" \
+            "${ISSUER}/management/v1/info" || echo "000")
+          case "$code" in
+            200)
+              echo "[zitadel-auth-probe] MACHINE_USER PAT verified against /management/v1/info (HTTP 200)"
+              ;;
+            401)
+              echo "$ERR zitadel-auth-probe: PAT rejected by Zitadel (HTTP 401)"
+              echo "[zitadel-auth-probe] MACHINE_USER PAT in $PAT_SECRET is stale or wrong"
+              exit 1
+              ;;
+            403)
+              echo "$ERR zitadel-auth-probe: MACHINE_USER lacks role grants (HTTP 403)"
+              echo "[zitadel-auth-probe] platform-operator's role-grant reconcile has not completed"
+              exit 1
+              ;;
+            *)
+              echo "$ERR zitadel-auth-probe: unexpected HTTP $code from /management/v1/info"
+              [ -s /tmp/info ] && echo "[zitadel-auth-probe] body: $(head -c 400 /tmp/info)"
+              exit 1
+              ;;
+          esac
+
+          echo ""
+          echo "[zitadel-auth-probe] PASS"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}

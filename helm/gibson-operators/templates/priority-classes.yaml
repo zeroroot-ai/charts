@@ -1,0 +1,45 @@
+{{/*
+PriorityClasses for Gibson workloads (Week 2 §3 R18 / Spec 2 R18).
+
+Three tiers; the existing `tenant-neo4j` PC (value 100) is rendered by
+templates/operations/tenant-neo4j-resource-quota.yaml and is intentionally
+NOT duplicated here.
+
+Tier values (keep the spread wide so the kube-scheduler always evicts
+correctly):
+  - gibson-platform-critical (900) — daemon, ext-authz, envoy, openfga, spire-server.
+                                     Loss-of-availability of these is platform downtime.
+  - gibson-platform          (500) — dashboard, tenant-operator. Customer-visible
+                                     but the platform stays up without them briefly.
+
+Both PCs are rendered unconditionally (cluster-scoped) so the kind quota
+scoping in operations/tenant-neo4j-resource-quota.yaml (which references
+tenant-neo4j) keeps working without coupling the two specs.
+*/}}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: gibson-platform-critical
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: priority-class
+value: 900
+globalDefault: false
+description: >
+  Gibson critical platform components — daemon, ext-authz, envoy gateway,
+  openfga, spire-server. Loss of any of these is platform downtime; kube-scheduler
+  preempts unprivileged pods to keep them running.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: gibson-platform
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: priority-class
+value: 500
+globalDefault: false
+description: >
+  Gibson platform components — dashboard, tenant-operator. Customer-visible
+  but not on the daemon-handler hot path; preempted by gibson-platform-critical
+  but ahead of unpriced workloads.

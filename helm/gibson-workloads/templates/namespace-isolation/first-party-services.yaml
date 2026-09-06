@@ -1,0 +1,224 @@
+{{/*
+Allow policies for first-party workloads of THIS chart that predate the
+namespace default-deny and had no policy (deploy#1365). See
+namespace-isolation/subchart-workloads.yaml for the design rationale
+(precise ingress, allow-all egress, contained-by-default for everything
+unselected).
+*/}}
+{{- $devDisabled := false -}}
+{{- with .Values.dev -}}{{- with .networkPolicy -}}{{- $devDisabled = .disabled -}}{{- end -}}{{- end -}}
+{{- if not $devDisabled -}}
+{{/* OpenBao — the platform secret store, HTTP API on :8200. Callers:
+     daemon, ext-authz (Vault/KMS-backed material), both operators
+     (per-tenant secret provisioning), the openbao-jwt-auth-init bringup
+     Job, and the External Secrets Operator from its own namespace
+     (external-secrets). :8201 is cluster/replication traffic between
+     openbao replicas — currently unexercised (replicas:1, storage
+     "file", no raft peers), kept for when deploy#1547 (raft-vs-file,
+     owner decision) lands HA. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-openbao
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao-isolation
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: openbao
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: daemon
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: ext-authz
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: tenant-operator
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: platform-operator
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: openbao-jwt-auth-init
+        # The external-secrets controller is an umbrella subchart in this
+        # namespace (deploy#1728): it logs in to OpenBao with its own
+        # ServiceAccount to read every ExternalSecret. Selected by the
+        # upstream chart's pod label, no longer by a namespace.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: external-secrets
+      ports:
+        - protocol: TCP
+          port: 8200
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: openbao
+      ports:
+        - protocol: TCP
+          port: 8201
+  {{- /* deploy#1462 tranche 2: NARROWED. OpenBao originates no
+         in-namespace calls under normal operation (single replica,
+         storage "file", no raft peer traffic), so DNS plus the one JWKS
+         hop below is the whole egress set. The static seal (deploy#1731)
+         reads its key from a mounted file and makes no cloud call, so the
+         former ipBlock 0.0.0.0/0:443 rule for AWS KMS, Secrets Manager
+         and STS is gone with the kms seal. */}}
+  egress:
+    {{- include "gibson.netpolEgressDNS" . | nindent 4 }}
+    {{- /* OpenBao DOES originate one in-namespace call the narrowing above
+           missed: the JWT-auth backend fetches the SPIRE OIDC provider's JWKS
+           at auth/jwt/config write time (root Job + per-tenant operator). The
+           provider serves on :https (8443); allow just that hop. Without it the
+           config write fails with "error checking jwks URL" and no tenant (nor
+           the daemon's root mount) can validate a SPIRE JWT-SVID. */}}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: spiffe-oidc-discovery-provider
+      ports:
+        - protocol: TCP
+          port: 8443
+        - protocol: TCP
+          port: 443
+---
+{{/* docs-svc — static customer-docs deployable, reached only through the
+     Envoy edge on :8080. Rides the docs.enabled seam (— online
+     self-hosted may disable local docs entirely; docs-seam.bats asserts
+     NOTHING named docs-svc renders when disabled). */}}
+{{- if ne ((.Values.docs).enabled | toString) "false" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-docs-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: docs-svc-isolation
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: docs-svc
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: envoy
+      ports:
+        - protocol: TCP
+          port: 8080
+  {{- /* deploy#1462: NARROWED to DNS only. docs-svc serves a statically
+         built customer-docs bundle baked into its image. It reaches
+         nothing: no database, no daemon RPC, no upstream fetch at
+         request time. Allow-all egress on a pod whose entire job is to
+         return bytes it already has is pure attack surface — it is the
+         internet-reachable-content component, so it is exactly the one
+         an exploit would land in first.
+
+         DNS stays allowed so a resolver failure never masquerades as an
+         application fault. */}}
+  egress:
+    {{- include "gibson.netpolEgressDNS" . | nindent 4 }}
+{{- end }}
+---
+{{/* ---------------------------------------------------------------------
+     Client-only workloads: DaemonSets, CronJobs and bringup Jobs of this
+     chart that accept NO connections (their servers' policies name them
+     as callers where relevant) but must keep egress under the namespace
+     default-deny — DNS, the kube-apiserver, and their in-namespace
+     dependencies. One policy, matchExpressions-OR over the component
+     labels. No ingress rules: selecting a pod with policyTypes Ingress
+     and an empty rule list IS the per-pod ingress deny.
+--------------------------------------------------------------------- */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-client-workloads
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: client-workloads-isolation
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - sandbox-eviction-handler
+          - dashboard-shell-gc
+          - redis-rotation
+          - redis-backup
+          # openbao-backup reads the OpenBao PVC directly (no API call to
+          # OpenBao, so it is absent from the openbao ingress list above) and
+          # needs egress to S3 + STS for the IRSA credential exchange
+          # (deploy#1496).
+          - openbao-backup
+          - redis-index-migration
+          - fga-init
+          - openbao-jwt-auth-init
+          - active-session-backfill
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - {}
+---
+{{/* ---------------------------------------------------------------------
+     Dev + observability surfaces (in-chart prometheus/grafana/loki/
+     promtail/jaeger, mailpit, stripe-mock). These render only on dev-
+     shaped profiles (observability.provider=in-chart, jaeger.enabled,
+     mailpit/stripe-mock enabled) and every platform component may need
+     to reach them (jaeger OTLP ingest from any instrumented pod,
+     prometheus scraped BY grafana, loki written by promtail, SMTP to
+     mailpit). Ingress is therefore any pod in the RELEASE NAMESPACE —
+     still a real boundary: pods outside the namespace and unlabelled
+     rogue pods (no egress allowance) cannot reach them. Inert on
+     profiles where none of these render.
+
+     stripe-mock is deliberately NOT in this list: its allow policy lives
+     inside templates/stripe-mock/deployment.yaml behind the
+     stripeMock.enabled gate, because kind-profile-coherence.bats asserts
+     the literal is ABSENT from the saas render (deploy#1143 class —
+     guards matched by rendered prose).
+--------------------------------------------------------------------- */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-dev-observability
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dev-observability-isolation
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - prometheus
+          - grafana
+          - loki
+          - promtail
+          - jaeger
+          - mailpit
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - {}
+{{- end }}

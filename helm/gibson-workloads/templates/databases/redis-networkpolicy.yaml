@@ -1,0 +1,71 @@
+{{/* Redis-Stack NetworkPolicy (Week 2 §3 R17). Allow ingress from daemon, ext-authz, dashboard,
+     tenant-operator. */}}
+{{- /* Sub-feature toggle: rendered when redis.networkPolicy.enabled
+       (default true). Redis itself is structural — no provider gate. */ -}}
+{{- if ne (include "gibson.trueUnlessSet" (((.Values.redis).networkPolicy).enabled)) "false" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-redis-stack
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  policyTypes:
+    - Ingress
+    - Egress
+  {{- /* deploy#1462: NARROWED to DNS only. Redis-Stack is a leaf data
+         store — it accepts connections and originates none. Nothing in
+         this chart configures replication, cluster bus, a RedisGears
+         fetch or any outbound module, so there is no in-namespace or
+         internet destination it legitimately needs.
+
+         That makes the win concrete rather than cosmetic: Redis holds
+         session and cache material, and until now a compromised redis
+         pod could dial cnpg/openfga/openbao laterally and exfiltrate to
+         anywhere on the internet. It now cannot open a connection at
+         all. The rotation/backup/index-migration CronJobs are SEPARATE
+         pods (client-workloads policy) and dial IN — they are unaffected.
+
+         DNS stays allowed because a pod with no resolver fails in ways
+         that look like data corruption rather than a network block. */}}
+  egress:
+    {{- include "gibson.netpolEgressDNS" . | nindent 4 }}
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: daemon
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: ext-authz
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: dashboard
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: tenant-operator
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: redis-index-migration
+        # deploy#1657: the per-client quota counters (rl:* keys).
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: ratelimit
+        # deploy#1365: rotation + backup CronJobs dial redis directly;
+        # under the namespace default-deny they must be named here.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: redis-rotation
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: redis-backup
+      ports:
+        - protocol: TCP
+          port: 6379
+{{- end }}

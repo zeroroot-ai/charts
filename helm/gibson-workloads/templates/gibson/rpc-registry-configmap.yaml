@@ -1,0 +1,22 @@
+{{- /*
+rpc-registry-configmap.yaml — optional override of the daemon's embedded
+FGA RPC authorization registry. Rendered only when
+`gibson.authz.rpcRegistry.override` is non-empty; otherwise the daemon uses
+the YAML baked into the binary at build time.
+
+See spec 21-yaml-rpc-authz-registry and enterprise/docs/AUTH.md §4.5.
+*/ -}}
+{{- with .Values.gibson.authz.rpcRegistry }}
+{{- if .override }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gibson.fullname" $ }}-authz-rpc-registry
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" $ | nindent 4 }}
+data:
+  rpc_registry.yaml: |-
+    {{- .override | nindent 4 }}
+{{- end }}
+{{- end }}

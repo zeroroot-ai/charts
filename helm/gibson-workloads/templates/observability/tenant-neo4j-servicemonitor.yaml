@@ -1,0 +1,52 @@
+{{/*
+ServiceMonitor for per-tenant Neo4j pods.
+
+Spec: per-tenant-data-plane-completion Task 31 / Req 10.3.
+
+Selects every per-tenant Neo4j Service by the
+`app.kubernetes.io/component=tenant-neo4j` label set by the
+tenant-operator's Go-built resources (the tenant-neo4j-template
+ConfigMap is not yet rendered by the chart — Task 22, deploy#1437).
+One ServiceMonitor sweeps all tenants — no per-tenant Prometheus jobs.
+
+The Neo4j Prometheus endpoint listens on port 2004 (`metrics` named port,
+added to the template in Task 31). The `gibson.zeroroot.ai/tenant-id` label is
+relabeled into a `tenant_id` time-series label so dashboards can filter
+per-tenant.
+*/}}
+{{- /* Both observability provider shapes consume ServiceMonitors; gated only
+       on the CRD presence at this point (deploy#313). */ -}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-tenant-neo4j
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tenant-neo4j
+    # Match the Prometheus Operator's serviceMonitorSelector if configured.
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: tenant-neo4j
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      # Promote the per-tenant label so PromQL can filter by tenant_id.
+      relabelings:
+        - sourceLabels:
+            - __meta_kubernetes_service_label_gibson_io_tenant_id
+          targetLabel: tenant_id
+        - sourceLabels:
+            - __meta_kubernetes_service_label_gibson_io_tier
+          targetLabel: tier
+  # Tenants land in per-tenant namespaces under the operator-provisioning
+  # path, so scrape across all namespaces — the label selector above is the
+  # only filter that matters.
+  namespaceSelector:
+    any: true
+{{- end }}

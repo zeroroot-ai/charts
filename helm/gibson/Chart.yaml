@@ -1,0 +1,183 @@
+apiVersion: v2
+name: gibson
+description: |
+  The Gibson platform umbrella chart — the single deployable unit.
+
+  CRDs are NOT here. They install as a separate release first:
+
+    helm install gibson-crds helm/gibson-crds -n gibson --create-namespace
+    helm install gibson     helm/gibson     -n gibson
+
+  Helm resolves every rendered manifest's kind against the live API server
+  BEFORE it applies anything, so a CRD and a CR of that CRD cannot share a
+  release — no apply ordering can fix it (deploy#1627). gibson-crds carries
+  spire-crds and prometheus-operator-crds for the same reason.
+
+  Wraps the two platform sub-charts as ordered dependencies:
+    gibson-operators  (tenant-operator + platform-operator; after CRDs)
+    gibson-workloads  (daemon, dashboard, ext-authz, Envoy, SPIFFE,
+                       PlatformBootstrap CR; after operators)
+
+  This is slice #785 (deploy#784): it establishes the umbrella *shape* so
+  every consumer — `helm install gibson`, Argo, Flux, a Big Bang package —
+  installs one artifact. The currently-gitops-only ExternalSecrets, bringup
+  Jobs, and CNPG cluster are folded in by later slices (#787, #788); until
+  then they are applied alongside from gitops.
+
+  The umbrella is controller-agnostic: no Argo/Flux/Istio dependency is
+  assumed. See enterprise/deploy/docs/adr/0003-big-bang-compatible-umbrella-chart.md.
+type: application
+# NOTE: both `version` and `appVersion` below are PLACEHOLDERS. The real
+# release version is release-please-managed (.release-please-manifest.json +
+# the `v*` git tag) and is stamped into the packaged chart at publish time by
+# publish-umbrella-chart.yml (`helm package … --version <tag> --app-version
+# <tag>`). Neither literal here is the source of truth. They are kept roughly
+# current so a from-source `helm template`/`helm package` (kind, Argo rendering
+# the repo) labels sensibly and any image tag that falls back to
+# `.Chart.AppVersion` resolves to a plausible release rather than a fossil.
+# Do NOT hand-pick a release version here — that is release-please's job.
+version: 0.1.0
+appVersion: "0.132.0"
+kubeVersion: ">=1.27.0-0"
+maintainers:
+  - name: Zero Root AI
+    email: team@zeroroot.ai
+keywords:
+  - gibson
+  - umbrella
+  - platform
+home: https://github.com/zeroroot-ai/deploy
+sources:
+  - https://github.com/zeroroot-ai/deploy
+
+# GHCR anchors a package to the repository named here. Without it the package
+# stays linked to whichever repo first published it, which is how charts/*
+# remained owned by deploy after the split.
+annotations:
+  org.opencontainers.image.source: https://github.com/zeroroot-ai/charts
+
+# Ordered platform sub-charts. CRDs are deliberately absent — they belong to
+# the gibson-crds release, which must already be installed. The previous
+# comment here claimed Helm "applies CustomResourceDefinitions before workloads
+# within a single release": true of apply order, false of manifest validation,
+# which is where the install actually failed. file:// keeps the repo
+# self-contained with no intermediate OCI publish.
+dependencies:
+  - name: gibson-operators
+    version: "0.3.0"
+    repository: "file://../gibson-operators"
+  - name: gibson-workloads
+    version: "0.2.0"
+    repository: "file://../gibson-workloads"
+  - name: neo4j
+    alias: neo4j
+    version: "2026.4.0"
+    repository: "https://helm.neo4j.com/neo4j"
+  - name: openfga
+    alias: openfga
+    version: "0.3.4"
+    repository: "https://openfga.github.io/helm-charts"
+  - name: zitadel
+    alias: zitadel
+    version: "9.34.1"
+    repository: "https://charts.zitadel.com"
+  # NOTE (deploy#1343): there is deliberately NO `redis` dependency here.
+  # The Bitnami redis subchart was carried unconditionally (no `condition:`)
+  # and stood up a full gibson-redis-master StatefulSet, four ConfigMaps, two
+  # Services and a 2Gi PVC in EVERY profile — with no consumer anywhere. The
+  # platform's Redis is the redis-stack Deployment in gibson-workloads
+  # (`gibson-redis-stack:6379`); RediSearch is a hard requirement for the
+  # catalog/vector store and the Bitnami image cannot serve it. Its image was
+  # also the worst-pinned reference in the chart: a mutable
+  # `registry-1.docker.io/bitnami/redis:latest`, pulled unauthenticated from
+  # Docker Hub, in a chart that digest-pins everything else. Do not re-add it;
+  # if a second Redis is ever genuinely needed, it needs a consumer, a
+  # `condition:`, and a mirrored immutable tag.
+  # spire-crds is NOT here — it moved to gibson-crds. This chart renders 14
+  # ClusterSPIFFEIDs, so it cannot also own the CRD that defines them.
+  - name: spire
+    alias: spire
+    version: "0.28.4"
+    repository: "https://spiffe.github.io/helm-charts-hardened"
+  # The cluster operators the platform depends on (deploy#1728).
+  # The umbrella owns them on every substrate: kind, EKS and a customer
+  # cluster all get the same four controllers from this chart, and stage 1
+  # (Terraform) installs Argo CD and nothing else. None of them is
+  # conditional: no service is optional. The
+  # `cnpg.enabled` substitution seam that let kind run a Terraform-owned CNPG
+  # operator is gone with the Terraform release it selected.
+  #
+  # Their CustomResourceDefinitions are NOT installed by these subcharts
+  # (crds.enabled / installCRDs / crds.create are all false in values.yaml).
+  # The umbrella renders CRs of every one of them (Certificate, Issuer,
+  # ExternalSecret, ClusterSecretStore, Cluster), so the CRDs live in
+  # gibson-crds, vendored from these exact chart versions by
+  # scripts/vendor-operator-crds.py. Bump a version here and that script's
+  # --check fails until the vendored copy is regenerated.
+  #
+  # Under Argo every resource of cert-manager, external-secrets and the CNPG
+  # operator carries sync-wave -20 (values.yaml), ahead of the
+  # ClusterSecretStore at -10 and the first ExternalSecret at -8. cert-manager
+  # and external-secrets expose no annotation seam for their RBAC, so the
+  # subcharts render with RBAC off and the umbrella carries a vendored,
+  # wave-annotated copy in templates/operators/ (scripts/vendor-operator-rbac.py).
+  - name: cert-manager
+    version: "v1.21.1"
+    repository: "https://charts.jetstack.io"
+  # OPERATOR-SUBSTITUTION SEAM. This condition selects WHOSE cert-manager runs, never
+  # WHETHER one runs. Every install still runs exactly one. A cluster that
+  # already owns it — Big Bang, or any brownfield estate — sets this false and
+  # the platform uses theirs. This is not an optional service and not a feature
+  # flag: there is one code path and two possible owners.
+    condition: certManager.enabled
+  - name: external-secrets
+    version: "2.10.0"
+    repository: "https://charts.external-secrets.io"
+  # OPERATOR-SUBSTITUTION SEAM. This condition selects WHOSE External Secrets Operator runs, never
+  # WHETHER one runs. Every install still runs exactly one. A cluster that
+  # already owns it — Big Bang, or any brownfield estate — sets this false and
+  # the platform uses theirs. This is not an optional service and not a feature
+  # flag: there is one code path and two possible owners.
+    condition: externalSecrets.enabled
+  - name: external-dns
+    version: "1.21.1"
+    repository: "https://kubernetes-sigs.github.io/external-dns/"
+  # OPERATOR-SUBSTITUTION SEAM. This condition selects WHOSE ExternalDNS runs, never
+  # WHETHER one runs. Every install still runs exactly one. A cluster that
+  # already owns it — Big Bang, or any brownfield estate — sets this false and
+  # the platform uses theirs. This is not an optional service and not a feature
+  # flag: there is one code path and two possible owners.
+    condition: externalDns.enabled
+  - name: cloudnative-pg
+    alias: cnpg
+    version: "0.29.0"
+    # CloudNativePG's OWN OCI registry, not a rehost (deploy#1778). The
+    # classic repo https://cloudnative-pg.github.io/charts 301-redirects to
+    # cloudnative-pg.io, which publishes AAAA records only. GitHub runners are
+    # IPv4-only, so that host is permanently unreachable from CI and one dead
+    # `helm repo add` failed ten jobs at once on 2026-09-02. ghcr.io is
+    # IPv4-reachable and serves this chart anonymously, upstream-published.
+    repository: "oci://ghcr.io/cloudnative-pg/charts"
+  # prometheus-operator-crds is NOT here — it moved to gibson-crds. This chart
+  # renders 5 ServiceMonitors, so it cannot also own the CRD that defines them.
+  # The rule this used to cite ("the umbrella must carry the CRDs it renders CRs
+  # for") is unimplementable under Helm; see the amendment.
+  # NOTE (deploy#1193, deploy#1734): there is deliberately NO `velero`
+  # dependency here, and there never will be. Velero was once carried
+  # unconditionally with the upstream chart's defaults, which bind its
+  # ServiceAccount to cluster-admin, while no environment ever gave it a
+  # BackupStorageLocation — a cluster-admin that backed up nothing.
+  #
+  # It now ships as helm/gibson-velero, a SEPARATE RELEASE in the `velero`
+  # namespace, with an owner, a BSL and a scoped RBAC posture. The namespace
+  # is the reason it cannot live here: the velero server keeps a cache
+  # restricted to its own namespace and reads its kopia repository password
+  # through it, so a cached Secret read needs list and watch on secrets in
+  # that namespace. This namespace holds every platform Secret. See
+  # helm/gibson-velero/Chart.yaml.
+  # OPERATOR-SUBSTITUTION SEAM. This condition selects WHOSE the CloudNativePG operator runs, never
+  # WHETHER one runs. Every install still runs exactly one. A cluster that
+  # already owns it — Big Bang, or any brownfield estate — sets this false and
+  # the platform uses theirs. This is not an optional service and not a feature
+  # flag: there is one code path and two possible owners.
+    condition: cnpg.enabled

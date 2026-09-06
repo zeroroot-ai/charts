@@ -1,0 +1,46 @@
+{{/* platform-operator NetworkPolicy (deploy#1365). Unlike the
+     tenant-operator, the platform-operator serves NO admission webhook —
+     its only listeners are metrics (:8080) and health probes (:8081;
+     kubelet probes are always permitted by the CNI's node-local
+     allowance). Ingress is therefore scrapers-only. Egress is allow-all
+     under the namespace default-deny added by deploy#1365 (Zitadel OIDC
+     app provisioning, OpenFGA, OpenBao, kube-apiserver); per-component
+     egress tightening is tracked separately (deploy#1462).
+
+     platform-operator is structural infrastructure (one-code-path /
+     deploy#188); the inner `networkPolicy.enabled` sub-feature flag
+     matches the tenant-operator policy's shape. */}}
+{{- if ne (include "gibson.trueUnlessSet" (((.Values.platformOperator).networkPolicy).enabled)) "false" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-platform-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: platform-operator
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: platform-operator
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - {}
+  ingress:
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: prometheus
+        - podSelector:
+            matchLabels:
+              app: grafana-agent
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}

@@ -1,0 +1,84 @@
+{{- /*
+  dashboard is structural infrastructure (one-code-path /
+  deploy#188). The previous outer `.Values.dashboard.enabled`
+  gate has been deleted — these RBAC objects render unconditionally.
+*/}}
+# Dashboard ServiceAccount lives in templates/dashboard/serviceaccount.yaml
+# (supports IRSA annotations via dashboard.serviceAccount.annotations).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gibson-dashboard-crd
+  labels:
+    app.kubernetes.io/name: gibson-dashboard
+    app.kubernetes.io/part-of: gibson
+rules:
+  # Tenants (cluster-scoped). Verbs reduced to read-only under spec
+  # `tenant-membership-not-in-jwt`: the dashboard no longer mutates Tenants
+  # directly (mutations go through PlatformOperatorService /
+  # TenantAdminService RPCs / tenant-operator), and the cluster-wide `list`
+  # of every Tenant CR was removed when src/lib/k8s/tenants-by-owner.ts was
+  # deleted. `get` + `watch` are kept so the dashboard can still surface
+  # tenant metadata for the active tenant.
+  #
+  # `create` is required by the signup Server Action (app/actions/signup.ts)
+  # which applies a Tenant CR via the K8s API on workspace creation. Spec
+  # auth-resolution-hardening Req 1 reduced this rule to [get, watch] under
+  # the assumption that signup would route through a PlatformOperatorService
+  # RPC, but that refactor wasn't shipped — the live code path still calls
+  # applyTenant() directly. Restore `create` until the PlatformOperatorService
+  # path lands; track removal under a follow-up to that spec.
+  #
+  # `update`/`patch` are required by the Stripe webhook handler
+  # (app/api/billing/webhook/route.ts), which stamps the
+  # gibson.zeroroot.ai/billing-active annotation (and teardown-after) on the
+  # Tenant CR — the signal the operator's WaitForBillingConfirmation polls to
+  # release card-first signup provisioning (dashboard#780/#785). Without these,
+  # the patch is forbidden, billing-active never lands, and every paid signup
+  # times out. The handler only mutates after verifying the Stripe-Signature
+  # HMAC, so this is not an arbitrary-mutation surface. Cleaner long-term shape
+  # is a daemon/operator RPC owning the stamp (tracked as a follow-up); restore
+  # these verbs until that lands.
+  #
+  # `list`/`delete` remain off — the dashboard never lists every Tenant or
+  # deletes one (that's the operator's job).
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["tenants"]
+    verbs: ["get", "watch", "create", "update", "patch"]
+  # Tenant status (needed to watch status.phase).
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["tenants/status"]
+    verbs: ["get"]
+  # Namespaced CRDs (across all tenant-* namespaces).
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["tenantmembers", "agentenrollments", "componentgrants"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Read Secrets in tenant-* namespaces for bootstrap-token display only.
+  # LLM provider credentials are NOT stored in Kubernetes Secrets by the
+  # dashboard — they are managed exclusively by the daemon's encrypted
+  # credential store (spec 25-daemon-driven-provider-config). This rule
+  # exists solely for reading agent-enrollment bootstrap-token Secrets
+  # whose names are dynamic (secretRef on the Tenant CRD).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+  # Read namespaces for tenant aggregate views.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gibson-dashboard-crd
+  labels:
+    app.kubernetes.io/name: gibson-dashboard
+    app.kubernetes.io/part-of: gibson
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.dashboard.serviceAccount.name | default "gibson-dashboard" }}
+    namespace: {{ .Values.dashboard.namespace | default "gibson" }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gibson-dashboard-crd

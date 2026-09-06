@@ -1,0 +1,21 @@
+{{- /*
+  platform-operator is structural infrastructure (one-code-path /
+  deploy#188). The previous `.Values.platformOperator.enabled` gate has
+  been deleted — the metrics Service is unconditionally required.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: gibson-platform-operator-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: gibson-platform-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  selector:
+    app.kubernetes.io/name: gibson-platform-operator
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+      protocol: TCP

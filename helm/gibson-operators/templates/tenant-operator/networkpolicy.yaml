@@ -1,0 +1,52 @@
+{{/* tenant-operator NetworkPolicy (Week 2 §3 R17). Operator only receives webhook traffic
+     from kube-apiserver.
+     tenant-operator is structural infrastructure (one-code-path /
+     deploy#188). The previous outer `.Values.tenantOperator.enabled`
+     gate has been deleted; the inner `networkPolicy.enabled`
+     sub-feature flag is preserved (legitimate sub-feature toggle). */}}
+{{- if ne (include "gibson.trueUnlessSet" (((.Values.tenantOperator).networkPolicy).enabled)) "false" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-tenant-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tenant-operator
+spec:
+  {{- /* deploy#1365: this selector previously included
+         `gibson.selectorLabels` (app.kubernetes.io/name: gibson-operators),
+         but the deployment's pod template stamps
+         app.kubernetes.io/name: gibson-tenant-operator — the policy has
+         NEVER selected the operator's pods. Under the namespace
+         default-deny that dead selector would leave the operator
+         uncovered (severed); scripts/check-netpol-coverage.py caught it.
+         Match the labels the pods actually carry. */}}
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gibson-tenant-operator
+      app.kubernetes.io/component: tenant-operator
+  policyTypes:
+    - Ingress
+    - Egress
+  {{- /* deploy#1365: allow-all egress under the namespace default-deny
+         (namespace-isolation/default-deny.yaml) — preserves this
+         component's pre-existing unrestricted-egress posture; per-
+         component egress tightening is tracked separately (deploy#1462). */}}
+  egress:
+    - {}
+  ingress:
+    # Webhook + metrics endpoints (kube-apiserver dials webhook from any IP)
+    - ports:
+        - protocol: TCP
+          port: 9443
+        - protocol: TCP
+          port: 8080
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}

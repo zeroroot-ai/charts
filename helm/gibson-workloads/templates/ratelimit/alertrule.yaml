@@ -1,0 +1,42 @@
+{{- /*
+Per-client quota degradation alert (deploy#1657).
+
+The envoy.filters.http.ratelimit filter is fail-open: when the quota service
+is unreachable, traffic passes under the local fuse and Envoy increments
+cluster.<upstream>.ratelimit.<stat_prefix>.failure_mode_allowed for every
+request it could not check (Prometheus:
+envoy_cluster_ratelimit_public_per_client_failure_mode_allowed, measured on
+the edge harness). That is the observable-degradation rule of the seam convention — a
+silently degraded SaaS edge must be detectable — so this pages on it.
+
+Renders only where prometheus-operator CRDs exist, like the Redis rules.
+*/}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-ratelimit-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ratelimit
+spec:
+  groups:
+    - name: ratelimit-degradation
+      rules:
+        - alert: EdgePerClientQuotaFailingOpen
+          expr: |
+            sum(increase({__name__=~"envoy_cluster_ratelimit_(public|api)_per_client_failure_mode_allowed"}[5m])) > 0
+          for: 2m
+          labels:
+            severity: page
+            component: ratelimit
+          annotations:
+            summary: "Edge per-client quota is failing open — requests pass unchecked"
+            description: |
+              The edge Envoy could not reach the ratelimit service for at least
+              one request in the last 5 minutes and let it through under the
+              per-pod fuse only. Per-client quotas (signup, login) are NOT being
+              enforced. Check gibson-ratelimit pods, the SPIFFE mTLS sidecar,
+              and gibson-redis-stack.
+{{- end }}

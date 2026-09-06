@@ -1,0 +1,32 @@
+{{/* Dashboard PodDisruptionBudget (Week 2 §3 R9).
+
+     dashboard is structural infrastructure (one-code-path / deploy#188).
+     The previous outer `.Values.dashboard.enabled` gate has been deleted;
+     the inner `podDisruptionBudget.enabled` sub-feature flag is preserved
+     (legitimate sub-feature toggle — auto-on when replicas > 1). */}}
+{{- $replicas := int (.Values.dashboard.replicas) }}
+{{- $pdb := .Values.dashboard.podDisruptionBudget | default dict }}
+{{- $pdbEnabled := $pdb.enabled }}
+{{- if and (kindIs "invalid" $pdbEnabled) (gt $replicas 1) }}
+{{- $pdbEnabled = true }}
+{{- end }}
+{{- if $pdbEnabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboard
+spec:
+  {{- if $pdb.maxUnavailable }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ $pdb.minAvailable | default (ternary "50%" 1 (gt $replicas 2)) }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dashboard
+{{- end }}

@@ -1,0 +1,88 @@
+{{/*
+SDK-generated ext-authz RPC registry — placeholder ConfigMap.
+
+Spec: unified-identity-and-authorization Phase H/8.6 (Req 4.7).
+
+The (rpc → authz-rule) registry is the canonical authorization policy and
+ships as a generated artifact from zeroroot-ai/sdk's tagged release. The
+ext-authz pod's init container (templates/ext-authz/deployment.yaml,
+Phase H/8.6) pulls registry.yaml from
+  oci://{{ .Values.sdk.registry }}:{{ .Values.sdk.version }}
+into a shared emptyDir at /etc/gibson/registry.yaml. The main container
+reads from the same path.
+
+This ConfigMap exists to:
+  1. Stamp the .Values.sdk.version in an annotation
+     (gibson.zeroroot.ai/sdk-version) so validateRegistryFromSDK
+     (templates/_validators.tpl) can detect that the chart was rendered
+     with a real pin.
+  2. Serve as a CHECKSUM-IS-DATA carrier so the ext-authz Deployment's
+     pod template hash recomputes when sdk.version changes (forcing a
+     rolling restart that triggers the init-container re-pull).
+  3. Provide an air-gapped fallback. When .Values.sdk.bypassRegistryValidation
+     is true AND .Values.sdk.embeddedRegistry is set (a YAML string),
+     the embedded registry is rendered into this ConfigMap's `data` and
+     the init-container path is bypassed (the deployment mounts THIS
+     ConfigMap instead of the emptyDir). This is the "I baked the
+     registry into a custom container image" or "operator wants to
+     hand-curate" path.
+
+Spec note: previous implementation pulled from
+files/ext-authz/rpc_registry.yaml (deleted in Phase H/8.7). DO NOT
+reintroduce — drift between the chart-vendored copy and the SDK source
+is exactly what this task is closing.
+
+ext-authz is structural infrastructure (deploy#188) — renders
+unconditionally; the extAuthz.enabled toggle was deleted.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gibson-extauthz-rpc-registry
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ext-authz
+  annotations:
+    {{- /* The version annotation is the marker validateRegistryFromSDK
+           looks for. Empty when sdk.version is unset (which would have
+           tripped the validator earlier). */}}
+    gibson.zeroroot.ai/sdk-version: {{ .Values.sdk.version | default "unset" | quote }}
+    gibson.zeroroot.ai/sdk-registry: {{ .Values.sdk.registry | default "ghcr.io/zeroroot-ai/sdk-registry" | quote }}
+    {{- $embedded := and .Values.sdk.bypassRegistryValidation (ne .Values.sdk.embeddedRegistry "") }}
+    gibson.zeroroot.ai/registry-source: {{ ternary "embedded" "init-container-pull" $embedded | quote }}
+data:
+{{- if and .Values.sdk.bypassRegistryValidation .Values.sdk.embeddedRegistry }}
+  rpc_registry.yaml: |
+{{ .Values.sdk.embeddedRegistry | indent 4 }}
+{{- else }}
+  {{- /*
+    Empty data — the actual registry.yaml is downloaded by the ext-authz
+    Deployment's init container into a shared emptyDir at
+    /etc/gibson/registry.yaml. This ConfigMap is metadata-only in the
+    init-container path; mounting it would shadow the emptyDir. The
+    Deployment's checksum/registry annotation hashes THIS ConfigMap so
+    sdk.version bumps trigger a rolling restart that re-runs the init
+    container.
+  */}}
+  README.md: |
+    This ConfigMap intentionally carries no rpc_registry.yaml data when
+    sdk.bypassRegistryValidation=false. The ext-authz Deployment's init
+    container pulls registry.yaml from the SDK OCI artifact at
+    oci://{{ .Values.sdk.registry }}:{{ .Values.sdk.version }} into a
+    shared emptyDir at /etc/gibson/registry.yaml. The main container
+    reads from the same path.
+
+    This ConfigMap exists for two reasons:
+      1. The sdk-version annotation lets validateRegistryFromSDK detect
+         a real SDK pin.
+      2. Hashing this ConfigMap into the Deployment's
+         checksum/registry annotation forces a rolling restart on
+         sdk.version bumps, which re-runs the init container with the
+         new pin.
+
+    For the air-gapped path (sdk.bypassRegistryValidation=true with
+    sdk.embeddedRegistry set), this ConfigMap's data carries the
+    rpc_registry.yaml content directly and the init container is
+    skipped.
+{{- end }}

@@ -1,0 +1,18 @@
+---
+# The Gibson platform namespace for the Big Bang distribution.
+#
+# istio-injection is explicitly DISABLED. This package is Big-Bang-*compatible*,
+# not Big-Bang-*native* (deploy#784): the platform keeps its own
+# Envoy + ext-authz + SPIRE/SPIFFE auth edge and must NOT receive a Big Bang
+# Istio sidecar. Disabling injection here preserves that edge even when this
+# namespace is reconciled onto a cluster that already runs the Big Bang Istio
+# mesh.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gibson
+  labels:
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/part-of: gibson
+    app.kubernetes.io/managed-by: flux
+    istio-injection: disabled

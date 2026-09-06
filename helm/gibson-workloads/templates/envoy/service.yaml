@@ -1,0 +1,74 @@
+{{/*
+Envoy Service.
+
+Sole external surface for the platform. Single TLS port (443) carries the
+api/app.<domain> hosts via SNI dispatch in the listener filter chain (the
+auth.<domain> host was retired in the single-host consolidation — docs./
+apex are served as virtual hosts on the app. chain; www is off-cluster).
+
+Defaults to NodePort so the Kind dev cluster's extra-port-mappings (created
+by `make kind-create`) can route external 443 → NodePort 30443. Flip to
+LoadBalancer in production overlays (values-saas.yaml / values-production.yaml).
+
+Spec: zitadel-envoy-gateway-migration, task 10.
+
+Envoy is required infrastructure (deploy#200); this Service renders
+unconditionally — there is no `envoy.enabled` opt-out.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: gibson-envoy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: envoy
+  {{- /* external-dns hostname annotation is config-derived (deploy#683):
+         on a LoadBalancer Service (prod) emit the apex/app/docs/api host list
+         from gibson.externalDnsHosts. Overlay-set annotations win on conflict
+         (override hatch). The retired auth. host is no longer published. */}}
+  {{- $ann := .Values.envoy.service.annotations | default dict }}
+  {{- /* One record per host, exactly one edge: every public
+         hostname the chart claims resolves to THIS Service. */}}
+  {{- if eq (.Values.envoy.service.type | default "NodePort") "LoadBalancer" }}
+  {{- $ann = merge (deepCopy $ann) (dict "external-dns.alpha.kubernetes.io/hostname" (include "gibson.externalDnsHosts" .)) }}
+  {{- end }}
+  {{- with $ann }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.envoy.service.type | default "NodePort" }}
+  # Client-IP contract. Local stops kube-proxy from SNATing the
+  # client address on the NodePort / passthrough-LB path (kind, vanilla, GKE,
+  # AKS), so Envoy's socket peer is the client. On AWS with nlb-target-type=ip
+  # the controller dials pod IPs directly and ignores this field; there the
+  # contract is met by preserve_client_ip.enabled=true on the target group.
+  # Structural, not an overlay knob: an edge that cannot see its clients has
+  # no per-client limit and no WAF worth the name.
+  externalTrafficPolicy: Local
+  # Pin the ClusterIP so dashboard / bootstrap-job hostAliases can target
+  # Envoy by a stable address. Required for the in-cluster path where pods
+  # need to reach the same hostname (app.<domain>) the browser uses, but
+  # via the cluster network rather than the host's NodePort.
+  #
+  # REQUIRED in every overlay (Envoy is required infrastructure — deploy#200).
+  # Production overlays may still pin a clusterIP — the Service is exposed
+  # externally via NodePort/LoadBalancer; pinning the ClusterIP doesn't
+  # change the external surface.
+  clusterIP: {{ required "envoy.service.clusterIP is REQUIRED — pin a stable ClusterIP so consuming pods (dashboard, bootstrap-job, daemon) can reach Envoy by a hostAlias. Allocate one outside the cluster's auto-assignment range. See deploy#200." .Values.envoy.service.clusterIP | quote }}
+  selector:
+    {{- include "gibson.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: envoy
+  ports:
+    - name: https
+      # Same port number on ClusterIP and NodePort, so pods inside the
+      # cluster and the browser outside can both use ":30443" — making the
+      # OIDC issuer URL (which is host:port-derived) identical from both
+      # sides and removing the issuer-mismatch class of bug.
+      port: {{ .Values.envoy.service.httpsPort | default 443 }}
+      targetPort: https
+      protocol: TCP
+      {{- if and (eq (.Values.envoy.service.type | default "NodePort") "NodePort") .Values.envoy.service.nodePort }}
+      nodePort: {{ .Values.envoy.service.nodePort }}
+      {{- end }}

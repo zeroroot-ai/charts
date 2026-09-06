@@ -1,0 +1,39 @@
+{{/* Gibson daemon ServiceMonitor (Week 2 §3 R21).
+     Both observability shapes consume ServiceMonitors:
+       - provider="in-chart"               → in-chart Prometheus scrapes
+       - provider="external-grafana-cloud" → in-cluster grafana-agent scrapes
+                                             and ships to Grafana Cloud
+     So this manifest renders unconditionally (deploy#313 — the
+     prometheus.enabled||grafanaAgent.serviceMonitorsEnabled OR-gate
+     collapsed into the observability.provider enum, which is now
+     mandatory). */}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "gibson.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: daemon
+spec:
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: daemon
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      # spec security-hardening R20: daemon :9090 is mTLS-only
+      # (gibson-daemon-metrics-tls Secret). Plain HTTP scrapes trigger a
+      # TLS handshake error every 15s and return no metrics. insecureSkipVerify
+      # is appropriate here — the metrics-tls cert is issued by the cluster-
+      # internal selfsigned-ca Issuer (kind) / openbao-issuer (prod), neither
+      # of which is in the Prometheus trust bundle. Network-level trust is
+      # established by the cluster NetworkPolicy. deploy#461.
+      scheme: https
+      tlsConfig:
+        insecureSkipVerify: true
+
+{{- end }}

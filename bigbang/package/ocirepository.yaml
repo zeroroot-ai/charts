@@ -1,0 +1,45 @@
+---
+# Flux source for the versioned OCI umbrella chart (deploy#790).
+#
+# A chart VERSION is the deployable unit: federal/Big Bang promotion is a
+# version (or digest) bump on this single source — never a branch merge.
+#
+# The chart published by .github/workflows/publish-umbrella-chart.yml lives at
+#   oci://ghcr.io/zeroroot-ai/charts/gibson
+# and wraps the three first-party sub-charts (crds -> operators -> workloads)
+# plus the platform dependencies as one artifact.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: gibson-umbrella
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/part-of: gibson
+spec:
+  interval: 10m
+  url: oci://ghcr.io/zeroroot-ai/charts/gibson
+  ref:
+    tag: "0.121.1"  # x-release-please-version
+  # AIR-GAP / FEDERAL HARDENING (uncomment + fill at mirror time):
+  #
+  # 1. Pin the chart by digest so the mirrored artifact is immutable. Resolve
+  #    with: helm pull oci://ghcr.io/zeroroot-ai/charts/gibson --version <tag>
+  #    then `crane digest` / `cosign` the pushed mirror.
+  #
+  # ref:
+  #   digest: "sha256:<chart-manifest-digest>"
+  #
+  # 2. When the chart is mirrored into the the customer's own registry,
+  #    repoint `url` at the mirror and reference a pull secret:
+  #
+  # url: oci://registry.il.example.mil/zeroroot-ai/charts/gibson
+  # secretRef:
+  #   name: private-registry
+  #
+  # 3. Optionally verify the artifact signature (Big Bang ships cosign keys):
+  #
+  # verify:
+  #   provider: cosign
+  #   secretRef:
+  #     name: cosign-pub

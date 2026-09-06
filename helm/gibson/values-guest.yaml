@@ -1,0 +1,23 @@
+# Guest profile: install onto a cluster that already owns the platform
+# operators. Big Bang, OpenShift, or any brownfield estate.
+#
+# Layered ON TOP of values-vanilla.yaml, like the substrate overlays:
+#   helm install gibson helm/gibson \
+#     -f helm/gibson/values-vanilla.yaml -f helm/gibson/values-guest.yaml
+#
+# It turns off the four operator-substitution seams and nothing else. The
+# cluster supplies cert-manager, External Secrets, ExternalDNS and
+# CloudNativePG, along with their CRDs. Gibson still runs exactly one of each;
+# this only selects the owner.
+#
+# The CRDs matter as much as the operators. A chart that ships a subset of
+# certificates.cert-manager.io overwrites the customer's copy underneath their
+# running controller, so the CRD chart follows the same switch.
+certManager:
+  enabled: false
+externalSecrets:
+  enabled: false
+externalDns:
+  enabled: false
+cnpg:
+  enabled: false

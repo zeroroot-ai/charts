@@ -1,0 +1,341 @@
+{{/* deploy#788: bringup Jobs + RBAC folded from gitops apps/manifests. All post-install (umbrella deps are in-release main resources); hook-weight preserves PreSync<Sync<PostSync order; jobs self-wait for readiness. */}}
+{{/* deploy#867: palette + marks live in files/branding/ (the declared brand source — its README carries the dashboard-token → hex mapping). */}}
+{{/*
+deploy#943: the login UI caches the label policy in process memory at request
+time, so a rebrand is invisible to end users until the gibson-zitadel-login
+pod cycles. This used to be an imperative `kubectl patch deployment` poked by
+the Job when CHANGED=1 — an allowlisted Check-28 exception. It is now a
+declarative, Reloader-driven restart:
+
+  - zitadel-login-branding-marker (below) is a chart-rendered ConfigMap whose
+    `branding-hash` is the sha256 of the declared brand source (the same three
+    files/branding/* this Job POSTs to Zitadel). Editing any branding file
+    changes the rendered hash → the ConfigMap content changes on the next
+    Sync.
+  - the upstream Zitadel login Deployment carries
+    `configmap.reloader.stakater.com/reload: "zitadel-login-branding-marker"`
+    (set via zitadel.login.annotations in values.yaml). Stakater Reloader
+    (gibson-operators) watches the ConfigMap and rolls the login Deployment
+    when — and only when — the hash changes.
+
+So a branding change rolls the login pod declaratively, and a steady-state
+Sync (unchanged branding) is restart-free: the hash is identical, Reloader
+sees no diff, no roll. The Job itself no longer touches the Deployment, so it
+needs no apps/deployments RBAC.
+
+The marker is a ConfigMap (not a Secret) — the brand hash is non-secret, so
+this does not engage the ESO-only secret rule; Reloader's
+`configmap.reloader.stakater.com/reload` form keys on ConfigMap content.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zitadel-login-branding
+  namespace: gibson
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '95'
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  label-policy.json: |
+{{ .Files.Get "files/branding/label-policy.json" | indent 4 }}
+  logo-dark.svg: |
+{{ .Files.Get "files/branding/logo-dark.svg" | indent 4 }}
+  icon-dark.svg: |
+{{ .Files.Get "files/branding/icon-dark.svg" | indent 4 }}
+
+---
+{{/*
+deploy#943: declarative restart marker for the login UI. NOT a hook — it is a
+standing Sync-phase resource so Reloader can watch it across the install's
+life (a hook ConfigMap is deleted before-hook-creation and would churn the
+hash / disappear from Reloader's informer). The branding-hash is computed over
+the exact declared brand source the Job applies; a rebrand changes the hash,
+Reloader rolls gibson-zitadel-login, and steady-state Syncs leave it alone.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zitadel-login-branding-marker
+  namespace: gibson
+  labels:
+    app.kubernetes.io/component: zitadel-login-branding
+data:
+  branding-hash: {{ printf "%s%s%s"
+    (.Files.Get "files/branding/label-policy.json")
+    (.Files.Get "files/branding/logo-dark.svg")
+    (.Files.Get "files/branding/icon-dark.svg") | sha256sum | quote }}
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zitadel-login-branding
+  namespace: gibson
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '95'
+    helm.sh/hook-delete-policy: before-hook-creation
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: zitadel-login-branding
+  namespace: gibson
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '95'
+    helm.sh/hook-delete-policy: before-hook-creation
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  resourceNames:
+  - iam-admin-pat
+# deploy#943: the apps/deployments get+patch rule is gone — the login restart
+# is now Reloader-driven off the zitadel-login-branding-marker ConfigMap, so
+# this Job no longer pokes the Deployment.
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: zitadel-login-branding
+  namespace: gibson
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '95'
+    helm.sh/hook-delete-policy: before-hook-creation
+subjects:
+- kind: ServiceAccount
+  name: zitadel-login-branding
+  namespace: gibson
+roleRef:
+  kind: Role
+  name: zitadel-login-branding
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: zitadel-login-branding
+  namespace: gibson
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '100'
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        # deploy#1365: pod-template label so the bringup-jobs
+        # NetworkPolicy can select this Job's pods under the
+        # gibson namespace default-deny (unlabelled = severed).
+        app.kubernetes.io/component: zitadel-login-branding
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: zitadel-login-branding
+      containers:
+      - name: brand
+        image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+        env:
+        - name: ZITADEL_EXTERNAL_DOMAIN
+          value: "{{ .Values.zitadel.zitadel.configmapConfig.ExternalDomain | default (printf "app.%s" .Values.global.domain) }}{{ if ne (int .Values.zitadel.zitadel.configmapConfig.ExternalPort) 443 }}:{{ .Values.zitadel.zitadel.configmapConfig.ExternalPort }}{{ end }}"
+        - name: ZITADEL_API_URL
+          value: http://gibson-zitadel.gibson.svc.cluster.local:8080
+        volumeMounts:
+        - name: branding
+          mountPath: /branding
+          readOnly: true
+        command:
+        - bash
+        - -ec
+        args:
+        - |
+          set -euo pipefail
+
+          # --- 1. Wait for the IAM admin PAT Secret. -------------------
+          # The chart's setup Job mints this; it usually exists by the
+          # time this hook fires but may race on first install.
+          echo "[brand] waiting for iam-admin-pat Secret..."
+          until PAT=$(kubectl -n gibson get secret iam-admin-pat \
+              -o jsonpath='{.data.pat}' 2>/dev/null | base64 -d \
+              | tr -d '\r\n') && [ -n "$PAT" ]; do
+            sleep 3
+          done
+          echo "[brand] PAT materialised (len=${#PAT})"
+
+          # --- 2. Wait for Zitadel itself to answer /debug/ready. ----
+          echo "[brand] waiting for zitadel /debug/ready..."
+          until curl -fsS -o /dev/null \
+              -H "Host: ${ZITADEL_EXTERNAL_DOMAIN}" \
+              "${ZITADEL_API_URL}/debug/ready"; do
+            sleep 3
+          done
+          echo "[brand] zitadel is ready"
+
+          LABEL_BODY=$(cat /branding/label-policy.json)
+
+          # api METHOD PATH BODY -> echoes "<HTTP_CODE>\t<BODY>"
+          api() {
+            method=$1; path=$2; body=${3:-}
+            tmp=$(mktemp)
+            if [ -n "$body" ]; then
+              code=$(curl -sS -o "$tmp" -w '%{http_code}' \
+                -X "$method" \
+                -H "Host: ${ZITADEL_EXTERNAL_DOMAIN}" \
+                -H "Authorization: Bearer ${PAT}" \
+                -H "Content-Type: application/json" \
+                --data "$body" \
+                "${ZITADEL_API_URL}${path}")
+            else
+              code=$(curl -sS -o "$tmp" -w '%{http_code}' \
+                -X "$method" \
+                -H "Host: ${ZITADEL_EXTERNAL_DOMAIN}" \
+                -H "Authorization: Bearer ${PAT}" \
+                "${ZITADEL_API_URL}${path}")
+            fi
+            printf '%s\t' "$code"
+            cat "$tmp"
+            rm -f "$tmp"
+          }
+
+          # upload PATH FILE MIME — multipart asset upload (deploy#867).
+          # Assets land on the preview policy; _activate promotes them.
+          upload() {
+            path=$1; file=$2; mime=$3
+            tmp=$(mktemp)
+            code=$(curl -sS -o "$tmp" -w '%{http_code}' \
+              -X POST \
+              -H "Host: ${ZITADEL_EXTERNAL_DOMAIN}" \
+              -H "Authorization: Bearer ${PAT}" \
+              -F "file=@${file};type=${mime}" \
+              "${ZITADEL_API_URL}${path}")
+            case "$code" in
+              2??) echo "[brand]   uploaded ${path} ($code)" ;;
+              *)
+                echo "[brand]   upload ${path} FAILED ($code): $(cat "$tmp")"
+                rm -f "$tmp"
+                exit 1
+                ;;
+            esac
+            rm -f "$tmp"
+          }
+
+          # --- 3. Snapshot the ACTIVE policy for the asset guard. -----
+          # We only upload marks when the active policy carries no dark
+          # logo yet, so steady-state Syncs stay restart-free. To force
+          # a re-upload after changing an SVG: DELETE the asset via
+          # /admin/v1/policies/label/logo_dark (and icon_dark), re-run.
+          ACTIVE_BEFORE=$(api GET /admin/v1/policies/label | cut -f2-)
+          HAS_LOGO=$(printf '%s' "$ACTIVE_BEFORE" | jq -r '.policy.logoUrlDark // empty')
+
+          # --- 4. Apply the INSTANCE-level policy colors. -------------
+          # Zitadel v4's hosted login UI (the surface the issue cares
+          # about) reads exclusively from the instance default policy
+          # under /admin/v1. Tenant orgs inherit unless they override,
+          # which they don't on bringup — so we don't touch
+          # /management/v1 at all.
+          CHANGED=0
+          echo "[brand] PUT /admin/v1/policies/label"
+          resp=$(api PUT "/admin/v1/policies/label" "$LABEL_BODY")
+          code=$(printf '%s' "$resp" | cut -f1)
+          body=$(printf '%s' "$resp" | cut -f2-)
+          case "$code" in
+            2??) echo "[brand]   ok ($code)"; CHANGED=1 ;;
+            # "Object Details has not been changed" — idempotent
+            # second run with no diff.
+            400) echo "[brand]   no-op ($code: unchanged)" ;;
+            *)
+              echo "[brand]   FAILED ($code): $body"
+              exit 1
+              ;;
+          esac
+
+          # --- 5. Upload the brand marks (deploy#867). ----------------
+          # Same SVG into light + dark slots: the platform ships one
+          # dark brand, but no slot may ever fall back to Zitadel's
+          # stock mark.
+          if [ -z "$HAS_LOGO" ]; then
+            echo "[brand] no active dark logo — uploading marks"
+            upload /assets/v1/instance/policy/label/logo      /branding/logo-dark.svg image/svg+xml
+            upload /assets/v1/instance/policy/label/logo/dark /branding/logo-dark.svg image/svg+xml
+            upload /assets/v1/instance/policy/label/icon      /branding/icon-dark.svg image/svg+xml
+            upload /assets/v1/instance/policy/label/icon/dark /branding/icon-dark.svg image/svg+xml
+            CHANGED=1
+          else
+            echo "[brand] dark logo already active; skipping asset upload"
+          fi
+
+          # Always activate — handles draft-was-set-but-not-activated race
+          # (gitops#210): if a previous run set the draft but was killed before
+          # _activate, PUT returns 400 "unchanged" on the next run, CHANGED=0,
+          # and the active policy stays at Zitadel's default. Calling _activate
+          # unconditionally is idempotent (409 when already active).
+          echo "[brand] POST /admin/v1/policies/label/_activate"
+          resp=$(api POST "/admin/v1/policies/label/_activate" '{}')
+          code=$(printf '%s' "$resp" | cut -f1)
+          body=$(printf '%s' "$resp" | cut -f2-)
+          case "$code" in
+            2??) echo "[brand]   activated ($code)" ;;
+            409) echo "[brand]   already active ($code)" ;;
+            *)
+              echo "[brand]   activate FAILED ($code): $body"
+              exit 1
+              ;;
+          esac
+
+          # --- 6. Show the active policy so logs surface the result. -
+          echo "[brand] final active label policy:"
+          ACTIVE=$(api GET /admin/v1/policies/label | cut -f2-)
+          echo "$ACTIVE" \
+            | jq -r '.policy | {primaryColor,backgroundColor,fontColor,themeMode,isDefault,logoUrlDark,iconUrlDark}'
+
+          # Defence-in-depth: fail loudly if the policy on the wire
+          # somehow doesn't match what we tried to write — catches a
+          # transient where the activate-call lied or returned 409
+          # against a stale draft.
+          EXPECTED=$(jq -r '.primaryColor' /branding/label-policy.json)
+          ACTUAL=$(printf '%s' "$ACTIVE" | jq -r '.policy.primaryColor')
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "[brand] FAIL: active primaryColor=$ACTUAL expected=$EXPECTED"
+            exit 1
+          fi
+
+          # --- 7. Login-UI restart is declarative (deploy#943). ------
+          # Zitadel's login Next.js app caches the policy in process
+          # memory at request time, so a policy edit is invisible to end
+          # users until the pod cycles. That restart is NO LONGER poked
+          # here with an imperative `kubectl patch deployment`. The login
+          # Deployment carries
+          #   configmap.reloader.stakater.com/reload: zitadel-login-branding-marker
+          # and that marker ConfigMap's branding-hash is the sha256 of the
+          # declared brand source (files/branding/*). A rebrand changes the
+          # files → changes the rendered hash → Reloader rolls the login
+          # pod on the next Sync. A steady-state Sync leaves the hash (and
+          # thus the pod) untouched. The Job's job is just to POST the
+          # policy to Zitadel's DB; the restart is the platform's.
+          if [ "$CHANGED" = "1" ]; then
+            echo "[brand] policy changed; login pod restart is Reloader-driven off the zitadel-login-branding-marker ConfigMap (deploy#943)"
+          else
+            echo "[brand] policy unchanged; nothing to roll"
+          fi
+          echo "[brand] complete"
+        resources:
+          requests:
+            cpu: 20m
+            memory: 32Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      volumes:
+      - name: branding
+        configMap:
+          name: zitadel-login-branding

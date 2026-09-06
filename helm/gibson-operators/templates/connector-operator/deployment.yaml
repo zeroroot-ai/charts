@@ -1,0 +1,124 @@
+{{- /*
+  connector-operator is structural infrastructure (one-code-path /
+  deploy#188). It reconciles ConnectorInstance CRs into ToolHive
+  MCPServer / MCPRemoteProxy resources; without it no connector
+  can reconcile. There is deliberately NO `.enabled` toggle — this Deployment
+  renders unconditionally.
+
+  The operator talks to the Kubernetes API and to ONE daemon RPC: its
+  ConnectorInstance finalizer revokes the connector's grant through
+  DaemonOperatorService.RevokeConnectorGrant on delete (§5,
+  gibson#1566). That dial is SPIFFE mTLS over the SPIRE Workload API socket
+, so the pod carries the CSI socket mount, the wait-for-spire init
+  and the daemon address/SVID env — the same wiring as tenant-operator. It
+  does NOT talk to Zitadel, OpenFGA or Vault/OpenBao: the daemon owns the
+  secret store; the operator only carries the (tenant, connector) pair.
+  cmd/main.go defines exactly three manager flags — --leader-elect,
+  --metrics-bind-address, --health-probe-bind-address (plus zap flags) — so
+  the args below stay to that set; any other flag would abort the binary with
+  "flag provided but not defined".
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gibson-connector-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: gibson-connector-operator
+    app.kubernetes.io/part-of: gibson
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.connectorOperator.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gibson-connector-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gibson-connector-operator
+        app.kubernetes.io/part-of: gibson
+        app.kubernetes.io/component: connector-operator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      {{- include "gibson.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ .Values.connectorOperator.serviceAccount.name | default "gibson-connector-operator" }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      # the finalizer dials the daemon over SPIFFE mTLS; without a
+      # SPIRE agent socket the dial hangs silently, so the pod does not start
+      # until the socket is present (deploy#201).
+      initContainers:
+        {{- include "gibson.waitForSpireSocket" . | nindent 8 }}
+      containers:
+        - name: manager
+          image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.connectorOperator.image.repository "tag" .Values.connectorOperator.image.tag "digest" .Values.connectorOperator.image.digest "appVersion" .Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ .Values.connectorOperator.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - --leader-elect=true
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+          env:
+            # The daemon the finalizer revokes connector grants through
+            #. gibson-common's gibson.daemonAddress is the single
+            # source of truth for the dialing address (deploy#179). REQUIRED by
+            # cmd/main.go: an operator that cannot reach the daemon fails at
+            # boot rather than leaving grants alive after every delete.
+            - name: GIBSON_DAEMON_GRPC_ADDRESS
+              value: {{ include "gibson.daemonAddress" . | quote }}
+            # the daemon SVID pinned at the mTLS handshake.
+            - name: GIBSON_DAEMON_SPIFFE_ID
+              value: {{ .Values.connectorOperator.daemonSpiffeID | default "spiffe://zeroroot.ai/platform/daemon" | quote }}
+            # SPIRE Workload API socket the X509Source streams SVIDs from.
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: "unix:///run/spire/sockets/api.sock"
+          volumeMounts:
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+          ports:
+            - containerPort: 8080
+              name: metrics
+              protocol: TCP
+            - containerPort: 8081
+              name: probes
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: probes
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: probes
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: {{ .Values.connectorOperator.resources.requests.cpu | default "20m" }}
+              memory: {{ .Values.connectorOperator.resources.requests.memory | default "64Mi" }}
+            limits:
+              cpu: {{ .Values.connectorOperator.resources.limits.cpu | default "500m" }}
+              memory: {{ .Values.connectorOperator.resources.limits.memory | default "256Mi" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        # SPIRE Workload API socket via the csi.spiffe.io CSI driver — SPIRE is
+        # structural infrastructure (deploy#201); no gate.
+        - name: spire-agent-socket
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+      terminationGracePeriodSeconds: 30

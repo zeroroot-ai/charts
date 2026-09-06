@@ -1,0 +1,40 @@
+{{/*
+Canonical derived-domain map (deploy#630, domain normalization epic).
+
+The single observable artifact that publishes EVERY external hostname the
+platform serves or claims, all derived from `global.domain` by the
+gibson-common domain helpers. There are no hostname literals here — change
+`global.domain` (and, in kind, `global.externalPort`) and every value below
+moves with it.
+
+Purpose:
+  - A render-testable, operator-readable source of truth for "what hosts is
+    this install actually using?" (tests/domains-configmap.bats asserts it).
+  - A reference the per-repo de-hardcode passes (S5–S8) and the no-hardcoding
+    CI guard (S4) point at as the sanctioned origin for derived hostnames.
+
+This ConfigMap is informational; consumers that need a value should read it
+or, preferably, derive from the same helpers in their own chart. The
+two-plane contract (see the ADR, deploy#634): these are EXTERNAL-identity
+values. Intra-cluster CONNECTION addresses (service DNS) are NOT here.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gibson-domains
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+data:
+  domain: {{ include "gibson.domain" . | quote }}
+  scheme: {{ include "gibson.scheme" . | quote }}
+  appHost: {{ include "gibson.appHost" . | quote }}
+  apiHost: {{ include "gibson.apiHost" . | quote }}
+  wwwHost: {{ include "gibson.wwwHost" . | quote }}
+  externalOrigin: {{ include "gibson.externalOrigin" . | quote }}
+  apiOrigin: {{ include "gibson.apiOrigin" . | quote }}
+  wwwOrigin: {{ include "gibson.wwwOrigin" . | quote }}
+  oidcIssuer: {{ include "gibson.oidcIssuer" . | quote }}
+  zitadelExternalDomain: {{ include "gibson.zitadelExternalDomain" . | quote }}
+  tlsSans: |
+    {{- include "gibson.tlsSans" . | nindent 4 }}

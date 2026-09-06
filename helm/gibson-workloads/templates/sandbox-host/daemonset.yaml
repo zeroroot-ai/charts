@@ -1,0 +1,110 @@
+{{- /*
+  sandbox-eviction-handler DaemonSet — closes gibson#211 (S9 of PRD
+  gibson#202 /). One pod per sandbox-host node; the pod
+  watches /var/run/aws/spot-interruption-notice (written by
+  aws-node-termination-handler on each sandbox-host node) and cordons
+  its own Kubernetes node on appearance so AWS terminates the spot
+  instance without further work landing on the node.
+
+  Design choice (gibson#211 HITL Option B): sidecar fully independent
+  of the gibson daemon. The daemon never learns about evictions;
+  spot-eviction is treated symmetrically with every other node-lifecycle
+  event (kubelet OOM-kill, upgrade restart, node-NotReady). The lost-
+  detonation cost during the 30 s SIGTERM window is bounded; spot
+  evictions are rare.
+
+  This DaemonSet is rendered unconditionally — the nodeSelector
+  (setec.zeroroot.ai/sandbox-host=true) and toleration constrain pods to the
+  sandbox-host node group provisioned by the production-eks-deploy
+  spec. On kind dev (no sandbox-host nodes), the DaemonSet exists with
+  zero scheduled pods, matching one-code-path discipline (no top-level
+  enabled flag).
+
+  Image: shares the gibson image (the Dockerfile bundles the
+  sandbox-eviction-handler binary alongside the daemon and the other
+  auxiliary CLIs). Wiring is via explicit `command:` override; nothing
+  else from the daemon's runtime path is exercised.
+*/}}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "gibson.fullname" . }}-sandbox-eviction-handler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox-eviction-handler
+spec:
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: sandbox-eviction-handler
+  template:
+    metadata:
+      labels:
+        {{- include "gibson.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: sandbox-eviction-handler
+    spec:
+      serviceAccountName: {{ include "gibson.fullname" . }}-sandbox-eviction-handler
+      # Pin to sandbox-host nodes provisioned by the production-eks-deploy
+      # spec — same selector setec uses (see values.yaml setec.nodeSelector).
+      nodeSelector:
+        setec.zeroroot.ai/sandbox-host: "true"
+      # Tolerate the matching NoSchedule taint on sandbox-host nodes.
+      tolerations:
+        - key: setec.zeroroot.ai/sandbox-host
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      # No host network / no host PID — the handler only needs to stat
+      # one hostPath file and call the K8s API.
+      hostNetwork: false
+      hostPID: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sandbox-eviction-handler
+          image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.gibson.image.repository "tag" .Values.gibson.image.tag "digest" .Values.gibson.image.digest "appVersion" .Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ .Values.gibson.image.pullPolicy }}
+          command: ["/usr/local/bin/sandbox-eviction-handler"]
+          args:
+            - --node-name=$(NODE_NAME)
+            - --notice-file=/var/run/aws/spot-interruption-notice
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          # No ports, no probes — the handler is a polling loop that
+          # exits the loop only on context cancel (SIGTERM). Kubelet
+          # restarts it via the DaemonSet's restartPolicy=Always (the
+          # implicit default for DaemonSet pods).
+          volumeMounts:
+            - name: aws-notice
+              mountPath: /var/run/aws
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: aws-notice
+          hostPath:
+            # Populated by aws-node-termination-handler (setec.spotEvictionFallback
+            # gates that DaemonSet on EKS sandbox-host nodes). Absent on kind dev;
+            # the handler polls a non-existent file forever, which is the desired
+            # behaviour there.
+            path: /var/run/aws
+            type: DirectoryOrCreate
+{{- include "gibson.imagePullSecrets" . | nindent 6 }}

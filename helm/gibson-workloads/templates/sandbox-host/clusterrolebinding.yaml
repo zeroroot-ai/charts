@@ -1,0 +1,15 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "gibson.fullname" . }}-sandbox-eviction-handler
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox-eviction-handler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "gibson.fullname" . }}-sandbox-eviction-handler
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gibson.fullname" . }}-sandbox-eviction-handler
+    namespace: {{ .Release.Namespace }}

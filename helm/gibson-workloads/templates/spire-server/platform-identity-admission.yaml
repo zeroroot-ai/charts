@@ -1,0 +1,412 @@
+{{/*
+=============================================================================
+Platform identity admission — the control that actually binds a platform
+SVID to a real workload.
+=============================================================================
+
+WHY THIS EXISTS
+
+The ClusterSPIFFEIDs next door select pods by `app.kubernetes.io/component`
+label plus literal `k8s:ns:` / `k8s:sa:` workload selectors. The SPIRE agent
+enforces those selectors against kubelet-derived facts at attestation time,
+so they are real — but every one of them describes the POD, and the pod is
+described by whoever created it. Kubernetes has had no `serviceaccounts/use`
+RBAC verb since PodSecurityPolicy was removed, so a principal holding
+`create pods` in this namespace simply writes:
+
+    metadata.labels["app.kubernetes.io/component"]: envoy
+    spec.serviceAccountName: gibson-envoy
+
+...and the spire-controller-manager mints a NEW registration entry for that
+pod, carrying `spiffe://<td>/platform/envoy`, pinned to the attacker's pod
+UID. The attack is not "reuse a wildcard entry"; it is "cause an entry to be
+minted". No SPIRE-native selector closes this: the k8s workload attestor
+emits ns, sa, pod-name, pod-uid, pod-owner, pod-owner-uid, pod-label,
+pod-annotation, node-name, container-name, container-image and pod-image —
+every one derived from the submitted pod object or its images.
+
+`request.userInfo.username` is the only attribute in the whole chain that a
+pod cannot self-assert. kube-controller-manager creates Deployment/
+StatefulSet/DaemonSet/Job pods as its own dedicated ServiceAccounts. Keying
+on it says: a platform SVID is only ever issued to a pod that a genuine
+workload controller produced from a genuine controller object — and those
+objects are Argo/GitOps-owned.
+
+WHY ValidatingAdmissionPolicy AND NOT A WEBHOOK
+
+VAP is evaluated in-process by the apiserver. Gatekeeper or a
+MutatingWebhook would put an out-of-process dependency in the pod-admission
+path of the very namespace that hosts the platform control plane: when it is
+down you either fail open (no control exactly when you need it) or you
+cannot schedule the pods that would bring it back. VAP is GA at
+admissionregistration.k8s.io/v1 on kind 1.31 (helm/kind-config.yaml) and on
+both EKS clusters (the cluster module always takes the newest supported
+version, >= 1.30).
+
+Pod Security Admission is not an alternative: PSA governs securityContext,
+never labels and never ServiceAccounts. It cannot see either field that
+matters here. (The gibson namespace is enforce:privileged on both EKS
+clusters, which is worth raising on its own merits and would not block one
+step of this attack.)
+
+TWO POLICIES, BECAUSE ONE HOP IS NOT ENOUGH
+
+An earlier revision of this file shipped only the pods policy below, and
+that was bypassable in one extra step. Keying on the pod's creator cannot
+help when the adversary can create the object that creates the pod:
+
+    a Deployment whose .spec.template claims the platform label + SA
+      -> deployment-controller writes a ReplicaSet
+      -> replicaset-controller writes the Pod
+      -> request.userInfo.username is replicaset-controller
+      -> which is on the allow-list, by construction
+
+The justification for allow-listing the built-in controllers — "a pod
+created by any of these was produced from a controller object that already
+passed admission" — was circular, because nothing was validating controller
+objects. So there are now two policies and the chain is closed at every
+hop:
+
+  gibson-platform-identity-pods       — Pods on CREATE. Allowed creators:
+                                        the built-in workload controllers.
+  gibson-platform-identity-workloads  — Deployments, ReplicaSets,
+                                        StatefulSets, DaemonSets, Jobs and
+                                        CronJobs on CREATE and UPDATE,
+                                        validating .spec.template (and
+                                        .spec.jobTemplate.spec.template for
+                                        CronJobs) against the same two
+                                        protected lists.
+
+The workloads policy's allow-list is the intermediate controllers —
+deployment-controller, which derives a ReplicaSet from a Deployment that
+this same policy just checked, and cronjob-controller, which derives a Job
+from a CronJob likewise — plus whatever principal legitimately applies this
+chart. That last one is install-specific and has no safe default, so it is
+`.Values.spire.identityAdmission.workloadCreators` and the render FAILS if
+Deny is requested with the list empty.
+
+UPDATE is covered on workloads and not on pods. A pod's labels and
+serviceAccountName are immutable once created, so there is nothing to catch
+there; a Deployment's .spec.template is not, and patching an existing
+platform Deployment to add a sidecar is the same attack with fewer steps.
+
+WHAT THIS STILL DOES NOT PREVENT — stated here so nobody reads the file as
+a closure it is not:
+
+  * It does not stop the creation of ANY object; it stops an object from
+    CLAIMING a platform identity. A principal holding create on workloads
+    in this namespace can still run whatever it likes here — it just does
+    not get an SVID for it.
+  * A principal on `workloadCreators` can mint any platform identity. On
+    the EKS clusters that principal is the Argo CD application-controller,
+    which holds `*` on `*` cluster-wide from the upstream chart default and
+    runs under `project: default` with no AppProject restriction. So the
+    real platform-identity boundary is: who can merge to the GitOps repo,
+    and who holds the Argo admin credential. That is an RBAC and
+    code-review boundary, not an admission one, and this policy does not
+    move it.
+  * Node compromise, cluster-admin, or direct write to the SPIRE server
+    defeat all of it.
+
+THE OTHER HALF OF THE CONTROL — deploy#1210
+
+Because this policy bounds the attack rather than closing it, the grant set
+it is bounding has to stay small. `scripts/check-workload-create-rbac.py`
+enforces that from the other side: every chart-defined Role/ClusterRole that
+grants create/update/patch on a pod or a pod-producing controller needs a
+line in `scripts/.workload-rbac-allowlist.txt` with a written reason, so the
+set of principals that can author a pod spec in this namespace only changes
+in a reviewed diff. Neither control substitutes for the other. Do not relax
+`identityAdmission` because the RBAC is narrow, and do not widen a grant
+because this policy exists.
+
+WHAT THIS POLICY CANNOT SEE AT ALL — deploy#1363
+
+The `resources: ["pods"]` in the matchConstraints below is literal: a
+subresource is a different resource, so nothing here fires on `pods/exec`,
+`pods/attach`, `pods/ephemeralcontainers`, `pods/portforward`, `pods/proxy`
+or `nodes/proxy`. Exec into a platform pod and you are inside a process that
+already holds the SVID, the projected SA token and the mounted Secrets —
+same destination as claiming the identity at CREATE, reached without
+creating anything, and therefore without any admission review.
+
+Widening the matchConstraints would not help. There is no pod template on an
+exec request to inspect — the object is a PodExecOptions — so the CEL above
+has nothing to key on, and the target pod's identity is not in the request.
+That class is bounded by RBAC alone, which is why the same guard now covers
+it: any verb on one of those subresources needs its own allow-list line.
+Two chart Roles hold one (deploy#1373, deploy#1374 narrowed both).
+
+ROLLOUT — THIS SHIPS IN DENY
+
+`.Values.spire.identityAdmission.actions` defaults to ["Deny"]. Audit/Warn
+was the previous default and it is not a security state: the policy is
+evaluated, the violation is recorded, and the pod is admitted anyway. A
+merged artifact that contains no enforcement, plus a follow-up ticket with
+no owner, is how this stays open indefinitely.
+
+Deny is safe to default here because the legitimate creator set is
+determined by this chart and verifiable from it, not guessed:
+
+  * every platform pod in this chart comes from a Deployment or a
+    StatefulSet, so its creator is replicaset-controller or
+    statefulset-controller;
+  * the one bare Pod that used to claim a platform identity — the
+    SVID-fetching helm test — now has its own ServiceAccount and its own
+    `spiffe://<td>/platform/helm-test` registration, so it no longer needs
+    the installer to be allow-listed. That was the clean resolution the
+    test's own comment block called for, and it is taken here;
+  * the workloads policy refuses to render in Deny with an empty
+    `workloadCreators`, so it cannot silently block your own rollout.
+
+The failure mode is loud and immediate: the create is rejected with a
+message naming the principal and both offending fields. The rollback is a
+values flip, and both policies are scoped to one namespace.
+
+If a legitimate creator on a specific control plane turns out not to be on
+the list — EKS is managed and is not assumed vanilla — the evidence to
+gather is the apiserver audit log annotation
+`validation.policy.admission.k8s.io/validation_failure` naming these policy
+names, over one full bringup cycle. Add the principal to
+`extraAllowedCreators` / `workloadCreators`, do not widen the protected
+lists.
+*/}}
+{{- $ns := .Release.Namespace -}}
+{{- $ia := (.Values.spire.identityAdmission | default dict) -}}
+{{- /* PROTECTED_COMPONENTS mirrors the podSelector of every platform
+       ClusterSPIFFEID in clusterspiffeids.yaml, and PROTECTED_SAS mirrors
+       their literal k8s:sa: workload selectors, via the same helpers. A pod
+       matching EITHER is a platform-identity candidate. Both lists must move
+       together with that file. */ -}}
+{{- $protectedComponents := list "daemon" "ext-authz" "dashboard" "tenant-operator" "connector-operator" "envoy" "openbao" -}}
+{{- $protectedSAs := list
+      (include "gibson.serviceAccountName" .)
+      (include "gibson.extAuthzServiceAccountName" .)
+      (include "gibson.dashboardServiceAccountName" .)
+      (include "gibson.tenantOperatorServiceAccountName" .)
+      (include "gibson.connectorOperatorServiceAccountName" .)
+      (include "gibson.envoyServiceAccountName" .)
+      (include "gibson.ratelimitServiceAccountName" .)
+      (include "gibson.openbaoServiceAccountName" .) -}}
+{{- /* Built-in workload controllers. A pod created by any of these was
+       produced from a Deployment/StatefulSet/DaemonSet/Job/CronJob that
+       the SECOND policy in this file checked as its own object — which is
+       what makes this list non-circular. Deleting that policy makes this
+       one a one-hop control again. */ -}}
+{{- $allowedCreators := concat (list
+      "system:serviceaccount:kube-system:replicaset-controller"
+      "system:serviceaccount:kube-system:statefulset-controller"
+      "system:serviceaccount:kube-system:daemon-set-controller"
+      "system:serviceaccount:kube-system:job-controller"
+      "system:serviceaccount:kube-system:cronjob-controller")
+      ($ia.extraAllowedCreators | default (list)) -}}
+{{- /* Principals permitted to create or update a CONTROLLER OBJECT whose
+       pod template claims a platform identity.
+
+       The two built-ins are the intermediate controllers: a ReplicaSet is
+       derived by deployment-controller from a Deployment this policy
+       already checked, and a Job by cronjob-controller from a CronJob
+       likewise. Neither can introduce a template the policy has not seen.
+
+       Everything else is install-specific — the Argo CD
+       application-controller ServiceAccount on a GitOps cluster, the
+       cluster-admin identity running `helm install` on a dev cluster — and
+       there is no safe default for it, so it is a required value. */ -}}
+{{- $workloadCreators := concat (list
+      "system:serviceaccount:kube-system:deployment-controller"
+      "system:serviceaccount:kube-system:cronjob-controller")
+      ($ia.workloadCreators | default (list)) -}}
+{{- /* Reloader (stakater, --reload-strategy=annotations) rolls a workload by
+       rewriting one pod-template annotation when a ConfigMap or Secret it
+       watches changes. This chart asks for exactly that on ext-authz and the
+       daemon (gibson-fga-config: a new FGA model id). Reloader is not a
+       creator: it may only re-issue a template the policy already admitted,
+       so the rule below admits its UPDATE only when the pod template's spec
+       and labels are byte-identical to the old object's. Empty disables. */ -}}
+{{- $reloaderPrincipal := $ia.reloaderPrincipal | default (printf "system:serviceaccount:%s:reloader" .Release.Namespace) -}}
+{{- $actions := $ia.actions | default (list "Deny") -}}
+{{- if and (has "Deny" $actions) (empty ($ia.workloadCreators | default (list))) -}}
+{{- fail "spire.identityAdmission.actions requests Deny but spire.identityAdmission.workloadCreators is empty. That policy governs who may create or update a Deployment/StatefulSet/DaemonSet/Job/CronJob whose pod template claims a Gibson platform identity, and the legitimate creator differs per install — the Argo CD application-controller ServiceAccount on a GitOps cluster, the cluster-admin identity running `helm install` on a dev cluster. Denying with an empty list would block your own rollout, and defaulting the list would hand a platform identity to a principal nobody chose. Name the principal, e.g. workloadCreators: [\"system:serviceaccount:argocd:argocd-application-controller\"]. Run `kubectl auth whoami` as the installing identity if you are unsure." -}}
+{{- end -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gibson-platform-identity-pods
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  # Fail closed on CEL evaluation errors. The expressions below are
+  # total (every field access is has()-guarded), so a failure here means
+  # the policy object itself is malformed — which must not silently
+  # degrade into "no control".
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      # CREATE only, and `pods` only (not pods/exec, pods/eviction, …).
+      # UPDATE is not covered: labels and serviceAccountName are immutable
+      # on a running pod, so there is nothing to catch there.
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+  variables:
+    - name: component
+      expression: >-
+        has(object.metadata.labels) && 'app.kubernetes.io/component' in object.metadata.labels
+          ? object.metadata.labels['app.kubernetes.io/component']
+          : ''
+    - name: sa
+      # Defaulting has already run by validating-admission time, so this is
+      # normally populated; the guard keeps the expression total anyway.
+      expression: >-
+        has(object.spec.serviceAccountName) && object.spec.serviceAccountName != ''
+          ? object.spec.serviceAccountName
+          : 'default'
+    - name: claimsPlatformIdentity
+      expression: >-
+        variables.component in {{ $protectedComponents | toJson }}
+          || variables.sa in {{ $protectedSAs | toJson }}
+  validations:
+    - expression: >-
+        !variables.claimsPlatformIdentity
+          || request.userInfo.username in {{ $allowedCreators | toJson }}
+      reason: Forbidden
+      messageExpression: >-
+        'pod claims Gibson platform identity (component=' + variables.component +
+        ', serviceAccount=' + variables.sa +
+        ') but was created by ' + request.userInfo.username +
+        ', which is not a built-in workload controller. A platform SPIFFE ID must only be' +
+        ' issued to a pod produced by a Deployment/StatefulSet/DaemonSet/Job. Create the' +
+        ' controller object instead, or add this principal to' +
+        ' spire.identityAdmission.extraAllowedCreators if it is a legitimate installer.'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gibson-platform-identity-pods
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  policyName: gibson-platform-identity-pods
+  # ["Deny"] by default — see the rollout note at the top of this file.
+  # Audit/Warn evaluates the policy and admits the pod anyway, which is a
+  # report, not a control.
+  validationActions: {{ $actions | toJson }}
+  matchResources:
+    # Scoped to the one namespace the platform ClusterSPIFFEIDs select on.
+    # Their namespaceSelector is `kubernetes.io/metadata.name: <ns>`, and
+    # that label is apiserver-managed (NamespaceDefaultLabelName), not
+    # settable by a namespace author — so the two scopes cannot be made to
+    # disagree.
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $ns }}
+---
+{{/*
+=============================================================================
+The controller-object half. Without this the policy above is one hop deep
+against an adversary that takes two: create a Deployment instead of a Pod
+and the pod arrives courtesy of replicaset-controller, which is allow-listed.
+
+`create pods` without `create deployments` is a near-nonexistent RBAC shape
+— the built-in `edit` and `admin` ClusterRoles grant both — so covering
+only Pods bought one extra kubectl verb, not a boundary.
+=============================================================================
+*/}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gibson-platform-identity-workloads
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  # Same reasoning as the pods policy: the expressions below are total, so
+  # an evaluation error means the policy object is malformed and must not
+  # degrade into "no control".
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      # ReplicaSets are matched as well as Deployments. A principal that
+      # can write a ReplicaSet directly skips the Deployment hop, and
+      # deployment-controller writing one on our behalf is allow-listed
+      # below, so nothing legitimate is caught by including it.
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+      # CronJobs nest the template one level deeper; the podTemplate
+      # variable below handles both shapes.
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["jobs", "cronjobs"]
+  variables:
+    # CEL's conditional is short-circuiting, so the CronJob branch is only
+    # evaluated for objects that have jobTemplate.
+    - name: podTemplate
+      expression: >-
+        has(object.spec.jobTemplate)
+          ? object.spec.jobTemplate.spec.template
+          : object.spec.template
+    - name: component
+      expression: >-
+        has(variables.podTemplate.metadata) && has(variables.podTemplate.metadata.labels)
+          && 'app.kubernetes.io/component' in variables.podTemplate.metadata.labels
+          ? variables.podTemplate.metadata.labels['app.kubernetes.io/component']
+          : ''
+    - name: sa
+      # Unlike a Pod, a pod TEMPLATE is not defaulted at admission time, so
+      # an omitted serviceAccountName here really does mean "default".
+      expression: >-
+        has(variables.podTemplate.spec) && has(variables.podTemplate.spec.serviceAccountName)
+          && variables.podTemplate.spec.serviceAccountName != ''
+          ? variables.podTemplate.spec.serviceAccountName
+          : 'default'
+    - name: claimsPlatformIdentity
+      expression: >-
+        variables.component in {{ $protectedComponents | toJson }}
+          || variables.sa in {{ $protectedSAs | toJson }}
+    # A restart-only UPDATE by Reloader: the pod template's spec and labels are
+    # unchanged, only template annotations moved. Nothing new claims an
+    # identity, so the admitted creator's template is simply re-issued.
+    - name: restartOnly
+      expression: >-
+        request.operation == 'UPDATE'
+          && request.userInfo.username == {{ $reloaderPrincipal | toJson }}
+          && !has(object.spec.jobTemplate)
+          && has(oldObject.spec) && has(oldObject.spec.template)
+          && object.spec.template.spec == oldObject.spec.template.spec
+          && (has(object.spec.template.metadata) && has(object.spec.template.metadata.labels) ? object.spec.template.metadata.labels : {})
+             == (has(oldObject.spec.template.metadata) && has(oldObject.spec.template.metadata.labels) ? oldObject.spec.template.metadata.labels : {})
+  validations:
+    - expression: >-
+        !variables.claimsPlatformIdentity
+          || request.userInfo.username in {{ $workloadCreators | toJson }}
+          || variables.restartOnly
+      reason: Forbidden
+      messageExpression: >-
+        'workload pod template claims Gibson platform identity (component=' + variables.component +
+        ', serviceAccount=' + variables.sa +
+        ') but the object was written by ' + request.userInfo.username +
+        ', which is not a permitted creator of platform workloads. A platform SPIFFE ID is only' +
+        ' issued to a workload written by the principal that manages this release. Add this' +
+        ' principal to spire.identityAdmission.workloadCreators if it legitimately deploys' +
+        ' Gibson, or drop the platform component label and ServiceAccount from the pod template.'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gibson-platform-identity-workloads
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  policyName: gibson-platform-identity-workloads
+  validationActions: {{ $actions | toJson }}
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $ns }}

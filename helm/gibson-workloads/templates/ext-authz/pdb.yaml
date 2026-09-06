@@ -1,0 +1,30 @@
+{{/* ext-authz PodDisruptionBudget (Week 2 §3 R9).
+ext-authz is structural infrastructure (deploy#188) — the
+extAuthz.enabled toggle was deleted; this template renders whenever
+its own pdb.enabled sub-feature toggle is true (auto-on when replicas>1). */}}
+{{- $replicas := int (.Values.extAuthz.replicas) }}
+{{- $pdb := .Values.extAuthz.podDisruptionBudget | default dict }}
+{{- $pdbEnabled := $pdb.enabled }}
+{{- if and (kindIs "invalid" $pdbEnabled) (gt $replicas 1) }}
+{{- $pdbEnabled = true }}
+{{- end }}
+{{- if $pdbEnabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-ext-authz
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ext-authz
+spec:
+  {{- if $pdb.maxUnavailable }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ $pdb.minAvailable | default (ternary "50%" 1 (gt $replicas 2)) }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ext-authz
+{{- end }}

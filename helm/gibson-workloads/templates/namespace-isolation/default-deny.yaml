@@ -1,0 +1,49 @@
+{{/*
+Namespace-wide default-deny NetworkPolicy (deploy#1365, second half of
+deploy#1210).
+
+`podSelector: {}` selects EVERY pod in the release namespace, present and
+future, and `policyTypes: [Ingress, Egress]` makes each of them
+default-deny in both directions. Kubernetes NetworkPolicies are additive:
+a pod selected by any policy is isolated for that policy's policyTypes,
+and only explicit allow rules restore traffic. This policy carries NO
+rules — every allowance lives in the per-component policies (the seven
+pre-existing ones plus the `namespace-isolation/` set added with this
+file), so this deny is a no-op for every first-party workload and a full
+ingress+egress cutoff for anything else: an unlabelled pod, a rogue pod
+that joined a Service's endpoints by copying selector labels
+(deploy#1187 / deploy#1382 exploit shape), or a workload added to the
+chart without a policy (blocked at render time by
+scripts/check-netpol-coverage.py).
+
+This mirrors the setec chart's `sandbox-namespace-baseline-netpol` — the
+same reasoning the issue cites: a containment control that switches
+itself off when unconfigured is not a control. There is therefore NO
+`.enabled` values toggle on this policy (one-code-path, deploy#188). The
+only escape hatch is `dev.networkPolicy.disabled`, which exists ONLY for
+Kind clusters whose CNI does not implement NetworkPolicies and is
+already documented as forbidden in production overlays.
+
+The kube-apiserver, kubelet probes and node-local health checks are not
+affected: admission webhooks receive ingress via the per-component
+policies' any-source webhook-port rules, and the AWS VPC CNI network
+policy agent always permits kubelet health-check traffic from the node's
+primary IP (deploy#1430 — NETWORK_POLICY_ENFORCING_MODE=standard).
+*/}}
+{{- $devDisabled := false -}}
+{{- with .Values.dev -}}{{- with .networkPolicy -}}{{- $devDisabled = .disabled -}}{{- end -}}{{- end -}}
+{{- if not $devDisabled -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-namespace-default-deny
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: namespace-default-deny
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+{{- end }}

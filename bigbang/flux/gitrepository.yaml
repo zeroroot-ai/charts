@@ -1,0 +1,20 @@
+---
+# GitRepository source that Big Bang's Flux uses to consume this package.
+#
+# Big Bang reconciles packages from git: this object points Flux at the deploy
+# repo, and ../flux/flux-kustomization.yaml selects the bigbang/package path.
+# Air-gap clusters repoint `url` at the customer's internal git mirror.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: gibson-deploy
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://github.com/zeroroot-ai/deploy
+  ref:
+    branch: main
+  # Air-gap: repoint at the internal mirror and reference an SSH/HTTPS secret.
+  # url: ssh://git@git.il.example.mil/zeroroot-ai/deploy.git
+  # secretRef:
+  #   name: gibson-deploy-git

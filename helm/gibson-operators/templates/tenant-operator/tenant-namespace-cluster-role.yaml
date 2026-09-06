@@ -1,0 +1,57 @@
+{{- /*
+ClusterRole referenced by every per-tenant RoleBinding the operator
+creates as it provisions a fresh tenant namespace. Holds the operator's
+in-namespace rule set (secrets, configmaps, services, PVCs, resource
+quotas, statefulsets, networkpolicies, roles + rolebindings) once,
+cluster-wide, so the operator does NOT need cluster-scope
+`roles/create + escalate` to bootstrap each tenant.
+
+Why this shape (vs minting a per-tenant Role at runtime, which the
+earlier saga did): minting a Role with arbitrary rules requires the
+operator to hold `roles/create + escalate` cluster-wide. That's a
+much wider blast radius than the spec
+`secrets-blast-radius-reduction` Phase 1.1 intended. By owning the
+rule set here in the chart and exposing only `rolebindings/create`
++ `clusterroles/bind` (scoped via resourceNames to THIS name), the
+operator can RoleBind the ClusterRole into a tenant namespace but
+cannot redefine its rules. A compromised operator can bind into
+arbitrary namespaces, but never escalate its permissions.
+
+The operator references this name as a Go constant:
+internal/controller/tenant_namespace.go → tenantOperatorNamespaceClusterRole.
+Drift between the constant and `metadata.name` here breaks every
+new tenant's RBAC bootstrap.
+
+tenant-operator is structural infrastructure (one-code-path /
+deploy#188). The previous outer `.Values.tenantOperator.enabled`
+gate has been deleted — this ClusterRole renders unconditionally.
+*/ -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gibson-tenant-operator-tenant-namespace
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/component: tenant-operator-tenant-namespace-rbac
+    app.kubernetes.io/part-of: gibson
+rules:
+  # Eight resource families the operator manages inside each tenant
+  # namespace. Verbs are the full CRUD set because the saga both
+  # writes (provision) and reads (reconcile / status) every kind.
+  - apiGroups: [""]
+    resources:
+      - secrets                  # DB creds, Vault transit, Neo4j auth
+      - configmaps               # tenant-neo4j-template read (NotFound + Go fallback until Task 22 renders it, deploy#1437)
+      - services                 # per-tenant DB Services
+      - persistentvolumeclaims   # per-tenant DB PVCs
+      - resourcequotas           # per-tenant quota
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["apps"]
+    resources: [statefulsets]    # per-tenant Postgres / Neo4j / Vault / Vector
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["networking.k8s.io"]
+    resources: [networkpolicies] # per-tenant ingress/egress restrictions
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: [roles, rolebindings]  # SA-token RBAC for in-namespace workloads
+    verbs: [get, list, watch, create, update, patch, delete]

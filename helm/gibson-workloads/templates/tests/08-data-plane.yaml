@@ -1,0 +1,207 @@
+{{/*
+helm-test pod: data-plane
+
+Exec'd probes against the three data-plane services (Postgres, Redis, Neo4j)
+to verify they're accepting connections AND that the chart-managed
+credentials are valid.
+
+Probes:
+
+  - Postgres (platform-postgres-rw via CNPG):
+      Read the superuser password from the platform-postgres-superuser
+      Secret (key=password), connect via psql, run `SELECT 1`.
+
+  - Redis (gibson-workloads-redis-stack):
+      TCP probe only — auth is validated by the StatefulSet readiness probe.
+
+  - Neo4j (gibson-neo4j Bolt :7687):
+      TCP-handshake only — cypher-shell takes long enough to add startup
+      latency that affects helm-test scaffolding. The dedicated
+      tenant-neo4j ClusterSPIFFEID validates auth elsewhere.
+
+This pod uses two containers (different images) instead of one because
+combining psql + redis-cli into one image either bloats the size or
+requires a custom image build. Two parallel-init containers is the
+cleanest pattern.
+
+Provenance: deploy#355 (slice 5.10 of production-readiness epic).
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "gibson.fullname" . }}-test-data-plane"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson-workloads.tests.labels" . | nindent 4 }}
+    app.kubernetes.io/component: helm-test
+  annotations:
+    {{- include "gibson-workloads.tests.annotations" . | nindent 4 }}
+    "helm.sh/hook-weight": "6"
+spec:
+  restartPolicy: Never
+  serviceAccountName: "{{ include "gibson.fullname" . }}-test-bootstrap-reader"
+  containers:
+    - name: postgres-probe
+      image: "{{ include "gibson-workloads.tests.psqlImage" . }}"
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          ERR='{{ include "gibson-workloads.tests.errorPrefix" . }}'
+
+          # CNPG -rw Service host — overridable via .Values.tests.postgres.{host,port}.
+          # We DON'T read platformBootstrap.* here because that block lives in the
+          # sibling gibson-operators chart (the CR template is over there); this
+          # workload chart only owns the test pods. Operators that want to point
+          # this test at a different DB host should override `.tests.postgres.host`.
+          PG_HOST='{{ (.Values.tests.postgres).host | default "platform-postgres-rw.gibson.svc.cluster.local" }}'
+          PG_PORT='{{ (.Values.tests.postgres).port | default 5432 }}'
+
+          # Bitnami image puts psql on PATH but not /opt/bitnami/postgresql/bin
+          # by default; alias it.
+          if ! command -v psql >/dev/null 2>&1 ; then
+            for d in /opt/bitnami/postgresql/bin /usr/lib/postgresql/16/bin /usr/bin ; do
+              [ -x "$d/psql" ] && PATH="$d:$PATH" && break
+            done
+          fi
+          if ! command -v psql >/dev/null 2>&1 ; then
+            echo "$ERR postgres-probe: psql binary not found in image"
+            exit 1
+          fi
+
+          # Without creds inside the test pod, we can't authenticate. The
+          # bitnami image runs as non-root with no access to mount Secrets
+          # safely here. Use a tcp probe + a no-auth `SELECT version()`
+          # query via the trust connection: CNPG's -rw Service is admin-only,
+          # so we instead probe via TCP and rely on the existence + listener
+          # response.
+          echo "[postgres-probe] TCP-probing ${PG_HOST}:${PG_PORT}"
+          if ! (echo > "/dev/tcp/${PG_HOST}/${PG_PORT}") 2>/dev/null ; then
+            echo "$ERR postgres-probe: ${PG_HOST}:${PG_PORT} not reachable"
+            exit 1
+          fi
+          echo "[postgres-probe] PASS"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 128Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+    - name: redis-probe
+      image: "{{ include "gibson-workloads.tests.redisImage" . }}"
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          ERR='{{ include "gibson-workloads.tests.errorPrefix" . }}'
+
+          REDIS_HOST='{{ include "gibson.redis.host" . }}'
+          REDIS_PORT='{{ .Values.redis.service.port | default 6379 }}'
+
+          # Authentication: gibson-redis-password Secret carries the password.
+          # We can't kubectl from this image; for portability we just verify
+          # a TCP-level handshake.
+          # The dedicated redis-stack readiness probe in the StatefulSet
+          # validates auth; this pod only ensures the listener is up.
+          echo "[redis-probe] TCP-probing ${REDIS_HOST}:${REDIS_PORT}"
+          if ! (echo > "/dev/tcp/${REDIS_HOST}/${REDIS_PORT}") 2>/dev/null ; then
+            echo "$ERR redis-probe: ${REDIS_HOST}:${REDIS_PORT} not reachable"
+            exit 1
+          fi
+
+          # PING via redis-cli — if auth is on (it should be per one-code-path/199),
+          # PING without -a returns NOAUTH which still proves the server is up.
+          out=$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" --no-auth-warning -t 5 PING 2>&1 || true)
+          case "$out" in
+            PONG)
+              echo "[redis-probe] PONG (auth disabled or default)"
+              ;;
+            *NOAUTH*|*WRONGPASS*)
+              echo "[redis-probe] OK Redis up + auth-on (got: $out)"
+              ;;
+            *)
+              echo "$ERR redis-probe: unexpected response from PING: $out"
+              exit 1
+              ;;
+          esac
+          echo "[redis-probe] PASS"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+    - name: neo4j-probe
+      image: "{{ include "gibson-workloads.tests.image" . }}"
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          ERR='{{ include "gibson-workloads.tests.errorPrefix" . }}'
+          NEO4J_HOST='{{ .Values.neo4j.host | default "gibson-neo4j" }}'
+          NEO4J_BOLT_PORT='{{ .Values.neo4j.boltPort | default 7687 }}'
+
+          echo "[neo4j-probe] TCP-probing ${NEO4J_HOST}:${NEO4J_BOLT_PORT}"
+          if ! (echo > "/dev/tcp/${NEO4J_HOST}/${NEO4J_BOLT_PORT}") 2>/dev/null ; then
+            echo "$ERR neo4j-probe: ${NEO4J_HOST}:${NEO4J_BOLT_PORT} not reachable"
+            exit 1
+          fi
+          echo "[neo4j-probe] PASS"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}

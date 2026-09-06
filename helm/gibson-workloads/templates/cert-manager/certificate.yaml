@@ -1,0 +1,107 @@
+{{/*
+Certificate for the Envoy edge listener at api.<global.domain>.
+
+Spec: unified-identity-and-authorization Phase H/8.3 (Req 3.7).
+
+cert-manager produces a TLS Secret named .Values.certManager.envoyEdge.secretName
+which the Envoy Deployment mounts at /etc/envoy/tls/. The cert SAN list is
+derived from .Values.certManager.envoyEdge.dnsNames or, when empty,
+defaults to api.<global.domain>.
+
+Validation:
+  - The chosen issuer (.Values.certManager.envoyEdge.issuer) must be one we
+    actually rendered above:
+        letsencrypt-staging | letsencrypt-prod  →  letsencrypt.enabled
+        selfsigned-ca                            →  selfsigned.enabled
+  - envoy.tls.selfSigned MUST be false (Envoy template generates an inline
+    self-signed cert when this is true; using both produces a Secret name
+    collision and unpredictable mount contents).
+
+deploy#201 / epic deploy#186: cert-manager is REQUIRED infrastructure —
+the `.Values.certManager.enabled` precondition is gone.
+*/}}
+{{- if .Values.certManager.envoyEdge.enabled }}
+
+{{- $issuer := .Values.certManager.envoyEdge.issuer | default "letsencrypt-prod" -}}
+{{- $allowed := list "letsencrypt-staging" "letsencrypt-prod" "selfsigned-ca" -}}
+{{- if not (has $issuer $allowed) }}
+{{- fail (printf "certManager.envoyEdge.issuer=%q is not one of: letsencrypt-staging, letsencrypt-prod, selfsigned-ca. The Envoy edge Certificate template only knows about issuers this chart renders." $issuer) }}
+{{- end }}
+
+{{- if and (or (eq $issuer "letsencrypt-staging") (eq $issuer "letsencrypt-prod")) (not .Values.certManager.issuers.letsencrypt.enabled) }}
+{{- fail (printf "certManager.envoyEdge.issuer=%q requires certManager.issuers.letsencrypt.enabled=true (the chart did not render that ClusterIssuer)." $issuer) }}
+{{- end }}
+
+{{- if and (eq $issuer "selfsigned-ca") (not .Values.certManager.issuers.selfsigned.enabled) }}
+{{- fail "certManager.envoyEdge.issuer=selfsigned-ca requires certManager.issuers.selfsigned.enabled=true (the chart did not render that ClusterIssuer)." }}
+{{- end }}
+
+{{- if .Values.envoy.tls.selfSigned }}
+{{- fail "certManager.envoyEdge.enabled=true conflicts with envoy.tls.selfSigned=true — only one source of truth allowed for the Envoy edge cert. Set envoy.tls.selfSigned=false." }}
+{{- end }}
+
+{{- /* S5 (deploy#636): the edge cert SANs derive from the gibson-common
+       domain helpers — the single derived set the platform serves
+       (app./api./www.), . global.domain is required (fail-loud,
+       no `zeroroot.ai` fallback).
+
+       Spec tier-2-host-aliases-cluster-dns Component 6: the daemon → Envoy
+       cluster-DNS path requires the in-cluster Service FQDN
+       (gibson-envoy.<ns>.svc.cluster.local) as a SAN too — else standard
+       SAN validation fails when the daemon trusts the Envoy CA and dials by
+       Service name. So the SAN list is gibson.tlsSans (external-identity
+       plane) PLUS the connection-plane Service FQDN. */ -}}
+{{- /* Single edge cert for the consolidated host set (deploy#630): the
+       external SANs are gibson.tlsSans (app./api./www. — auth. retired),
+       plus the connection-plane Service FQDN for the daemon→Envoy
+       cluster-DNS path. commonName = app.<domain> (tlsSans[0]). */ -}}
+{{- $externalSans := include "gibson.tlsSans" . | fromYamlArray -}}
+{{- $svcSan := printf "gibson-envoy.%s.svc.cluster.local" .Release.Namespace -}}
+{{- /* Public ACME CAs (Let's Encrypt) reject a cert if ANY SAN is a non-public
+       name — the internal gibson-envoy.<ns>.svc.cluster.local SAN makes the
+       whole order fail ("not a valid public suffix"). Only append the
+       cluster-DNS SAN for non-public issuers (selfsigned / internal CA); for
+       letsencrypt the edge cert carries the public SANs (app/api/www) only. */ -}}
+{{- $defaultDns := $externalSans -}}
+{{- if not (hasPrefix "letsencrypt" $issuer) -}}
+{{- $defaultDns = append $externalSans $svcSan -}}
+{{- end -}}
+{{- $dnsNames := .Values.certManager.envoyEdge.dnsNames | default $defaultDns -}}
+{{- /* selfsigned-ca is a namespaced Issuer (the gibson-selfsigned-ca CA
+       Secret lives in this release's namespace; cert-manager's
+       --cluster-resource-namespace defaults to the controller's
+       namespace, so a ClusterIssuer wouldn't see the Secret). The
+       letsencrypt-* and awspca issuers are ClusterIssuers. Pick the
+       right kind by issuer name so the CertificateRequest is signable.
+    */ -}}
+{{- $issuerKind := "ClusterIssuer" -}}
+{{- if eq $issuer "selfsigned-ca" -}}
+{{- $issuerKind = "Issuer" -}}
+{{- end -}}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gibson-envoy-edge
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: envoy
+spec:
+  secretName: {{ .Values.certManager.envoyEdge.secretName | default "gibson-envoy-tls" | quote }}
+  issuerRef:
+    name: {{ $issuer | quote }}
+    kind: {{ $issuerKind | quote }}
+    group: cert-manager.io
+  commonName: {{ index $dnsNames 0 | quote }}
+  dnsNames:
+{{ toYaml $dnsNames | indent 4 }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  {{- with .Values.certManager.envoyEdge.duration }}
+  duration: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.certManager.envoyEdge.renewBefore }}
+  renewBefore: {{ . | quote }}
+  {{- end }}
+{{- end }}

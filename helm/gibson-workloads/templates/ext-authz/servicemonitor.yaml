@@ -1,0 +1,24 @@
+{{/* ext-authz ServiceMonitor (Week 2 §3 R21).
+     Renders unconditionally: both observability provider shapes consume
+     ServiceMonitors (in-chart Prometheus or external grafana-agent → Grafana
+     Cloud). deploy#313. */}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-ext-authz
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ext-authz
+spec:
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ext-authz
+  endpoints:
+    - port: health
+      path: /metrics
+      interval: 30s
+
+{{- end }}

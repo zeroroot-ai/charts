@@ -1,0 +1,101 @@
+# Substrate overlay: eks. The AWS deltas, layered ON TOP of
+# values-vanilla.yaml.
+#
+#   helm install gibson . -f values-vanilla.yaml -f values-eks.yaml
+#
+# Proof: installed on zeroroot-ai staging/prod EKS before the 2026-08-16
+#        teardown; the client-IP annotations below are rendered in CI, not yet
+#        installed on a cluster (exit-test-substrate.yml, deploy#1661).
+#
+# the vanilla cluster is the supported self-hosted target and a
+# substrate is one specialisation of it. This file therefore contains ONLY
+# what is true because the cluster is EKS, and only from the allowlist in
+# CONTEXT.md § Substrate (scripts/check-substrate-overlay-allowlist.py):
+# load-balancer annotations incl. client-IP preservation, storage class, the
+# provider region, the DNS-01 solver for the edge certificate, and the DNS
+# provider external-dns publishes to.
+#
+# NO IRSA annotation and NO cloud KMS key (deploy#1744): the 31
+# IRSA roles left with the AWS control plane — the platform's one cloud
+# credential is the durable bucket credential in the bringup keyring — and
+# the daemon key provider runs without a cloud KMS on every substrate. A
+# render guard (helm/gibson/tests/eks-overlay-no-aws-control-plane.bats)
+# fails on any eks.amazonaws.com/role-arn, Secrets Manager, ACM or WAF
+# reference in the EKS render.
+#
+# NOT the secret backend: OpenBao is the one External Secrets backend on every
+# substrate, so no overlay names one.
+#
+# It was previously ci/values-self-hosted-eks.yaml. A `ci/` path says render
+# fixture; this is a deployment source. Before that it was
+# values-self-hosted.yaml and carried the whole profile, which quietly made
+# "self-hosted" mean "self-hosted on AWS". If you are adding something here
+# that is not AWS-specific, it belongs in values-vanilla.yaml.
+#
+# The two operators that keep a per-cloud seam: cert-manager
+# solves DNS-01 against Route53 and external-dns publishes records into it.
+# Both are umbrella subcharts (deploy#1728). Their Route53 credential is the
+# per-cloud seam the operator supplies at install time (a static credential
+# Secret, or a workload-identity overlay of their own) — the committed
+# overlay binds no IRSA role, because stage 1 mints none (deploy#1744).
+external-dns:
+  provider:
+    name: aws
+  env:
+    - name: AWS_DEFAULT_REGION
+      value: "us-east-1"
+
+gibson-workloads:
+  aws:
+    region: "us-east-1"
+
+  certManager:
+    # A real certificate rather than the vanilla self-signed one. DNS-01 over
+    # Route53 needs a hosted zone and a Route53 credential for cert-manager
+    # (supplied at install time — see the seam note above).
+    issuers:
+      letsencrypt:
+        enabled: true
+        email: "ops@example.com"
+        solver: "dns01-route53"
+        dns01Route53:
+          region: "us-east-1"
+          hostedZoneID: ""
+    envoyEdge:
+      issuer: "letsencrypt-prod"
+
+  envoy:
+    service:
+      # Read by the AWS Load Balancer Controller. On a non-EKS cluster these
+      # are inert strings, which is why they are not in the vanilla base.
+      annotations:
+        service.beta.kubernetes.io/aws-load-balancer-type: external
+        service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+        service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+        service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+        service.beta.kubernetes.io/aws-load-balancer-attributes: "deletion_protection.enabled=true"
+        # Client-IP contract. NLB IP targets default to
+        # preserve_client_ip.enabled=false, which hands Envoy the NLB ENI as
+        # the peer. On, the peer is the client. The controller (>= v2.6) gives
+        # the NLB its own security group and writes the backend rule as a
+        # reference to it, so the target SG never opens to 0.0.0.0/0 and the
+        # public rule lives on the NLB alone.
+        service.beta.kubernetes.io/aws-load-balancer-target-group-attributes: "preserve_client_ip.enabled=true"
+        service.beta.kubernetes.io/aws-load-balancer-manage-backend-security-group-rules: "true"
+
+  # gp3 rather than the cluster default.
+  openbao:
+    persistence:
+      storageClass: gp3
+  redis:
+    master:
+      persistence:
+        storageClass: gp3
+
+  gibson:
+    persistence:
+      storageClassName: gp3
+
+gibson-operators:
+  aws:
+    region: "us-east-1"

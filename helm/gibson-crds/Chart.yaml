@@ -1,0 +1,82 @@
+apiVersion: v2
+name: gibson-crds
+description: |
+  CRDs for the gibson platform. Ships every CustomResourceDefinition
+  used by tenant-operator + platform-operator. Must be installed BEFORE
+  gibson-operators (CRDs registered first, controllers second).
+
+  This chart is a SEPARATE RELEASE, installed before the gibson umbrella,
+  and it carries the third-party CRDs the platform renders CRs for as well
+  as its own. That split is forced by Helm, not chosen: Helm resolves every
+  rendered manifest's kind against the live API server BEFORE it applies
+  anything, so a CRD and a CR of that CRD can never occupy one release. The
+  umbrella previously carried gibson-crds, spire-crds and
+  prometheus-operator-crds, and a plain `helm install` of it failed on
+  ClusterSPIFFEID, PlatformBootstrap and ServiceMonitor (deploy#1627). Argo
+  hid this in kind and staging by applying in sync waves and retrying.
+
+  It also carries the CRDs of the cluster operators the umbrella owns as
+  subcharts (cert-manager, external-secrets, CloudNativePG,
+  deploy#1728) through the file:// dependency gibson-operator-crds, whose
+  files are vendored by scripts/vendor-operator-crds.py from the chart
+  versions helm/gibson/Chart.yaml pins. A dependency rather than files here
+  because a Helm release record is one Secret with a 1 MiB cap and stores
+  the top-level chart's files as well as the manifest: those CRDs as files
+  of this chart counted twice and the install failed (measured on kind).
+
+  CRDs are templated under templates/ rather than crds/ so they upgrade
+  in place on `helm upgrade`. `crds/` would also be invisible to
+  `helm template` without --include-crds, which would drop them from the
+  Argo-rendered set entirely. The chart annotates each with
+  `helm.sh/resource-policy: keep` — an accidental `helm uninstall
+  gibson-crds` does NOT delete the CRDs (and every CR depending on them).
+  For a true wipe: `kubectl delete crd <name>` per CRD.
+
+  Spec: .spec-workflow/specs/deploy-architecture-refactor (Phase 7.1).
+type: application
+version: 0.4.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+maintainers:
+  - name: Zero Root AI
+    email: team@zeroroot.ai
+keywords:
+  - gibson
+  - crds
+home: https://github.com/zeroroot-ai/deploy
+sources:
+  - https://github.com/zeroroot-ai/deploy
+
+# Third-party CRD-only charts. They live HERE, not in the umbrella, because the
+# umbrella renders CRs of these kinds: ClusterSPIFFEID (spire) and
+# ServiceMonitor (prometheus-operator). Both upstreams ship CRDs in templates/,
+# so carrying them alongside their own CRs is exactly the install that cannot
+# work. Neither takes any values from this repo. cert-manager, external-secrets
+# and CloudNativePG publish no CRD-only chart, so theirs are vendored files in
+# the first-party gibson-operator-crds chart next door.
+dependencies:
+  - name: spire-crds
+    version: "0.5.0"
+    repository: "https://spiffe.github.io/helm-charts-hardened"
+  # 31.x is the first line with per-CRD toggles (values.yaml): the platform
+  # renders ServiceMonitor and PrometheusRule CRs and nothing else from this
+  # group, and the eight unused CRDs are 3.8 MB of a Helm release that must
+  # stay under the 1 MiB Secret cap (deploy#1728).
+  # Same seam. The platform renders ServiceMonitor and PrometheusRule; a cluster
+  # that runs Prometheus Operator already defines both and owns the full set.
+  - name: prometheus-operator-crds
+    version: "31.0.1"
+    repository: "https://prometheus-community.github.io/helm-charts"
+    condition: prometheus-operator-crds.enabled
+  # OPERATOR-SUBSTITUTION SEAM, matching the umbrella's four toggles. A CRD is
+  # CLUSTER-scoped: shipping certificates.cert-manager.io to a cluster that
+  # already runs cert-manager REPLACES the customer's copy underneath their
+  # running controller. Default true for a greenfield install; a guest cluster
+  # that owns the operators sets it false and keeps its own CRDs.
+  - name: gibson-operator-crds
+    version: "0.1.0"
+    repository: "file://../gibson-operator-crds"
+    condition: gibson-operator-crds.enabled
+
+annotations:
+  org.opencontainers.image.source: https://github.com/zeroroot-ai/charts

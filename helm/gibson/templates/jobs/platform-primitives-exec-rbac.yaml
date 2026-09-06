@@ -1,0 +1,112 @@
+{{/* deploy#788: bringup Jobs + RBAC folded from gitops apps/manifests. All post-install (umbrella deps are in-release main resources); hook-weight preserves PreSync<Sync<PostSync order; jobs self-wait for readiness. */}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgres-exec
+  namespace: gibson
+  labels:
+    app.kubernetes.io/component: postgres-bootstrap
+  annotations:
+    helm.sh/resource-policy: keep
+    # Must exist before the Sync-wave -6 postgres-setup Jobs that run
+    # under this SA (deploy#908). Run as an early Sync hook (-7) instead of
+    # PostSync; postgres-exec is used only by ephemeral setup Jobs, so hook
+    # lifecycle is safe (unlike a standing-Deployment SA).
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "-7"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: '-7'
+    helm.sh/hook-delete-policy: before-hook-creation
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: postgres-exec
+  namespace: gibson
+  labels:
+    app.kubernetes.io/component: postgres-bootstrap
+  annotations:
+    helm.sh/resource-policy: keep
+    # Must exist before the Sync-wave -6 postgres-setup Jobs that run
+    # under this SA (deploy#908). Run as an early Sync hook (-7) instead of
+    # PostSync; postgres-exec is used only by ephemeral setup Jobs, so hook
+    # lifecycle is safe (unlike a standing-Deployment SA).
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "-7"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: '-7'
+    helm.sh/hook-delete-policy: before-hook-creation
+rules:
+# deploy#1363: the pods/exec + pods-list + cnpg-cluster-read grants exist for
+# the CNPG-exec setup Jobs (gibson-workloads/openfga/zitadel/spire-
+# postgres-setup), which kubectl-exec into the elected in-cluster CNPG
+# primary. Since (deploy#1730) that Cluster is the platform Postgres
+# on every profile, so the grants render everywhere. `pods/exec: create` in
+# gibson is the same identity primitive as pod-create (exec a platform pod,
+# inherit its SVID / SA token / mounted Secrets; the platform-identity VAP
+# matches `pods` CREATE, not `pods/exec`), and the SA is a hook SA whose
+# token exists only while the Jobs run.
+#
+# The grant cannot be name-scoped the way redis-rotation's could: the CNPG
+# primary is elected, so its pod name is not deterministic. That residual is
+# inherent to the exec-based bootstrap and would need a CNPG-native bootstrap
+# (Database CR / postInitSQL) to remove — tracked on #1363.
+- apiGroups:
+  - ''
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - ''
+  resources:
+  - pods/exec
+  verbs:
+  - create
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - clusters
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: postgres-exec
+  namespace: gibson
+  labels:
+    app.kubernetes.io/component: postgres-bootstrap
+  annotations:
+    helm.sh/resource-policy: keep
+    # Must exist before the Sync-wave -6 postgres-setup Jobs that run
+    # under this SA (deploy#908). Run as an early Sync hook (-7) instead of
+    # PostSync; postgres-exec is used only by ephemeral setup Jobs, so hook
+    # lifecycle is safe (unlike a standing-Deployment SA).
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "-7"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: '-7'
+    helm.sh/hook-delete-policy: before-hook-creation
+subjects:
+- kind: ServiceAccount
+  name: postgres-exec
+  namespace: gibson
+roleRef:
+  kind: Role
+  name: postgres-exec
+  apiGroup: rbac.authorization.k8s.io

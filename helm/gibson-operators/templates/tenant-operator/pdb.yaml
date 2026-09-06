@@ -1,0 +1,37 @@
+{{/* tenant-operator PodDisruptionBudget (Week 2 §3 R9). HA via leader election.
+     tenant-operator is structural infrastructure (one-code-path /
+     deploy#188). The previous outer `.Values.tenantOperator.enabled`
+     gate has been deleted; the inner `podDisruptionBudget.enabled`
+     sub-feature flag is preserved (legitimate sub-feature toggle).
+
+     deploy#348: the selector matches the Deployment's actual pod labels
+     (app.kubernetes.io/name=gibson-tenant-operator + component) rather
+     than gibson.selectorLabels (which would produce name=gibson-operators,
+     the chart name, not the workload name). The prior selector matched
+     zero pods → InsufficientPods → Argo Degraded. */}}
+{{- $replicas := int (.Values.tenantOperator.replicas) }}
+{{- $pdb := .Values.tenantOperator.podDisruptionBudget | default dict }}
+{{- $pdbEnabled := $pdb.enabled }}
+{{- if and (kindIs "invalid" $pdbEnabled) (gt $replicas 1) }}
+{{- $pdbEnabled = true }}
+{{- end }}
+{{- if $pdbEnabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-tenant-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tenant-operator
+spec:
+  {{- if $pdb.maxUnavailable }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ $pdb.minAvailable | default 1 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gibson-tenant-operator
+      app.kubernetes.io/component: tenant-operator
+{{- end }}

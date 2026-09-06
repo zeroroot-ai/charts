@@ -1,0 +1,23 @@
+{{- /*
+  gibson daemon is structural infrastructure (one-code-path /
+  deploy#188). The previous outer `.Values.gibson.enabled` gate has
+  been deleted; the inner `serviceAccount.create` sub-feature flag
+  is preserved (legitimate sub-feature toggle).
+*/}}
+{{- if .Values.gibson.serviceAccount.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "gibson.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "gibson.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gibson.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

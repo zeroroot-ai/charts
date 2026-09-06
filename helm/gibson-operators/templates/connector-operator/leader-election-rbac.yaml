@@ -1,0 +1,46 @@
+{{- /*
+Leader-election RBAC for the gibson-connector-operator.
+
+The manager runs with --leader-elect (deployment.yaml), so controller-runtime
+takes a Lease in the operator's own namespace (LeaderElectionID
+"connector-operator.gibson.zeroroot.ai", namespace defaults to the pod
+namespace — cmd/main.go sets no LeaderElectionNamespace). It also emits
+Events about reconciles. Both are namespaced, so they are granted with a
+Role + RoleBinding here rather than in the cluster-wide ClusterRole — the
+kubebuilder leader_election_role shape.
+
+connector-operator is structural infrastructure (one-code-path / deploy#188,
+) — renders unconditionally, no `.enabled` toggle.
+*/ -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gibson-connector-operator-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: gibson-connector-operator
+    app.kubernetes.io/part-of: gibson
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gibson-connector-operator-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: gibson-connector-operator
+    app.kubernetes.io/part-of: gibson
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.connectorOperator.serviceAccount.name | default "gibson-connector-operator" }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gibson-connector-operator-leader-election

@@ -1,0 +1,333 @@
+{{/*
+openbao-approle-cert-manager-init — bootstraps the Vault approle auth path,
+the PKI mount + cert-manager policy, the `cert-manager` approle role, and
+writes a freshly-minted role_id + secret_id into the K8s Secret consumed
+by the cert-manager Vault Issuer.
+
+Why this exists:
+  The cert-manager Vault Issuer at templates/cert-manager/vault-issuer.yaml
+  authenticates to Vault via the approle auth method (deploy#351).
+  The previous shape used the now-forbidden Kubernetes-auth mount (see
+; the literal path is on its deny-list so it MUST NOT appear
+  here), which was never mounted in the in-chart Vault, so first-renewal
+  would 404. This Job
+  is the on-cluster counterpart that makes approle real:
+
+    1. Enable auth/approle if not already mounted (400 "already in use" =
+       idempotent success).
+    2. Enable + tune the PKI secrets engine at `pki_int` if not already
+       mounted, and seed a self-signed root CA + a sign role `gibson`
+       (idempotent). This is the same PKI mount the Issuer's `path` field
+       points at (e.g. pki_int/sign/gibson). The chart did not previously
+       template a PKI bootstrap and the docs assumed one existed — this
+       Job IS that bootstrap.
+    3. Write policy `cert-manager-vault-pki` granting issue + sign + read
+       on the PKI mount.
+    4. Create / update approle role `cert-manager` bound to the policy
+       with token_ttl=1h token_max_ttl=24h.
+
+  Every step above is a Vault HTTP API call (curl), NOT a kubectl call —
+  this Job no longer touches any K8s resource, so it needs no RBAC and is
+  off the Check-28 imperative-kubectl ledger (deploy#944).
+
+Materialising the AppRole credential (deploy#944):
+  The role_id (non-secret) and a freshly-minted secret_id were previously
+  read here and written into the `gibson-cert-manager-approle` K8s Secret
+  via an imperative `kubectl patch secret` / `create -f` — an allowlisted
+  Check-28 exception, because the secret_id is minted live by Vault so ESO
+  had no backend to sync from.
+
+  That write is now declarative, via the ESO Vault generator + ExternalSecret
+  at ../../external-secrets/cert-manager-approle-externalsecret.yaml: a
+  VaultDynamicSecret generator POSTs auth/<approle>/role/cert-manager/secret-id
+  to mint a fresh secret_id and GETs .../role-id, and an ExternalSecret
+  materialises both into `gibson-cert-manager-approle`. ESO authenticates to
+  the in-cluster OpenBao with the same admin token this Job mounts (token
+  auth — NOT the kubernetes-auth mount, which forbids). ESO retries
+  on its refresh interval, so once this Job has created the approle role the
+  generator's POST succeeds and the Secret materialises; the cert-manager
+  Vault Issuer consumes it from there.
+
+Reference: openbao-jwt-auth-init/job.yaml is the structural twin — same
+admin-token mount, same idempotent curl + status-code handling, same
+wait-for-vault initContainer.
+*/}}
+{{- if (((.Values.certManager).issuers).vault).enabled }}
+{{- $vi := .Values.certManager.issuers.vault }}
+{{- $openbaoPort := .Values.openbao.service.port | required "openbao.service.port is REQUIRED for openbao-approle-cert-manager-init Job (deploy#351). Typical value: 8200." -}}
+{{- $auth := $vi.auth | default dict }}
+{{- $aAuth := $auth.appRole | default dict }}
+{{- $approlePath := $aAuth.path | default "approle" }}
+{{- $sref := $aAuth.secretRef | default dict }}
+{{- $secretName := $sref.name | default "gibson-cert-manager-approle" }}
+{{- /* PKI mount derived from the Issuer's `path` field. The path is of
+       the form "<mount>/sign/<role>"; we split on "/sign/" to recover
+       the mount + role name. */ -}}
+{{- $issuerPath := required "certManager.issuers.vault.path is required when vault issuer is enabled (e.g. pki_int/sign/gibson)" $vi.path }}
+{{- $pkiSplit := splitList "/sign/" $issuerPath }}
+{{- if ne (len $pkiSplit) 2 }}
+  {{- fail (printf "certManager.issuers.vault.path %q must be of the form <pki-mount>/sign/<role-name> (e.g. pki_int/sign/gibson)" $issuerPath) }}
+{{- end }}
+{{- $pkiMount := index $pkiSplit 0 }}
+{{- $pkiRole := index $pkiSplit 1 }}
+{{- /* deploy#944: the SA/Role/RoleBinding that granted get+patch+create on
+       the gibson-cert-manager-approle Secret are gone — this Job no longer
+       writes any K8s resource (it only bootstraps Vault over HTTP). The
+       AppRole credential is materialised declaratively by the ESO Vault
+       generator + ExternalSecret in
+       ../../external-secrets/cert-manager-approle-externalsecret.yaml. The
+       Job runs on the default ServiceAccount with no extra RBAC. */ -}}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "gibson.fullname" . }}-openbao-approle-cert-manager-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao-approle-cert-manager-init
+  annotations:
+    # Regular Sync-phase resource (no helm hook). forbids
+    # helm.sh/hook on state-bearing resources, but this is a setup-time
+    # Job with the same shape as openbao-jwt-auth-init/job.yaml which is
+    # also annotated `helm.sh/resource-policy: keep` (no hook).
+    helm.sh/resource-policy: keep
+spec:
+  backoffLimit: 10
+  {{- /* Wall-clock from JOB CREATION, and it counts the wait for
+         prerequisites that converge slowly on a cold bring-up (deploy#1766:
+         the SPIRE OIDC JWKS behind the spire server and discovery provider
+         reached t+8-9m on a loaded workstation, measured 2026-09-02). A fired
+         deadline is permanent on a plain helm install and wedges everything
+         downstream, so the value covers the worst measured cold bring-up with
+         headroom. The deadline stays for Argo sync hygiene. */}}
+  activeDeadlineSeconds: 1200
+  ttlSecondsAfterFinished: 60
+  template:
+    metadata:
+      labels:
+        {{- include "gibson.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: openbao-approle-cert-manager-init
+    spec:
+      restartPolicy: OnFailure
+      # deploy#944: runs on the namespace default ServiceAccount — the Job
+      # no longer touches the K8s API (Vault HTTP bootstrap only); the
+      # AppRole Secret is materialised by ESO.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-for-vault
+          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+          command: ['sh', '-c']
+          args:
+            - |
+              set -e
+              BAO_ADDR="http://{{ .Release.Name }}-openbao:{{ $openbaoPort }}"
+              echo "Waiting for Vault at ${BAO_ADDR}/v1/sys/health ..."
+              i=0
+              while [ $i -lt 90 ]; do
+                code=$(curl -sS -o /dev/null -w '%{http_code}' "${BAO_ADDR}/v1/sys/health" || echo "000")
+                case "$code" in
+                  200|429|472|473) echo "Vault ready (HTTP $code)"; exit 0 ;;
+                esac
+                i=$((i+1))
+                echo "  not ready (HTTP $code, ${i}/90), retrying in 2s ..."
+                sleep 2
+              done
+              echo "ERROR: Vault did not become ready in 180s"
+              exit 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: approle-cert-manager-init
+          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+          command: ['sh', '-c']
+          args:
+            - |
+              set -e
+              BAO_ADDR="http://{{ .Release.Name }}-openbao:{{ $openbaoPort }}"
+              APPROLE_PATH="{{ $approlePath }}"
+              PKI_MOUNT="{{ $pkiMount }}"
+              PKI_ROLE="{{ $pkiRole }}"
+              SECRET_NAME="{{ $secretName }}"
+              NAMESPACE="{{ .Release.Namespace }}"
+
+              if [ ! -s /etc/vault-init/VAULT_ADMIN_TOKEN ]; then
+                echo "FATAL: /etc/vault-init/VAULT_ADMIN_TOKEN missing or empty"
+                exit 1
+              fi
+              VAULT_ADMIN_TOKEN="$(cat /etc/vault-init/VAULT_ADMIN_TOKEN)"
+              TOKEN_HEADER="X-Vault-Token: ${VAULT_ADMIN_TOKEN}"
+              CT='Content-Type: application/json'
+
+              echo "=== openbao-approle-cert-manager-init ==="
+              echo "  vault:        ${BAO_ADDR}"
+              echo "  approle_path: ${APPROLE_PATH}"
+              echo "  pki_mount:    ${PKI_MOUNT}"
+              echo "  pki_role:     ${PKI_ROLE}"
+              echo "  secret_name:  ${SECRET_NAME} (ns=${NAMESPACE})"
+
+              # ---------- Step 1: enable auth/approle (idempotent) ----------
+              echo "--- Step 1: enable auth/${APPROLE_PATH} ---"
+              code=$(curl -sS -o /tmp/enable.json -w '%{http_code}' \
+                -X POST -H "$TOKEN_HEADER" -H "$CT" \
+                -d '{"type":"approle"}' \
+                "${BAO_ADDR}/v1/sys/auth/${APPROLE_PATH}")
+              if [ "$code" = "204" ] || [ "$code" = "200" ]; then
+                echo "  enabled (HTTP $code)"
+              elif [ "$code" = "400" ] && grep -q 'path is already in use' /tmp/enable.json; then
+                echo "  already enabled (idempotent)"
+              else
+                echo "FATAL: enable approle failed (HTTP $code): $(cat /tmp/enable.json)"
+                exit 1
+              fi
+
+              # ---------- Step 2: enable PKI secrets engine (idempotent) ----------
+              echo "--- Step 2: enable secrets/${PKI_MOUNT} ---"
+              code=$(curl -sS -o /tmp/pki_mount.json -w '%{http_code}' \
+                -X POST -H "$TOKEN_HEADER" -H "$CT" \
+                -d '{"type":"pki","config":{"max_lease_ttl":"87600h"}}' \
+                "${BAO_ADDR}/v1/sys/mounts/${PKI_MOUNT}")
+              if [ "$code" = "204" ] || [ "$code" = "200" ]; then
+                echo "  enabled (HTTP $code)"
+              elif [ "$code" = "400" ] && grep -q 'path is already in use' /tmp/pki_mount.json; then
+                echo "  already enabled (idempotent)"
+              else
+                echo "FATAL: enable pki at ${PKI_MOUNT} failed (HTTP $code): $(cat /tmp/pki_mount.json)"
+                exit 1
+              fi
+
+              # Tune PKI max-lease (idempotent).
+              echo "  tune ${PKI_MOUNT} max_lease_ttl=87600h ..."
+              code=$(curl -sS -o /tmp/pki_tune.json -w '%{http_code}' \
+                -X POST -H "$TOKEN_HEADER" -H "$CT" \
+                -d '{"max_lease_ttl":"87600h"}' \
+                "${BAO_ADDR}/v1/sys/mounts/${PKI_MOUNT}/tune")
+              [ "$code" = "204" ] || [ "$code" = "200" ] || { echo "FATAL: tune (HTTP $code): $(cat /tmp/pki_tune.json)"; exit 1; }
+
+              # Seed root CA if no cert exists yet. The read of /ca/pem returns
+              # an empty body + 204 when no CA is configured.
+              echo "  check / seed root CA ..."
+              code=$(curl -sS -o /tmp/ca.pem -w '%{http_code}' \
+                "${BAO_ADDR}/v1/${PKI_MOUNT}/ca/pem")
+              if [ "$code" = "200" ] && [ -s /tmp/ca.pem ]; then
+                echo "  root CA already present"
+              else
+                echo "  generating self-signed root CA ..."
+                code=$(curl -sS -o /tmp/ca_gen.json -w '%{http_code}' \
+                  -X POST -H "$TOKEN_HEADER" -H "$CT" \
+                  -d '{"common_name":"gibson-vault-pki","ttl":"87600h"}' \
+                  "${BAO_ADDR}/v1/${PKI_MOUNT}/root/generate/internal")
+                [ "$code" = "200" ] || { echo "FATAL: root gen (HTTP $code): $(cat /tmp/ca_gen.json)"; exit 1; }
+              fi
+
+              # Create or update the sign role (idempotent — POST is overwrite).
+              echo "  upsert pki role ${PKI_ROLE} ..."
+              cat > /tmp/role.json <<JSON
+              {
+                "allowed_domains": "svc.cluster.local,cluster.local,zeroroot.ai,zeroroot.ai",
+                "allow_subdomains": true,
+                "allow_bare_domains": true,
+                "allow_glob_domains": true,
+                "allow_any_name": true,
+                "max_ttl": "720h",
+                "ttl": "72h"
+              }
+              JSON
+              code=$(curl -sS -o /tmp/role.out.json -w '%{http_code}' \
+                -X POST -H "$TOKEN_HEADER" -H "$CT" \
+                --data-binary "@/tmp/role.json" \
+                "${BAO_ADDR}/v1/${PKI_MOUNT}/roles/${PKI_ROLE}")
+              [ "$code" = "204" ] || [ "$code" = "200" ] || { echo "FATAL: role upsert (HTTP $code): $(cat /tmp/role.out.json)"; exit 1; }
+
+              # ---------- Step 3: policy cert-manager-vault-pki ----------
+              echo "--- Step 3: write policy cert-manager-vault-pki ---"
+              POLICY=$(cat <<HCL
+              path "${PKI_MOUNT}/sign/${PKI_ROLE}" {
+                capabilities = ["create", "update"]
+              }
+              path "${PKI_MOUNT}/issue/${PKI_ROLE}" {
+                capabilities = ["create", "update"]
+              }
+              path "${PKI_MOUNT}/sign-verbatim/${PKI_ROLE}" {
+                capabilities = ["create", "update"]
+              }
+              path "${PKI_MOUNT}/ca/pem" {
+                capabilities = ["read"]
+              }
+              HCL
+              )
+              # PUT /v1/sys/policies/acl/<name> with JSON body { "policy": "<hcl>" }
+              jq -Rn --arg p "$POLICY" '{policy:$p}' > /tmp/policy.json
+              code=$(curl -sS -o /tmp/policy.out.json -w '%{http_code}' \
+                -X PUT -H "$TOKEN_HEADER" -H "$CT" \
+                --data-binary "@/tmp/policy.json" \
+                "${BAO_ADDR}/v1/sys/policies/acl/cert-manager-vault-pki")
+              [ "$code" = "204" ] || [ "$code" = "200" ] || { echo "FATAL: policy write (HTTP $code): $(cat /tmp/policy.out.json)"; exit 1; }
+              echo "  policy ok"
+
+              # ---------- Step 4: approle role cert-manager ----------
+              echo "--- Step 4: upsert approle role cert-manager ---"
+              cat > /tmp/approle.json <<JSON
+              {
+                "token_ttl": "1h",
+                "token_max_ttl": "24h",
+                "token_policies": ["cert-manager-vault-pki"],
+                "bind_secret_id": true
+              }
+              JSON
+              code=$(curl -sS -o /tmp/approle.out.json -w '%{http_code}' \
+                -X POST -H "$TOKEN_HEADER" -H "$CT" \
+                --data-binary "@/tmp/approle.json" \
+                "${BAO_ADDR}/v1/auth/${APPROLE_PATH}/role/cert-manager")
+              [ "$code" = "204" ] || [ "$code" = "200" ] || { echo "FATAL: approle role upsert (HTTP $code): $(cat /tmp/approle.out.json)"; exit 1; }
+              echo "  approle role ok"
+
+              # ---------- AppRole credential materialisation (deploy#944) ----------
+              # The role_id read + secret_id mint + K8s Secret write that used
+              # to live here (imperative `kubectl patch secret` / `create -f`)
+              # is GONE. The AppRole credential is now materialised declaratively
+              # by the ESO Vault generator + ExternalSecret at
+              # ../../external-secrets/cert-manager-approle-externalsecret.yaml:
+              #   - a VaultDynamicSecret generator POSTs
+              #     auth/${APPROLE_PATH}/role/cert-manager/secret-id (mint) and
+              #     GETs .../role-id, authenticating with this same admin token
+              #     over token auth (NOT the-forbidden kubernetes mount);
+              #   - an ExternalSecret writes both into ${SECRET_NAME}.
+              # This Job's responsibility ends at "the approle role exists";
+              # ESO's refresh loop does the rest, so the role-id/secret-id are
+              # rotated on ESO's cadence rather than only at Job-run time.
+              echo "--- AppRole role 'cert-manager' is bootstrapped; ESO materialises"
+              echo "    ${SECRET_NAME} (roleId/secretId) via the VaultDynamicSecret"
+              echo "    generator + ExternalSecret (deploy#944). ---"
+
+              echo "=== openbao-approle-cert-manager-init: OK ==="
+          volumeMounts:
+            - name: openbao-admin-token
+              mountPath: /etc/vault-init
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # writes /tmp/*.json
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+      volumes:
+        - name: openbao-admin-token
+          secret:
+            secretName: gibson-openbao-keys
+            defaultMode: 0o400
+{{- end }}

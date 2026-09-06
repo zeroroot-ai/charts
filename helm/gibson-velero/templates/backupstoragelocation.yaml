@@ -1,0 +1,66 @@
+{{- /*
+The one BackupStorageLocation. Rendered here rather than by the sub-chart
+because this is the object whose shape the platform pins.
+
+No `credential` block on purpose. A BSL credential is an API read of a Secret
+through the velero server's cached client; the bucket credential is a MOUNTED
+file instead (velero.credentials.existingSecret -> AWS_SHARED_CREDENTIALS_FILE),
+which the kubelet supplies and no RBAC covers. That keeps the Secret the
+server reads down to exactly one, the kopia repository password.
+*/}}
+{{- $bucket := .Values.bucket }}
+{{- if not $bucket.name }}
+{{- fail "bucket.name is required: Velero writes to the durable bucket stage 0 created. There is no default that is safe to invent." }}
+{{- end }}
+{{- if not (hasPrefix "backups/" $bucket.prefix) }}
+{{- fail (printf "bucket.prefix (%s) must sit under backups/: retention is the bucket lifecycle rule on that prefix and nothing else." $bucket.prefix) }}
+{{- end }}
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: default
+  annotations:
+    # This is a CR of a kind the velero sub-chart in THIS SAME RELEASE
+    # registers. Helm cannot order a CRD and a CR of it within one release, and
+    # it sorts kinds it does not recognise alphabetically — so without this the
+    # CR is applied before its CRD exists and the apply is refused.
+    #
+    # Both barriers, because there are two orderings to satisfy:
+    #   helm.sh/hook      a plain `helm install` has no barrier in its main phase
+    #   argocd sync-wave  Argo orders hooks and ordinary resources together
+    #
+    # Observed before this: Argo reported a controller sync timeout and
+    # recovered on retry, which hid the defect behind a retry that a plain
+    # helm install does not have. See charts#2.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "20"
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "20"
+    helm.sh/hook-delete-policy: before-hook-creation
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: backup-storage-location
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    # After the server Deployment: a location the controller cannot reconcile
+    # yet reports its phase as empty, which reads as a failure.
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  provider: aws
+  default: true
+  # The platform credential can write and read and cannot delete, so a
+  # ReadWrite location never prunes: the bucket lifecycle rule owns removal.
+  accessMode: ReadWrite
+  validationFrequency: {{ .Values.bucket.validationFrequency | quote }}
+  objectStorage:
+    bucket: {{ $bucket.name | quote }}
+    prefix: {{ $bucket.prefix | quote }}
+  config:
+    region: {{ $bucket.region | quote }}
+    s3ForcePathStyle: {{ $bucket.forcePathStyle | quote }}
+    {{- with $bucket.endpoint }}
+    # Empty on AWS: the plugin then resolves the regional S3 endpoint itself.
+    s3Url: {{ . | quote }}
+    {{- end }}

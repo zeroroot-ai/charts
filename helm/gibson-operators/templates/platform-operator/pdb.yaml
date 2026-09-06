@@ -1,0 +1,31 @@
+{{- /*
+  platform-operator is structural infrastructure (one-code-path /
+  deploy#188). The previous outer `.Values.platformOperator.enabled`
+  gate has been deleted. The inner `$pdbEnabled` toggle remains — it is
+  a legitimate sub-feature flag (`podDisruptionBudget.enabled`).
+*/}}
+{{- $replicas := int (.Values.platformOperator.replicas) }}
+{{- $pdb := .Values.platformOperator.podDisruptionBudget | default dict }}
+{{- $pdbEnabled := $pdb.enabled }}
+{{- if and (kindIs "invalid" $pdbEnabled) (gt $replicas 1) }}
+{{- $pdbEnabled = true }}
+{{- end }}
+{{- if $pdbEnabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-platform-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: platform-operator
+spec:
+  {{- if $pdb.maxUnavailable }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ $pdb.minAvailable | default 1 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gibson-platform-operator
+{{- end }}

@@ -1,0 +1,77 @@
+{{/*
+Per-Postgres-alias TLS Certificate resources.
+
+Spec: first-deploy-unblock-and-ha R7.21 — every in-chart Bitnami Postgres
+alias receives a cert-manager-issued cert + key, materialized into a
+Secret that the alias's `tls.certificatesSecret` value references. The
+chart-issued CA bundle (the same issuer's `ca.crt`) is what client
+workloads (daemon, dashboard, openfga, spire-server, ext-authz,
+tenant-operator) mount at a fixed path and pass to libpq via PGSSLROOTCERT
++ PGSSLMODE=verify-full.
+
+In prod, RDS issues its own cert via the AWS RDS CA bundle — the
+per-alias subcharts are disabled (Spec R1.2), so this template renders
+nothing for those aliases. The `awspca-issuer` ClusterIssuer is still
+rendered (`templates/cert-manager/awspca-issuer.yaml`) for any other
+client-cert needs, but no per-alias Certificate is emitted because the
+alias subcharts are off.
+
+Issuer selection:
+  - prod (awspca-issuer)  — when certManager.issuers.awspca.enabled
+  - kind (vault-issuer)   — when certManager.issuers.vault.enabled
+  - else: no Certificate is rendered (operator BYO).
+
+deploy#201: cert-manager itself is REQUIRED infrastructure — the
+`.Values.certManager.enabled` precondition is gone. Per-issuer toggles
+remain.
+*/}}
+
+{{- /* Pick the issuer name + kind. awspca takes precedence when both are
+       enabled (which would be a misconfiguration but harmless). */ -}}
+{{- $issuerName := "" -}}
+{{- $issuerKind := "ClusterIssuer" -}}
+{{- if (((.Values.certManager).issuers).awspca).enabled }}
+{{- $issuerName = "awspca-issuer" -}}
+{{- $issuerKind = "AWSPCAClusterIssuer" -}}
+{{- else if (((.Values.certManager).issuers).vault).enabled }}
+{{- $issuerName = "vault-issuer" -}}
+{{- end }}
+
+{{- if $issuerName -}}
+{{- $aliases := list "dashboard-postgresql" "tenant-postgresql" "fga-postgresql" "zitadel-postgresql" -}}
+{{- range $alias := $aliases }}
+{{- $sub := index $.Values $alias | default dict }}
+{{- if $sub.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $.Release.Name }}-{{ $alias }}-tls
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: postgres-tls
+    gibson.zeroroot.ai/postgres-alias: {{ $alias | quote }}
+spec:
+  secretName: {{ $.Release.Name }}-{{ $alias }}-tls
+  duration: 2160h    # 90d
+  renewBefore: 360h  # 15d
+  commonName: {{ printf "%s-%s" $.Release.Name $alias | quote }}
+  dnsNames:
+    - {{ printf "%s-%s" $.Release.Name $alias | quote }}
+    - {{ printf "%s-%s.%s" $.Release.Name $alias $.Release.Namespace | quote }}
+    - {{ printf "%s-%s.%s.svc" $.Release.Name $alias $.Release.Namespace | quote }}
+    - {{ printf "%s-%s.%s.svc.cluster.local" $.Release.Name $alias $.Release.Namespace | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+    - client auth
+  issuerRef:
+    name: {{ $issuerName | quote }}
+    kind: {{ $issuerKind | quote }}
+    group: {{ if eq $issuerKind "AWSPCAClusterIssuer" }}awspca.cert-manager.io{{ else }}cert-manager.io{{ end }}
+{{- end }}
+{{- end }}
+{{- end }}

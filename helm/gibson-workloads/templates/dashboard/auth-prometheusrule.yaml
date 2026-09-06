@@ -1,0 +1,109 @@
+{{- /*
+  dashboard is structural infrastructure (one-code-path /
+  deploy#188). The previous outer `.Values.dashboard.enabled`
+  gate has been deleted; the inner `.Capabilities.APIVersions.Has`
+  Prometheus-Operator gate is preserved (the rule is irrelevant
+  when prometheus-operator CRDs aren't installed).
+*/}}
+{{- if (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+# Spec auth-resolution-hardening (R3, R8) — SLO recording rules + alert
+# rules for the dashboard auth path. Surfaces sign-in error rate, FGA
+# unreachability, and sign-in latency budget burn.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-dashboard-auth-rules
+  namespace: {{ .Values.dashboard.namespace | default .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: gibson-dashboard
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: dashboard-auth
+spec:
+  groups:
+    # --------------------------------------------------------------------
+    # SLO recording rules — referenced by alerts below + the Grafana
+    # dashboard. Objectives (annotation-only):
+    #   p95(dashboard_signin_duration_seconds) < 1.5s
+    #   p99(dashboard_signin_duration_seconds) < 3.0s
+    # --------------------------------------------------------------------
+    - name: dashboard-auth-slos
+      interval: 30s
+      rules:
+        - record: slo:dashboard_signin_p95_seconds
+          expr: |
+            histogram_quantile(0.95, sum(rate(dashboard_signin_duration_seconds_bucket[5m])) by (le))
+        - record: slo:dashboard_signin_p99_seconds
+          expr: |
+            histogram_quantile(0.99, sum(rate(dashboard_signin_duration_seconds_bucket[5m])) by (le))
+
+    # --------------------------------------------------------------------
+    # Alerts — page on sign-in error rate, FGA unreachability, and SLO
+    # latency-budget burn.
+    # --------------------------------------------------------------------
+    - name: dashboard-auth-alerts
+      rules:
+        - alert: DashboardSignInErrorRateHigh
+          expr: |
+            (sum(rate(dashboard_signin_total{outcome="error"}[5m]))
+              /
+             sum(rate(dashboard_signin_total[5m]))) > 0.01
+          for: 5m
+          labels:
+            severity: page
+            component: dashboard-auth
+          annotations:
+            summary: "Dashboard sign-in error rate >1% over 5m"
+            description: |
+              More than 1% of dashboard sign-in attempts have failed over
+              the last 5 minutes. Check
+              dashboard_login_error_total{reason} and the auth Grafana
+              dashboard for the dominant reason.
+        - alert: DashboardFGAUnreachable
+          expr: |
+            increase(dashboard_membership_resolution_total{outcome="fga_error"}[1m]) > 0
+          for: 30s
+          labels:
+            severity: page
+            component: dashboard-auth
+          annotations:
+            summary: "Dashboard cannot reach FGA — membership resolution failing"
+            description: |
+              The dashboard's getMyMemberships() RPC is failing with FGA
+              unreachable. Sign-in routes users to /login/error. Check
+              gibson-fga health and the daemon's ListMyMemberships handler
+              logs.
+        - alert: DashboardSignInLatencyBudgetBurn
+          # Multi-window burn-rate: page if p95 latency exceeds the SLO
+          # objective sustained over both a 5m and 1h window.
+          expr: |
+            (slo:dashboard_signin_p95_seconds > 1.5)
+              and
+            (avg_over_time(slo:dashboard_signin_p95_seconds[1h]) > 1.5)
+          for: 10m
+          labels:
+            severity: page
+            component: dashboard-auth
+          annotations:
+            summary: "Dashboard sign-in p95 latency budget burning at >2x"
+            description: |
+              p95 sign-in latency has been above the 1.5s SLO objective
+              for >10m sustained. Investigate Zitadel JWKS cache,
+              membership-resolution latency, and Envoy upstream health.
+        - alert: DashboardUserTokenForwardingDisabled
+          # Spec dashboard-fga-user-identity R8 — degraded-mode detector.
+          expr: |
+            increase(dashboard_user_token_forwarding_disabled_total[5m]) > 0
+          for: 10m
+          labels:
+            severity: warning
+            component: dashboard-auth
+          annotations:
+            summary: "Dashboard running in user-token-forwarding backout mode"
+            description: |
+              The dashboard is making daemon RPCs via the SPIFFE
+              workload-JWT fallback. Per-user FGA is disabled and audit
+              attribution is wrong. Either the soak hot-revert is active
+              (intentional) or USE_USER_TOKEN_FORWARDING=false slipped
+              into the deployed env. Verify
+              dashboard.userTokenForwarding=true in the live values.
+{{- end }}

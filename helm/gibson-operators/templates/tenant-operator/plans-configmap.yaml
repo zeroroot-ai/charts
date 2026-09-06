@@ -1,0 +1,21 @@
+{{- /*
+  tenant-operator is structural infrastructure (one-code-path /
+  deploy#188). The previous outer `.Values.tenantOperator.enabled`
+  gate has been deleted — the plans ConfigMap renders unconditionally.
+*/}}
+# gibson-tenant-operator-plans — canonical plan registry mounted into the
+# operator pod. Sourced from enterprise/platform/tenant-operator/plans/plans.yaml
+# at chart render time via `.Files.Get`. Changing pricing is a PR to that file
+# followed by a helm upgrade; no operator image rebuild is required.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.tenantOperator.plans.configMapName | default "gibson-tenant-operator-plans" }}
+  namespace: {{ .Values.tenantOperator.namespace | default "gibson" }}
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+    app.kubernetes.io/component: tenant-operator
+data:
+  plans.yaml: |-
+{{ .Files.Get (.Values.tenantOperator.plans.sourcePath | default "files/plans.yaml") | indent 4 }}

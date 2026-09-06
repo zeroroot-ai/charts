@@ -1,0 +1,61 @@
+{{- /*
+ratelimit NetworkPolicy (deploy#1657).
+
+Ingress: the mTLS gRPC port from Envoy pods only, and /healthcheck from the
+scrapers. Egress: EXACTLY DNS and Redis. The quota service reaches nothing
+else, and tests/ratelimit-service.bats fails on any third egress rule.
+*/}}
+{{- if ne (include "gibson.trueUnlessSet" (((.Values.ratelimit).networkPolicy).enabled)) "false" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-ratelimit
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ratelimit
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ratelimit
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Envoy → ratelimit sidecar (SPIFFE mTLS gRPC)
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "gibson.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: envoy
+      ports:
+        - protocol: TCP
+          port: {{ .Values.ratelimit.ports.grpc | default 8081 }}
+    # Prometheus / scrapers → /healthcheck and /metrics
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        - podSelector:
+            matchLabels:
+              app: grafana-agent
+      ports:
+        - protocol: TCP
+          port: {{ .Values.ratelimit.ports.http | default 8080 }}
+        - protocol: TCP
+          port: {{ .Values.ratelimit.ports.metrics | default 9090 }}
+  egress:
+    {{- include "gibson.netpolEgressDNS" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: redis
+      ports:
+        - protocol: TCP
+          port: {{ .Values.redis.service.port | default 6379 }}
+{{- end }}

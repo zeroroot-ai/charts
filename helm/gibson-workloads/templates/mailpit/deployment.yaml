@@ -1,0 +1,106 @@
+{{- if .Values.mailpit.enabled }}
+{{/*
+mailpit: dev-only delivering SMTP sink for kind (signup-email-delivery, the
+deploy companion to gibson#1228 / dashboard#991).
+
+gibson#1228 makes the daemon refuse to serve self-serve signup — and refuse
+to BOOT at all when gibson.signupSelfServe is true (the chart default) —
+unless it is wired to a mail transport that actually Delivers() (see
+mailer.RequireDelivering, internal/platform/mailer). Kind has no real SMTP
+account to hand it. mailpit stands in: it accepts SMTP like a real mail
+system, so the daemon's startup gate passes, and it exposes a web UI so a
+developer can read the verification link exactly the way the old "log"
+provider let them read it from stdout — except the message actually goes
+somewhere, same as it will in staging/prod.
+
+Production overlays MUST NOT enable this (mailpit.enabled defaults to
+false). The mailpit Service is never reachable from external networks
+(ClusterIP + no Ingress).
+
+Upstream: https://github.com/axllent/mailpit
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gibson.mailpit.host" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mailpit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mailpit
+  template:
+    metadata:
+      labels:
+        {{- include "gibson.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mailpit
+    spec:
+      containers:
+        - name: mailpit
+          image: "{{ .Values.mailpit.image.repository }}:{{ .Values.mailpit.image.tag }}"
+          imagePullPolicy: {{ .Values.mailpit.image.pullPolicy | default "IfNotPresent" }}
+          env:
+            # No auth, no persistent storage — dev sink only. Messages are
+            # kept in mailpit's in-memory/sqlite store for pod lifetime.
+            - name: MP_SMTP_AUTH_ACCEPT_ANY
+              value: "1"
+            - name: MP_SMTP_AUTH_ALLOW_INSECURE
+              value: "1"
+          ports:
+            - name: smtp
+              containerPort: {{ .Values.mailpit.ports.smtp | default 1025 }}
+              protocol: TCP
+            - name: http
+              containerPort: {{ .Values.mailpit.ports.http | default 8025 }}
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: smtp
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: smtp
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.mailpit.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # mailpit writes its message store at startup
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gibson.mailpit.host" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mailpit
+spec:
+  type: ClusterIP
+  ports:
+    - name: smtp
+      port: {{ .Values.mailpit.ports.smtp | default 1025 }}
+      targetPort: smtp
+      protocol: TCP
+    - name: http
+      port: {{ .Values.mailpit.ports.http | default 8025 }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "gibson.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: mailpit
+{{- end }}

@@ -1,0 +1,30 @@
+{{- /*
+Reserved-names denylist consumed by:
+  - the operator's K8s admission webhook (Tenant CR creation/update)
+  - the daemon's PlatformOperatorService.GetReservedNames RPC
+    which is proxied by the dashboard signup form
+
+Spec: tenant-provisioning-unification-phase2 Requirement 4.5.
+
+The chart owns this resource — do not patch it directly. Override
+.Values.reservedNames.exact / .Values.reservedNames.prefix to extend
+the denylist. Entries are newline-separated; lines starting with '#'
+are comments.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gibson-reserved-names
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: reserved-names
+data:
+  exact: |
+    {{- range $name := .Values.reservedNames.exact }}
+    {{ $name }}
+    {{- end }}
+  prefix: |
+    {{- range $p := .Values.reservedNames.prefix }}
+    {{ $p }}
+    {{- end }}

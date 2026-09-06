@@ -1,0 +1,67 @@
+{{/*
+Spec: canonical-service-identity Req 2.
+
+The single source-of-truth mapping from readable platform-SA usernames
+(e.g. "gibson-tenant-operator") to their Zitadel-issued numeric subjects
+(e.g. "370767967299829765"). The numeric sub is the canonical identifier
+used by every auth decision point downstream:
+
+  - fga-init Job seeds platform_operator tuples by `user:<numeric_sub>`.
+  - Dashboard's resolver init container expands the comma-joined numeric
+    list into ALLOWED_SERVICE_SUBJECTS for verifyZitadelBearer.
+  - Daemon + ext-authz mount this map as JSON for log enrichment ONLY
+    (a `gibsoncheck` lint pins the resolver helpers to log code paths).
+
+Lifecycle:
+
+  - Chart render emits "<unset>" for each SA in .Values.serviceAccounts.required.
+  - The post-install Zitadel bootstrap Job (templates/zitadel/post-install-job.yaml)
+    is the SOLE writer of populated values thereafter. As `ensure_machine_user`
+    creates each SA, it `kubectl patch`es the entry with the captured numeric
+    userId.
+  - The Argo Application's `ignoreDifferences` for managedFieldsManagers=[kubectl-patch]
+    combined with `syncOptions: [ServerSideApply=true]` ensures argocd-controller
+    never overwrites a kubectl-patch-written field — SSA field ownership keeps
+    each manager's writes isolated.
+  - `helm.sh/resource-policy: keep` prevents `helm uninstall` from deleting
+    the populated mapping.
+
+Consumers fail-fast on `<unset>` values rather than retry-loop. If the
+post-install Job hasn't completed, the consumer Pod exits at startup; the
+kubelet restarts it and on the next attempt the map is populated.
+
+Prior implementation used a `lookup`-then-keep idiom to preserve the
+post-install Job's writes across helm upgrades. That pattern is broken
+under Argo's offline `helm template` render (lookup returns nil) and was
+redundant with the existing SSA field-ownership protection (see above).
+ deploy / PRD deploy#255 / slice S8 (deploy#264) deleted the
+lookup; SSA + ignoreDifferences carry the preservation contract.
+*/}}
+{{- $ns := .Release.Namespace -}}
+{{- $name := "gibson-sa-identity-map" -}}
+{{- $required := default (list) ((.Values.serviceAccounts | default dict).required) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sa-identity-map
+  annotations:
+    helm.sh/resource-policy: keep
+    gibson.zeroroot.ai/spec: canonical-service-identity
+    gibson.zeroroot.ai/owner: zitadel-post-install-job
+{{- /*
+  No `data` section rendered. The sa-identity-map-populator Sync hook is
+  the SOLE writer of the SA → numeric-sub entries.
+
+  `data: {}` (empty map) caused argocd-controller to claim the `f:data`
+  key in managed fields. With ServerSideApply force=true, the dry-run
+  result was an empty data map — different from the live data that
+  kubectl-patch owned — producing a permanent OutOfSync.
+
+  Without ANY `data` field, argocd-controller claims no part of the data
+  section via SSA. The dry-run result preserves kubectl-patch's entries,
+  live matches target, and the app stays Synced without ignoreDifferences.
+*/}}

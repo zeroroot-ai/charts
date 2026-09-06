@@ -1,0 +1,156 @@
+{{/* Redis RDB-snapshot S3 backup CronJob (Week 2 §3 R14, Spec 2 R14).
+     Sub-feature toggle: rendered when redis.backup.enabled (default
+     false). Redis itself is structural — no provider gate (deploy#224).
+
+     TWO STAGES, TWO IMAGES (deploy#1459). No mirrored image carries both
+     `redis-cli` and the `aws` CLI, so the job runs the dump in an init
+     container on the mirrored redis image and the upload in the main
+     container on the mirrored aws-cli image, handing the RDB over on a
+     shared emptyDir.
+
+     What this replaced, and why it could never work: a single aws-cli
+     container that ran `apk add --no-cache redis 2>/dev/null || true`
+     before calling redis-cli. `amazon/aws-cli` is Amazon-Linux-based and
+     has no `apk`; the redirect plus `|| true` swallowed the
+     "command not found" whole, so redis-cli was never installed and the
+     next line died. Every run failed, and with `redis.backup.enabled`
+     off nobody saw it.
+
+     INVARIANT — do not reintroduce a run-time package install. Each stage
+     must use only tooling its own image already ships, and every failure
+     must exit non-zero so the Job fails loudly. Guarded by
+     tests/redis-backup-cronjob.bats.
+
+     IDENTITY (deploy#1535). The job used to run as the namespace `default`
+     ServiceAccount, which carries no IRSA association, so every upload
+     ended in AccessDenied once the tooling was fixed — a backup that
+     cannot write reads as coverage on a dashboard. It now renders its own
+     ServiceAccount, annotated with the `redis_backup` IRSA role from
+     eks/gibson/modules/iam-irsa. That role grants PutObject/GetObject on
+     the snapshot prefix ONLY, with no s3:DeleteObject. */}}
+{{- if default false ((.Values.redis).backup).enabled }}
+{{- $backup := .Values.redis.backup }}
+{{- $backupSA := $backup.serviceAccountName | default (printf "%s-redis-backup" .Release.Name) }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $backupSA }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-backup
+  {{- with ($backup.serviceAccount).annotations }}
+  # IRSA role (eks.amazonaws.com/role-arn). Provisioned by
+  # eks/gibson/modules/iam-irsa key `redis_backup`; the matching KMS grant
+  # (redis_backup_s3) is what keeps SSE-KMS PutObject from 403ing.
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+{{- $redisHost := printf "%s-redis-stack" .Release.Name }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-redis-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-backup
+spec:
+  schedule: {{ $backup.schedule | default "0 * * * *" | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # A snapshot that hangs must not block the next tick forever, and
+      # concurrencyPolicy: Forbid would let it. 30 minutes is ~2x the
+      # dump-and-upload path on the largest instance we run.
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            {{- include "gibson.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: redis-backup
+        spec:
+          restartPolicy: OnFailure
+          # Never the namespace `default` SA: it carries no IRSA association,
+          # so the upload 403s (deploy#1535). Always the job's own SA above.
+          serviceAccountName: {{ $backupSA | quote }}
+          {{- include "gibson.imagePullSecrets" . | nindent 10 }}
+          volumes:
+            - name: snapshot
+              emptyDir: {}
+          # Stage 1 — dump. Runs on the mirrored redis image, which ships
+          # redis-cli. An init container (not a sidecar) so the upload
+          # stage cannot start until the dump has exited 0.
+          initContainers:
+            - name: redis-dump
+              image: {{ $backup.redisImage | default "ghcr.io/zeroroot-ai/mirror/redis:7.4.1-alpine" | quote }}
+              imagePullPolicy: IfNotPresent
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  # Fail loudly and immediately if the image ever stops
+                  # shipping redis-cli, instead of dying one line later
+                  # with a less diagnosable error.
+                  command -v redis-cli >/dev/null 2>&1 || {
+                    echo "FATAL: redis-cli missing from the dump image" >&2
+                    exit 1
+                  }
+                  # The upload stage names the object; record the instant
+                  # the snapshot was taken so both stages agree on it.
+                  date -u +%Y%m%dT%H%M%SZ > /snapshot/TIMESTAMP
+                  echo "Dumping RDB from {{ $redisHost }} ..."
+                  # --rdb runs a full synchronization and writes a
+                  # consistent point-in-time RDB itself, so no separate
+                  # BGSAVE (and no LASTSAVE poll that can silently give
+                  # up) is needed. redis-cli reads REDISCLI_AUTH from the
+                  # environment, keeping the password out of argv.
+                  redis-cli -h {{ $redisHost }} --rdb /snapshot/dump.rdb
+                  # A zero-byte RDB is a failed dump that redis-cli may
+                  # still have exited 0 on. Refuse to hand it onward.
+                  test -s /snapshot/dump.rdb
+                  echo "RDB written: $(wc -c < /snapshot/dump.rdb) bytes"
+              env:
+                - name: REDISCLI_AUTH
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "gibson.redisPasswordSecretName" . }}
+                      key: {{ include "gibson.redisPasswordSecretKey" . }}
+              volumeMounts:
+                - name: snapshot
+                  mountPath: /snapshot
+          # Stage 2 — upload. Runs on the mirrored aws-cli image, which
+          # ships `aws` and nothing redis-related.
+          containers:
+            - name: upload
+              image: {{ $backup.awsCliImage | default "ghcr.io/zeroroot-ai/mirror/aws-cli:2.17.50" | quote }}
+              imagePullPolicy: IfNotPresent
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  command -v aws >/dev/null 2>&1 || {
+                    echo "FATAL: aws CLI missing from the upload image" >&2
+                    exit 1
+                  }
+                  test -s /snapshot/dump.rdb
+                  TS=$(cat /snapshot/TIMESTAMP)
+                  DEST="s3://{{ required "redis.backup.s3Bucket required" $backup.s3Bucket }}/{{ trimSuffix "/" ($backup.s3Prefix | default "longterm/redis") }}/{{ .Release.Namespace }}/${TS}.rdb"
+                  echo "Uploading ${DEST} ..."
+                  aws s3 cp /snapshot/dump.rdb "$DEST"
+                  echo "Backup complete: ${DEST}"
+              {{- with $backup.awsRegion }}
+              env:
+                - name: AWS_REGION
+                  value: {{ . | quote }}
+              {{- end }}
+              volumeMounts:
+                - name: snapshot
+                  mountPath: /snapshot
+                  readOnly: true
+{{- end }}

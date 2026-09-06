@@ -1,0 +1,52 @@
+{{/*
+Egress allowance for the umbrella's bringup hook Jobs (deploy#1365).
+
+The gibson-workloads subchart ships a namespace-wide default-deny
+NetworkPolicy (podSelector: {}, Ingress+Egress). The bringup Jobs in
+templates/jobs/ live in THIS chart, so their allowance lives here too.
+They are pure clients: the postgres-exec family runs kubectl-exec against
+the CNPG primary (kube-apiserver only), signup-bot-pat-minter and
+zitadel-login-branding call the Zitadel API (named as callers in the
+workloads subchart's zitadel policy). None of them accepts connections, so
+there are no ingress rules — selecting them with policyTypes Ingress and an
+empty rule list IS the per-pod ingress deny.
+
+Every Job pod template (templates/jobs/ AND templates/operations/) MUST carry
+one of the component labels below; scripts/check-netpol-coverage.py fails the
+render when a workload in the namespace is selected by no policy.
+
+The Jobs hard-code `namespace: gibson`, so this policy does the same.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gibson-bringup-jobs
+  namespace: gibson
+  labels:
+    app.kubernetes.io/component: bringup-jobs-isolation
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - postgres-exec
+          - signup-bot-pat-minter
+          - zitadel-login-branding
+          # deploy#1631: the first-admin Job. Under the namespace default-deny,
+          # a component label absent from THIS list means the pod cannot even
+          # reach CoreDNS — seed-first-admin then fails with an i/o timeout to
+          # :53 that reads like a DNS bug, not a policy one. The Job lives in
+          # templates/operations/ rather than templates/jobs/, which is why
+          # check-netpol-coverage.py did not force it into this list.
+          - first-admin
+          # deploy#1761: the admission-webhook readiness gate. It posts an
+          # AdmissionReview to every webhook endpoint the umbrella installs,
+          # including setec-webhook in setec-system, so it needs egress and
+          # CoreDNS like the rest of this list.
+          - webhook-gate
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - {}

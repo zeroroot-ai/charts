@@ -1,0 +1,284 @@
+{{- /*
+  First-party plugin workloads (R5).
+
+  Ranges over `.Values.plugins` (keyed by vendor) and, for each ENABLED entry,
+  renders a plugin as one of two runtime tiers:
+
+    runtime: pod    (default) — a Deployment + ServiceAccount + NetworkPolicy.
+    runtime: setec  (hardened) — a setec Sandbox microVM + ServiceAccount.
+
+  The plugin body is the vendor's SDK wrapped in the plugin `Serve` loop. Its
+  connection to the platform is entirely env-driven (opensource/sdk/plugin):
+
+    GIBSON_URL             capability-grant enrol endpoint (daemon native-login :8085)
+    GIBSON_DAEMON_ADDR     daemon gRPC (ComponentService + HarnessCallback)
+    GIBSON_PLUGIN_RUNTIME  selects the SDK egress enforcer mode (pod|setec)
+    GIBSON_PLUGIN_MANIFEST absolute path to the baked manifest (/etc/gibson/plugin.yaml);
+                           the SDK falls back to ./plugin.yaml (CWD) only for local dev
+
+  Enrolment uses the pod's PROJECTED ServiceAccount token as the one-time
+  capability-grant bootstrap credential (capabilitygrant.ResolveBootstrap falls
+  back to /var/run/secrets/kubernetes.io/serviceaccount/token). The vendor
+  credential is resolved at call time through the secrets broker over the daemon
+  gRPC channel — never through Helm values and never an env var, so this chart
+  authors no Secret (ESO-only / holds trivially).
+
+  This is the platform's existing Helm + GitOps path (the same chart Argo/Flux/
+  `helm install` sync). There is NO bespoke plugin controller and NO in-cluster
+  build — the image is CI-built and pulled from ghcr.
+*/}}
+{{- $root := $ }}
+{{- $fullname := include "gibson.fullname" $ }}
+{{- $ns := $.Release.Namespace }}
+{{- range $vendor, $p := $.Values.plugins }}
+{{- if $p.enabled }}
+{{- $runtime := ($p.runtime | default "pod") }}
+{{- if not (has $runtime (list "pod" "setec")) }}
+{{- fail (printf "plugins.%s.runtime=%q is not supported — use \"pod\" (default) or \"setec\". `process` is local-dev-only (gibson component run); `mcp-bridge` is deleted from the plugin domain (R5)." $vendor $runtime) }}
+{{- end }}
+{{- if not (($p.image).repository) }}
+{{- fail (printf "plugins.%s.image.repository is required — the ghcr reference the integrations CI published (e.g. ghcr.io/zeroroot-ai/integrations/%s)." $vendor $vendor) }}
+{{- end }}
+{{- $name := printf "%s-plugin-%s" $root.Release.Name $vendor }}
+{{- $saName := $name }}
+{{- $image := include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" $p.image.repository "tag" (($p.image).tag) "digest" (($p.image).digest) "appVersion" $root.Chart.AppVersion) }}
+{{- $podLabels := dict "app.kubernetes.io/name" $name "app.kubernetes.io/part-of" "gibson" "app.kubernetes.io/component" "plugin" "gibson.zeroroot.ai/plugin" $vendor }}
+{{- /* SSL_CERT_DIR unions the Envoy edge CA (/etc/ssl/envoy-ca — the trust
+       anchor for the capability-grant enrol POST to the public issuer URL
+       through Envoy) with the public roots (/etc/ssl/certs) the plugin needs
+       for its vendor calls (api.github.com, gitlab.com). SSL_CERT_FILE is
+       deliberately left UNSET: pointing it at the envoy CA alone would REPLACE
+       the root set and break vendor TLS. The Go SDK's HTTP + gRPC clients honor
+       SSL_CERT_DIR (crypto/x509). */}}
+{{- /* A component reaches the daemon ONLY through the Envoy edge — never a direct
+       daemon channel (the same invariant as the dashboard). GIBSON_URL is the
+       api host over TLS, so ALL plugin↔platform traffic (capability-grant enrol
+       discover/register on the :8085 pre-auth routes, AND the ComponentService /
+       HarnessCallback gRPC) flows through Envoy: ext-authz verifies the plugin's
+       CG-JWT, and the daemon's :50051 mTLS-only listener is never dialed directly
+       (a plaintext direct dial there is reset before the HTTP/2 preface — sdk#452).
+       The SDK derives the gRPC dial target from GIBSON_URL (apiHost:443); no
+       GIBSON_DAEMON_ADDR override — that override is the thing that mis-minted a
+       :50051 CG-JWT audience. GIBSON_DAEMON_TLS=1 dials Envoy over TLS; the edge
+       cert is trusted via the envoy CA in SSL_CERT_DIR, and the hostAlias resolves
+       the api host to Envoy in-cluster. */}}
+{{- $commonEnv := list
+      (dict "name" "HOME" "value" "/home/nonroot")
+      (dict "name" "GIBSON_URL" "value" (printf "https://%s" (include "gibson.apiHost" $root)))
+      (dict "name" "GIBSON_DAEMON_TLS" "value" "1")
+      (dict "name" "GIBSON_PLUGIN_RUNTIME" "value" $runtime)
+      (dict "name" "GIBSON_PLUGIN_MANIFEST" "value" "/etc/gibson/plugin.yaml")
+      (dict "name" "SSL_CERT_DIR" "value" "/etc/ssl/certs:/etc/ssl/envoy-ca")
+      (dict "name" "SPIFFE_ENDPOINT_SOCKET" "value" "unix:///run/spire/sockets/api.sock")
+}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $saName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: plugin
+    gibson.zeroroot.ai/plugin: {{ $vendor }}
+{{- if eq $runtime "pod" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: plugin
+    gibson.zeroroot.ai/plugin: {{ $vendor }}
+spec:
+  {{- /* replicas: unset -> 1, explicit 0 -> 0 (scale-to-zero honoured;
+         no `| default N` numeric-swallows-zero, deploy#1228). */}}
+  replicas: {{ if kindIs "invalid" $p.replicas }}1{{ else }}{{ $p.replicas }}{{ end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/component: plugin
+  template:
+    metadata:
+      labels:
+        {{- toYaml $podLabels | nindent 8 }}
+    spec:
+      {{- include "gibson.imagePullSecrets" $root | nindent 6 }}
+      # Resolve the platform hostnames (api/app/... .selfhosted) to the in-cluster
+      # Envoy, same as the daemon + dashboard (deploy#200). Capability-grant enrol
+      # follows the discovery doc's issuer URL (https://api.<domain>/capabilitygrant
+      # /v1/register) — without this alias that GET fails in-cluster with "no such
+      # host" and the plugin never registers.
+      {{- include "gibson.hostAliases" $root | nindent 6 }}
+      serviceAccountName: {{ $saName }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        {{- /* SPIRE is REQUIRED infrastructure (deploy#201) — block plugin start
+               until the agent socket is reachable, so the SDK can fetch its
+               JWT-SVID for capability-grant enrollment. Mirrors the daemon. */}}
+        {{- include "gibson.waitForSpireSocket" $root | nindent 8 }}
+      containers:
+        - name: plugin
+          image: {{ $image | quote }}
+          imagePullPolicy: {{ ($p.image).pullPolicy | default "IfNotPresent" }}
+          env:
+            {{- toYaml $commonEnv | nindent 12 }}
+          ports:
+            - containerPort: 8080
+              name: health
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: {{ (($p.resources).requests).cpu | default "25m" }}
+              memory: {{ (($p.resources).requests).memory | default "64Mi" }}
+            limits:
+              cpu: {{ (($p.resources).limits).cpu | default "500m" }}
+              memory: {{ (($p.resources).limits).memory | default "256Mi" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            # Writable ~/.gibson for the capability-grant host key
+            # (~/.gibson/plugin/<name>/host_key.json) under the read-only rootfs.
+            # Scoped to .gibson, NOT the whole HOME (/home/nonroot): an emptyDir
+            # over the WorkingDir shadows the image's baked files. The manifest
+            # loads from GIBSON_PLUGIN_MANIFEST (/etc/gibson/plugin.yaml) which is
+            # unaffected, but a WorkingDir-wide mount is a defect regardless.
+            - name: state
+              mountPath: /home/nonroot/.gibson
+            {{- if eq (include "gibson.envoyEdge.caRequired" $root) "true" }}
+            # Envoy edge CA — the trust anchor for the capability-grant enrol
+            # POST to the public issuer URL through Envoy. SSL_CERT_DIR (above)
+            # unions this dir with the public roots. Rendered only when the edge
+            # cert is self-signed (kind / self-hosted before a trusted cert);
+            # a publicly-trusted edge needs no mount. Matches the dashboard
+            # (deploy#200 / deploy#126).
+            - name: envoy-ca
+              mountPath: /etc/ssl/envoy-ca
+              readOnly: true
+            {{- end }}
+            # SPIRE Workload API socket — the SDK fetches the plugin's JWT-SVID
+            # here for capability-grant enrollment. Unconditional:
+            # SPIRE is required infrastructure (deploy#201), same as the daemon.
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+      volumes:
+        - name: state
+          emptyDir: {}
+        {{- if eq (include "gibson.envoyEdge.caRequired" $root) "true" }}
+        - name: envoy-ca
+          secret:
+            secretName: {{ required "envoy.tls.secretName is REQUIRED — see deploy#200." $root.Values.envoy.tls.secretName }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+        {{- end }}
+        # SPIRE Workload API socket via the csi.spiffe.io CSI driver (deploy#201).
+        - name: spire-agent-socket
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+      terminationGracePeriodSeconds: 30
+{{- if ne (include "gibson.trueUnlessSet" (($p.networkPolicy).enabled)) "false" }}
+---
+{{- /*
+  Plugin NetworkPolicy. Under the namespace default-deny
+  (namespace-isolation/default-deny.yaml, deploy#1365) a pod matched by no
+  allow policy is severed both ways, and the miss fails at RUNTIME. The
+  podSelector names the exact labels the Deployment's pod template stamps
+  (deploy#1365 lesson). Egress is allow-all: a plugin's job is to reach an
+  arbitrary vendor API (api.github.com, gitlab.com, …) whose address is not
+  known at render time, and the plugin's declared egress policy is enforced
+  IN-PROCESS by the SDK egress enforcer (GIBSON_PLUGIN_RUNTIME), not by this
+  CNI policy — the same allow-all posture the connector-operator keeps. Ingress
+  admits only kubelet health probes on :8080.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: plugin
+    gibson.zeroroot.ai/plugin: {{ $vendor }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/component: plugin
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - {}
+  ingress:
+    # Health/readiness/liveness probes: kubelet dials :8080 from the node IP.
+    - ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}
+{{- else if eq $runtime "setec" }}
+{{- if not $p.sandboxClassName }}
+{{- fail (printf "plugins.%s.runtime=setec requires plugins.%s.sandboxClassName — the cluster-scoped SandboxClass the setec operator runs the microVM under." $vendor $vendor) }}
+{{- end }}
+---
+{{- /*
+  setec runtime (R5, hardened tier): the plugin image runs as a
+  Firecracker microVM Sandbox instead of a pod. Same env contract as the pod
+  path; the setec operator (the setec chart) reconciles the Sandbox onto the
+  sandbox-host DaemonSet and applies the SandboxClass network posture. microVMs
+  are not CNI-selected, so no NetworkPolicy is rendered here — the SandboxClass
+  `defaultNetworkMode` governs egress. Not selected by check-netpol-coverage
+  (Sandbox is not a workload kind).
+*/}}
+apiVersion: setec.zeroroot.ai/v1alpha1
+kind: Sandbox
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: plugin
+    gibson.zeroroot.ai/plugin: {{ $vendor }}
+spec:
+  sandboxClassName: {{ $p.sandboxClassName | quote }}
+  image: {{ $image | quote }}
+  env:
+    {{- toYaml $commonEnv | nindent 4 }}
+  resources:
+    cpu: {{ (($p.resources).limits).cpu | default "500m" | quote }}
+    memory: {{ (($p.resources).limits).memory | default "256Mi" | quote }}
+{{- end }}
+{{- end }}
+{{- end }}

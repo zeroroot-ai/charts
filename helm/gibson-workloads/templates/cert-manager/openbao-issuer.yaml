@@ -1,0 +1,78 @@
+{{/*
+Vault-backed ClusterIssuer for the kind/dev overlay.
+
+Spec: first-deploy-unblock-and-ha R7.18-R7.23.
+
+In kind dev the chart provisions an in-cluster Vault (always rendered,
+deploy#223 made it structural) with the PKI engine seeded by the
+chart-managed `openbao-approle-cert-manager-init` Job; this template
+registers a ClusterIssuer that mints end-entity certs against that PKI
+mount. Every chart-issued TLS material in dev — per-Postgres-alias
+certificates, the daemon's mTLS client cert, the dashboard's SVID — is
+ultimately rooted in the in-cluster Vault PKI.
+
+Gating:
+  - certManager.issuers.vault.enabled    — per-issuer toggle (true in kind)
+
+deploy#201: cert-manager itself is REQUIRED infrastructure — no top-level
+toggle. The per-issuer toggle is the only choice.
+
+Auth: cert-manager v1 ClusterIssuer's `spec.vault.auth.appRole` shape.
+The role-id is non-secret + chart-templated; the secret-id is short-TTL
+and rotated by the bootstrap Job (deploy#351). The old shape
+used the now-forbidden Kubernetes-auth mount, which was never mounted
+in the in-chart Vault, so first-renewal would 404. See for
+the migration history; the literal path string is on that ADR's
+deny-list so it MUST NOT appear here.
+
+Required values when enabled:
+  - certManager.issuers.vault.server                  — Vault server URL
+                                                        (default: in-chart
+                                                        Vault Service)
+  - certManager.issuers.vault.path                    — PKI mount path
+                                                        (e.g. pki_int/sign/gibson)
+  - certManager.issuers.vault.auth.appRole.path       — Vault approle mount
+                                                        path (default "approle")
+  - certManager.issuers.vault.auth.appRole.roleId     — approle role_id
+                                                        (REQUIRED, non-secret;
+                                                        chart fails LOUD when
+                                                        empty)
+  - certManager.issuers.vault.auth.appRole.secretRef
+        .name                                         — K8s Secret holding
+                                                        the secret_id
+                                                        (default
+                                                        "gibson-cert-manager-approle")
+        .key                                          — key in that Secret
+                                                        (default "secretId")
+*/}}
+{{- if (((.Values.certManager).issuers).vault).enabled }}
+{{- $vi := .Values.certManager.issuers.vault }}
+{{- $server := default (printf "http://%s-vault.%s.svc.cluster.local:8200" .Release.Name .Release.Namespace) $vi.server }}
+{{- $path := required "certManager.issuers.vault.path is required when vault issuer is enabled (e.g. pki_int/sign/gibson)" $vi.path }}
+{{- $auth := $vi.auth | default dict }}
+{{- $aAuth := $auth.appRole | default dict }}
+{{- $approlePath := $aAuth.path | default "approle" }}
+{{- $roleId := required "certManager.issuers.vault.auth.appRole.roleId is REQUIRED when vault issuer is enabled. The role-id is non-secret and chart-templated; pair it with a K8s Secret holding the secret_id (default name: gibson-cert-manager-approle, key: secretId, materialised by gitops standalone-externalsecrets/cert-manager-approle-externalsecret.yaml and by the in-chart openbao-approle-cert-manager-init Job)." $aAuth.roleId }}
+{{- $sref := $aAuth.secretRef | default dict }}
+{{- $secretName := $sref.name | default "gibson-cert-manager-approle" }}
+{{- $secretKey := $sref.key | default "secretId" }}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: openbao-issuer
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cert-manager-issuer
+spec:
+  vault:
+    server: {{ $server | quote }}
+    path: {{ $path | quote }}
+    auth:
+      appRole:
+        path: {{ $approlePath | quote }}
+        roleId: {{ $roleId | quote }}
+        secretRef:
+          name: {{ $secretName | quote }}
+          key: {{ $secretKey | quote }}
+{{- end }}

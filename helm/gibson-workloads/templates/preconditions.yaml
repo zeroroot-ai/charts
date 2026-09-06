@@ -1,0 +1,29 @@
+{{- /*
+Render-time preconditions for gibson-workloads (deprecated).
+
+Spec: one-code-path (zeroroot-ai/deploy#186, #202).
+
+This file historically used Helm's `lookup` function to check for the
+gibson-crds + gibson-operators Helm release Secrets at render time.
+That pattern is broken under ArgoCD:
+
+  - Argo's repo-server renders charts WITHOUT cluster context, so
+    `lookup` silently returns nil and the check passes vacuously.
+  - Under Argo, charts are not `helm install`-ed at all (manifests are
+    server-side-applied), so the Helm release Secrets the check looked
+    for never exist even when the prerequisite resources are present.
+
+The preflight is replaced by an init container on the daemon
+StatefulSet (templates/gibson/statefulset.yaml -- `wait-for-prerequisites`)
+that checks for the actual cluster state the workloads depend on:
+
+  1. The tenant-operator Pod is Ready (transitively proves the
+     gibson-operators chart's resources are applied and the CRDs the
+     operator watches are Established -- the operator binary fails to
+     start otherwise).
+
+The init container fails fast with a structured log line if the
+prerequisite isn't observable within a bounded timeout. This file is
+kept as a placeholder so the path is still rendered but emits no
+resources; it will be deleted entirely in a follow-up.
+*/ -}}

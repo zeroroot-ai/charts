@@ -1,0 +1,80 @@
+{{- /*
+ClusterRole for the gibson-connector-operator.
+
+The ConnectorInstance CRD is Namespaced — one CR per connector per tenant,
+living in each tenant namespace. The operator watches ConnectorInstance
+across EVERY tenant namespace, so its watch + the resources it reconciles
+into those namespaces (ToolHive MCPServer / MCPRemoteProxy, NetworkPolicy,
+ConfigMap, Secret) are granted cluster-wide. The connector's credential
+Secret is written by the daemon from the tenant secret store;
+the operator never emits an ExternalSecret.
+
+This rule set is the authoritative controller permission set — the kubebuilder
+RBAC markers on internal/controller/connectorinstance_controller.go, rendered
+by controller-gen into operators/connector/config/rbac/role.yaml. Keep it
+byte-for-byte with that generated ClusterRole (rules ordered alphabetically by
+apiGroup, as controller-gen emits them); drift means the operator 403s at
+reconcile time.
+
+Leader-election Leases + Events are NOT here — they are namespaced and granted
+by the Role in leader-election-rbac.yaml (kubebuilder's leader_election_role).
+
+connector-operator is structural infrastructure (one-code-path / deploy#188,
+) — these RBAC objects render unconditionally, no `.enabled` toggle.
+*/ -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gibson-connector-operator
+  labels:
+    app.kubernetes.io/name: gibson-connector-operator
+    app.kubernetes.io/part-of: gibson
+rules:
+  # ConfigMaps + Secrets alongside each connector (permission-profile
+  # ConfigMaps, and the daemon-written credential Secret the operator reads).
+  # The operator never authors Secret manifests in the chart; this grant is
+  # the runtime read/patch surface only.
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+
+  # ConnectorInstance — the CR this operator owns end to end, cluster-wide
+  # across every tenant namespace, plus status + finalizers subresources.
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["connectorinstances"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["connectorinstances/finalizers"]
+    verbs: ["update"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["connectorinstances/status"]
+    verbs: ["get", "patch", "update"]
+
+  # NetworkPolicies — the operator renders the connector's egress allow-list
+  # into a NetworkPolicy per tenant namespace (Spike 1).
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+
+  # ToolHive primitives — the operator reconciles each ConnectorInstance into
+  # an MCPServer (Hosted) or MCPRemoteProxy (Remote). The ToolHive CRDs are
+  # installed by the toolhive-operator-crds release (deploy#1635).
+  - apiGroups: ["toolhive.stacklok.dev"]
+    resources: ["mcpremoteproxies", "mcpservers"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gibson-connector-operator
+  labels:
+    app.kubernetes.io/name: gibson-connector-operator
+    app.kubernetes.io/part-of: gibson
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.connectorOperator.serviceAccount.name | default "gibson-connector-operator" }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gibson-connector-operator

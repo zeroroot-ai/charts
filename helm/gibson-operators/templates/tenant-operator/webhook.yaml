@@ -1,0 +1,171 @@
+{{- /*
+  tenant-operator is structural infrastructure (one-code-path /
+  deploy#188). The previous outer `.Values.tenantOperator.enabled`
+  gate has been deleted; the inner `webhook.enabled` sub-feature flag
+  is preserved (legitimate sub-feature toggle).
+*/}}
+{{- if .Values.tenantOperator.webhook.enabled }}
+{{- $ns := .Values.tenantOperator.namespace | default "gibson" -}}
+{{- $svc := "gibson-tenant-operator-webhook" -}}
+{{- $secretName := "gibson-tenant-operator-webhook-certs" -}}
+{{- $certName := "gibson-tenant-operator-webhook-cert" -}}
+{{- $issuerName := "gibson-tenant-operator-webhook-selfsigned" -}}
+
+{{- /*
+  Webhook serving cert + CA — managed by cert-manager (deploy /
+  PRD deploy#255 / slice S6, deploy#262).
+
+  The prior implementation rendered the CA + cert in-chart via
+  `genCA` / `genSignedCert` and used `lookup` to preserve the material
+  across helm upgrades. Both patterns are broken under Argo's offline
+  `helm template` render (lookup returns nil; every reconcile re-minted
+  a fresh CA + cert), which would silently rotate the webhook's
+  caBundle on every sync and lock the apiserver out of admission until
+  every consumer-side reference caught up.
+
+  Cert-manager is REQUIRED infrastructure (one-code-path /
+  deploy#201) — the `.Values.certManager.enabled` toggle is gone. cainjector
+  ships with cert-manager and populates `caBundle` on the webhook
+  configurations from the matching `cert-manager.io/inject-ca-from`
+  annotation at runtime, so no chart-rendered caBundle bytes appear in
+  this template.
+
+  Issuer is a dedicated selfsigned-only `Issuer` (not a chain off the
+  existing `selfsigned-ca` Issuer in gibson-workloads): keeps the
+  gibson-operators chart's Application startup independent of the
+  gibson-workloads chart's Application startup. Webhook reaches Ready
+  before workloads need to come up.
+*/ -}}
+
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $issuerName }}
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/component: tenant-operator-webhook
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $certName }}
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/component: tenant-operator-webhook
+spec:
+  secretName: {{ $secretName }}
+  issuerRef:
+    name: {{ $issuerName }}
+    kind: Issuer
+    group: cert-manager.io
+  commonName: {{ $svc }}
+  dnsNames:
+    - {{ $svc }}
+    - {{ printf "%s.%s" $svc $ns }}
+    - {{ printf "%s.%s.svc" $svc $ns }}
+    - {{ printf "%s.%s.svc.cluster.local" $svc $ns }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  duration: 8760h   # 1 year
+  renewBefore: 720h # 30 days before expiry
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svc }}
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/component: tenant-operator-webhook
+spec:
+  selector:
+    app.kubernetes.io/name: gibson-tenant-operator
+  ports:
+    - name: webhook
+      port: 443
+      targetPort: webhook
+      protocol: TCP
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: gibson-tenant-operator-owner-ref
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/component: tenant-operator-webhook
+  annotations:
+    cert-manager.io/inject-ca-from: {{ printf "%s/%s" $ns $certName | quote }}
+webhooks:
+  - name: ownerref.gibson.zeroroot.ai
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ $ns }}
+        path: /mutate-owner-ref
+        port: 443
+      # caBundle populated by cert-manager cainjector at runtime from the
+      # `cert-manager.io/inject-ca-from` annotation above.
+    rules:
+      - apiGroups: ["gibson.zeroroot.ai"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE"]
+        resources: ["agentenrollments", "componentgrants", "tenantmembers"]
+        scope: Namespaced
+    # Fail-closed (one-code-path / deploy#204): webhook outage rejects
+    # writes rather than silently admitting malformed CRDs. Availability
+    # is guaranteed by replicas≥2 + PodDisruptionBudget. The previous
+    # Ignore posture let a single-replica outage admit unowned/malformed
+    # resources that the reconciler then had to repair after the fact —
+    # a worse failure mode than the API server returning "webhook
+    # unavailable" to the client.
+    failurePolicy: Fail
+    sideEffects: None
+    timeoutSeconds: 3
+    admissionReviewVersions: ["v1"]
+    # Scope to tenant-* namespaces only so we never intercept creates
+    # outside the tenant scope.
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: Exists
+    objectSelector: {}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: gibson-tenant-operator-tenant-validator
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/component: tenant-operator-webhook
+  annotations:
+    cert-manager.io/inject-ca-from: {{ printf "%s/%s" $ns $certName | quote }}
+webhooks:
+  - name: tenant.gibson.zeroroot.ai
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ $ns }}
+        path: /validate-tenant
+        port: 443
+      # caBundle populated by cert-manager cainjector at runtime.
+    rules:
+      - apiGroups: ["gibson.zeroroot.ai"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["tenants"]
+        scope: Cluster
+    # Fail-closed — invalid Tenant slugs (e.g. starting with a digit, the
+    # daemon admin API rejects those) MUST be blocked at admission. Letting
+    # one through means the saga runs 10 steps before failing at the
+    # Entitlements step, which the dashboard sees as a hung provisioning.
+    failurePolicy: Fail
+    sideEffects: None
+    timeoutSeconds: 3
+    admissionReviewVersions: ["v1"]
+{{- end }}

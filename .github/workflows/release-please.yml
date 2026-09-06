@@ -1,0 +1,109 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    outputs:
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      pr: ${{ steps.release.outputs.pr }}
+    steps:
+      - name: Mint App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3
+        with:
+          app-id: ${{ secrets.SDK_FANOUT_APP_ID }}
+          private-key: ${{ secrets.SDK_FANOUT_APP_PRIVATE_KEY }}
+          owner: zeroroot-ai
+          repositories: deploy
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7  # v5
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          # Mint a short-lived token from the zeroday-sdk-fanout GitHub App rather
+          # than using GITHUB_TOKEN or a long-lived PAT. GITHUB_TOKEN does not fire
+          # downstream `push: tags:` workflows (GitHub anti-recursion) and its
+          # bot-authored PRs get held at action_required; a PAT avoids both but
+          # expires, which reproduces the same silent stall on a timer. An App token
+          # has neither failure mode. See zeroroot-ai/.github#263.
+          token: ${{ steps.app-token.outputs.token }}
+
+  # deploy#1358. bigbang/images/{images.txt,images.yaml} pin the umbrella
+  # chart's OWN version (`ghcr.io/zeroroot-ai/charts/gibson:<version>`),
+  # copied from .release-please-manifest.json at generation time. A release
+  # bumps the manifest but nothing regenerated the copy, so the two drifted
+  # apart on every release — and airgap-image-list's `--check` correctly
+  # flagged it stale, but on the NEXT unrelated PR that happened to touch
+  # helm/**, not on the release itself where the drift was introduced.
+  #
+  # Regenerates the manifest onto the release-please PR branch itself, so the
+  # version bump and the manifest that copies it land in the SAME PR, using
+  # the documented release-please-action pattern for modifying the release PR
+  # before merge (checkout its head branch, commit, push — see the action's
+  # own README "Building on PR update or release" section). Runs on every
+  # push to main that results in an open/updated release PR, not just once,
+  # so the manifest never has the chance to drift.
+  regenerate-airgap-manifest:
+    name: regenerate-airgap-manifest
+    needs: release-please
+    if: ${{ needs.release-please.outputs.prs_created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      # Minted again here rather than passed from the release-please job: a job
+      # output is a poor carrier for a credential, and an App token is cheap to
+      # re-mint. Same App, same reason as that job.
+      - name: Mint App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3
+        with:
+          app-id: ${{ secrets.SDK_FANOUT_APP_ID }}
+          private-key: ${{ secrets.SDK_FANOUT_APP_PRIVATE_KEY }}
+          owner: zeroroot-ai
+          repositories: deploy
+
+      - name: Checkout the release-please PR branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+          # App token, not the default GITHUB_TOKEN, which cannot push to a
+          # branch protected by the org rulesets.
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Install helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4  # v4
+        with:
+          version: v3.18.4
+
+      # No --skip-deps, matching airgap-image-list.yml's own step: charts/*.tgz
+      # is gitignored, so a fresh checkout has no packaged dependencies and the
+      # generator must build them.
+      - name: Regenerate the air-gap image manifest
+        run: ./bigbang/images/generate-image-list.py
+
+      - name: Commit and push if the manifest changed
+        env:
+          BRANCH: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- bigbang/images/images.txt bigbang/images/images.yaml; then
+            echo "air-gap manifest already matches this release — nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bigbang/images/images.txt bigbang/images/images.yaml
+          git commit -m "chore(bigbang): regenerate air-gap image manifest for this release"
+          git push origin "HEAD:${BRANCH}"

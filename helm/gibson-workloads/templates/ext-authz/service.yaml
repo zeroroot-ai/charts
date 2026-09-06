@@ -1,0 +1,49 @@
+{{/*
+ext_authz Service.
+
+Cluster-internal Service exposing two ports:
+  - grpc (9001 by default): both the Envoy ExtAuthz `Authorization/Check`
+    contract AND the gibson.extauthz.v1.ExtAuthzService API
+    (MintCapabilityGrant, ValidateAPIKey) — same gRPC server, single port.
+  - http (9002 by default): /healthz (liveness/readiness) only. ext-authz
+    publishes no key document: since CG-JWT verifiers resolve the
+    signing key per-kid from the daemon (GET /capabilitygrant/v1/keys/{kid}),
+    and gibson#1306 retired the JWKS-wide document, so nothing is served here.
+
+MUST be ClusterIP. ext_authz is never exposed externally; Envoy is the only
+public surface.
+
+Spec: zitadel-envoy-gateway-migration, task 9.
+ext-authz is structural infrastructure (deploy#188) — renders
+unconditionally; the extAuthz.enabled toggle was deleted.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: gibson-ext-authz
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ext-authz
+spec:
+  type: {{ .Values.extAuthz.service.type | default "ClusterIP" }}
+  selector:
+    {{- include "gibson.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: ext-authz
+  ports:
+    - name: grpc
+      port: {{ .Values.extAuthz.ports.grpc | default 9001 }}
+      targetPort: grpc
+      protocol: TCP
+      appProtocol: grpc
+      {{- if and (eq (.Values.extAuthz.service.type | default "ClusterIP") "NodePort") .Values.extAuthz.service.nodePort.grpc }}
+      nodePort: {{ .Values.extAuthz.service.nodePort.grpc }}
+      {{- end }}
+    - name: http
+      port: {{ .Values.extAuthz.ports.http | default 9002 }}
+      targetPort: http
+      protocol: TCP
+      appProtocol: http
+      {{- if and (eq (.Values.extAuthz.service.type | default "ClusterIP") "NodePort") .Values.extAuthz.service.nodePort.http }}
+      nodePort: {{ .Values.extAuthz.service.nodePort.http }}
+      {{- end }}

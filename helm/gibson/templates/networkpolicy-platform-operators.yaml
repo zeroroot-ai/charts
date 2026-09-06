@@ -1,0 +1,74 @@
+{{/*
+NetworkPolicies for the cluster operators the umbrella owns (
+deploy#1728): cert-manager, external-secrets, external-dns and the
+CloudNativePG operator. All four are subcharts of this chart and render into
+the release namespace, where the gibson-workloads subchart ships a
+namespace-wide default-deny (podSelector: {}, Ingress+Egress). A workload no
+allow policy selects is severed in both directions, and
+scripts/check-netpol-coverage.py fails the render on it.
+
+Every operator is a kube-apiserver client and a network client of the thing
+it manages: cert-manager reaches ACME endpoints and DNS providers,
+external-secrets reaches OpenBao, external-dns reaches the DNS provider, the
+CNPG operator reaches its instance pods. Egress is open for all of them. Only
+the admission webhooks accept connections, and they are dialled by the
+kube-apiserver, which pod labels cannot select (same pattern as the
+tenant-operator policy): the webhook port is open from any source. Metrics
+ports are open to the in-namespace scrapers.
+
+Selectors use app.kubernetes.io/name as the upstream charts stamp it. The
+per-env-overlay-render bats suite pins the names against the render.
+*/}}
+{{- $release := .Release.Name }}
+{{- $ns := .Release.Namespace }}
+{{- $scrapers := list
+  (dict "namespaceSelector" (dict) "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" "prometheus")))
+  (dict "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/component" "prometheus")))
+  (dict "podSelector" (dict "matchLabels" (dict "app" "grafana-agent")))
+}}
+{{- /* name, selector label value, webhook port (0 = none), metrics port */}}
+{{- $operators := list
+  (dict "name" "cloudnative-pg" "webhook" 9443 "metrics" 8080)
+  (dict "name" "cert-manager" "webhook" 0 "metrics" 9402)
+  (dict "name" "cainjector" "webhook" 0 "metrics" 9402)
+  (dict "name" "webhook" "webhook" 10250 "metrics" 9402)
+  (dict "name" "external-secrets" "webhook" 0 "metrics" 8080)
+  (dict "name" "external-secrets-webhook" "webhook" 10250 "metrics" 8080)
+  (dict "name" "external-secrets-cert-controller" "webhook" 0 "metrics" 8080)
+  (dict "name" "external-dns" "webhook" 0 "metrics" 7979)
+}}
+{{- range $op := $operators }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $release }}-operator-{{ $op.name }}
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/component: platform-operator-isolation
+  annotations:
+    # Same wave as the operators: a policy that lands after the pod it
+    # selects leaves that pod severed until it does.
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $op.name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- if $op.webhook }}
+    # Admission webhook: the kube-apiserver dials from unselectable IPs.
+    - ports:
+        - protocol: TCP
+          port: {{ $op.webhook }}
+    {{- end }}
+    - from:
+        {{- toYaml $scrapers | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ $op.metrics }}
+  egress:
+    - {}
+{{- end }}

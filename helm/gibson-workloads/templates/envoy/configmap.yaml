@@ -1,0 +1,218 @@
+{{/*
+Envoy ConfigMap — bootstrap config + the API key Lua filter.
+
+The bootstrap config in files/envoy/envoy.yaml is templated (it uses Go template
+markers like {{ .domains.api }}) and rendered through `tpl` against the dict
+passed as the second arg. We build that dict from .Values.envoy + a few
+release-time bits (release name, ext_authz/dashboard ports) so the same file
+can be reused across Kind/staging/production overlays without per-environment
+forks.
+
+Spec: zitadel-envoy-gateway-migration, task 10.
+
+Envoy is required infrastructure (deploy#200); this template renders
+unconditionally — there is no `envoy.enabled` opt-out.
+*/}}
+{{- /* Single-host consolidation (deploy#630 /): every external
+       hostname derives from the gibson-common domain helpers (fail-loud on
+       unset global.domain). The platform serves ONE public host
+       app.<domain>; the `auth.` subdomain is retired (S12/deploy#642). */ -}}
+{{- $domain := include "gibson.domain" . -}}
+{{- /*
+  Zitadel issuer URL == the external origin (gibson.oidcIssuer), host root
+  with no path. global.externalPort carries the kind :30443 quirk (the
+  helper appends it; prod leaves it empty so the issuer is bare-host:443
+  implicit). Zitadel's ExternalDomain is app.<domain> so it stamps exactly
+  this iss. Override via envoy.zitadel.issuer only for an off-domain edge.
+*/ -}}
+{{- $zitadelIssuer := default (include "gibson.oidcIssuer" .) (.Values.envoy.zitadel).issuer -}}
+{{- /*
+  Dashboard's OAuth client_id is accepted as a JWT `aud` claim alongside
+  the static "gibson-dashboard" string. Zitadel emits the client_id in
+  every user access token; Envoy MUST accept it or every authenticated
+  RPC fails with `Audiences in Jwt are not allowed`.
+
+  This value is resolved at POD STARTUP from the Secret
+  `gibson-dashboard-oidc` (key `client_id`), which platform-operator
+  maintains as the runtime source of truth — it is rewritten on every
+  Zitadel reset / re-mint of the OIDC app. See zeroroot-ai/deploy#130
+  for the chart-render-time history (Argo's repo-server has no cluster
+  read access, so chart-time `lookup` cannot see this Secret); and the
+  follow-up that moved resolution to runtime to stop env overlays from
+  drifting on every Zitadel reset.
+
+  The template below emits the literal placeholder `${DASHBOARD_CLIENT_ID}`
+  into the ConfigMap; the Envoy pod's `render-envoy-config` initContainer
+  substitutes it using `sed` against the mounted Secret before the main
+  envoy container starts. The Stakater Reloader annotation on the
+  Deployment rolls the pods when the Secret changes.
+
+  `envoy.zitadel.dashboardClientId` is now intentionally ignored — kept
+  in values.yaml as a deprecated/empty default for backward compatibility
+  while gitops overlays drop it. Setting it has no effect.
+*/ -}}
+{{- $envoyNodePort := .Values.envoy.service.nodePort | default "" -}} {{/* allowlist-silent-default: nodePort is kind-only; empty signals ClusterIP/LoadBalancer mode. */}}
+{{- /* Spec eliminate-permissive-authz Req 1 — `zitadelJwksScheme` and
+       `zitadelTlsEnabled` are deleted. The Envoy bootstrap fetches JWKS
+       over HTTPS unconditionally; the scheme is no longer a configurable
+       knob. The upstream `zitadel_jwks` cluster always terminates TLS
+       with a validation_context against the in-cluster trust bundle. */ -}}
+{{- /*
+  JWKS endpoint defaults: in-cluster Zitadel Service over plain HTTP.
+  Spec kind-dashboard-bringup-e2e (D3) — the public app.<domain>
+  URL is only used as the JWT issuer claim; the JWKS fetch path is
+  decoupled so it works without DNS hairpinning in Kind / EKS.
+*/ -}}
+{{- /* Default JWKS host targets the sibling Zitadel Application's Service
+       (gibson-zitadel.<namespace>.svc.cluster.local), NOT a chart-internal
+       release name. Zitadel ships as its own helm release in the gitops
+       App-of-Apps; the gibson chart's Release.Name is `gibson-dev-workload`
+       in dev / `gibson` in prod and bears no relation to the Zitadel
+       Service name. Override via envoy.zitadel.jwks.host. */ -}}
+{{- $jwksHost := default (printf "gibson-zitadel.%s.svc.cluster.local" .Release.Namespace) ((.Values.envoy.zitadel).jwks).host -}}
+{{- $jwksPort := default 8080 ((.Values.envoy.zitadel).jwks).port -}}
+{{- $jwksScheme := default "http" ((.Values.envoy.zitadel).jwks).scheme -}}
+{{- /*
+  The JWKS URI's authority (host:port) becomes the Host header Envoy sends
+  on the JWKS fetch. Zitadel routes by Host — a request without the public
+  hostname (app.<domain>) gets matched to its default vhost and 404s.
+  Construct the URI with the public authority so Zitadel's vhost match
+  succeeds, while the actual TCP connect still goes to the in-cluster
+  Service via the zitadel_jwks cluster's socket_address (set from
+  zitadelJwksHost:zitadelJwksPort below). Standard Envoy pattern.
+*/ -}}
+{{- $jwksUriAuthority := printf "%s:%v" (include "gibson.appHost" .) (.Values.envoy.service.httpsPort | default 443) -}}
+{{- $jwksUri := default (printf "%s://%s/oauth/v2/keys" $jwksScheme $jwksUriAuthority) ((.Values.envoy.zitadel).jwks).uri -}}
+{{- /*
+  deploy#1204 — source CIDRs allowed to select the pre-auth in-cluster OIDC
+  filter chain (SNI gibson-envoy.<ns>.svc.cluster.local), which carries no
+  jwt_authn and no ext_authz. See envoy.internalChain.sourcePrefixRanges in
+  values.yaml for why this exists and why it MUST be narrowed on EKS.
+
+  Fail the render, never default: an unset OR EMPTY list would emit a
+  filter_chain_match with no source restriction at all, silently re-opening
+  that auth-free chain to anything that sets the SNI. `required` alone is not
+  enough — it passes an empty list through — so the length is checked too. A
+  /0 entry is rejected for the same reason: it restricts nothing.
+*/ -}}
+{{- $internalChainSourceRanges := ((.Values.envoy.internalChain).sourcePrefixRanges) | default list -}}
+{{- if eq (len $internalChainSourceRanges) 0 -}}
+{{- fail "envoy.internalChain.sourcePrefixRanges must be a NON-EMPTY list of {address_prefix, prefix_len} entries — it restricts which source CIDRs may select the pre-auth in-cluster OIDC filter chain, which carries no jwt_authn and no ext_authz (deploy#1204). Leaving it empty publishes that auth-free chain to any client that sets SNI gibson-envoy.<ns>.svc.cluster.local." -}}
+{{- end -}}
+{{- range $internalChainSourceRanges -}}
+{{- if or (not .address_prefix) (eq (int .prefix_len) 0) -}}
+{{- fail (printf "envoy.internalChain.sourcePrefixRanges entry %v is invalid — each entry needs a non-empty address_prefix and a prefix_len greater than 0. A /0 range restricts nothing and would re-open the pre-auth in-cluster OIDC filter chain to the internet (deploy#1204)." .) -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+  deploy#1189 — edge rate-limit buckets.
+
+  Every bucket is REQUIRED and hard-validated; there is no `enabled` knob and
+  no numeric default in this template. The rationale is in values.yaml under
+  envoy.rateLimit and in gibson.envoy.validateRateLimitBucket: a token bucket
+  has several degenerate shapes (absent, zero, fractional, inverted,
+  unbounded) that all render valid YAML, all produce an Envoy config Envoy
+  accepts, and all throttle nothing — leaving the route table LOOKING
+  protected. Defaulting here would make every one of them a silent bypass, so
+  the render fails instead.
+
+  These buckets carry NO descriptors. Do not add any: `use_remote_address` is
+  unset on this HCM, so the address Envoy would hand a `masked_remote_address`
+  descriptor comes from the client-supplied x-forwarded-for (the NLB is L4 and
+  adds none). tests/envoy-edge-rate-limiting.bats fails the build on that
+  combination.
+*/ -}}
+{{- $rl := .Values.envoy.rateLimit -}}
+{{- if not (kindIs "map" $rl) -}}
+{{- fail "envoy.rateLimit is missing. The Envoy edge rate limiter is structural (deploy#1189) — restore the block from the chart's values.yaml. Removing it leaves the five pre-auth routes, including /capabilitygrant/v1/register (which reaches Postgres before signature verification), with no throttle at all." -}}
+{{- end -}}
+{{- range $bucketName := list "apiBaseline" "preAuthDiscovery" "preAuthRegister" "apiConnections" "publicBaseline" "appSignupSubmit" -}}
+{{- include "gibson.envoy.validateRateLimitBucket" (dict "name" $bucketName "bucket" (index $rl $bucketName)) -}}
+{{- end -}}
+{{- include "gibson.envoy.validateHttp2MaxConcurrentStreams" $rl.http2MaxConcurrentStreams -}}
+{{- /*
+  streamKeepalive. Same fail-loud posture as the rate-limit buckets
+  above, and for the same reason: every degenerate value here renders valid
+  YAML that Envoy accepts, and every one of them silently ends missions early.
+  A zero interval disables the PINGs, so the NLB's fixed 350s idle drop removes
+  the flow. An interval at or above 350s never beats it. A browser idle timeout
+  of 0 disables idle reaping for the whole listener, which is the amplification
+  hole stream_idle_timeout exists to close.
+*/ -}}
+{{- $ka := .Values.envoy.streamKeepalive -}}
+{{- if not (kindIs "map" $ka) -}}
+{{- fail "envoy.streamKeepalive is missing. It is structural: without downstream HTTP/2 PINGs the NLB drops any mission stream idle for 350s, and that NLB timeout is not configurable. Restore the block from the chart's values.yaml." -}}
+{{- end -}}
+{{- if or (not $ka.intervalSeconds) (lt (int $ka.intervalSeconds) 1) (ge (int $ka.intervalSeconds) 350) -}}
+{{- fail (printf "envoy.streamKeepalive.intervalSeconds must be >=1 and <350 (got %v). The NLB drops a flow idle for 350s and that is not configurable, so a PING interval at or above it never keeps the flow warm — missions would still die, silently." $ka.intervalSeconds) -}}
+{{- end -}}
+{{- if or (not $ka.timeoutSeconds) (lt (int $ka.timeoutSeconds) 1) (ge (int $ka.timeoutSeconds) (int $ka.intervalSeconds)) -}}
+{{- fail (printf "envoy.streamKeepalive.timeoutSeconds must be >=1 and < intervalSeconds (got %v with interval %v). A timeout at or above the interval means a PING is still outstanding when the next one is due." $ka.timeoutSeconds $ka.intervalSeconds) -}}
+{{- end -}}
+{{- if or (not $ka.browserIdleTimeoutSeconds) (lt (int $ka.browserIdleTimeoutSeconds) 1) -}}
+{{- fail (printf "envoy.streamKeepalive.browserIdleTimeoutSeconds must be >=1 (got %v). Zero disables stream_idle_timeout for the WHOLE listener, which lets anyone hold browser-edge streams open at no cost. Mission streams opt out per-route via idle_timeout: 0s instead." $ka.browserIdleTimeoutSeconds) -}}
+{{- end -}}
+{{- /*
+  gibson#1450 — the daemon's HARNESS CALLBACK listener port, dialed by Envoy's
+  gibson_daemon_callback cluster.
+
+  HarnessCallbackService is registered on that listener ONLY (gibson
+  internal/engine/harness/callback_server.go). The main gRPC port does not
+  serve it and has no UnknownServiceHandler, so while the edge route pointed
+  at gibson_daemon_grpc every off-cluster component call returned
+  codes.Unimplemented after passing jwt_authn, ext_authz and FGA.
+
+  `required`, never a silent default: a wrong or absent port renders a cluster
+  aimed at nothing, and the symptom is a connect timeout at the edge for every
+  component callback rather than a failed deploy. templates/gibson/service.yaml
+  publishes the same value, so Envoy and the Service cannot drift apart.
+*/ -}}
+{{- $gibsonCallbackPort := required "gibson.service.callback.port is required — Envoy's gibson_daemon_callback cluster dials the daemon's harness callback listener there, and HarnessCallbackService is served on that listener alone (gibson#1450). Without it the edge route for /gibson.harness.v1.HarnessCallbackService/ points at nothing." ((.Values.gibson.service).callback).port -}}
+{{- $ctx := dict
+    "release"          .Release.Name
+    "namespace"        .Release.Namespace
+    "envoyServiceType"     .Values.envoy.service.type
+    "envoyServiceNodePort" $envoyNodePort
+    "domains"          (dict
+        "api"            (.Values.envoy.domains.api  | default (include "gibson.apiHost" .))
+        "app"            (.Values.envoy.domains.app  | default (include "gibson.appHost" .))
+        "apex"           (.Values.envoy.domains.apex | default $domain)
+        "docs"             (.Values.envoy.domains.docs  | default (include "gibson.docsHost" .))
+        "zitadelIssuer"  $zitadelIssuer
+        "zitadelJwksUri"  $jwksUri
+        "zitadelJwksHost" $jwksHost
+        "zitadelJwksPort" $jwksPort
+        "spiffeTrustDomain" (.Values.spire.server.trustDomain | default "zeroroot.ai"))
+    "envoyHttpsPort"   (.Values.envoy.service.httpsPort | default 443)
+    "ratelimitPort"    (((.Values.ratelimit).ports).grpc | default 8081)
+    "waf"              (dict
+                          "browserDirectives" (include "gibson.envoy.wafDirectives" (dict "ctx" . "file" "files/coraza/browser.conf"))
+                          "apiDirectives"     (include "gibson.envoy.wafDirectives" (dict "ctx" . "file" "files/coraza/api.conf")))
+    "gibsonService"    (include "gibson.fullname" .)
+    "gibsonGrpcPort"   (include "gibson.grpc.port" .)
+    "gibsonCallbackPort" $gibsonCallbackPort
+    "dashboardPort"    (.Values.dashboard.service.port | default 3000)
+    "extAuthzGrpcPort" (.Values.extAuthz.ports.grpc    | default 9001)
+    "zitadelDashboardClientId" "${DASHBOARD_CLIENT_ID}"
+    "zitadelNativeLoginClientId" "${NATIVE_LOGIN_CLIENT_ID}"
+    "internalChainSourcePrefixRanges" $internalChainSourceRanges
+    "rateLimit"        $rl
+    "streamKeepalive"  $ka
+-}}
+{{- /* The browser chain (files/envoy/public-chain.yaml) is rendered once here
+       and injected into envoy.yaml as `.publicChain`. It is templated with the
+       SAME $ctx, so it sees the same domains, ports and rate-limit values
+       envoy.yaml does. Rendering it before the injection is why $ctx is built
+       first rather than inline in the tpl call. */}}
+{{- $_ := set $ctx "publicChain" (tpl (.Files.Get "files/envoy/public-chain.yaml") $ctx) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gibson-envoy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: envoy
+data:
+  envoy.yaml: |
+{{ tpl (.Files.Get "files/envoy/envoy.yaml") $ctx | indent 4 }}

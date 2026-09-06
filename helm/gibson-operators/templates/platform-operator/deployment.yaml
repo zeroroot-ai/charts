@@ -1,0 +1,258 @@
+{{- /*
+  platform-operator is structural infrastructure (one-code-path /
+  deploy#188). The previous outer `.Values.platformOperator.enabled`
+  gate has been deleted — the operator reconciles PlatformBootstrap and
+  OIDCClient CRs that the platform cannot run without.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gibson-platform-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: gibson-platform-operator
+    app.kubernetes.io/part-of: gibson
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.platformOperator.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gibson-platform-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gibson-platform-operator
+        app.kubernetes.io/part-of: gibson
+        app.kubernetes.io/component: platform-operator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ .Values.platformOperator.serviceAccount.name | default "gibson-platform-operator" }}
+      {{- /*
+        hostAliases makes app.<domain> + api.<domain> resolve to Envoy's
+        ClusterIP from inside the platform-operator pod (the auth.<domain>
+        host is retired — Zitadel is served under app.<domain>). The
+        PlatformBootstrap CR's spec.zitadel.issuer URL
+        (e.g. https://app.zeroroot.ai) is the public URL; the
+        reconciler dials it directly. Without this alias the operator
+        can't reach Zitadel — DNS for *.zeroroot.ai doesn't resolve
+        inside the cluster.
+
+        gibson-common library helper (deploy#179) replaces the
+        previously-inline block; single source of truth shared with
+        tenant-operator + dashboard + daemon templates.
+      */}}
+      {{- include "gibson.hostAliases" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.platformOperator.image.repository "tag" .Values.platformOperator.image.tag "digest" .Values.platformOperator.image.digest "appVersion" .Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ .Values.platformOperator.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - --leader-elect=true
+            - --leader-election-namespace={{ .Release.Namespace }}
+            - --leader-election-id=gibson-platform-operator
+            - --metrics-bind-address=:8080
+            - --metrics-secure=false
+            - --health-probe-bind-address=:8081
+          ports:
+            - containerPort: 8080
+              name: metrics
+              protocol: TCP
+            - containerPort: 8081
+              name: probes
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: probes
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: probes
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: {{ .Values.platformOperator.resources.requests.cpu | default "50m" }}
+              memory: {{ .Values.platformOperator.resources.requests.memory | default "128Mi" }}
+            limits:
+              cpu: {{ .Values.platformOperator.resources.limits.cpu | default "500m" }}
+              memory: {{ .Values.platformOperator.resources.limits.memory | default "512Mi" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: OPERATOR_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # SSL_CERT_DIR is colon-separated; Go skips missing dirs and
+            # /etc/ssl/certs keeps the system bundle. envoy-ca trusts
+            # Envoy's edge cert for https://app.<domain> (deploy#200);
+            # fga-ca trusts the OpenFGA HTTP-listener cert (deploy#1382) —
+            # platformBootstrap.fgaModel.apiEndpoint is https now and the
+            # component-cert issuer is a private CA in every profile, so
+            # the env is unconditional.
+            - name: SSL_CERT_DIR
+            {{- if .Values.envoy.tls.secretName }}
+              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
+            {{- else }}
+              value: "/etc/ssl/certs:/etc/ssl/fga-ca"
+            {{- end }}
+            {{- /*
+              ZITADEL_EXTERNAL_DOMAIN is the Host header forged onto every
+              Zitadel API request. Required because the platform-operator
+              dials Zitadel via in-cluster Service-name DNS (resolved via
+              hostAlias) — Zitadel's instance router matches by Host, not
+              SNI, so the Host has to be the registered ExternalDomain.
+              Same env var pattern as tenant-operator.
+            */}}
+            - name: ZITADEL_EXTERNAL_DOMAIN
+              value: {{ (((.Values.zitadel).zitadel).configmapConfig).ExternalDomain | default (include "gibson.zitadelExternalDomain" .) | quote }}
+            # ZITADEL_ISSUER: public OIDC issuer URL used by the ZitadelProbe
+            # readiness check (hits <issuer>/debug/ready). Must match the URL
+            # Zitadel emits in the `iss` claim. Uses dashboard.zitadel.issuer
+            # (the same value tenant-operator uses) — hostAliases above make
+            # app.<domain> resolve to Envoy's ClusterIP inside the pod.
+            - name: ZITADEL_ISSUER
+              value: {{ ((.Values.dashboard.zitadel).issuer) | default (include "gibson.oidcIssuer" .) | quote }}
+            # ZITADEL_INTERNAL_ADDRESS: in-cluster Zitadel Service URL used by
+            # the readiness ZitadelProbe (GET <addr>/debug/ready). MUST be the
+            # cluster service, not ZITADEL_ISSUER (app.<domain>): the external
+            # origin routes through Envoy, which does not proxy /debug/ to
+            # Zitadel, so probing the issuer pins the pod at 0/1
+            # (platform-operator#76, deploy#630). Same convention the
+            # tenant-operator uses for its in-cluster Zitadel URL.
+            # Reuse tenantOperator.zitadelURL — both operators dial the SAME
+            # in-cluster Zitadel Service (gibson-zitadel:8080). Do NOT derive
+            # from .Release.Name: this chart's release is "gibson-operators",
+            # which would yield the non-existent "gibson-operators-zitadel".
+            - name: ZITADEL_INTERNAL_ADDRESS
+              value: {{ ((.Values.platformOperator).zitadelInternalURL) | default ((.Values.tenantOperator).zitadelURL) | default "http://gibson-zitadel:8080" | quote }}
+            {{- /* deploy#201: SPIRE is REQUIRED — env + mount unconditional. */}}
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: "unix:///run/spire/sockets/api.sock"
+            # Zitadel System API user private key path (platform-operator#28,
+            #). The reconcile step that registers the cluster
+            # Service name as a Zitadel trusted domain signs JWTs with
+            # this key to call /system/v1/*. The matching public key is
+            # provisioned on Zitadel via the chart's SystemAPIUsers
+            # config block (gitops apps/zitadel.yaml).
+            - name: ZITADEL_SYSTEM_KEY_PATH
+              value: "/etc/zitadel-system/private-key.pem"
+            - name: ZITADEL_SYSTEM_USER_NAME
+              value: {{ default "gibson-system-bot" ((.Values.platformBootstrap).zitadel).systemUserName | quote }}
+            {{- /*
+              Vault / OpenBao admin token — required by platform-clients
+              vaulttoken.Renewer introduced in platform-operator#45. Without
+              VAULT_TOKEN the operator fails at startup with
+              "VaultOptions.Token or TokenPath required" (deploy#449).
+              The Secret is materialised by the kind-bootstrap ESO ExternalSecret
+              (gibson-openbao-keys) or by the ESO backend in prod.
+              VAULT_ADDR overrides the code default "http://gibson-vault:8200"
+              which no longer matches the in-cluster Service after the
+              Vault→OpenBao migration (/ deploy#431).
+            */}}
+            - name: VAULT_ADDR
+              value: {{ required "platformOperator.vaultAddr is required — set to the OpenBao/Vault Service URL (e.g. http://gibson-workloads-openbao.<ns>.svc:8200)" .Values.platformOperator.vaultAddr | quote }}
+            # Vault/OpenBao admin token via an OPTIONAL projected-Secret FILE,
+            # NOT a fixed env var (deploy#971 / gibson#1000). On a from-zero
+            # bringup OpenBao mints/writes this Secret later (it lives in
+            # gibson-workloads, a later sync-wave), so the operator must start
+            # WITHOUT it. A fixed env is read once at pod start and can never
+            # refresh; a mounted projected Secret is refreshed by the kubelet
+            # when the Secret appears. vaulttoken.New polls VAULT_TOKEN_PATH and
+            # the PlatformBootstrap reconciler requeues until the token exists —
+            # so the pod becomes Ready immediately, gibson-operators goes
+            # Healthy, and Argo advances to the wave that brings OpenBao up.
+            - name: VAULT_TOKEN_PATH
+              value: /etc/gibson/vault-token/VAULT_ADMIN_TOKEN
+          volumeMounts:
+            # CA for the OpenFGA HTTP-listener cert (deploy#1382).
+            - name: fga-http-ca
+              mountPath: /etc/ssl/fga-ca
+              readOnly: true
+            {{- if .Values.envoy.tls.secretName }}
+            - name: envoy-ca
+              mountPath: /etc/ssl/envoy-ca
+              readOnly: true
+            {{- end }}
+            - name: vault-admin-token
+              mountPath: /etc/gibson/vault-token
+              readOnly: true
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+            - name: zitadel-system-key
+              mountPath: /etc/zitadel-system
+              readOnly: true
+      volumes:
+        # Only ca.crt is projected — the operator must never hold the
+        # OpenFGA listener's private key (deploy#1382).
+        - name: fga-http-ca
+          secret:
+            secretName: gibson-openfga-http-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 0444
+        {{- if .Values.envoy.tls.secretName }}
+        - name: envoy-ca
+          secret:
+            # Trust anchor = the self-signed ROOT CA (gitops wave -12), NOT the
+            # Envoy leaf secret (gibson-envoy-tls, wave 10) — see deploy#971 and
+            # envoy.tls.caSecretName in values.yaml. tls.crt IS the CA cert for a
+            # self-signed CA; project only the cert, never the CA key.
+            secretName: {{ .Values.envoy.tls.caSecretName | default "gibson-selfsigned-ca" | quote }}
+            items:
+              - key: tls.crt
+                path: envoy-ca.crt
+        {{- end }}
+        # Vault/OpenBao admin token, mounted OPTIONAL (deploy#971 / gibson#1000):
+        # the Secret is produced later in the sync order (OpenBao mints/writes it
+        # at wave 10), so the volume must tolerate it being absent at pod start.
+        # When the Secret appears the kubelet projects the file; the operator
+        # polls VAULT_TOKEN_PATH and requeues until then. Project only the token
+        # key to a stable filename.
+        - name: vault-admin-token
+          secret:
+            secretName: {{ .Values.platformOperator.vaultTokenSecretRef.name | default "gibson-openbao-keys" | quote }}
+            optional: true
+            items:
+              - key: {{ .Values.platformOperator.vaultTokenSecretRef.key | default "VAULT_ADMIN_TOKEN" | quote }}
+                path: VAULT_ADMIN_TOKEN
+        {{- /* deploy#201: SPIRE is REQUIRED — CSI volume unconditional. */}}
+        - name: spire-agent-socket
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        # Zitadel System API user private key (platform-operator#28,
+        #). Materialised by ESO from gibson-secrets-backend
+        # in kind dev; from AWS Secrets Manager in prod. The matching
+        # public key is also stored at PublicKey: this Secret carries
+        # only the private half; the public half lives in the Zitadel
+        # SystemAPIUsers config block.
+        - name: zitadel-system-key
+          secret:
+            secretName: gibson-zitadel-system-key
+            items:
+              - key: private-key.pem
+                path: private-key.pem
+      terminationGracePeriodSeconds: 30

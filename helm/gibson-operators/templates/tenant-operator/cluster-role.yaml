@@ -1,0 +1,150 @@
+{{- /*
+ClusterRole for the gibson-tenant-operator.
+
+Spec: secrets-blast-radius-reduction Phase 1.1.
+
+This ClusterRole holds ONLY rules for resources that are inherently
+cluster-scoped or that the operator must observe across every namespace.
+Per-namespace resources (secrets, configmaps, services, PVCs, resourcequotas,
+statefulsets, networkpolicies, roles, rolebindings, leases) are NOT here —
+they're granted via:
+
+  - templates/tenant-operator/release-namespace-rbac.yaml — Role+RoleBinding
+    in the chart's release namespace (.Release.Namespace) for the operator's
+    own bootstrap traffic (chart-rendered Secrets, controller-runtime Lease,
+    spire-jwks-exporter RBAC, etc).
+
+  - The operator's runtime saga step EnsureTenantNamespaceRBAC (in
+    internal/saga/flows/tenant_namespace_rbac.go) creates a per-tenant
+    Role+RoleBinding inside the tenant's namespace at provision time.
+    OwnerRef = the tenant Namespace, so cleanup is automatic on tenant delete.
+
+NOTE: this boundary is enforced by review, not by CI — there is no
+automated guard today. scripts/check-workload-create-rbac.py (deploy#1210)
+checks a different, narrower thing (workload-authoring verbs on pods and
+pod-producing controllers); it does not check for the per-namespace
+resources named above. Re-adding any of them cluster-wide currently passes
+CI. If you are re-reviewing this file for that reason, see deploy#1362.
+
+tenant-operator is structural infrastructure (one-code-path /
+deploy#188). The previous outer `.Values.tenantOperator.enabled`
+gate has been deleted — these RBAC objects render unconditionally.
+*/ -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gibson-tenant-operator
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+rules:
+  # Tenant CRDs are cluster-scoped — must stay cluster-wide. The four
+  # tenant child CRDs (TenantDataPlane / TenantSecretsBackend /
+  # TenantIdentity / TenantGrants) are the open-core decomposition of the
+  # monolithic Tenant reconcile into per-concern controllers (gibson
+  # #801–805). The operator owns their full lifecycle plus status +
+  # finalizers, exactly as for the top-level Tenant CRDs.
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["tenants", "tenantmembers", "agentenrollments", "componentgrants", "tenantdataplanes", "tenantsecretsbackends", "tenantidentities", "tenantgrants"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["tenants/status", "tenantmembers/status", "agentenrollments/status", "componentgrants/status", "tenantdataplanes/status", "tenantsecretsbackends/status", "tenantidentities/status", "tenantgrants/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["tenants/finalizers", "tenantmembers/finalizers", "agentenrollments/finalizers", "componentgrants/finalizers", "tenantdataplanes/finalizers", "tenantsecretsbackends/finalizers", "tenantidentities/finalizers", "tenantgrants/finalizers"]
+    verbs: ["update"]
+
+  # ConnectorInstance is the connector-operator's CRD. The tenant-operator
+  # watches it to converge the connector's FGA component tuples and holds its
+  # own finalizer for tuple removal (gibson#1548). Read + update
+  # only — the connector-operator owns create/delete and the runtime.
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["connectorinstances"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["connectorinstances/finalizers"]
+    verbs: ["update"]
+
+  # Namespace is inherently cluster-scoped — operator creates per-tenant namespaces.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Events: operator emits about Tenant reconciles (release ns) and per-tenant
+  # provisioning steps (tenant ns). Cluster-scope avoids picking the right
+  # RoleBinding at every event-emit site. Events are low-sensitivity.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+
+  # Newer client-go (used by controller-runtime in the operator) emits
+  # Events via the events.k8s.io API in addition to the legacy core/events
+  # one. Without this parallel grant, every Event the operator records is
+  # rejected by the apiserver with "events.events.k8s.io is forbidden".
+  # Mirror of tenant-operator#142 (kubebuilder marker on the same controllers).
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+
+  # NO clusterspiffeids GRANT — deliberately removed, do not re-add
+  # without also constraining WHAT may be written.
+  #
+  # This ClusterRole used to hold cluster-wide
+  # get/list/watch/create/update/patch/delete on
+  # `spire.spiffe.io/clusterspiffeids`. A ClusterSPIFFEID maps a pod
+  # selector to a SPIFFE ID, so that grant let one compromised operator
+  # pod write its own CR mapping `spiffe://<td>/platform/daemon` onto its
+  # own pod and mint any platform identity in a single API call —
+  # bypassing the platform-identity admission policy entirely, since that
+  # policy governs pods and workloads, not ClusterSPIFFEIDs.
+  #
+  # It was also dead. `grep -rn "spire.spiffe.io\|ClusterSPIFFEID"` over
+  # enterprise/platform/gibson returns nothing in Go or YAML: every
+  # ClusterSPIFFEID in this platform is rendered by
+  # gibson-workloads/templates/spire-server/clusterspiffeids.yaml, by
+  # Helm, not by the operator. controller-gen agrees — the generated
+  # operators/tenant/config/rbac/role.yaml has never contained it.
+  #
+  # If the per-tenant ClusterSPIFFEID design is ever built (the
+  # tenant-operator writing one CR per tenant with the literal tenant id),
+  # re-add it together with a ValidatingAdmissionPolicy on
+  # clusterspiffeids CREATE/UPDATE constraining the spiffeIDTemplate this
+  # operator may write to the `spiffe://<td>/tenant/` prefix. The grant
+  # without that constraint is a platform-identity minting primitive.
+
+  # Per-tenant RoleBindings. The operator creates a RoleBinding in each
+  # tenant namespace at provision time, scoped to the chart-defined
+  # `gibson-tenant-operator-tenant-namespace` ClusterRole. This is the
+  # narrow alternative to giving the operator `roles/create + escalate`
+  # cluster-wide (which would let it mint Roles with any rules — a wider
+  # blast radius than the spec intends). The operator cannot define the
+  # rule set; it can only bind the chart-owned ClusterRole into a ns.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # `bind` is RBAC's privilege-escalation guard: holding it lets the
+  # operator reference the named ClusterRole from a RoleBinding even
+  # though the operator itself doesn't hold every verb in that
+  # ClusterRole's rules. Scoped via resourceNames so the operator can
+  # bind ONLY this one ClusterRole — not arbitrary cluster-admin etc.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    resourceNames: ["gibson-tenant-operator-tenant-namespace"]
+    verbs: ["bind"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gibson-tenant-operator
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+subjects:
+  - kind: ServiceAccount
+    name: gibson-tenant-operator
+    namespace: {{ .Values.tenantOperator.namespace | default "gibson" }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gibson-tenant-operator

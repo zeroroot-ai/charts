@@ -1,0 +1,64 @@
+{{/*
+Gibson daemon Service.
+
+Locked to ClusterIP — the only external entry point to the daemon is the
+Envoy gateway (spec zitadel-envoy-gateway-migration, Requirements 3.7 / 5.5).
+The .Values.gibson.service.type field is preserved for compatibility but the
+template ignores anything other than ClusterIP. NodePort/LoadBalancer
+fallbacks and per-port nodePort overrides were removed in task 12; if you
+need to reach the daemon from outside the cluster, route through Envoy.
+
+Ingress to the four published ports is further restricted to Envoy and
+Prometheus pods by templates/gibson/networkpolicy.yaml (task 11).
+
+gibson daemon is structural infrastructure (one-code-path /
+deploy#188). The previous outer `.Values.gibson.enabled` gate has
+been deleted — the daemon Service renders unconditionally.
+*/}}
+{{- $declaredType := .Values.gibson.service.type | default "ClusterIP" -}}
+{{- if ne $declaredType "ClusterIP" -}}
+{{- fail (printf "gibson.service.type=%q is not supported — the daemon Service is locked to ClusterIP. Route external traffic through Envoy. See spec zitadel-envoy-gateway-migration task 12." $declaredType) -}}
+{{- end -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gibson.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: daemon
+spec:
+  type: ClusterIP
+  ports:
+    - name: callback
+      port: {{ .Values.gibson.service.callback.port }}
+      targetPort: callback
+      protocol: TCP
+    - name: grpc
+      port: {{ include "gibson.grpc.port" . }}
+      targetPort: grpc
+      protocol: TCP
+    - name: registration
+      port: {{ .Values.gibson.service.registration.port }}
+      targetPort: registration
+      protocol: TCP
+    - name: metrics
+      port: {{ .Values.gibson.service.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+    # gibson#623 — native-login bootstrap (GET /.well-known/gibson-login).
+    # Envoy's gibson_native_login cluster targets gibson-workloads:8085; this
+    # port must be published or `gibson login` times out at the upstream.
+    - name: native-login
+      port: {{ .Values.gibson.service.nativeLogin.port }}
+      targetPort: native-login
+      protocol: TCP
+    # deploy#852: ext-authz fetches the authz registry from the daemon here
+    # over mTLS (single source of truth — replaces the OCI-artifact pull).
+    - name: authz-registry
+      port: {{ .Values.gibson.service.authzRegistry.port | default 8086 }}
+      targetPort: authz-registry
+      protocol: TCP
+  selector:
+    {{- include "gibson.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: daemon

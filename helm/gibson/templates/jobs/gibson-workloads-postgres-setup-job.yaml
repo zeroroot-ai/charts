@@ -1,0 +1,60 @@
+{{- /* CNPG-exec setup/migration Job. Renders on every profile: the umbrella's own Cluster is the platform Postgres everywhere (deploy#1730). */ -}}
+{{/* deploy#788: bringup Jobs + RBAC folded from gitops apps/manifests. Jobs self-wait for readiness (CNPG primary + ESO credential Secret). */}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gibson-workloads-postgres-setup
+  namespace: gibson
+  annotations:
+    # gitops#297: this role-creating job (gibson_platform/dashboard/tenant_admin
+    # roles + DBs, pg_trgm seed, tenant_neo4j_endpoints registry) MUST run
+    # BEFORE anything that logs in with those roles — the zitadel-init Sync hook
+    # at wave -4 and every DB-consuming service. As a post-install/PostSync hook
+    # it deadlocked: consumers (Sync) waited for roles this job had not yet
+    # created, so the Sync phase never completed and the PostSync phase (this
+    # job) never ran. Run it as a Sync hook at wave -6 instead — after the ESO
+    # credential Secrets (Sync-phase, wave -8; PreSync would deadlock waiting on
+    # a Secret its own phase hasn't created yet) and before zitadel-init (-4).
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "-6"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    # Helm-native (non-Argo) installs keep an early hook so role creation still
+    # precedes the consumers; ArgoCD honours the argocd.* annotations above.
+    # post-install, NOT pre-install (deploy#1627). This Job blocks on two
+    # MAIN-PHASE resources: Cluster.status.currentPrimary for platform-postgres,
+    # and the ESO-materialised credentials Secret. Helm runs pre-install hooks
+    # to completion BEFORE it applies any main-phase manifest, so as a
+    # pre-install hook this waited for resources the same release had not
+    # created yet and hung until --timeout, reporting only "failed pre-install:
+    # timed out waiting for the condition".
+    #
+    # Argo is unaffected: the argocd.argoproj.io/hook annotation above is what
+    # Argo honours, and sync-waves order hooks and ordinary resources on one
+    # axis, which is why this was only ever wrong on the Helm-native path.
+    # The hook-weight is unchanged, so the order among these Jobs is preserved.
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '-6'
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        # deploy#1365: pod-template label so the bringup-jobs
+        # NetworkPolicy can select this Job's pods under the
+        # gibson namespace default-deny (unlabelled = severed).
+        app.kubernetes.io/component: postgres-exec
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: postgres-exec
+      containers:
+      - name: setup
+        image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+        command:
+        - bash
+        - -ec
+        args:
+        - "# Wait for primary pod\necho \"waiting for platform-postgres primary...\"\n# Source the primary instance name from CNPG's authoritative\n# Cluster.status.currentPrimary field instead of pod labels.\n# The `role=primary` label is applied by CNPG AFTER promotion,\n# which races this hook at sync-wave -5. Cluster status is set\n# by CNPG the moment the primary is elected. deploy#322\n# finding 9.\nPOD=\"\"\nfor i in $(seq 1 90); do\n  P=$(kubectl -n gibson get cluster.postgresql.cnpg.io platform-postgres \\\n      -o jsonpath='{.status.currentPrimary}' 2>/dev/null || true)\n  if [ -n \"$P\" ] && \\\n     kubectl -n gibson get pod \"$P\" \\\n      -o jsonpath='{.status.phase}' 2>/dev/null | grep -q Running; then\n    POD=$P\n    break\n  fi\n  sleep 2\ndone\nif [ -z \"$POD\" ]; then\n  echo \"ERROR: platform-postgres has no Running currentPrimary after 180s \u2014 Argo will retry\"\n  exit 1\nfi\necho \"primary pod: $POD\"\n\nEXEC=\"kubectl exec -n gibson $POD -c postgres --\"\nEXEC_I=\"kubectl exec -i -n gibson $POD -c postgres --\"\n\n# role:db:role_opts:secret_name\n#\n# gitops#99: tenant_admin needs CREATEROLE in addition to\n# CREATEDB. The tenant-operator's per-tenant Postgres\n# provisioner creates BOTH the per-tenant database AND a\n# per-tenant `<tenant>_app` role inside it. Without\n# CREATEROLE the saga step \"Postgres\" fails at the role-\n# creation stage with SQLSTATE 42501.\nENTRIES=(\n  \"gibson_platform:gibson_platform:LOGIN:gibson-platform-postgres-credentials\"\n  \"dashboard:dashboard:LOGIN:dashboard-postgres-credentials\"\n  \"tenant_admin:tenant_admin:LOGIN CREATEDB CREATEROLE:tenant-admin-postgres-credentials\"\n)\n\nfor entry in \"${ENTRIES[@]}\"; do\n  IFS=\":\" read -r ROLE DB ROLE_OPTS SECRET_NAME <<< \"$entry\"\n  echo \"[$ROLE] starting setup...\"\n\n  # Wait for Secret\n  until PW=$(kubectl -n gibson get secret \"$SECRET_NAME\" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d) && [ -n \"$PW\" ]; do\n    echo \"[$ROLE] waiting for Secret $SECRET_NAME...\"\n    sleep 2\n  done\n  echo \"[$ROLE] secret materialised (len=${#PW})\"\n\n  # CREATE ROLE if new, then ALWAYS apply the declared\n  # ROLE_OPTS via ALTER ROLE \u2014 this makes the setup Job\n  # idempotent on attribute changes too, not just on\n  # role-presence. Previously, an existing role's options\n  # could drift from the declared set forever (the case\n  # that caused gitops#99: tenant_admin's CREATEROLE flag\n  # was missing on a cluster created before the update).\n  cat <<SQL | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1\n  DO \\$\\$\n  BEGIN\n    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '$ROLE') THEN\n      EXECUTE 'CREATE ROLE \"' || '$ROLE' || '\" WITH $ROLE_OPTS';\n    ELSE\n      EXECUTE 'ALTER ROLE \"' || '$ROLE' || '\" WITH $ROLE_OPTS';\n    END IF;\n  END\n  \\$\\$;\nSQL\n\n  # CREATE DATABASE (no IF NOT EXISTS)\n  if ! $EXEC psql -U postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='$DB'\" | grep -q '^1$'; then\n    $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"CREATE DATABASE \\\"$DB\\\" OWNER \\\"$ROLE\\\";\"\n  else\n    $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"ALTER DATABASE \\\"$DB\\\" OWNER TO \\\"$ROLE\\\";\"\n  fi\n\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"GRANT ALL PRIVILEGES ON DATABASE \\\"$DB\\\" TO \\\"$ROLE\\\";\"\n  printf \"%s\\n\" \"ALTER ROLE \\\"$ROLE\\\" WITH PASSWORD '$PW';\" | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1 -d postgres\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d \"$DB\" -c \"ALTER SCHEMA public OWNER TO \\\"$ROLE\\\"; GRANT ALL ON SCHEMA public TO \\\"$ROLE\\\";\"\n\n  echo \"[$ROLE] setup complete\"\ndone\n\n# gitops#101: per-tenant DBs require pg_trgm for the\n# missions_name_trgm_idx GIN index in migration 003.\n# CREATE DATABASE doesn't carry extensions over from\n# template1 unless they're installed there. Seed it in\n# template1 so every NEW per-tenant DB inherits it;\n# backfill any existing tenant_* DBs in-place so the\n# current cluster recovers without manual operator work.\necho \"\
+          [pg_trgm] installing in template1...\"\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d template1 \\\n  -c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\"\necho \"[pg_trgm] template1 done.\"\n\necho \"[pg_trgm] backfilling existing per-tenant DBs...\"\nfor tdb in $($EXEC psql -U postgres -tAc \\\n    \"SELECT datname FROM pg_database WHERE datname LIKE 'tenant\\\\_%' ESCAPE '\\\\\\\\' AND datname <> 'tenant_admin'\"); do\n  echo \"  [pg_trgm] $tdb\"\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d \"$tdb\" \\\n    -c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\"\ndone\necho \"[pg_trgm] backfill complete.\"\n\n# tenant-operator#69: the operator's Neo4j data-plane step\n# writes one row per tenant into the tenant_neo4j_endpoints\n# registry table (bolt URI + secret name + tier). The table\n# lives in the platform postgres `postgres` database that\n# `tenant_admin` connects to via DATAPLANE_PG_ADMIN_DSN.\n# The CREATE TABLE migration ships in\n# tenant-operator/migrations/001_create_tenant_neo4j_endpoints.up.sql\n# but the operator never runs it on startup, so every\n# signup's Neo4j step failed at registry-insert with\n# SQLSTATE 42P01 (\"relation does not exist\"). This bash\n# CREATE is the gitops-side counterpart of that migration\n# so signup works on a fresh cluster; tenant-operator#69\n# tracks moving this to a proper embed.FS + golang-migrate\n# pass at operator startup.\n# D1-G (deploy#256): tenant-operator's DATAPLANE_PG_ADMIN_DSN\n# connects as `tenant_admin` to the BUILT-IN `postgres` DB,\n# NOT the `tenant_admin` DB. The operator's platform-db\n# migrations try CREATE TABLE in `public` of `postgres` and\n# fail with `permission denied for schema public`\n# (SQLSTATE 42501) because PostgreSQL 15+ owns `public` in\n# the `postgres` DB as `pg_database_owner` and revoked\n# default CREATE for non-owners. The other DBs (gibson_platform,\n# tenant_admin) get the ownership flip via the loop above\n# (line 94), but `postgres` is not in ENTRIES \u2014 it's the\n# cluster's built-in DB.\n#\n# Fix: explicit GRANT CREATE,USAGE on the postgres-DB public\n# schema for tenant_admin. Idempotent \u2014 re-running with\n# privileges already granted is a no-op.\necho \"[postgres-db] granting tenant_admin CREATE on public schema of postgres DB...\"\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres \\\n  -c \"GRANT CREATE, USAGE ON SCHEMA public TO tenant_admin;\"\necho \"[postgres-db] grant complete.\"\n\necho \"[neo4j-registry] ensuring tenant_neo4j_endpoints exists...\"\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"\n  CREATE TABLE IF NOT EXISTS tenant_neo4j_endpoints (\n      tenant_id   TEXT        PRIMARY KEY,\n      bolt_uri    TEXT        NOT NULL,\n      secret_name TEXT        NOT NULL,\n      tier        TEXT        NOT NULL,\n      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n      ready_at    TIMESTAMPTZ,\n      version     INT         NOT NULL DEFAULT 1\n  );\n  GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_neo4j_endpoints TO tenant_admin;\n\"\necho \"[neo4j-registry] table ready.\"\n\necho \"ALL_ROLES_SETUP_OK\"\n"
+

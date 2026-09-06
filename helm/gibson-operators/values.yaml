@@ -1,0 +1,684 @@
+# gibson-operators chart values.
+#
+# Both operators in this chart (tenantOperator + platformOperator) are
+# structural infrastructure (one-code-path / deploy#188) — neither has
+# an `.enabled` toggle. Sub-feature toggles on each operator block
+# (`webhook.enabled`, `metrics.enabled`, `podDisruptionBudget.enabled`,
+# `rbac.create`, etc.) are legitimate and stay.
+
+# Render-time precondition — fails install if gibson-crds Helm release
+# is not present in the same cluster. Set to "" to disable.
+preconditions:
+  requireCRDs: true
+
+# tenant-operator is structural infrastructure (one-code-path /
+# deploy#188): it reconciles Tenant / TenantMember / AgentEnrollment /
+# ComponentGrant CRs that the platform cannot run without. The previous
+# `enabled: true|false` substitution toggle has been deleted — the
+# platform cannot run without it. Sub-feature toggles (`rbac.create`,
+# `podDisruptionBudget.enabled`, `webhook.enabled`, `metrics.enabled`,
+# `networkPolicy.enabled`, `releaseNamespaceRBAC.enabled`,
+# `orphanReaper.enabled`) remain legitimate.
+tenantOperator:
+  namespace: gibson
+  image:
+    # Consolidated monorepo publishes the tenant-operator image as
+    # ghcr.io/zeroroot-ai/tenant-operator. The pre-consolidation
+    # `gibson-tenant-operator` package froze on 2026-06-22 and no longer
+    # receives builds — pinning to it ships a stale operator. The k8s
+    # workload/SA name stays `gibson-tenant-operator` (FGA tuples, OIDC client,
+    # wait-for selectors all key on it); only the image repo moved.
+    repository: ghcr.io/zeroroot-ai/tenant-operator
+    # deploy#789: digest-pinned for staging/prod immutability.
+    # The tenant-operator package publishes main/latest/sha-* only; the digest
+    # below is the current `main` (staging/prod deploy reality) — identical to
+    # the gibson-workloads chart's tenant-operator pin. kind keeps :main, exempt.
+    # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/tenant-operator/versions
+    # sha-ee35187 is gibson#1736 on main: the per-tenant Neo4j pins its heap
+    # and page cache to the tier limit. Before it, the tenant data plane's
+    # Neo4j sized itself from detected memory, which lies inside a kind node
+    # on a GitHub runner, so tenant-primary-neo4j never became ready and the
+    # Tenant CR never reached Ready (deploy#1766, run 33600876035). The
+    # package publishes main/latest/sha-* only, so the commit sha tag is the
+    # honest provenance.
+    tag: "sha-ee35187@sha256:fb19509f541530645ded2f5fc58c81d98a8581639ff09390814b7928e45904fb"
+    # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
+    # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
+    digest: ""
+    pullPolicy: IfNotPresent
+  # replicas: HA required for failurePolicy: Fail webhooks (deploy#204).
+  # A single replica + Fail posture means any pod restart rejects every
+  # tenant-create until the new pod is Ready. With ≥2 replicas + leader
+  # election + the PDB below, the cluster always has at least one
+  # webhook serving.
+  replicas: 2
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  serviceAccount:
+    create: true
+    name: gibson-tenant-operator
+    annotations: {}
+  rbac:
+    create: true
+  webhook:
+    enabled: true
+    port: 9443
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  prometheusRule:
+    enabled: true
+  metrics:
+    enabled: true
+  leaderElection:
+    leaseDuration: "15s"
+    renewDeadline: "10s"
+    retryPeriod: "2s"
+  plans:
+    configMapName: gibson-tenant-operator-plans
+    mountPath: /etc/gibson/plans
+    sourcePath: files/plans.yaml
+  networkPolicy:
+    enabled: true
+  releaseNamespaceRBAC:
+    enabled: true
+  orphanReaper:
+    enabled: true
+    gracePeriodSeconds: 300
+  # The daemon's K8s Service is gibson.fullname of the WORKLOADS release:
+  # "gibson-workloads" when that chart is its own release (gitops/kind — this
+  # default), "gibson-gibson-workloads" under the umbrella chart's single
+  # release `gibson` (overridden in helm/gibson/values.yaml — deploy#879).
+  # tenant-operator#70 documented the older legacy-release default
+  # ("gibson:50051").
+  daemonGrpcAddress: "gibson-workloads:50051"
+  dashboardUrl: "http://gibson-dashboard:3000"
+  # Zitadel in-cluster Service URL. Overlays set per-environment.
+  zitadelURL: ""
+  # Billing controls. devAutoConfirm skips payment confirmation in dev
+  # environments; must be false (default) in production.
+  # stripeAPIBaseURL: when set, routes all Stripe API calls to the given
+  # base URL instead of api.stripe.com. Use with the gibson-workloads
+  # stripe-mock service in kind (stripeMock.enabled: true). Leave empty
+  # in production.
+  billing:
+    # Card-first-signup Stripe mode guard (dashboard#767). REQUIRED per
+    # env overlay — "test" (kind/staging) or "live" (prod). Empty here so
+    # overlays must declare it (one-code-path; the template
+    # `required` fails the install if an overlay leaves it empty).
+    stripeExpectedMode: ""
+    devAutoConfirm: false
+    stripeAPIBaseURL: ""
+  # devMode was deleted in deploy#205 (one-code-path epic): the operator
+  # binary boots identically in every environment. Capability misses always
+  # fail-fast — there is no longer a per-environment bypass.
+
+  # WriteTenantBrokerConfig saga step (one-code-path: deploy#194).
+  # The operator writes a row to the platform tenant_secrets_broker_config
+  # table after data-plane provisioning. Without this row, gibson's
+  # daemon returns FailedPrecondition (HTTP 412) on every authenticated
+  # list call — the user sees "Failed to load" on every dashboard panel.
+  #
+  # The previous `enabled` flag let the saga step Skip() when its deps
+  # (platformPg DSN, system-tenant KEK) were absent. Removed — the
+  # step is non-negotiable. Missing values fail chart render with a
+  # specific error pointing at the absent field.
+  #
+  # KEK delivery: file mount only. The legacy env-injection path
+  # (`injectAsEnv`) is removed — raw 32-byte KEKs frequently contain
+  # nul bytes which crash env-var injection ("value contains nul
+  # byte"). The mounted file at /etc/gibson/master-key/<key> with
+  # GIBSON_SYSTEM_TENANT_KEK_PATH is symmetric with the daemon's k8s
+  # key_provider.
+  #
+  # Cross-component invariant: GIBSON_SYSTEM_TENANT_KEK file contents
+  # MUST be byte-identical to the daemon's KEK Secret. The chart
+  # points both consumers at the same Secret + key.
+  brokerConfig:
+    platformPg:
+      # Operator-shared platform Postgres. The daemon connects to this
+      # DB via DASHBOARD_DB_PASSWORD in the gibson-workloads chart;
+      # the operator gets its own DSN here so the two charts release
+      # independently. host + passwordSecretRef.name are required —
+      # chart render fails if either is empty.
+      host: ""
+      port: 5432
+      database: "gibson_platform"
+      username: "gibson_platform"
+      sslMode: "require"
+      passwordSecretRef:
+        name: ""
+        key: "password"
+    # 32-byte system-tenant KEK. The default points at the chart-
+    # managed `gibson-master-key` Secret the daemon also reads (per
+    # gibson-workloads/.../configmap.yaml key_provider.kubernetes
+    # default). Override only if the chart's key_provider was
+    # overridden to a different Secret name.
+    systemTenantKekSecretRef:
+      name: "gibson-master-key"
+      key: "master-key"
+    # Vault provider config the operator writes per tenant. Address +
+    # transit_key are reused from the dataPlane.vault block above
+    # (GIBSON_VAULT_ADDR / GIBSON_VAULT_TRANSIT_KEY env vars the
+    # operator already sets). These three are the additional fields:
+    vault:
+      namespaceTemplate: "tenant-{tenant_id}"
+      authMethod: "jwt"
+      mountPath: "secret"
+
+# Master-key + postgres-bundle reconciler state is sourced from
+# .Values.platformBootstrap below. This block governs only deployment
+# wiring for the platform-operator binary.
+#
+# platform-operator is structural infrastructure (one-code-path /
+# deploy#188): it reconciles PlatformBootstrap + OIDCClient CRs that are
+# required for cluster bringup. The previous `enabled: true|false`
+# substitution toggle has been deleted — the platform cannot run without
+# it. Sub-feature toggles (`rbac.create`, `podDisruptionBudget.enabled`)
+# remain legitimate.
+platformOperator:
+  image:
+    repository: ghcr.io/zeroroot-ai/platform-operator
+    # deploy#789: digest-pinned for staging/prod immutability.
+    # The digest below is the current `latest`. kind keeps :main, exempt.
+    # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/platform-operator/versions
+    tag: "v0.132.0@sha256:447b442428e8d24052139ab1cc72cac8140517173d5ce9ed1826cff4f52956d3"
+    # digest (deploy#1066) — see tenantOperator.image.digest for semantics.
+    digest: ""
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  serviceAccount:
+    create: true
+    name: gibson-platform-operator
+    annotations: {}
+  rbac:
+    create: true
+  podDisruptionBudget:
+    # deploy#348: PDB is auto-disabled when replicas=1 to avoid the
+    # InsufficientPods state (a single-replica deployment with
+    # minAvailable=1 has DisruptionsAllowed=0, which Argo treats as
+    # Degraded forever). Set explicitly when bumping replicas ≥ 2.
+    enabled: false
+    minAvailable: 1
+  # Vault / OpenBao wiring (deploy#449 — regression from platform-operator#45).
+  # vaultAddr: REQUIRED — set to the Vault/OpenBao Service URL.
+  # vaultTokenSecretRef: Secret that holds the admin token; key VAULT_ADMIN_TOKEN
+  # is the canonical key written by the kind-bootstrap ESO ExternalSecret and the
+  # prod ESO backend.
+  vaultAddr: ""  # REQUIRED — fails chart render when empty (see template | required)
+  vaultTokenSecretRef:
+    name: gibson-openbao-keys
+    key: VAULT_ADMIN_TOKEN
+
+# connector-operator is structural infrastructure (one-code-path /
+# deploy#188): it reconciles ConnectorInstance CRs into ToolHive
+# MCPServer / MCPRemoteProxy resources + ExternalSecrets. Without
+# it no connector can reconcile. There is deliberately NO `.enabled`
+# toggle. Unlike the other two operators it is a plain controller-runtime
+# manager — it talks only to the Kubernetes API (no daemon / Zitadel / FGA /
+# Vault / SPIRE), so it needs no platform-integration values.
+connectorOperator:
+  image:
+    # Consolidated monorepo publishes the connector-operator image
+    # as ghcr.io/zeroroot-ai/connector-operator (build/connector-operator.
+    # Dockerfile, gibson-images.yml).
+    repository: ghcr.io/zeroroot-ai/connector-operator
+    # deploy#789: digest-pinned for staging/prod immutability —
+    # digest-pin-check scans this file. The connector-operator has no tagged
+    # release yet, so this pins the current `main` by digest (a valid OCI
+    # name:tag@digest reference kubelet pulls by digest; the `main` tag is
+    # cosmetic). kind keeps the floating :main tag (values-kind.yaml), exempt.
+    # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/connector-operator/versions
+    tag: "main@sha256:896f131a9106f6cb4acb40942196b857605328d4c630d093935ca32fadeb70a0"
+    # digest (deploy#1066) — see tenantOperator.image.digest for semantics.
+    digest: ""
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  serviceAccount:
+    name: gibson-connector-operator
+    annotations: {}
+  # §5: the SPIFFE ID of the daemon the ConnectorInstance
+  # finalizer dials to revoke a connector's grant. The dialing address comes
+  # from gibson.daemonAddress (gibson-common). Override per environment only
+  # when the trust domain differs.
+  daemonSpiffeID: "spiffe://zeroroot.ai/platform/daemon"
+
+# Cross-namespace ESO bridge — zitadel ns reader RBAC consumed by ESO to
+# pull the iam-admin-pat Secret from zitadel ns into gibson ns. Required
+# infrastructure (one-code-path epic / deploy#187); the previous
+# `.enabled` toggle was a degradation surface and has been deleted. The
+# sub-keys below are substitution selectors for namespaces / SA / Secret
+# name only.
+crossNamespaceESO:
+  zitadelNamespace: zitadel
+  workloadNamespace: gibson
+  serviceAccountName: gibson-zitadel-admin-reader
+  patSecretName: iam-admin-pat
+
+# Image pull secret for ghcr.io private images. Materialised by ESO.
+imagePullSecrets:
+  - name: ghcr-credentials
+
+# -----------------------------------------------------------------------
+# Values bridge — cross-cutting umbrella values referenced by the lifted
+# tenant-operator templates. These carry forward the umbrella chart's
+# values shapes verbatim (pragmatic decomposition, not pristine).
+# See spec deploy-architecture-refactor Phase 7.2 design note.
+# -----------------------------------------------------------------------
+
+global:
+  domain: zeroroot.ai
+  # externalPort: the external NodePort the platform is served on. Empty in
+  # base (standard 443 via the LB); the kind overlay sets "30443" and the
+  # gibson-common helpers fold it into gibson.oidcIssuer / gibson.zitadelHostPort.
+  # Declared here so the kind overlay's key has a base default (deploy#576 parity).
+  externalPort: ""
+  imagePullSecrets:
+    - name: ghcr-credentials
+  environment: ""
+
+# ESO (External Secrets Operator) is REQUIRED infrastructure
+# (one-code-path #203). The legacy on/off toggle for this block was
+# deleted; the operator must be installed in every environment. Only the
+# refresh cadence substitution is configurable.
+eso:
+  refreshInterval: "60s"
+
+# SPIRE workload identity — REQUIRED infrastructure for tenant-operator
+# and platform-operator deployments (deploy#201 / epic deploy#186). Both
+# operators dial the daemon over SPIFFE mTLS and authenticate to the
+# dashboard admin API by minting short-lived JWT-SVIDs. There is no
+# "disable SPIRE" path; the deployment templates always mount the
+# Workload API socket and a wait-for-spire-socket init container blocks
+# pod start until /run/spire/agent/spire-agent.sock is ready.
+spire: {}
+
+# Envoy gateway — tenant-operator reads these for hostAliases + TLS mounts.
+# Envoy is required infrastructure (deploy#200 / one-code-path epic). The
+# chart unconditionally references Envoy; there is no `.enabled` opt-out.
+# clusterIP MUST be set in kind overlays (where pods need a hostAlias pin);
+# in production the value stays empty (public DNS resolves to the ALB).
+# tls.secretName MUST be set on every install — it names the cert-manager-
+# managed Secret consumers mount to trust the Envoy edge CA.
+envoy:
+  service:
+    clusterIP: ""
+  tls:
+    secretName: "gibson-envoy-tls"
+    # CA trust anchor the operators mount to validate Envoy's edge serving
+    # cert when they dial the daemon through Envoy (SPIFFE mTLS).
+    # This is the self-signed ROOT CA — produced early by the gitops
+    # cert-manager-issuers manifest (sync-wave -12) — NOT the Envoy leaf
+    # secret (`gibson-envoy-tls`), which gibson-workloads only produces at
+    # sync-wave 10. The operators (gibson-operators, wave -3) only need the CA
+    # to TRUST Envoy's cert, so the root CA is both correct and available
+    # before they start. Mounting the leaf created a forward-wave deadlock:
+    # the operators blocked on a Secret only a later wave produces, so Argo
+    # never advanced to wave 10 and the leaf was never created. deploy#971.
+    caSecretName: "gibson-selfsigned-ca"
+
+# Zitadel IdP — drives ZitadelOIDCExternalSecret + deployment env vars.
+#
+# Per epic one-code-path (deploy#186), slice deploy#196: Zitadel is
+# structurally required. The previous `enabled: false` opt-out has been
+# deleted — Zitadel is the identity provider for every signed-in user, so
+# rendering the chart with Zitadel "off" used to produce a tenant-operator
+# pod that silently no-ops the entire IAM provisioning saga (NoopClient
+# injection at the operator end). Whether Zitadel runs as an in-cluster
+# subchart (kind/dev) or as an external instance (prod) is now expressed
+# only by `tenantOperator.zitadelURL`, the chart-level `dashboard.zitadel.issuer`,
+# and the iam-admin-pat Secret reference. There is no "Zitadel off" state.
+zitadel:
+  # Secret name holding the IAM_OWNER Personal Access Token the operator
+  # mounts at /etc/zitadel/pat. Created by the post-install zitadel-bootstrap
+  # Job; can be overridden when the PAT lives in a customer-owned Secret.
+  adminPatSecretName: "iam-admin-pat"
+  zitadel:
+    configmapConfig:
+      ExternalDomain: ""
+
+# OpenFGA.
+# One-code-path slice deploy#195: FGA is a hard dependency of the
+# tenant-operator. fga.url MUST resolve to a reachable OpenFGA HTTP endpoint;
+# the operator exits 1 at startup if it cannot dial it. The chart fails to
+# render when this value is empty.
+fga:
+  url: "http://gibson-fga:8080"
+
+# Redis.
+#
+# Redis is structural infrastructure (deploy#224 deleted the
+# `redis.provider` enum and `redis.external` substitution). The
+# operator-side signup-progress + tenant-keyspace + tenant-name-registry
+# paths all require a reachable, authenticated Redis at boot. The
+# tenant-operator deployment template fails `helm install` / `helm upgrade`
+# (via `| required`) when `addr` or `auth.passwordSecret` is empty.
+#
+# The operator always dials the in-cluster redis-stack StatefulSet
+# rendered by gibson-workloads (templates/databases/redis-stack.yaml).
+# `redis.addr` MUST point at it — kind/prod overlays set it to
+# `<workloads-release>-redis-stack:6379`.
+redis:
+  # REQUIRED — host:port the operator dials. No default; chart render
+  # fails when empty.
+  addr: ""
+  auth:
+    # REQUIRED — name of the Secret holding the Redis AUTH password.
+    # Typically the sibling `<workloads-release>-redis-stack` Secret
+    # (set in values-kind.yaml via `existingSecret`).
+    passwordSecret: ""
+    passwordSecretKey: "redis-password"
+    # Legacy alias preserved for sibling-managed Redis Applications that
+    # write their credentials to a Secret named via Helm-side
+    # `auth.existingSecret` (matches the bitnami redis subchart's field
+    # name). When set, used in lieu of `passwordSecret`. Exactly one of
+    # `passwordSecret` / `existingSecret` must be non-empty.
+    existingSecret: ""
+  service:
+    port: 6379
+
+# Platform-tier Postgres (the consolidated admin pool).
+#
+# one-code-path/198: the in-chart-StatefulSet toggle is GONE. The platform
+# Postgres is structurally required — every environment (kind, eks,
+# customer self-host) MUST point at a reachable Postgres tier. There is
+# no "off" state. `host` + `passwordSecretName` are required values; the
+# chart fails render when either is empty.
+#
+# `external.enabled` remains as a substitution toggle: when true, the
+# chart routes at an externally managed instance (RDS, AlloyDB, etc.) via
+# `external.host`; when false, the chart routes at the host/secret pair
+# above (kind dev points these at the kind-bootstrap CNPG cluster).
+platformPostgres:
+  host: ""
+  port: 5432
+  database: gibson_platform
+  username: gibson_platform
+  user: ""  # alias accepted by some overlays; templates prefer `username`
+  passwordSecretName: ""
+  passwordSecretKey: PLATFORM_DB_PASSWORD
+  sslMode: disable
+  external:
+    enabled: false
+    host: ""
+    port: 5432
+    database: gibson_platform
+    username: gibson_platform
+    passwordSecretName: ""
+    passwordSecretKey: PLATFORM_DB_PASSWORD
+    sslMode: require
+
+# Data-plane overrides (vault + vector + postgres admin DSN).
+#
+# ============================================================
+# Vault JWT auth (SPIRE→Vault audience contract).
+# ============================================================
+# The daemon's broker init calls SPIRE Workload API
+# `source.Token(ctx, audience)` for every per-tenant Vault auth
+# refresh. SPIRE mints a JWT-SVID with the requested string as the
+# `aud` claim. Vault's per-tenant role (gibson-plugin-<tenant_id>)
+# rejects the login unless its `bound_audiences` list contains the
+# exact same string.
+#
+# tenant-operator#148 wires the operator's
+# GIBSON_VAULT_JWT_BOUND_AUDIENCE env into every per-tenant role's
+# bound_audiences when writing the role. gibson#187 wires the
+# daemon's GIBSON_DAEMON_VAULT_JWT_AUDIENCE env into the audience
+# requested from SPIRE. The two MUST hold the same string — when
+# they don't, every per-tenant Vault login fails up front and
+# signed-up tenants see 412/500 on data-bearing endpoints (parent
+# PRD gibson#167 amendment docs#34).
+#
+# This stanza is duplicated in helm/gibson-workloads/values.yaml
+# under the same key path. Both charts pin the SAME value via
+# their respective values overlays so the daemon (workloads) and
+# tenant-operator (operators) negotiate the same audience. Cross-
+# chart drift would be caught by the chart-render REQUIRED gates
+# in both templates.
+#
+# REQUIRED — chart fails render LOUDLY when empty (mirrors the
+# vault.jwtAuth.spireOidcIssuer required pattern; see deploy#354).
+vault:
+  jwtAuth:
+    audience: ""
+    # spireOidcIssuer is the SPIRE OIDC discovery provider's issuer URL,
+    # written into every per-tenant auth/jwt/config's `bound_issuer` field
+    # by the ConfigureSecretsJWTAuth saga step (tenant-operator#189).
+    # Mirrors the root namespace's bound_issuer set by the chart's
+    # openbao-jwt-auth-init Job (gibson-workloads), so the daemon's
+    # SPIRE-issued JWT-SVID validates against the same issuer regardless
+    # of which per-tenant namespace it's logging into. REQUIRED — chart
+    # fails render LOUDLY when empty.
+    spireOidcIssuer: ""
+    # spireOidcJwksURL is the JWKS endpoint Vault dials to fetch the
+    # SPIRE OIDC signing keys. Defaults to "<spireOidcIssuer>/keys" at
+    # the operator (empty here, operator derives).
+    spireOidcJwksURL: ""
+    # spireBundleConfigMap is the in-cluster ConfigMap (published by
+    # SPIRE Server's k8s_configmap BundlePublisher) the operator pod
+    # mounts to read the JWKS CA PEM. The operator converts the JWKS
+    # x5c entries → PEM at saga time. Defaults to "spire-bundle" — the
+    # same name the openbao-jwt-auth-init Job reads.
+    spireBundleConfigMap: "spire-bundle"
+
+# Vault is non-negotiable (one-code-path: deploy#197). The operator dials
+# Vault on every Tenant reconcile to provision the per-tenant secrets
+# namespace; without it, the daemon's secrets broker cannot resolve any
+# tenant credential at runtime. `dataPlane.vault.addr` is REQUIRED — the
+# chart fails render when it is empty. The legacy `.enabled` toggle was
+# deleted: there is no longer an "off" state.
+dataPlane:
+  postgres:
+    host: ""
+    admin_database: postgres
+  vault:
+    addr: ""
+    transitKey: "master-kek"
+    adminTokenSecretRef:
+      name: ""
+      key: VAULT_ADMIN_TOKEN
+  redis:
+    adminURL: ""
+
+# AWS (IRSA annotations, KMS key ARN, region).
+aws:
+  region: us-east-1
+
+# KMS (AWS KMS-backed KEK derivation).
+#
+# Single source of truth (deploy#187 deleted `kms.enabled`):
+# the presence of `kms.keyARN` IS the activation signal. Empty (base
+# default) → operator uses the chart-managed master-key Secret (kind/dev).
+# Non-empty (prod overlay) → operator wires GIBSON_KMS_KEY_ARN and uses
+# AWS KMS HMAC for KEK derivation. No separate toggle that can drift
+# out of sync with keyARN.
+kms:
+  keyARN: ""
+
+# Zitadel service account OIDC secrets — optional BYO secret references.
+zitadelServiceAccounts:
+  tenantOperator:
+    secretName: ""
+
+# Dashboard sub-block needed by tenant-operator deployment for ZITADEL_ISSUER.
+dashboard:
+  zitadel:
+    issuer: ""
+
+# Legacy externalRedis compat (used by gibson.redis.host helper).
+externalRedis:
+  host: ""
+
+# -----------------------------------------------------------------------------
+# PlatformBootstrap CR (Phase 7.8 + masterKey/postgresBundle extension).
+#
+# Lives in gibson-operators because the platform-operator that consumes
+# the CRD ships in this chart.
+#
+# PlatformBootstrap is required infrastructure (one-code-path epic /
+# deploy#187). The previous top-level `enabled` toggle was a degradation
+# surface and has been deleted. Every sub-feature is structural too
+# (/ [[feedback-no-service-is-optional]]): vaultTransit was
+# ripped first, then fgaModel.apiEndpoint / masterKey.secretName /
+# postgresBundle.cluster empty-string skips followed. The chart fails
+# render LOUD when any required field below is empty.
+# -----------------------------------------------------------------------------
+platformBootstrap:
+  zitadel:
+    # OIDC issuer URL for both browser and in-cluster traffic. Kind dev
+    # uses `https://app.zeroroot.ai:30443` (Envoy NodePort) — the retired
+    # `auth.` subdomain is not used.
+    issuer: ""
+    # externalDomain — public hostname forged onto the Host header on
+    # every operator → Zitadel API request. Required when the operator
+    # dials Zitadel by in-cluster Service name (Zitadel's vhost router
+    # matches by Host, not SNI). Same value as the Zitadel chart's
+    # configmapConfig.ExternalDomain.
+    externalDomain: ""
+    adminTokenRef:
+      name: "iam-admin-pat"
+      namespace: ""
+      key: "pat"
+    project:
+      name: "gibson"
+      ensureExists: true
+    # systemClient — activates the TrustedDomainReady reconcile step
+    # (platform-operator#29). When both fields are empty the
+    # step short-circuits with reason SystemClientDisabled. Overlays set
+    # these to register the cluster Service hostname as an additional
+    # trusted Zitadel domain so every Gibson pod can dial Zitadel by
+    # Service name without the per-pod hostAliases workaround.
+    systemClient:
+      systemUserName: ""
+      trustedClusterDomain: ""
+      # apiURL — the address the operator DIALS for Zitadel /system/v1/*
+      # (GHSA-534c, gibson#1275). MUST be cluster-internal; the Envoy edge
+      # publishes no /system/v1/ route, so a public URL here fails closed
+      # rather than silently re-exposing the instance-superuser API.
+      #
+      # Leave empty: the template derives http://<trustedClusterDomain>:8080.
+      # Set it only for a non-8080 port or an off-chart Zitadel.
+      apiURL: ""
+    serviceUsers:
+      - name: "gibson-iam-admin"
+        roles: ["IAM_OWNER"]
+        patSecretRef:
+          name: "gibson-iam-admin-pat"
+          key: "pat"
+      - name: "gibson-tenant-operator"
+        roles: ["IAM_USER_MANAGER"]
+        patSecretRef:
+          name: "gibson-zitadel-tenant-operator-pat"
+          key: "pat"
+
+  # OIDC clients to reconcile as child OIDCClient CRs.
+  oidcClients: []
+
+  # FGA model load — STRUCTURAL (no skip toggle). Overlays MUST supply
+  # apiEndpoint (in-cluster FGA Service URL); chart render fails LOUD.
+  fgaModel:
+    apiEndpoint: ""        # e.g. https://gibson-openfga.gibson.svc:8080 (server TLS since deploy#1382)
+    storeNameRef:
+      name: "gibson-fga-config"
+      key: "store_id"
+    modelConfigMapRef:
+      name: "gibson-fga-model"
+      key: "model.json"
+
+  # Vault transit init — STRUCTURAL infrastructure (no `.enabled` toggle).
+  # The platform-operator unconditionally mounts the transit engine and
+  # creates the master-kek key at this address. Overlays MUST supply
+  # `address` and `tokenRef.name`; chart render fails LOUD otherwise.
+  vaultTransit:
+    address: ""        # e.g. http://gibson-workloads-vault.gibson.svc:8200
+    tokenRef:
+      name: ""         # Secret holding the Vault admin token
+      key: "VAULT_ADMIN_TOKEN"
+    keyName: "master-kek"
+
+  # Plan-sync.
+  planSync:
+    plansConfigMapRef:
+      name: "gibson-tenant-operator-plans"
+      key: "plans.yaml"
+
+  # Master-key Secret the operator owns — STRUCTURAL (no skip toggle).
+  # Idempotent generation replaces the per-chart helm `randAlphaNum`
+  # dance and the ad-hoc ExternalSecret in kind-dev-secrets. Overlays
+  # MUST set secretName; chart render fails LOUD when empty.
+  masterKey:
+    secretName: "gibson-master-key"
+    namespace: "gibson"
+    key: "master-key"
+
+  # unsealEscrow.sourceSecret — the Secret the OpenBao seal key lives in.
+  # Since the static seal (deploy#1731) that is the bringup
+  # keyring Secret, written before the first sync. destination stays
+  # managedExternally: the keyring file outside the cluster IS the escrow,
+  # so the operator copies nothing.
+  #
+  # BOTH FIELDS ARE REQUIRED AND MUST NOT BE EMPTY (deploy#1766). The
+  # platform-operator round-trips the CR through its Go types on every
+  # write, and those types serialize sourceSecret even when the chart
+  # omits it. A CR without a sourceSecret is therefore valid at creation
+  # and INVALID on the operator's first update (minLength: 1 in the CRD),
+  # so the operator cannot even add its finalizer and the whole bootstrap
+  # (master-key, OIDC clients, postgres bundle) never runs.
+  unsealEscrow:
+    sourceSecret:
+      name: "bringup-keyring"
+      key: "openbao-seal-key"
+
+  # PostgresBundle — STRUCTURAL (no skip toggle). Per-database ownership +
+  # public-schema grants; replaces the broken CNPG postInitApplicationSQL
+  # path. Overlays MUST supply cluster.host and superuserSecretRef.name;
+  # chart render fails LOUD when empty.
+  postgresBundle:
+    cluster:
+      host: ""        # e.g. platform-postgres-rw.gibson.svc.cluster.local
+      port: 5432
+      superuserSecretRef:
+        name: "platform-postgres-superuser"
+        namespace: "gibson"
+        key: "password"
+    databases: []
+    # Example (kind dev):
+    # databases:
+    #   - { name: zitadel, owner: zitadel-user, grants: [gibson-app] }
+    #   - { name: openfga, owner: openfga-user }
+    #   - { name: gibson, owner: gibson-app }
+
+# -----------------------------------------------------------------------
+# Stakater Reloader (deploy#278 — follow-up to PRD #255 slice S7).
+# Watches Secrets / ConfigMaps in the gibson namespace and triggers
+# rolling restarts of workloads with the
+# `secret.reloader.stakater.com/reload: "<csv>"` annotation. Required
+# for unattended-safe Secret rotation; deploy, the chart's
+# daemon / dashboard / redis-stack all carry the annotation.
+# Manifests at templates/reloader/reloader.yaml — namespace-scoped RBAC
+# (only watches + rolls workloads in tenantOperator.namespace).
+# -----------------------------------------------------------------------
+reloader:
+  image:
+    repository: ghcr.io/stakater/reloader
+    tag: "v1.4.6"
+    pullPolicy: IfNotPresent

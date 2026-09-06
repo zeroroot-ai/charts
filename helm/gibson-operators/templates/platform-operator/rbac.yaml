@@ -1,0 +1,79 @@
+{{- /*
+  platform-operator is structural infrastructure (one-code-path /
+  deploy#188). The outer `.Values.platformOperator.enabled` half of the
+  previous compound gate has been deleted. The inner `rbac.create`
+  toggle remains — it is a legitimate sub-feature flag (most operators
+  ship the RBAC together with the workload, but some setups manage
+  ClusterRole/Binding out-of-band).
+*/}}
+{{- if .Values.platformOperator.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gibson-platform-operator
+  labels:
+    app.kubernetes.io/name: gibson-platform-operator
+    app.kubernetes.io/part-of: gibson
+rules:
+  # PlatformBootstrap — cluster-scoped CRD.
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["platformbootstraps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["platformbootstraps/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["platformbootstraps/finalizers"]
+    verbs: ["update"]
+
+  # OIDCClient — cluster-scoped CRD.
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["oidcclients"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["oidcclients/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["oidcclients/finalizers"]
+    verbs: ["update"]
+
+  # Secrets in the gibson namespace — for OIDC client credential materialisation
+  # and PAT Secret reads. Cluster-scoped grant is required because PlatformBootstrap
+  # is cluster-scoped and may reference Secrets in any namespace.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+  # ConfigMaps — FGA model, plans-configmap, sa-identity-map, and operator's
+  # own Lease for leader election. PlatformBootstrap writes gibson-sa-identity-map;
+  # cluster-scoped so the operator can read/write ConfigMaps in any namespace.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Leases — controller-runtime leader election.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Events — operator emits reconciliation events.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gibson-platform-operator
+  labels:
+    app.kubernetes.io/name: gibson-platform-operator
+    app.kubernetes.io/part-of: gibson
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.platformOperator.serviceAccount.name | default "gibson-platform-operator" }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gibson-platform-operator
+{{- end }}

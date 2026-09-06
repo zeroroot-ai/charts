@@ -1,0 +1,309 @@
+{{- /*
+  Redis password rotation controller (deploy#517 + deploy#518).
+
+  Enforces the correct restart ordering after ESO rotates the Redis password
+  Secret: redis-stack must be Ready with the new password before daemon or
+  tenant-operator restart. Reloader handles restarting redis-stack; this
+  CronJob handles the downstream cascade.
+
+  Zero-downtime dual-password window (deploy#518):
+    When a previous password is stored in the rotation-state Secret (all runs
+    after the first), the CronJob temporarily adds the old password to the
+    running redis-stack's in-memory ACL via `ACL SETUSER` before restarting
+    the daemon and tenant-operator. This means clients using the old password
+    can still authenticate while their pods are being rolled. Once all
+    consumers have restarted with the new password the old password is removed
+    from the ACL.
+
+  First run after deployment: no rotation-state Secret exists, so the
+  dual-password step is skipped and only ordered restarts are performed.
+  A brief WRONGPASS window (<90s) is accepted on the first rotation.
+
+  Components:
+    - ServiceAccount  gibson-redis-rotation
+    - Role            gibson-redis-rotation  (namespace-scoped, least-privilege)
+    - RoleBinding
+    - CronJob         {{ .Release.Name }}-redis-rotation  (every minute, Forbid concurrency)
+*/}}
+{{- $saName := "gibson-redis-rotation" -}}
+{{- $stateSecret := printf "%s-redis-rotation-state" .Release.Name -}}
+{{- $redisSecret := include "gibson.redisPasswordSecretName" . -}}
+{{- $redisKey    := include "gibson.redisPasswordSecretKey"  . -}}
+{{- $redisSts    := printf "%s-redis-stack" .Release.Name -}}
+{{- $daemonSts   := include "gibson.fullname" . -}}
+{{- $tenantOpDep := "gibson-tenant-operator" -}}
+{{- $ns          := .Release.Namespace -}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $saName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-rotation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $saName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-rotation
+rules:
+  # Read the redis password Secret to detect rotation and retrieve passwords.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  # Manage the rotation-state Secret (stores last-processed version +
+  # last-known password for the dual-password ACL window).
+  # K8s ignores resourceNames for `create` (no name exists yet at create time),
+  # so create is a separate unrestricted rule (deploy#557).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  # update/patch/delete are name-restricted to the state Secret only.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ $stateSecret | quote }}]
+    verbs: ["get", "update", "patch", "delete"]
+  # Reads for the rollout-status watch loop (deploy#551) — these stay
+  # namespace-wide because `kubectl rollout status` LISTs.
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "deployments"]
+    verbs: ["get", "list", "watch"]
+  # WRITES are name-restricted (deploy#1210). `patch` on .spec.template is a
+  # platform-identity grant, not a restart button: Kubernetes has no
+  # `serviceaccounts/use` verb, so an unrestricted patch here let this
+  # CronJob rewrite ANY workload in the namespace — including its own
+  # `serviceAccountName` — and take that workload's SVID. Unlike `create`,
+  # `patch` honours resourceNames, so the grant is scoped to exactly the two
+  # workloads the script rolls:
+  #   kubectl rollout restart statefulset/$DAEMON_STS
+  #   kubectl rollout restart deployment/$TENANT_OP
+  # redis-stack is deliberately absent — Reloader restarts it; this job only
+  # `rollout status`es it, which the read rule above covers.
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    resourceNames: [{{ $daemonSts | quote }}]
+    verbs: ["patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: [{{ $tenantOpDep | quote }}]
+    verbs: ["patch"]
+  # rollout status needs to watch the status sub-resource.
+  - apiGroups: ["apps"]
+    resources: ["statefulsets/status", "deployments/status"]
+    verbs: ["get", "watch", "list"]
+  # kubectl rollout status for Deployments needs to read ReplicaSets.
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+  # Execute redis-cli commands inside the redis-stack pod for ACL management.
+  # deploy#1363: name-scoped to the single redis-stack StatefulSet pod. `exec`
+  # is a subresource of an EXISTING named Pod, so `create` honours resourceNames
+  # (unlike Pod `create`, where no name exists yet). redis-stack is a
+  # replicas=1 StatefulSet (redis-stack.yaml), so its pod name is deterministic
+  # ("<sts>-0") and the script derives it directly — the namespace-wide
+  # `pods: get,list` grant this rule used to carry is gone with it. This closes
+  # the primitive named in deploy#1363: an UNRESTRICTED pods/exec create in the
+  # gibson namespace is the same identity grant as pod-create — exec into any
+  # platform pod and you hold that workload's SPIFFE SVID, projected SA token
+  # and mounted Secrets, and no admission policy (the platform-identity VAP
+  # matches `pods` CREATE, not `pods/exec`) sees it.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    resourceNames: [{{ printf "%s-0" $redisSts | quote }}]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $saName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-rotation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $saName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ $ns }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-redis-rotation
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-rotation
+spec:
+  # Every minute — finest CronJob granularity. Latency from rotation to first
+  # client restart is up to ~60s (CronJob gap) + ~120s (redis rollout) +
+  # ~180s (daemon rollout) + ~120s (tenant-op rollout) = ~480s worst case.
+  schedule: {{ ((.Values.redis).rotation).schedule | default "* * * * *" | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # No backoff: if the script fails (e.g. redis-stack not yet Ready), the
+      # next CronJob tick retries within a minute. Immediate requeue not needed.
+      backoffLimit: 0
+      # Full rotation = redis-stack rollout (120s) + daemon rollout (900s) +
+      # tenant-op rollout (120s) + ACL ops + state save ≈ 1160s max.
+      # 55s was far too short (deploy#553); 540s was also too short — the
+      # daemon has 6 init containers and can take 7+ minutes on kind
+      # (deploy#563). Daemon timeout raised from 600s to 900s after kind
+      # clusters showed >600s startup under load; deadline raised to 1200s.
+      activeDeadlineSeconds: 1200
+      template:
+        metadata:
+          labels:
+            {{- include "gibson.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: redis-rotation
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ $saName }}
+          {{- include "gibson.imagePullSecrets" . | nindent 10 }}
+          containers:
+            - name: rotation-controller
+              image: "ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4"
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -euo pipefail
+                  NS={{ $ns | quote }}
+                  REDIS_SECRET={{ $redisSecret | quote }}
+                  REDIS_KEY={{ $redisKey | quote }}
+                  STATE_SECRET={{ $stateSecret | quote }}
+                  REDIS_STS={{ $redisSts | quote }}
+                  DAEMON_STS={{ $daemonSts | quote }}
+                  TENANT_OP={{ $tenantOpDep | quote }}
+
+                  # The Secret this rotates is created by the same release that
+                  # schedules this CronJob, so on a fresh install the first firing
+                  # can land before it exists. That is not an error worth alarming
+                  # on: exit 0 and let the next schedule do the work, rather than
+                  # leaving an Error pod on every clean bringup and training an
+                  # operator to ignore them (charts#3).
+                  if ! kubectl get secret -n "$NS" "$REDIS_SECRET" >/dev/null 2>&1; then
+                    echo "[rotation] ${REDIS_SECRET} not created yet — install still converging."
+                    echo "[rotation] nothing to rotate; the next scheduled run picks it up."
+                    exit 0
+                  fi
+
+                  # Read current Secret version and password.
+                  CURRENT_VERSION=$(kubectl get secret -n "$NS" "$REDIS_SECRET" \
+                    -o jsonpath='{.metadata.resourceVersion}')
+                  CURRENT_PASSWORD=$(kubectl get secret -n "$NS" "$REDIS_SECRET" \
+                    -o jsonpath="{.data.${REDIS_KEY}}" | base64 -d)
+
+                  # Read last-processed version from rotation-state Secret.
+                  LAST_VERSION=$(kubectl get secret -n "$NS" "$STATE_SECRET" \
+                    -o jsonpath='{.data.lastProcessedVersion}' 2>/dev/null \
+                    | base64 -d 2>/dev/null || echo "")
+
+                  # First-boot registration: no rotation-state exists yet.
+                  # Record the current version as baseline and exit without
+                  # touching any StatefulSets — version <none>→N is not a rotation.
+                  if [ -z "$LAST_VERSION" ]; then
+                    echo "First boot — recording version ${CURRENT_VERSION} in state; no rotation needed."
+                    kubectl create secret generic "$STATE_SECRET" -n "$NS" \
+                      --from-literal=lastProcessedVersion="$CURRENT_VERSION" \
+                      --from-literal=lastKnownPassword="$CURRENT_PASSWORD" \
+                      --save-config --dry-run=client -o yaml \
+                      | kubectl apply -f -
+                    exit 0
+                  fi
+
+                  if [ "$CURRENT_VERSION" = "$LAST_VERSION" ]; then
+                    echo "No rotation (version ${CURRENT_VERSION} unchanged). Exiting."
+                    exit 0
+                  fi
+
+                  # Read previous password from rotation-state Secret for
+                  # the dual-password ACL window.
+                  PREV_PASSWORD=$(kubectl get secret -n "$NS" "$STATE_SECRET" \
+                    -o jsonpath='{.data.lastKnownPassword}' 2>/dev/null \
+                    | base64 -d 2>/dev/null || echo "")
+
+                  echo "Rotation detected: version ${LAST_VERSION:-<none>} → ${CURRENT_VERSION}"
+
+                  # Wait for redis-stack to be Ready with the new password
+                  # (Reloader restarts it before this CronJob fires).
+                  echo "Waiting for redis-stack StatefulSet rollout..."
+                  kubectl rollout status statefulset/"$REDIS_STS" -n "$NS" --timeout=120s
+
+                  # Derive the redis-stack pod name directly instead of LISTing.
+                  # redis-stack is a replicas=1 StatefulSet, so the sole pod is
+                  # always "<sts>-0". Deriving it lets the Role drop its
+                  # namespace-wide `pods: list` grant and name-scope pods/exec to
+                  # exactly this pod (deploy#1363).
+                  REDIS_POD="${REDIS_STS}-0"
+                  echo "Redis pod: ${REDIS_POD}"
+
+                  # Open dual-password window: add previous password to the
+                  # running redis-stack's in-memory ACL so existing daemon/
+                  # tenant-op pods (still holding old password) keep working
+                  # during the rolling restart.
+                  if [ -n "$PREV_PASSWORD" ] && [ "$PREV_PASSWORD" != "$CURRENT_PASSWORD" ]; then
+                    echo "Opening dual-password window (adding old password to ACL)..."
+                    kubectl exec -n "$NS" "$REDIS_POD" -- \
+                      redis-cli -a "$CURRENT_PASSWORD" --no-auth-warning \
+                      ACL SETUSER default ">${PREV_PASSWORD}"
+                    echo "Both old and new passwords now accepted by redis-stack."
+                  else
+                    echo "No previous password in state; skipping dual-password window."
+                    echo "(First rotation after deploy — brief WRONGPASS window expected.)"
+                  fi
+
+                  # Rolling restart daemon — picks up new password from refreshed env.
+                  echo "Rolling restart daemon StatefulSet ${DAEMON_STS}..."
+                  kubectl rollout restart statefulset/"$DAEMON_STS" -n "$NS"
+                  kubectl rollout status statefulset/"$DAEMON_STS" -n "$NS" --timeout=900s
+                  echo "Daemon ready."
+
+                  # Rolling restart tenant-operator.
+                  echo "Rolling restart tenant-operator Deployment ${TENANT_OP}..."
+                  kubectl rollout restart deployment/"$TENANT_OP" -n "$NS"
+                  kubectl rollout status deployment/"$TENANT_OP" -n "$NS" --timeout=120s
+                  echo "Tenant-operator ready."
+
+                  # Close dual-password window: remove old password from ACL.
+                  if [ -n "$PREV_PASSWORD" ] && [ "$PREV_PASSWORD" != "$CURRENT_PASSWORD" ]; then
+                    echo "Closing dual-password window (removing old password from ACL)..."
+                    kubectl exec -n "$NS" "$REDIS_POD" -- \
+                      redis-cli -a "$CURRENT_PASSWORD" --no-auth-warning \
+                      ACL SETUSER default resetpass ">${CURRENT_PASSWORD}"
+                    echo "Old password removed. Only new password accepted."
+                  fi
+
+                  # Persist rotation state: current version + password for next
+                  # rotation's dual-password window.
+                  echo "Persisting rotation state..."
+                  kubectl create secret generic "$STATE_SECRET" -n "$NS" \
+                    --from-literal=lastProcessedVersion="$CURRENT_VERSION" \
+                    --from-literal=lastKnownPassword="$CURRENT_PASSWORD" \
+                    --save-config --dry-run=client -o yaml \
+                    | kubectl apply -f -
+                  echo "Rotation complete. New version: ${CURRENT_VERSION}"
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  # This is a kubectl shell-loop controller that spends most
+                  # of its life waiting on `kubectl rollout status`; it does
+                  # not need a 200m burst. 100m matches the sibling OpenBao
+                  # init jobs and keeps the kind CPU budget in line
+                  # (deploy#858).
+                  cpu: 100m
+                  memory: 64Mi

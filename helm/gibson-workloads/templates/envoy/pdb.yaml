@@ -1,0 +1,29 @@
+{{/* Envoy PodDisruptionBudget (Week 2 §3 R9).
+     Envoy is required infrastructure — deploy#200. The PDB still gates on
+     replicas > 1 or an explicit pdb.enabled override below. */}}
+{{- $replicas := int (.Values.envoy.replicas) }}
+{{- $pdb := .Values.envoy.podDisruptionBudget | default dict }}
+{{- $pdbEnabled := $pdb.enabled }}
+{{- if and (kindIs "invalid" $pdbEnabled) (gt $replicas 1) }}
+{{- $pdbEnabled = true }}
+{{- end }}
+{{- if $pdbEnabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}-envoy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: envoy
+spec:
+  {{- if $pdb.maxUnavailable }}
+  maxUnavailable: {{ $pdb.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ $pdb.minAvailable | default (ternary "50%" 1 (gt $replicas 2)) }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: envoy
+{{- end }}

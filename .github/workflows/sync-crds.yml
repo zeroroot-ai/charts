@@ -1,0 +1,180 @@
+# ----------------------------------------------------------------------------
+# sync-crds.yml
+#
+# Triggered by a `repository_dispatch` event with type `crd-updated`.
+# Fetches updated CRD YAML from the gibson monorepo, copies them into
+# helm/gibson-crds/templates/, annotates each with
+# helm.sh/resource-policy: keep (matching `make sync-crds` behaviour), and
+# opens a PR if there is an actual diff.
+#
+# Since the monorepo fold the tenant-operator and platform-operator are
+# subdirs of zeroroot-ai/gibson, so their generated CRDs live at:
+#   operators/tenant/config/crd/bases/    (tenant primitives + agentenrollments)
+#   operators/platform/config/crd/bases/  (oidcclients + platformbootstraps)
+#
+# Firing the dispatch (from gibson CI):
+#
+#   gh api repos/zeroroot-ai/deploy/dispatches \
+#     --method POST \
+#     --field event_type=crd-updated \
+#     --field client_payload='{"source_repo":"zeroroot-ai/gibson","source_ref":"main"}'
+#
+# Required secret in this repo:
+#   CRD_SYNC_TOKEN  — a PAT or App installation token with:
+#     - repo: read   on zeroroot-ai/gibson
+#     - repo: write  on zeroroot-ai/deploy  (to push the sync branch)
+#     - pull-requests: write  on zeroroot-ai/deploy
+#
+# Note: if CRD_SYNC_TOKEN is absent the job fails loudly — do not use
+# GITHUB_TOKEN here because it cannot read cross-repo and cannot trigger
+# further workflows on the resulting PR.
+# ----------------------------------------------------------------------------
+
+name: sync-crds
+
+on:
+  repository_dispatch:
+    types: [crd-updated]
+
+# GITHUB_TOKEN is not used anywhere in this job — checkout, the branch push,
+# and `gh pr create` all authenticate with the explicit CRD_SYNC_TOKEN secret
+# (see the comment above), because a PR opened with the default GITHUB_TOKEN
+# cannot trigger further workflow runs, so its own gates would never fire.
+# `contents: write` / `pull-requests: write` on GITHUB_TOKEN would therefore
+# be unused blast radius. Mirrors the same pattern in bump-image-digests.yml.
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout deploy repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          # Fetch full history so we can diff against main.
+          fetch-depth: 0
+          token: ${{ secrets.CRD_SYNC_TOKEN }}
+
+      - name: resolve source repo
+        id: sources
+        run: |
+          # The dispatch payload may specify the source_repo to sync from.
+          # Post-fold both operators live in the gibson monorepo, so the
+          # default (and only expected) source is zeroroot-ai/gibson.
+          SOURCE="${{ github.event.client_payload.source_repo }}"
+          if [[ -z "${SOURCE}" || "${SOURCE}" == "*" ]]; then
+            SOURCE="zeroroot-ai/gibson"
+          fi
+          echo "repo=${SOURCE}" >> "$GITHUB_OUTPUT"
+
+          # The two operator CRD-base subdirs inside the gibson monorepo.
+          echo "crd_dirs=operators/tenant/config/crd/bases operators/platform/config/crd/bases" >> "$GITHUB_OUTPUT"
+
+          REF="${{ github.event.client_payload.source_ref }}"
+          echo "ref=${REF:-main}" >> "$GITHUB_OUTPUT"
+
+      - name: fetch CRDs from gibson monorepo
+        env:
+          GH_TOKEN: ${{ secrets.CRD_SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          REPO="${{ steps.sources.outputs.repo }}"
+          DEST="helm/gibson-crds/templates"
+          mkdir -p "${DEST}"
+
+          for CRD_DIR in ${{ steps.sources.outputs.crd_dirs }}; do
+            echo "--- syncing CRDs from ${REPO}/${CRD_DIR} at ${{ steps.sources.outputs.ref }} ---"
+
+            # List all YAML files under this CRD-base subdir in the gibson repo.
+            mapfile -t crd_paths < <(
+              gh api \
+                "repos/${REPO}/contents/${CRD_DIR}?ref=${{ steps.sources.outputs.ref }}" \
+                --jq '.[].path'
+            )
+
+            if [[ ${#crd_paths[@]} -eq 0 ]]; then
+              echo "WARNING: no CRD files found in ${REPO}/${CRD_DIR} — skipping."
+              continue
+            fi
+
+            for crd_path in "${crd_paths[@]}"; do
+              fname="$(basename "${crd_path}")"
+              echo "  fetching ${fname}"
+              gh api \
+                "repos/${REPO}/contents/${crd_path}?ref=${{ steps.sources.outputs.ref }}" \
+                --jq '.content' \
+                | base64 -d > "${DEST}/${fname}"
+
+              # Mirror the annotation logic from `make _annotate`:
+              # add helm.sh/resource-policy: keep if not already present.
+              if ! grep -q "resource-policy" "${DEST}/${fname}"; then
+                # Insert after the annotations: key if it exists, otherwise
+                # insert an annotations block under metadata:.
+                if grep -q "^  annotations:" "${DEST}/${fname}"; then
+                  sed -i 's|^  annotations:|  annotations:\n    "helm.sh/resource-policy": keep|' \
+                    "${DEST}/${fname}"
+                else
+                  sed -i '/^metadata:/a\  annotations:\n    "helm.sh/resource-policy": keep' \
+                    "${DEST}/${fname}"
+                fi
+              fi
+            done
+          done
+
+      - name: check for diff
+        id: diff
+        run: |
+          if git diff --quiet helm/gibson-crds/templates/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: open PR if changed
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.CRD_SYNC_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          BRANCH="chore/sync-crds-$(date -u +%Y%m%dT%H%M%SZ)"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "${BRANCH}"
+          git add helm/gibson-crds/templates/
+          git commit -m "chore(crds): sync CRDs from operator repos
+
+          Source: ${{ steps.sources.outputs.repo }} @ ${{ steps.sources.outputs.ref }}
+          Triggered by repository_dispatch run: ${GITHUB_RUN_ID}."
+          git push origin "${BRANCH}"
+
+          gh pr create \
+            --repo zeroroot-ai/deploy \
+            --base main \
+            --head "${BRANCH}" \
+            --title "chore(crds): sync CRDs from operator repos" \
+            --body "$(cat <<'PRBODY'
+          ## Summary
+
+          - Automated CRD sync from operator repos into \`helm/gibson-crds/templates/\`.
+          - Source repo: ${{ steps.sources.outputs.repo }}
+          - Source ref: ${{ steps.sources.outputs.ref }}
+          - Triggered by \`repository_dispatch\` (run ${GITHUB_RUN_ID}).
+
+          ## Review checklist
+
+          - [ ] Confirm added/changed CRDs are intentional schema changes.
+          - [ ] Verify each CRD carries \`helm.sh/resource-policy: keep\` annotation.
+          - [ ] Check that no CRD was dropped unintentionally (review the diff for deletions).
+
+          Docs-PR: not-applicable: automated CRD sync, no user-facing doc change
+          PRBODY
+          )"
+
+      - name: no-op summary
+        if: steps.diff.outputs.changed == 'false'
+        run: |
+          echo "CRD files are already up-to-date; no PR needed."

@@ -1,0 +1,18 @@
+{{- /*
+  platform-operator is structural infrastructure (one-code-path /
+  deploy#188). The previous `.Values.platformOperator.enabled` gate has
+  been deleted — the SA is unconditionally required.
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.platformOperator.serviceAccount.name | default "gibson-platform-operator" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: gibson-platform-operator
+    app.kubernetes.io/part-of: gibson
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  {{- with .Values.platformOperator.serviceAccount.annotations }}
+  annotations:
+    {{- include "gibson.irsaAnnotations" . | nindent 4 }}
+  {{- end }}

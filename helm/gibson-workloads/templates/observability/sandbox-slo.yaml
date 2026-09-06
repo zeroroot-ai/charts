@@ -1,0 +1,198 @@
+{{- /*
+PrometheusRule for the Setec sandbox SLOs and alerts.
+
+Spec setec-sandbox-prod-default Task 51 / R10.3 / NFR-P1 / NFR-P2.
+
+Recording rules expose two SLI inputs that drive the alerts below:
+  - gibson:sandbox_dispatch_duration_seconds:p95_5m   (split by cold_start)
+  - gibson:sandbox_dispatch_duration_seconds:p99_5m
+
+Alerts:
+  - SandboxColdStartLatencyHigh   warning   p95 cold > 500ms for 10m
+  - SandboxWarmStartLatencyHigh   warning   p95 warm > 100ms for 10m
+  - SandboxDispatchSLOBreach      critical  p99 > 10s for 5m
+  - SandboxUnavailable            critical  health=up < 0.5 for 5m
+  - SandboxSpotEvictionStorm      warning   health=degraded > 0.5 for 5m
+  - SandboxQuotaExceededRate      warning   quota_exceeded outcome > N/min
+
+Alert thresholds and `for:` durations match the design's spec verbatim
+(design §"PrometheusRule manifest for SLOs"). They will be retuned after
+the first week of production data; do NOT change them in this PR — the
+runbook annotations and the dashboard panels in Task 53 reference these
+exact thresholds.
+
+Runbook URLs point at github.com/zeroroot-ai/zeroroot.ai/blob/main/...
+runbooks (owned by the runbooks agent in Phase 14). The runbooks may not
+exist yet at the time of first deploy; alert annotations gracefully
+degrade to a 404 link rather than failing the alert payload.
+
+Render gates:
+  - setec.enabled=true
+  - The cluster has the monitoring.coreos.com/v1 PrometheusRule CRD
+    (kube-prometheus-stack / Prometheus Operator). Without it, the
+    manifest is skipped — the chart still renders cleanly on a cluster
+    that doesn't run the Prometheus Operator.
+
+Email-only alerting via SES (per orchestrator policy: NO Sentry /
+PagerDuty / Statuspage / Opsgenie). Alertmanager routing is configured
+out-of-band; this manifest only authors the rules.
+*/}}
+{{- if and .Values.setec.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "gibson.fullname" . }}-sandbox-slo
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: sandbox-slo
+  annotations:
+    gibson.zeroroot.ai/spec: setec-sandbox-prod-default
+spec:
+  groups:
+    - name: gibson.sandbox.slo
+      interval: 30s
+      rules:
+        # ---- Recording rules: SLI inputs --------------------------------
+        # Cold-start vs warm-start split via the `cold_start` label
+        # emitted by the daemon's dispatch-duration histogram (Task 52,
+        # daemon-side).
+        - record: gibson:sandbox_dispatch_duration_seconds:p95_5m
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le, cold_start) (
+                rate(gibson_sandbox_dispatch_duration_seconds_bucket[5m])
+              ))
+        - record: gibson:sandbox_dispatch_duration_seconds:p99_5m
+          expr: |
+            histogram_quantile(0.99,
+              sum by (le) (
+                rate(gibson_sandbox_dispatch_duration_seconds_bucket[5m])
+              ))
+
+        # ---- Alerts: SLO violations -------------------------------------
+        # NFR-P1: cold-start p95 = 500ms.
+        - alert: SandboxColdStartLatencyHigh
+          expr: |
+            gibson:sandbox_dispatch_duration_seconds:p95_5m{cold_start="true"} > 0.5
+          for: 10m
+          labels:
+            severity: warning
+            slo: cold_start_p95_500ms
+            component: setec-sandbox
+          annotations:
+            summary: "Setec cold-start p95 above 500ms (SLI breach)"
+            description: |
+              The 5-minute p95 latency of cold-start SANDBOXED dispatches
+              has been above 500ms for 10 minutes. Cold starts launch a
+              fresh microVM; sustained breach usually means Setec's
+              snapshot pre-warm pool is exhausted or the bare-metal
+              sandbox-host node is at CPU saturation.
+            runbook_url: "https://github.com/zeroroot-ai/zeroroot.ai/blob/main/enterprise/docs/runbooks/setec-degradation.md"
+
+        # NFR-P2: warm-start p95 = 100ms.
+        - alert: SandboxWarmStartLatencyHigh
+          expr: |
+            gibson:sandbox_dispatch_duration_seconds:p95_5m{cold_start="false"} > 0.1
+          for: 10m
+          labels:
+            severity: warning
+            slo: warm_start_p95_100ms
+            component: setec-sandbox
+          annotations:
+            summary: "Setec warm-start p95 above 100ms (SLI breach)"
+            description: |
+              The 5-minute p95 latency of warm-start SANDBOXED
+              dispatches (re-using a pre-warmed microVM from the snapshot
+              pool) has been above 100ms for 10 minutes. Likely causes:
+              snapshot-pool starvation, KVM contention, or a Setec
+              frontend slowdown.
+            runbook_url: "https://github.com/zeroroot-ai/zeroroot.ai/blob/main/enterprise/docs/runbooks/setec-degradation.md"
+
+        # R10.3: 99% of SANDBOXED dispatches < 10s.
+        - alert: SandboxDispatchSLOBreach
+          expr: |
+            gibson:sandbox_dispatch_duration_seconds:p99_5m > 10
+          for: 5m
+          labels:
+            severity: critical
+            slo: dispatch_p99_10s
+            component: setec-sandbox
+          annotations:
+            summary: "99th-percentile SANDBOXED dispatch above 10s SLO"
+            description: |
+              At least 1% of SANDBOXED dispatches are taking longer than
+              10 seconds end-to-end. This is the hard user-facing SLO;
+              a sustained breach blocks UNTRUSTED-content missions for
+              users.
+            runbook_url: "https://github.com/zeroroot-ai/zeroroot.ai/blob/main/enterprise/docs/runbooks/setec-degradation.md"
+
+        # R5.3: sandbox unavailable for >5m.
+        - alert: SandboxUnavailable
+          expr: |
+            avg_over_time(gibson_sandbox_health{status="up"}[5m]) < 0.5
+          for: 5m
+          labels:
+            severity: critical
+            component: setec-sandbox
+          annotations:
+            summary: "Setec sandbox unavailable for >5m — SANDBOXED dispatch failing closed"
+            description: |
+              The daemon's 30s health probe has reported the Setec
+              frontend unreachable for the majority of the last 5
+              minutes. UNTRUSTED-content missions are failing closed with
+              `sandbox_unavailable`; trusted-content missions continue.
+              The R3.4 OverrideDispatchPolicy RPC is the documented
+              escape hatch (1-hour TTL, audit-logged).
+            runbook_url: "https://github.com/zeroroot-ai/zeroroot.ai/blob/main/enterprise/docs/runbooks/setec-degradation.md"
+
+        # NFR-R1 + Scenario 4: spot-eviction storm signal.
+        # health=degraded for >5m means the eviction handler in
+        # core/gibson/internal/sandbox/eviction has been cancelling
+        # in-flight detonations (the gauge flip, NOT a Setec frontend
+        # outage). Sustained degraded means too many spot evictions
+        # in flight.
+        - alert: SandboxSpotEvictionStorm
+          expr: |
+            avg_over_time(gibson_sandbox_health{status="degraded"}[5m]) > 0.5
+          for: 5m
+          labels:
+            severity: warning
+            component: setec-sandbox
+          annotations:
+            summary: "Sustained spot-eviction churn — consider raising on-demand fallback cap"
+            description: |
+              The sandbox health gauge has been in `degraded` state for
+              >5m, which means the in-daemon eviction handler is
+              cancelling detonations in response to AWS spot-interruption
+              notices faster than the on-demand fallback ASG can
+              backfill. Mitigation: open a GitOps PR raising
+              `setec.spotEvictionFallback.onDemandMax` (current cap is 2);
+              wait for ArgoCD sync (≤5 min); revert once the spot pool
+              recovers. Escalate to the EKS sister-spec owner if
+              sustained >24h.
+            runbook_url: "https://github.com/zeroroot-ai/zeroroot.ai/blob/main/enterprise/docs/runbooks/setec-eviction-storm.md"
+
+        # R4.4: per-tenant quota-exceeded rate elevated.
+        # The alert uses the sum across tenants intentionally — a
+        # per-tenant alert would create cardinality + alert-storm
+        # problems. Operators triage which tenant via the dashboard
+        # panel keyed off gibson_sandbox_detonation_total{outcome=
+        # "quota_exceeded"}.
+        - alert: SandboxQuotaExceededRate
+          expr: |
+            sum(rate(gibson_sandbox_detonation_total{outcome="quota_exceeded"}[5m])) > 0.1
+          for: 15m
+          labels:
+            severity: warning
+            component: setec-sandbox
+          annotations:
+            summary: "Setec quota_exceeded rejections elevated across tenants"
+            description: |
+              SANDBOXED dispatches are being rejected with
+              `quota_exceeded` at a sustained rate above 0.1/sec for 15m.
+              Likely a single tenant driving traffic past the per-tenant
+              cap; check the Sandbox Health dashboard's "quota-exceeded
+              by tenant" panel and follow setec-cost-spike.md.
+            runbook_url: "https://github.com/zeroroot-ai/zeroroot.ai/blob/main/enterprise/docs/runbooks/setec-cost-spike.md"
+{{- end }}

@@ -1,0 +1,138 @@
+{{/*
+helm-test pod: fga-tuple-seed
+
+Asserts that the platform-operator's tuple-seed loop has run against OpenFGA
+and that a known-good seed tuple resolves via the OpenFGA HTTP API.
+
+How the assertion works:
+
+  1. Read store_id from the gibson-fga-config ConfigMap (the FGA store the
+     platform points at).
+  2. POST /stores/${store_id}/check with a known-good tuple from the
+     platform-operator seed list:
+
+       { "tuple_key": { "user": "user:platform_operator",
+                        "relation": "member",
+                        "object": "platform:gibson" } }
+
+  3. Require the response to contain `"allowed":true`.
+
+If the platform-operator hasn't seeded yet, or the seed list changes such that
+the canary tuple disappears, this pod fails LOUDLY (with the OpenFGA response
+in the log) rather than silently passing.
+
+Known caveat: the canary tuple `(platform_operator, member, platform:gibson)`
+is part of the platform-operator's hard-coded seed list (see
+enterprise/platform/platform-operator/internal/controllers/fga/seed.go). If
+the platform-operator team changes the canary, update the body below.
+
+Provenance: deploy#355 (slice 5.10 of production-readiness epic).
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "gibson.fullname" . }}-test-fga-tuple-seed"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson-workloads.tests.labels" . | nindent 4 }}
+    app.kubernetes.io/component: helm-test
+  annotations:
+    {{- include "gibson-workloads.tests.annotations" . | nindent 4 }}
+    "helm.sh/hook-weight": "2"
+spec:
+  restartPolicy: Never
+  serviceAccountName: "{{ include "gibson.fullname" . }}-test-bootstrap-reader"
+  containers:
+    - name: probe
+      image: "{{ include "gibson-workloads.tests.kubectlImage" . }}"
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          ERR='{{ include "gibson-workloads.tests.errorPrefix" . }}'
+          NS='{{ .Release.Namespace }}'
+
+          # Re-use the fga-init Job's resolved Service name/port so the test
+          # follows the same DNS path as the production consumer.
+          FGA_SVC='{{ (.Values.fgaInit).openfgaService | default "gibson-openfga" }}'
+          FGA_PORT='{{ (.Values.fgaInit).openfgaHttpPort | default 8080 }}'
+          # deploy#1382: server TLS on the HTTP listener. curl here runs -k
+          # (this is a reachability/tuple assertion, not a trust decision).
+          FGA="https://${FGA_SVC}:${FGA_PORT}"
+
+          # 1. Read store_id from gibson-fga-config (written by fga-init).
+          STORE_ID=$(kubectl -n "$NS" get configmap gibson-fga-config -o jsonpath='{.data.store_id}' 2>/dev/null || echo "")
+          if [ -z "$STORE_ID" ]; then
+            echo "$ERR fga-tuple-seed: store_id not found in gibson-fga-config — fga-init has not run"
+            exit 1
+          fi
+          echo "[fga-tuple-seed] OpenFGA store_id=$STORE_ID"
+
+          # 2. POST a Check against the canary tuple from the seed list.
+          # If the platform-operator's hard-coded seed list rotates, update this
+          # block to match. Both representations of `platform:gibson` (with or
+          # without trailing context) should resolve; we use the bare form.
+          BODY='{"tuple_key":{"user":"user:platform_operator","relation":"member","object":"platform:gibson"}}'
+
+          # Note: -f makes curl exit non-zero on >=400, but for diagnostics we
+          # want to keep the body. So we capture status separately.
+          code=$(curl -ksS -o /tmp/check.json -w '%{http_code}' \
+            -X POST -H 'Content-Type: application/json' \
+            -d "$BODY" \
+            --max-time 15 \
+            "${FGA}/stores/${STORE_ID}/check" || echo "000")
+
+          if [ "$code" != "200" ]; then
+            echo "$ERR fga-tuple-seed: OpenFGA Check returned HTTP $code"
+            [ -s /tmp/check.json ] && echo "[fga-tuple-seed] body: $(head -c 500 /tmp/check.json)"
+            # If the seed canary moved this is the most likely class of failure.
+            # An operator should rerun the platform-operator tuple-seed loop, or
+            # update this test to match the new canary tuple.
+            exit 1
+          fi
+
+          # 3. Parse JSON for "allowed":true.
+          # alpine/k8s ships jq; use it if present, else fall back to grep.
+          if command -v jq >/dev/null 2>&1 ; then
+            allowed=$(jq -r '.allowed' < /tmp/check.json)
+          else
+            allowed=$(grep -oE '"allowed":[^,}]+' /tmp/check.json | head -1 | cut -d: -f2 | tr -d ' "')
+          fi
+
+          if [ "$allowed" != "true" ]; then
+            echo "$ERR fga-tuple-seed: canary tuple NOT allowed (allowed=$allowed)"
+            echo "[fga-tuple-seed] body: $(cat /tmp/check.json)"
+            echo "[fga-tuple-seed] this usually means the platform-operator's tuple-seed loop has not run yet"
+            echo "[fga-tuple-seed] (PlatformBootstrap reconcile loop step FGAModelLoadComplete)"
+            exit 1
+          fi
+
+          echo "[fga-tuple-seed] OK  (platform_operator, member, platform:gibson) -> allowed=true"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}

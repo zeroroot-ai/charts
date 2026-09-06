@@ -1,0 +1,468 @@
+{{- /*
+-----------------------------------------------------------------------------
+The customer browser filter chain — app / apex / docs.
+
+It lives in its own file so the chain is one readable, diffable definition,
+rendered once by templates/envoy/configmap.yaml against the same $ctx as
+envoy.yaml and injected there as `.publicChain`, on the one edge listener
+(edge_tls), SNI-matched, on every substrate.
+
+Per-client rate-limit descriptors and the Edge WAF land in this file
+(deploy#1657, deploy#1658). The chain's HCM trusts the socket peer only —
+see the Client-IP contract in CONTEXT.md.
+
+INDENTATION IS LOAD-BEARING: these lines sit inside a `filter_chains:` list
+item whose `-` and whose filter_chain_match the CALLER writes.
+-----------------------------------------------------------------------------
+*/ -}}
+        # =====================================================================
+        # app.<domain> — dashboard. Pure TLS termination + HTTP proxy. The
+        # dashboard runs its own OIDC flow against Zitadel via Auth.js;
+        # Envoy does not validate the user session here. The dashboard's
+        # SERVER-SIDE calls back into the daemon go through api.<domain>, on
+        # the edge_tls listener, which is where Zitadel JWT validation happens.
+        # =====================================================================
+        # =====================================================================
+        # Merged public filter chain: app + apex + docs (deploy#865; www is
+        # off-cluster ).
+        #
+        # These hostnames share ONE TLS cert and resolve to the same edge
+        # IPs, so browsers HTTP/2-COALESCE requests across them onto a single
+        # connection. Envoy selects the filter chain by the *connection's SNI*,
+        # not the per-request :authority — so a coalesced `app.<domain>/login`
+        # request riding a connection opened to one hostname landed on a
+        # chain scoped to another, matched no virtual_host, and returned 404. (Plain
+        # curl opens a fresh connection with the correct SNI every time, which
+        # is why it never reproduced.) Serving all three authorities from ONE
+        # filter chain, matched by :authority (the virtual_host `domains`),
+        # makes the SNI irrelevant and eliminates the coalescing 404.
+        #
+        # SAFE to merge: none of these carry auth filters — ext_authz /
+        # jwt_authn live ONLY on the api.<domain> chain, on the edge_tls
+        # listener. (api coalescing is tracked separately in deploy#865: it
+        # would surface as 401/403, not this 404.)
+        #
+        # Where this chain is MOUNTED varies by environment (deploy#1196) and
+        # nothing below depends on it: routing is by :authority throughout.
+        # =====================================================================
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_certificates:
+                  - certificate_chain: { filename: /etc/envoy/tls/tls.crt }
+                    private_key:       { filename: /etc/envoy/tls/tls.key }
+                alpn_protocols: ["h2", "http/1.1"]
+          filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: public_ingress
+                codec_type: AUTO
+                # Client-IP contract. The L4 load balancer preserves
+                # the client IP, so the socket peer IS the client. Trust it and
+                # nothing else: never a client-supplied x-forwarded-for, and no
+                # trusted-hop count, which is only correct behind an ALB.
+                use_remote_address: true
+                xff_num_trusted_hops: 0
+                route_config:
+                  name: public_routes
+                  virtual_hosts:
+                    - name: app
+                      domains: ["{{ .domains.app }}", "{{ .domains.app }}:{{ .envoyHttpsPort }}"]
+                      routes:
+                        # -------------------------------------------------------
+                        # Single-host consolidation (deploy#630): the whole
+                        # platform is served at app.<domain>. Reserved Zitadel
+                        # protocol prefixes route to Zitadel (login + OIDC),
+                        # everything else to the dashboard. The OIDC issuer
+                        # stays a clean origin (https://app.<domain>) because
+                        # these endpoints live at the host root — the dashboard
+                        # owns /, /dashboard, /api/auth (Auth.js BFF).
+                        # -------------------------------------------------------
+                        # OAuth 2.0 Device Authorization verification page
+                        # (deploy#715). The device_authorization response
+                        # advertises verification_uri = {issuer}/device; Zitadel
+                        # core serves it and 302s to its EMBEDDED v1 login at
+                        # /ui/login/device. Zitadel v4 has no Login-V2 device
+                        # page wired into the device redirect (verified on
+                        # v4.13.1 + v4.14.0: the instance loginV2 feature and the
+                        # per-app loginVersion do not move the device flow off
+                        # /ui/login/*), so the device flow runs on the core
+                        # binary. These two prefixes therefore go to core, NOT
+                        # the V2 login container — and MUST precede the broad
+                        # /ui/ rule below, which otherwise swallows /ui/login/*
+                        # and 404s `gibson login`'s approval page.
+                        - match: { prefix: "/device" }
+                          route:
+                            cluster: zitadel_upstream
+                            timeout: 30s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.appLogin, by address.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: app_login
+                                  - masked_remote_address:
+                                      v4_prefix_mask_len: 32
+                                      v6_prefix_mask_len: 64
+                        - match: { prefix: "/ui/login/" }
+                          route:
+                            cluster: zitadel_upstream
+                            timeout: 60s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.appLogin, by address.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: app_login
+                                  - masked_remote_address:
+                                      v4_prefix_mask_len: 32
+                                      v6_prefix_mask_len: 64
+                        # Zitadel v4 Login V2 UI (separate Next.js app,
+                        # gibson-zitadel-login). /oauth/v2/authorize 302s the
+                        # browser here.
+                        - match: { prefix: "/ui/" }
+                          route: { cluster: zitadel_login, timeout: 60s }
+                        # OIDC discovery + OAuth/OIDC protocol + external-IdP
+                        # and SAML callbacks → Zitadel core.
+                        - match: { prefix: "/.well-known/openid-configuration" }
+                          route: { cluster: zitadel_upstream, timeout: 30s }
+                        - match: { prefix: "/oauth/" }
+                          route:
+                            cluster: zitadel_upstream
+                            timeout: 30s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.appLogin, by address.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: app_login
+                                  - masked_remote_address:
+                                      v4_prefix_mask_len: 32
+                                      v6_prefix_mask_len: 64
+                        - match: { prefix: "/oidc/" }
+                          route:
+                            cluster: zitadel_upstream
+                            timeout: 30s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.appLogin, by address.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: app_login
+                                  - masked_remote_address:
+                                      v4_prefix_mask_len: 32
+                                      v6_prefix_mask_len: 64
+                        - match: { prefix: "/idps/" }
+                          route: { cluster: zitadel_upstream, timeout: 30s }
+                        - match: { prefix: "/saml/" }
+                          route: { cluster: zitadel_upstream, timeout: 30s }
+                        # Zitadel REST + gRPC management/admin/auth/system APIs.
+                        # The dashboard (server-side) and operators call these
+                        # via the app host (ZITADEL_INTERNAL_ISSUER=app.<domain>):
+                        # password policy (/auth/v1/policies/...), user/org
+                        # creation (/management/v1/...), instance/policy admin
+                        # (/admin/v1/...), the v2 connect/gRPC services
+                        # (/zitadel.*), AND the v2 RESOURCE REST API
+                        # (/v2/users/human, /v2/users, /v2/users/:id/password,
+                        # /v2beta/...) the signup admin client uses. Without
+                        # these the catch-all sends them to the dashboard → 404
+                        # and signup breaks (deploy#630; /v2 gap: signup
+                        # createHumanUser).
+                        # NOTE: /auth/v1/ is Zitadel; the dashboard's Auth.js BFF
+                        # lives under /api/auth/ and is unaffected.
+                        - match: { prefix: "/auth/v1/" }
+                          route: { cluster: zitadel_upstream, timeout: 30s }
+                        - match: { prefix: "/management/v1/" }
+                          route: { cluster: zitadel_upstream, timeout: 30s }
+                        - match: { prefix: "/admin/v1/" }
+                          route: { cluster: zitadel_upstream, timeout: 30s }
+                        # NO /system/v1/ ROUTE. DO NOT ADD ONE (GHSA-534c,
+                        # gibson#1275).
+                        #
+                        # /system/v1/* is Zitadel's INSTANCE-SUPERUSER surface:
+                        # it creates and deletes instances, registers trusted
+                        # domains, and mints instance-scoped tokens. It sits
+                        # above the org boundary, so it is above every tenant
+                        # boundary Gibson has. Publishing it at the edge put
+                        # the whole control plane one SystemAPIUsers key
+                        # compromise away from total instance takeover, and
+                        # the route carried no ext_authz and no FGA check —
+                        # Zitadel's own JWT-assertion auth was the only gate.
+                        #
+                        # Its ONE caller is the platform-operator's
+                        # TrustedDomainReady step, which dials Zitadel by
+                        # Service DNS inside the cluster
+                        # (PlatformBootstrap spec.zitadel.systemClient.apiURL,
+                        # emitted by helm/gibson-operators) and forges the
+                        # public Host header so Zitadel still routes it. No
+                        # dashboard, CLI, SDK or operator outside the pod
+                        # network ever reads it.
+                        #
+                        # Guarded by tests/envoy-edge-exposure.bats.
+                        - match: { prefix: "/v2/" }
+                          route: { cluster: zitadel_upstream, timeout: 30s }
+                        - match: { prefix: "/v2beta/" }
+                          route: { cluster: zitadel_upstream, timeout: 30s }
+                        - match: { prefix: "/zitadel." }
+                          route: { cluster: zitadel_upstream, timeout: 30s }
+                        # Zitadel asset delivery (label-policy logo/icon/font
+                        # uploads, deploy#867). The hosted login references
+                        # logoUrlDark = {host}/assets/v1/<instance>/policy/
+                        # label/logo-dark-<id>; without this route the image
+                        # request falls through to the dashboard catch-all and
+                        # 404s — empty logo on the signin page (deploy#877).
+                        # The dashboard serves nothing under /assets.
+                        - match: { prefix: "/assets/" }
+                          route: { cluster: zitadel_upstream, timeout: 30s }
+                        # Closed billing tier's Stripe webhook receiver
+                        # (gibson#798/#800). Stripe POSTs here; routed to the
+                        # hosted gibson-billing-webhook workload, NOT the
+                        # dashboard (whose billing webhook is retired). On-prem
+                        # has no such workload — the cluster 503s, but on-prem
+                        # receives no Stripe webhooks, so the path is never hit.
+                        #
+                        # prefix_rewrite is REQUIRED: the receiver's mux serves
+                        # POST /webhook (+ GET /healthz) only — the public
+                        # /api/billing/webhook path is an edge-side convention.
+                        # Forwarding it verbatim 404s every Stripe delivery,
+                        # which Stripe reports as a failing endpoint while the
+                        # tenant's subscription_status never lands in
+                        # tenant_quotas. Ground truth: billing
+                        # cmd/billing-webhook/main.go.
+                        - match: { path: "/api/billing/webhook" }
+                          route:
+                            cluster: gibson_billing_webhook
+                            timeout: 30s
+                            prefix_rewrite: "/webhook"
+                        # -------------------------------------------------------
+                        # Signup submission bucket (deploy#1242). The signup
+                        # Server Action POSTs to its page URL (/signup — Next.js
+                        # Server Actions always target the current route), so
+                        # this is the ONE unauthenticated, captcha-less route on
+                        # the public chain that mints a tenant, creates a Stripe
+                        # customer and drives an SES verification email per
+                        # accepted request. POST-only on purpose: GET page loads
+                        # and RSC prefetches fall through to the catch-all below
+                        # (same cluster, publicBaseline ceiling), so a crowd
+                        # reading the signup page cannot drain the submission
+                        # bucket. Same cluster and same 300s timeout as the
+                        # catch-all — the signup action blocks synchronously on
+                        # waitForTenantReady up to ~255s; see the catch-all's
+                        # comment for the full timeout derivation. MUST stay
+                        # above the catch-all or it is shadowed and the bucket
+                        # never fires. Sizing rationale: values.yaml
+                        # envoy.rateLimit.appSignupSubmit. Per-client
+                        # descriptors are deliberately absent until the edge has
+                        # a real client address (#1196 CloudFront -> #1241).
+                        - match:
+                            prefix: "/signup"
+                            headers:
+                              - name: ":method"
+                                string_match: { exact: "POST" }
+                          route:
+                            cluster: gibson_dashboard
+                            timeout: 300s
+                            # Per-client quota: descriptor
+                            # (route=app_signup_submit, masked_remote_address)
+                            # → envoy.rateLimit.perClient.appSignupSubmit in the
+                            # ratelimit service config. The address is the
+                            # socket peer (Client-IP contract), never a header.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: app_signup_submit
+                                  - masked_remote_address:
+                                      v4_prefix_mask_len: 32
+                                      v6_prefix_mask_len: 64
+                          typed_per_filter_config:
+                            envoy.filters.http.local_ratelimit:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                              stat_prefix: app_signup_submit
+                              token_bucket:
+                                max_tokens: {{ .rateLimit.appSignupSubmit.maxTokens }}
+                                tokens_per_fill: {{ .rateLimit.appSignupSubmit.tokensPerFill }}
+                                fill_interval: {{ .rateLimit.appSignupSubmit.fillIntervalSeconds }}s
+                              # Both REQUIRED: each defaults to 0% when omitted,
+                              # which renders a limiter that enforces nothing.
+                              filter_enabled:
+                                default_value: { numerator: 100, denominator: HUNDRED }
+                              filter_enforced:
+                                default_value: { numerator: 100, denominator: HUNDRED }
+                              response_headers_to_add:
+                                - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                                  header: { key: retry-after, value: "{{ .rateLimit.appSignupSubmit.fillIntervalSeconds }}" }
+                        # Everything else → dashboard.
+                        # 300s (NOT 60s): the signup server action blocks
+                        # synchronously on waitForTenantReady up to
+                        # TENANT_READY_TIMEOUT_MS=240s (dashboard#962: a second
+                        # back-to-back tenant provision was observed at 2m25s
+                        # CR→Ready on floor-sized staging, plus ≤15s operator
+                        # queue pickup; the signup smoke's own saga budget is
+                        # 180s) before returning its graceful
+                        # PROVISIONING_TIMEOUT ("we'll email you") response.
+                        # Worst-case action duration ≈ 240s wait + ~15s of
+                        # Stripe/owner-provisioning preamble, so the gateway
+                        # timeout MUST exceed ~255s or Envoy 504s the browser —
+                        # turning the graceful path into a hard "Something went
+                        # wrong" while the backend provisions the tenant anyway
+                        # (deploy: signup-504-timeout-mismatch / deploy#1020,
+                        # recurred as dashboard#962). Ceiling: the staging NLB's
+                        # fixed 350s TCP idle timeout — this value must stay
+                        # below it, and TENANT_READY_TIMEOUT_MS below this.
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: gibson_dashboard
+                            timeout: 300s
+                            # Per-client quota (deploy#1659):
+                            # envoy.rateLimit.perClient.appCatchAll, by address.
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: app_catch_all
+                                  - masked_remote_address:
+                                      v4_prefix_mask_len: 32
+                                      v6_prefix_mask_len: 64
+                    # docs.<domain> — core optional-by-toggle docs surface
+                    # (/ deploy#1034). Served by gibson-docs-svc
+                    # (ghcr.io/zeroroot-ai/docs-site, Apache-2.0, nginx).
+                    # Core component — present in self-hosted AND SaaS.
+                    # Default-on, operator may disable via .Values.docs.enabled=false.
+                    # When disabled (no docs-svc Deployment/Service), STRICT_DNS
+                    # yields no endpoints → 503. The fail-safe (public docs link)
+                    # is surfaced by the dashboard's DOCS_URL env var.
+                    - name: docs
+                      domains: ["{{ .domains.docs }}", "{{ .domains.docs }}:{{ .envoyHttpsPort }}"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: gibson_docs_svc
+                            timeout: 30s
+                    # apex (e.g. zeroroot.ai) — permanent 301 → app.<domain>.
+                    - name: apex
+                      domains: ["{{ .domains.apex }}", "{{ .domains.apex }}:{{ .envoyHttpsPort }}"]
+                      routes:
+                        - match: { prefix: "/" }
+                          redirect:
+                            # www is off-cluster, so this cannot
+                            # send a self-hosted visitor to a marketing site
+                            # that does not exist there. The apex goes to the
+                            # product front door, which is the login page.
+                            host_redirect: "{{ .domains.app }}"
+{{- if ne (printf "%v" .envoyHttpsPort) "443" }}
+                            port_redirect: {{ .envoyHttpsPort }}
+{{- end }}
+                            response_code: MOVED_PERMANENTLY
+                            https_redirect: true
+                http_filters:
+                  # 0. Edge rate limiting (deploy#1242). Until this filter
+                  # existed, the merged public chain's http_filters was JUST
+                  # the router — no limiter of any kind on the vhost carrying
+                  # every dashboard page load and Server Action, the Zitadel
+                  # login/OIDC surface, docs, AND the in-cluster
+                  # dashboard-to-Zitadel admin traffic. The api chain has had
+                  # api_baseline since deploy#1189; this is the same floor for
+                  # the public chain, declared at filter level (NOT per vhost)
+                  # for the same reason: a virtual host added to public_routes
+                  # later inherits it WITHOUT having to remember to ask. The
+                  # POST /signup route above overrides it with a tighter
+                  # bucket; an override REPLACES this one rather than
+                  # stacking, so a signup flood drains only the signup bucket
+                  # and the rest of the vhost keeps serving.
+                  #
+                  # filter_enabled / filter_enforced are set explicitly and
+                  # MUST stay at 100%: BOTH DEFAULT TO 0% WHEN OMITTED — a
+                  # limiter that omits them renders fine and enforces nothing.
+                  # tests/envoy-edge-rate-limiting.bats asserts 100/HUNDRED on
+                  # every local_ratelimit config in the rendered file.
+                  #
+                  # No descriptors — see envoy.rateLimit in values.yaml for
+                  # why this edge has no trustworthy client address to key on.
+                  - name: envoy.filters.http.local_ratelimit
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                      stat_prefix: public_baseline
+                      token_bucket:
+                        max_tokens: {{ .rateLimit.publicBaseline.maxTokens }}
+                        tokens_per_fill: {{ .rateLimit.publicBaseline.tokensPerFill }}
+                        fill_interval: {{ .rateLimit.publicBaseline.fillIntervalSeconds }}s
+                      filter_enabled:
+                        default_value: { numerator: 100, denominator: HUNDRED }
+                      filter_enforced:
+                        default_value: { numerator: 100, denominator: HUNDRED }
+                      # This chain is mostly browser HTTP, but /zitadel.* on
+                      # the app vhost carries Zitadel's connect/gRPC services.
+                      # For those callers RESOURCE_EXHAUSTED (8) means "back
+                      # off"; Envoy's default UNAVAILABLE (14) is retried
+                      # immediately by generated clients. Plain HTTP callers
+                      # still get 429 either way.
+                      rate_limited_as_resource_exhausted: true
+                      response_headers_to_add:
+                        - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                          header: { key: retry-after, value: "{{ .rateLimit.publicBaseline.fillIntervalSeconds }}" }
+                  # deploy#1657 — the per-client layer. Calls the
+                  # shared ratelimit service (Redis-backed, exact across
+                  # replicas) for every route that carries `rate_limits`
+                  # actions. FAIL-OPEN, and there is no value that changes it:
+                  # an unreachable quota service degrades to the local fuse
+                  # above, and envoy_ratelimit_failure_mode_allowed counts the
+                  # requests that passed unchecked. Deny-on-error would turn a
+                  # quota-service blip into an edge-wide 429 storm, which is
+                  # the outage this layer exists to prevent.
+                  - name: envoy.filters.http.ratelimit
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ratelimit.v3.RateLimit
+                      domain: {{ .rateLimit.perClient.domain }}
+                      stage: 0
+                      request_type: external
+                      # google.protobuf.Duration: seconds only, so ms/1000.
+                      timeout: {{ divf .rateLimit.perClient.timeoutMs 1000 }}s
+                      failure_mode_deny: false
+                      enable_x_ratelimit_headers: DRAFT_VERSION_03
+                      stat_prefix: public_per_client
+                      rate_limit_service:
+                        transport_api_version: V3
+                        grpc_service:
+                          envoy_grpc:
+                            cluster_name: ratelimit_grpc
+                  # deploy#1658 — the Edge WAF. Coraza running the
+                  # OWASP Core Rule Set, request bodies inspected, on every
+                  # substrate. Sits AFTER both limiters so a flood pays the
+                  # cheap fuse and the quota before it pays CRS inspection,
+                  # and a scanner's blocked requests still burn its quota.
+                  # The directives come from files/coraza/browser.conf; the
+                  # module from the mirrored coraza-proxy-wasm image via the
+                  # copy-coraza-wasm init container. SecRuleEngine is On and
+                  # nothing here can turn it to DetectionOnly.
+                  - name: envoy.filters.http.wasm
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm
+                      config:
+                        name: coraza-browser
+                        root_id: ""
+                        fail_open: false
+                        configuration:
+                          "@type": type.googleapis.com/google.protobuf.StringValue
+                          value: |
+                            {
+                              "directives_map": { "browser": {{ .waf.browserDirectives }} },
+                              "default_directives": "browser",
+                              "metric_labels": { "chain": "browser" }
+                            }
+                        vm_config:
+                          runtime: envoy.wasm.runtime.v8
+                          vm_id: coraza
+                          code:
+                            local:
+                              filename: /etc/envoy/wasm/coraza.wasm
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router

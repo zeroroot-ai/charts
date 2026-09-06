@@ -1,0 +1,305 @@
+{{/* OpenBao storage snapshot -> S3 CronJob (deploy#1496 ask 1, deploy#1535).
+
+     WHY THIS IS THE HIGHEST-SEVERITY BACKUP GAP. AWS KMS auto-unseal
+     (deploy#835) protects the UNSEAL KEY, not the data. OpenBao's whole
+     store — the transit engine, the CG-JWT signing key, and every
+     per-tenant KEK derived from master-kek — lives on the StatefulSet
+     PVC at /etc/openbao/data. Lose that PVC and the KMS key is still
+     there, still able to unwrap a master key that no longer exists: every
+     tenant's encrypted data becomes unrecoverable even from a perfect
+     Postgres backup. Nothing else in this chart made a copy of it.
+
+     WHY NOT `bao operator raft snapshot save`. That command requires the
+     INTEGRATED RAFT storage backend. This chart deliberately runs
+     `storage "file"` (deploy#365 — see the header of
+     openbao-deployment.yaml), and on a file backend the raft snapshot API
+     does not exist; `bao operator raft snapshot save` fails with
+     "raft storage is not in use". A logical export is not a substitute
+     either: transit keys are non-exportable by design, so an API-level
+     dump captures none of the material this exists to protect. On the
+     file backend, a filesystem-level copy of the data directory is the
+     ONLY mechanism that captures the keyring. Migrating to raft storage
+     (which would give a consistent online snapshot API) is tracked
+     separately — it is a storage-engine migration, not a backup change.
+
+     TWO STAGES, TWO IMAGES — same shape and same invariant as
+     redis-backup-cronjob.yaml (deploy#1459). No mirrored image ships both
+     a working `tar` over the OpenBao data layout and the `aws` CLI, so
+     the archive is built in an init container on the mirrored OpenBao
+     image (Alpine/BusyBox: tar + gzip) and uploaded by the main container
+     on the mirrored aws-cli image, handed over on a shared emptyDir.
+
+     INVARIANT — do not reintroduce a run-time package install, and do not
+     let any stage swallow a failure. Guarded by
+     tests/openbao-backup-cronjob.bats.
+
+     HOW IT REACHES THE DATA. The PVC is ReadWriteOnce, so the Job is
+     pinned by a REQUIRED podAffinity to the node already running
+     openbao-0 and mounts the same claim read-only. A second read-only
+     mount of an RWO volume on the SAME node is supported by the EBS CSI
+     driver (RWO is a per-node constraint; ReadWriteOncePod is the
+     per-pod one, and is not used here). No `kubectl exec` into the
+     OpenBao container: pods/exec on the platform secret store is
+     arbitrary code execution inside it, a capability
+     scripts/check-workload-create-rbac.py exists to keep scarce
+     (deploy#1363). The job therefore holds NO Kubernetes RBAC at all.
+
+     CONSISTENCY. OpenBao's file backend writes each logical entry to its
+     own file via a temp-file + rename, so no single entry can be torn;
+     an archive taken while the server is writing can still mix entry
+     versions across files. That is the accepted cost of the file
+     backend. The restore procedure and its limits are in
+     docs/runbooks/backup-restore.md — read it before relying on this. */}}
+{{- if default false ((.Values.openbao).backup).enabled }}
+{{- $backup := .Values.openbao.backup }}
+{{- $bucket := required "openbao.backup.s3Bucket is REQUIRED when openbao.backup.enabled — the platform backups bucket (<workspace>-backups-<account>). deploy#1496." $backup.s3Bucket }}
+{{- $prefix := $backup.s3Prefix | default "longterm/openbao" }}
+{{- /* The claim a StatefulSet volumeClaimTemplate produces for ordinal 0.
+       openbao runs replicas: 1 everywhere (see values.yaml), so ordinal 0
+       is the whole store. */ -}}
+{{- $claim := $backup.pvcName | default (printf "data-%s-openbao-0" .Release.Name) }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-openbao-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao-backup
+  {{- with ($backup.serviceAccount).annotations }}
+  # IRSA role (eks.amazonaws.com/role-arn). The role is provisioned by
+  # eks/gibson/modules/iam-irsa (key `openbao_backup`) and grants
+  # s3:PutObject/GetObject on the snapshot prefix ONLY — no s3:DeleteObject,
+  # so a compromised backup job cannot destroy the copies it made. Retention
+  # is the bucket lifecycle's job (longterm/: GLACIER@30d, expire@6y).
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-openbao-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao-backup
+spec:
+  schedule: {{ $backup.schedule | default "17 3 * * *" | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  # A missed tick must still be visible. The default (100) silently gives up
+  # counting after a long controller outage and the CronJob stops scheduling.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      # A backup pod holding the RWO volume delays a reschedule of openbao-0
+      # to another node, because the EBS volume cannot detach while it is
+      # mounted. Bound the exposure hard: 15 minutes is ~10x the observed
+      # archive-and-upload path on the largest store we run.
+      activeDeadlineSeconds: 900
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "gibson.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: openbao-backup
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ .Release.Name }}-openbao-backup
+          {{- include "gibson.imagePullSecrets" . | nindent 10 }}
+          # uid 100 / gid 1000 mirrors the OpenBao StatefulSet's own
+          # securityContext. The file backend creates 0700 directories and
+          # 0600 files owned by uid 100, so nothing else can read them.
+          # fsGroup is deliberately NOT set: it would ask the kubelet to
+          # recursively chgrp a read-only mount.
+          securityContext:
+            runAsUser: 100
+            runAsGroup: 1000
+            runAsNonRoot: true
+          # The claim is ReadWriteOnce. Land on the node already running
+          # openbao-0 or do not run at all — a Pending pod that the
+          # activeDeadline then fails is a loud, diagnosable outcome; a pod
+          # scheduled elsewhere would hang forever on volume attach.
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchLabels:
+                      {{- include "gibson.selectorLabels" . | nindent 22 }}
+                      app.kubernetes.io/component: openbao
+                  topologyKey: kubernetes.io/hostname
+          volumes:
+            - name: openbao-data
+              persistentVolumeClaim:
+                claimName: {{ $claim | quote }}
+                readOnly: true
+            - name: snapshot
+              emptyDir: {}
+            # aws-cli v2 writes its own cache/config under $HOME. uid 100 owns
+            # nothing in the image, so give it a writable HOME.
+            - name: home
+              emptyDir: {}
+            # readOnlyRootFilesystem is on for both stages, so every scratch
+            # path a tool may reach for has to be an explicit volume.
+            - name: tmp
+              emptyDir: {}
+          # Stage 1 — archive. Runs on the mirrored OpenBao image, which is
+          # Alpine/BusyBox and ships tar + gzip. An init container (not a
+          # sidecar) so the upload stage cannot start on a failed archive.
+          initContainers:
+            - name: snapshot
+              image: "{{ ($backup.snapshotImage).repository | default "ghcr.io/zeroroot-ai/mirror/openbao" }}:{{ ($backup.snapshotImage).tag | default "2.5.3" }}"
+              imagePullPolicy: {{ ($backup.snapshotImage).pullPolicy | default "IfNotPresent" }}
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  # Fail immediately if the image ever stops shipping tar,
+                  # instead of dying one line later on a less diagnosable
+                  # error. No run-time package install — ever (deploy#1459).
+                  command -v tar >/dev/null 2>&1 || {
+                    echo "FATAL: tar missing from the snapshot image" >&2
+                    exit 1
+                  }
+                  # Both stages must agree on the object name.
+                  date -u +%Y%m%dT%H%M%SZ > /snapshot/TIMESTAMP
+                  echo "Archiving OpenBao file-backend store from {{ $claim }} ..."
+                  tar -czf /snapshot/openbao-data.tar.gz -C /openbao-data .
+                  test -s /snapshot/openbao-data.tar.gz
+                  # A truncated or empty archive is a failed backup that tar
+                  # may still have exited 0 on. Listing it re-reads every
+                  # gzip block and every header, so a short write is caught
+                  # HERE and not six months from now during a restore.
+                  #
+                  # The listing goes to a FILE, not through a pipe. `set -e`
+                  # without `pipefail` takes the exit status of the LAST
+                  # command in a pipeline, so `tar -tzf ... | wc -l` would let
+                  # a tar that died on a corrupt member be masked by wc's
+                  # exit 0 — and a tail-truncated archive lists most of its
+                  # entries before the corruption, so the count would still
+                  # look healthy. Redirecting makes tar's own status the
+                  # statement's status. (`set -o pipefail` is not POSIX and
+                  # this runs under BusyBox ash.)
+                  tar -tzf /snapshot/openbao-data.tar.gz > /snapshot/MANIFEST
+                  ENTRIES=$(wc -l < /snapshot/MANIFEST)
+                  echo "Archive lists ${ENTRIES} entries"
+                  # An initialized OpenBao file backend always holds far more
+                  # than this; 1 means "the mount was empty or wrong".
+                  test "${ENTRIES}" -gt 1
+                  echo "Snapshot written: $(wc -c < /snapshot/openbao-data.tar.gz) bytes"
+              volumeMounts:
+                - name: openbao-data
+                  mountPath: /openbao-data
+                  readOnly: true
+                - name: snapshot
+                  mountPath: /snapshot
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          # Stage 2 — upload. Runs on the mirrored aws-cli image, which ships
+          # `aws` and nothing OpenBao-related. It never sees the PVC.
+          containers:
+            - name: upload
+              image: {{ $backup.awsCliImage | default "ghcr.io/zeroroot-ai/mirror/aws-cli:2.17.50" | quote }}
+              imagePullPolicy: IfNotPresent
+              command:
+                - sh
+                - -c
+                - |
+                  set -eu
+                  command -v aws >/dev/null 2>&1 || {
+                    echo "FATAL: aws CLI missing from the upload image" >&2
+                    exit 1
+                  }
+                  # A non-AWS S3 endpoint (MinIO, Ceph, any self-hosted store)
+                  # is reached by AWS_ENDPOINT_URL, which the CLI reads on its
+                  # own. What it does NOT infer is addressing style: boto still
+                  # prefers virtual-host, so it would resolve
+                  # <bucket>.<service>.<ns>.svc and fail on a name no cluster
+                  # DNS serves. Path style is the only shape that works there,
+                  # and it is a no-op against real S3 because this block only
+                  # runs when an endpoint is set.
+                  if [ -n "${AWS_ENDPOINT_URL:-}" ]; then
+                    mkdir -p "${HOME}/.aws"
+                    printf '[default]\ns3 =\n  addressing_style = path\n' > "${HOME}/.aws/config"
+                    echo "Using S3 endpoint ${AWS_ENDPOINT_URL} (path-style addressing)"
+                  fi
+                  test -s /snapshot/openbao-data.tar.gz
+                  TS=$(cat /snapshot/TIMESTAMP)
+                  KEY="{{ $prefix }}/{{ .Release.Namespace }}/${TS}.tar.gz"
+                  echo "Uploading s3://{{ $bucket }}/${KEY} ..."
+                  # No --sse flag: the bucket's default encryption is SSE-KMS
+                  # with the platform CMK (eks/gibson/modules/s3/main.tf
+                  # aws_s3_bucket_server_side_encryption_configuration), and
+                  # naming an algorithm here would override it with a weaker
+                  # one. The bucket policy also denies non-TLS transport.
+                  aws s3 cp /snapshot/openbao-data.tar.gz \
+                    "s3://{{ $bucket }}/${KEY}"
+                  # A backup nobody has read back is a hope, not a backup.
+                  # Compare the stored object's length to what we sent, so a
+                  # silently truncated upload fails the Job now.
+                  LOCAL=$(wc -c < /snapshot/openbao-data.tar.gz)
+                  REMOTE=$(aws s3api head-object \
+                    --bucket {{ $bucket }} \
+                    --key "${KEY}" \
+                    --query ContentLength --output text)
+                  echo "Local bytes ${LOCAL}, stored bytes ${REMOTE}"
+                  test "${LOCAL}" = "${REMOTE}"
+                  echo "Backup complete: s3://{{ $bucket }}/${KEY}"
+              env:
+                - name: HOME
+                  value: /home
+                {{- with $backup.awsRegion }}
+                - name: AWS_REGION
+                  value: {{ . | quote }}
+                {{- end }}
+                {{- with $backup.s3EndpointUrl }}
+                # Self-hosted object storage. Unset for the AWS profiles, which
+                # take the CLI's own regional endpoint.
+                - name: AWS_ENDPOINT_URL
+                  value: {{ . | quote }}
+                {{- end }}
+              {{- with $backup.credentialsSecretName }}
+              # Static credentials, for a store that has no IRSA. The Secret is
+              # brought by the operator — the chart never renders it, so a name
+              # that resolves to nothing is caught by Rule B of the
+              # secret-plumbing guard rather than failing at 03:17.
+              envFrom:
+                - secretRef:
+                    name: {{ . | quote }}
+              {{- end }}
+              volumeMounts:
+                - name: snapshot
+                  mountPath: /snapshot
+                  readOnly: true
+                - name: home
+                  mountPath: /home
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+{{- end }}

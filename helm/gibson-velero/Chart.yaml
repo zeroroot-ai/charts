@@ -1,0 +1,67 @@
+apiVersion: v2
+name: gibson-velero
+description: |
+  Velero for the gibson platform: the backup half of a preserve teardown and
+  of a recreate. It writes Kubernetes objects and volume
+  data to the durable bucket with file-system backup (kopia), and it restores
+  them into a named cluster.
+
+  WHY THIS IS A SEPARATE RELEASE IN ITS OWN NAMESPACE, and not a subchart of
+  the gibson umbrella like cert-manager, external-secrets, external-dns and
+  the CNPG operator. It is forced, not chosen.
+
+  The velero server keeps a controller-runtime cache restricted to its OWN
+  namespace (pkg/cmd/server/server.go: cache.Options.DefaultNamespaces), and
+  it reads the kopia repository password through that cache
+  (internal/credentials/file_store.go -> kube.GetSecretKey). A cached read of
+  a Secret needs `list` and `watch` on secrets in that namespace, and `list`
+  cannot be narrowed by resourceNames. So the server's namespace is a
+  namespace where Velero can read every Secret.
+
+  The gibson namespace holds every platform Secret: the Zitadel master key
+  and system key, the Postgres credentials, the registry credential, the
+  bringup keyring. Velero in that namespace is the escalation deploy#1193
+  removed it for. In its own namespace it can read exactly two objects, both
+  its own: `velero-repo-credentials` (the kopia repository password) and
+  `velero-bucket-credential` (the bucket credential, which is a mounted file
+  and not an API read at all). The cluster-scoped role grants NO verb on
+  secrets, so a backup can never contain one, which is the property
+  "Velero never sees a Secret".
+
+  The upstream chart names every object `{{ .Release.Namespace }}` and has no
+  namespace seam, and Helm gives one release one namespace. So the namespace
+  decision decides the release boundary. Same shape of argument as
+  gibson-crds: a boundary Helm forces rather than one the platform picked.
+
+  WHAT THIS CHART OWNS. The pinned upstream chart as its one dependency, with
+  its cluster-admin binding and its wildcard Role turned OFF
+  (velero.rbac.create=false), plus the scoped RBAC and the
+  BackupStorageLocation in templates/. It renders no Secret: the bringup
+  writes both credentials from the bringup keyring before this release
+  installs, the same contract the CNPG Cluster and the OpenBao static seal
+  use.
+
+  Guard: tests/velero-rbac.bats. Live proof: the `velero-tenant-restore` job
+  of .github/workflows/exit-test-backup-restore.yml.
+type: application
+version: 0.1.0
+appVersion: "1.18.1"
+kubeVersion: ">=1.27.0-0"
+maintainers:
+  - name: Zero Root AI
+    email: team@zeroroot.ai
+keywords:
+  - gibson
+  - backup
+  - velero
+home: https://github.com/zeroroot-ai/deploy
+sources:
+  - https://github.com/zeroroot-ai/deploy
+
+dependencies:
+  - name: velero
+    version: "12.1.0"
+    repository: "https://vmware-tanzu.github.io/helm-charts"
+
+annotations:
+  org.opencontainers.image.source: https://github.com/zeroroot-ai/charts

@@ -1,0 +1,204 @@
+{{- /*
+The one hourly Schedule (deploy#1735, docs/bringup.md § Cadence).
+
+This is the backup spec the platform pins, so it is a template here and never
+a `velero.schedules` value. The spec is the option C decision from CONTEXT.md
+§ Velero backup: include by default, exclude desired state by label.
+
+  * It includes every `tenant-*` namespace and the `gibson` namespace whole.
+    Velero matches namespace names with globs
+    (pkg/util/collections/includes_excludes.go), so a new tenant namespace is
+    in the next backup with no edit anywhere.
+  * The resource filter is the SCOPED style (includedNamespaceScopedResources
+    and friends), not the old includedResources/excludedResources pair, and
+    Velero refuses a spec that mixes the two. The scoped style is here for
+    one reason: the `Tenant` CR is cluster-scoped, and a namespace-shaped
+    backup includes a cluster-scoped kind only when it is NAMED in
+    `includedClusterScopedResources`. Without that line the tenant records
+    themselves silently miss the backup, which is the exact failure
+    direction the include-by-default decision rejects. Related
+    cluster-scoped items (the PV behind a backed-up PVC) still ride along:
+    the item collector bypasses the filter for plugin-added related items
+    (pkg/backup/item_backupper.go, itemInclusionChecks).
+  * `excludedNamespaceScopedResources` names `secrets` and the ESO
+    generator kinds, the two places secret material can live. The RBAC
+    denies both (no verb on secrets anywhere, no verb on the
+    generators.external-secrets.io group), so a spec that asks for them ends
+    PartiallyFailed instead of Completed. The RBAC is the control. These
+    lines keep the phase honest.
+  * Desired state opts out with the label
+    `velero.io/exclude-from-backup: "true"`. That is Velero's own item-level
+    exclusion, checked by the item collector before anything is written
+    (pkg/backup/item_backupper.go, itemInclusionChecks). The chart-rendered
+    objects that carry it: the PlatformBootstrap CR, the CNPG Cluster CR,
+    and, through the Cluster's `inheritedMetadata`, every pod and PVC the
+    CNPG operator derives from it. Postgres data travels through its own
+    barman archive, and a file-system copy of a CNPG volume restored over a
+    `bootstrap.recovery` re-initializes the database. An object that MISSES
+    the label rides in the backup and surfaces at restore as a loud conflict
+    with the chart-rendered copy, never as lost data. The render guard is
+    helm/gibson/tests/velero-exclude-label.bats.
+  * `defaultVolumesToFsBackup` is set in the spec itself. The server default
+    says the same thing, but a Backup built from this template must carry
+    the whole contract on its own.
+
+Postgres is NOT this schedule's job. CNPG ships every WAL segment within
+300 s and one base backup a day (helm/gibson, deploy#1730), a five minute
+recovery point that an hourly copy cannot improve. The pre-backup step that
+creates a CNPG Backup and waits for `completed` therefore lives in the
+preserve-teardown path (test/dr/cnpg-backup-and-wait.sh, deploy#1738), not
+here: Velero has no mechanism that runs a step outside a pod before a backup,
+and an exec into the Postgres primary is not that design.
+
+The Neo4j hooks below ARE this schedule's job. A Neo4j file-system copy
+without a checkpoint replays its transaction log on start, and the
+checkpoint makes the copy carry a current store. Measured reality
+(2026-09-02): `db.checkpoint()` is an Enterprise procedure, and the pinned
+`neo4j:5.26.0-community` image does not register it, so the command tries
+the checkpoint first and, ONLY when the error is the procedure's absence,
+falls back to `CALL db.ping()` — the store still has to answer, and the
+community store stays recoverable through its periodic checkpoint (15 min
+default) plus transaction-log replay. Every other error (auth, a hung
+store, a dead bolt port) still fails the hook, and `onError: Fail` turns
+that into a failed pod backup and a backup phase that is not Completed,
+which the exit test asserts (test/dr/velero-schedule-drill.sh). A hook
+selector that matches no pod runs nothing and fails nothing, so a cluster
+without Neo4j still backs up.
+*/}}
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: platform-hourly
+  annotations:
+    # This is a CR of a kind the velero sub-chart in THIS SAME RELEASE
+    # registers. Helm cannot order a CRD and a CR of it within one release, and
+    # it sorts kinds it does not recognise alphabetically — so without this the
+    # CR is applied before its CRD exists and the apply is refused.
+    #
+    # Both barriers, because there are two orderings to satisfy:
+    #   helm.sh/hook      a plain `helm install` has no barrier in its main phase
+    #   argocd sync-wave  Argo orders hooks and ordinary resources together
+    #
+    # Observed before this: Argo reported a controller sync timeout and
+    # recovered on retry, which hid the defect behind a retry that a plain
+    # helm install does not have. See charts#2.
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "20"
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "20"
+    helm.sh/hook-delete-policy: before-hook-creation
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: schedule
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    # With the BackupStorageLocation (wave 10): a Schedule the server cannot
+    # reconcile against an Available location yet would log errors on every
+    # tick.
+    argocd.argoproj.io/sync-wave: "10"
+    # ARGO MUST NOT OWN THE BACKUPS THIS SCHEDULE MAKES.
+    #
+    # Velero copies a Schedule's OWN labels and annotations onto every Backup
+    # it creates from it (pkg/controller/schedule_controller.go, getBackup),
+    # and Argo stamps its tracking id onto this object. So without this line
+    # every scheduled Backup arrives wearing Argo's tracking id, Argo adopts
+    # it as a resource of this Application, finds it in no manifest, reports
+    # the Application OutOfSync forever, and with `prune: true` DELETES the
+    # platform's backups. Measured on kind 2026-09-02 (deploy#1739): the
+    # velero Application never reached Synced, and the extraneous resource was
+    # a Backup the server had just synced from the durable bucket.
+    #
+    # IgnoreExtraneous tells Argo to ignore a live resource that is not in the
+    # desired state. It rides to every Backup through the same copy, and it is
+    # a no-op on this Schedule itself, which IS in the desired state.
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+spec:
+  schedule: {{ .Values.schedule.cron | quote }}
+  # The first backup waits for the first cron tick. An install-time backup
+  # would race the node-agent rollout and record a PartiallyFailed run as the
+  # schedule's first result.
+  skipImmediately: true
+  template:
+    includedNamespaces:
+      - gibson
+      - tenant-*
+    includedNamespaceScopedResources:
+      - "*"
+    excludedNamespaceScopedResources:
+      - secrets
+      # The ESO generator kinds get the secrets treatment: a Fake generator
+      # spec and a GeneratorState can carry literal secret material. The RBAC
+      # holds no verb on the group (templates/rbac.yaml), and this glob keeps
+      # the item collector from even asking, so the phase stays Completed.
+      - "*.generators.external-secrets.io"
+    includedClusterScopedResources:
+      - tenants.gibson.zeroroot.ai
+    defaultVolumesToFsBackup: true
+    storageLocation: default
+    # Velero's garbage collector deletes a backup whose ttl expired, with the
+    # server's own credential. Retention is the bucket lifecycle rule
+    # (`backups/` expires at 180 days, CONTEXT.md § Backup cadence), so the
+    # ttl states the SAME horizon and the two mechanisms agree instead of
+    # racing: at 180 days the lifecycle rule has expired the objects and the
+    # GC removes the record that points at them. A shorter ttl would have
+    # Velero pruning backups the bucket still holds, which contradicts
+    # "retention is the bucket's job and nothing else".
+    ttl: {{ .Values.schedule.ttl | quote }}
+    hooks:
+      resources:
+        # One hook per Neo4j pod shape. The two label sets come from the two
+        # producers: the tenant operator stamps
+        # app.kubernetes.io/component=tenant-neo4j on every per-tenant pod
+        # (gibson operators/tenant/internal/dataplane/neo4j_networkpolicy.go),
+        # and the upstream neo4j chart stamps
+        # helm.neo4j.com/pod_category=neo4j-instance on the platform graph
+        # pod. Both run the container `neo4j` and both carry their auth as
+        # `neo4j/<password>`: the tenant pod in the env var NEO4J_AUTH, the
+        # platform pod in the file NEO4J_AUTH_PATH points at. The command
+        # reads whichever is present and checkpoints over bolt on localhost.
+        - name: tenant-neo4j-checkpoint
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: tenant-neo4j
+          pre:
+            - exec:
+                container: neo4j
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    A="${NEO4J_AUTH:-$(cat "$NEO4J_AUTH_PATH")}"
+                    out="$(cypher-shell -a bolt://127.0.0.1:7687 -u "${A%%/*}" -p "${A#*/}" "CALL db.checkpoint()" 2>&1)" && { echo "$out"; exit 0; }
+                    case "$out" in
+                      *"no procedure with the name"*)
+                        echo "community edition has no db.checkpoint (measured on neo4j:5.26.0-community, deploy#1735): the periodic checkpoint bounds replay, asserting the store answers instead"
+                        exec cypher-shell -a bolt://127.0.0.1:7687 -u "${A%%/*}" -p "${A#*/}" "CALL db.ping()"
+                        ;;
+                      *) echo "$out" >&2; exit 1 ;;
+                    esac
+                onError: Fail
+                timeout: {{ .Values.schedule.checkpointTimeout | quote }}
+        - name: platform-neo4j-checkpoint
+          labelSelector:
+            matchLabels:
+              helm.neo4j.com/pod_category: neo4j-instance
+          pre:
+            - exec:
+                container: neo4j
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    A="${NEO4J_AUTH:-$(cat "$NEO4J_AUTH_PATH")}"
+                    out="$(cypher-shell -a bolt://127.0.0.1:7687 -u "${A%%/*}" -p "${A#*/}" "CALL db.checkpoint()" 2>&1)" && { echo "$out"; exit 0; }
+                    case "$out" in
+                      *"no procedure with the name"*)
+                        echo "community edition has no db.checkpoint (measured on neo4j:5.26.0-community, deploy#1735): the periodic checkpoint bounds replay, asserting the store answers instead"
+                        exec cypher-shell -a bolt://127.0.0.1:7687 -u "${A%%/*}" -p "${A#*/}" "CALL db.ping()"
+                        ;;
+                      *) echo "$out" >&2; exit 1 ;;
+                    esac
+                onError: Fail
+                timeout: {{ .Values.schedule.checkpointTimeout | quote }}

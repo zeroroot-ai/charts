@@ -1,0 +1,26 @@
+{{- /*
+  dashboard is structural infrastructure (one-code-path /
+  deploy#188). The previous outer `.Values.dashboard.enabled`
+  gate has been deleted — the dashboard ConfigMap renders
+  unconditionally.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-dashboard-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboard
+data:
+  # Node.js Environment
+  NODE_ENV: "production"
+
+  # Next.js Configuration
+  NEXT_TELEMETRY_DISABLED: "1"
+
+  {{- if .Values.dashboard.extraConfig }}
+  {{- range $key, $value := .Values.dashboard.extraConfig }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  {{- end }}

@@ -1,0 +1,211 @@
+{{- /*
+The umbrella's admission-webhook readiness gate (deploy#1761).
+
+THE DEFECT THIS EXISTS TO PREVENT
+---------------------------------
+A `failurePolicy: Fail` webhook configuration starts refusing writes the
+instant the API server sees it, and keeps refusing until the pod behind it
+answers. The umbrella installs the operators AND the custom resources those
+operators admit, so on a fresh install there is a window in which the
+configuration exists and the endpoint does not. Anything applied in that
+window is refused:
+
+    Internal error occurred: failed calling webhook
+    "mscheduledbackup.cnpg.io": failed to call webhook: Post
+    "https://cnpg-webhook-service.gibson.svc:443/mutate-...-scheduledbackup"
+
+`make vanilla-fresh` hit that four times on 2026-09-01 (three SandboxClass,
+one ScheduledBackup). Until then the chart survived by accident: Helm sorts
+manifest kinds it does not know alphabetically, so `Certificate`, `Cluster`,
+`ClusterSecretStore`, `ExternalSecret` and `Issuer` all land before
+`MutatingWebhookConfiguration`, while `SandboxClass` and `ScheduledBackup`
+land after it. That is luck, not a contract, and it changes with a rename.
+
+WHY THE RESOURCES MOVE AND THE WEBHOOK CONFIGURATIONS DO NOT
+------------------------------------------------------------
+The other way round is impossible. CloudNativePG runs with
+`manageWebhookConfigurations: true`: at startup the operator PATCHES its two
+configurations by name to inject its own CA, and it exits when they are
+absent —
+
+    setup  unable to setup PKI infrastructure
+           error: mutatingwebhookconfigurations.admissionregistration.k8s.io
+                  "cnpg-mutating-webhook-configuration" not found
+
+— so deferring them crashloops the operator, the Postgres Cluster is never
+reconciled and the install hangs. Measured on kind, 2026-09-01, while
+building this gate. The configurations stay where they are; the resources
+that would be refused move behind the gate:
+
+    operators + webhook configurations + everything Helm applies before a
+    configuration can exist
+        -> gibson-webhook-gate, which proves every endpoint answers
+            -> the resources at risk
+
+WHICH RESOURCES THOSE ARE IS COMPUTED, NOT LISTED
+-------------------------------------------------
+Helm applies a release in kind order: the kinds in its own InstallOrder
+first, then every kind it does not know, alphabetically. Both webhook
+configuration kinds are unknown kinds, so a custom resource is refused
+exactly when its kind sorts at or after the configuration of a webhook that
+admits it. `scripts/check-webhook-ordering.py` derives that set from the
+render and Helm's sorter, and fails the build on a resource that needs the
+gate and does not carry it — or carries it and does not need it. Today the
+set is `SandboxClass` and `ScheduledBackup`; a rename moves the boundary and
+the guard moves with it.
+
+THE GATE PROVES THE ENDPOINT ANSWERS, NOT THAT A DEPLOYMENT IS AVAILABLE
+------------------------------------------------------------------------
+A Deployment reports Available as soon as its probes pass, which is earlier
+than "the admission path serves this URL". So the gate posts a real
+AdmissionReview to each webhook's own service, port and path, and accepts
+only an HTTP answer from that path. A connection refused, a TLS handshake
+that never completes, an empty Endpoints list, a 404 on the path and a 5xx
+are all "not serving yet".
+
+It is not a retry loop that hides a broken webhook. Every probe shares one
+deadline (`webhookGate.timeoutSeconds`). When the deadline passes, the gate
+prints every webhook that never answered, with its configuration name,
+service, path and last observed result, and exits non-zero — which fails
+`helm install` and fails the Argo sync. A webhook that never serves is never
+activated and never silently skipped.
+
+BOTH PATHS, ONE MECHANISM
+-------------------------
+Helm has no barrier inside its main phase, so the gate is a post-install
+hook at weight 10 and the resources at risk are post-install hooks at weight
+20. Argo orders hooks and ordinary resources on one axis, so the same
+objects carry sync-wave 10 and 20; the highest wave anything else in this
+chart uses is 0. One rule, written once for each delivery model, the way the
+umbrella's postgres-setup Jobs have been since deploy#1627.
+
+SCOPE. Every `failurePolicy: Fail` webhook the umbrella installs is probed.
+The SPIRE controller-manager webhooks are `failurePolicy: Ignore` by
+: they cannot refuse a write, so they cannot produce this defect and
+they are not probed. The guard pins that exception to the failure policy in
+the render, not to a name.
+*/ -}}
+{{- $gate := .Values.webhookGate | default dict -}}
+{{- $setecOn := true -}}
+{{- with (index .Values "gibson-workloads") -}}
+{{- with .setec -}}
+{{- $setecOn = .enabled -}}
+{{- end -}}
+{{- end -}}
+{{- $probes := list -}}
+{{- range $p := ($gate.probes | default list) -}}
+{{- if or (not $p.component) (and (eq $p.component "setec") $setecOn) -}}
+{{- $probes = append $probes $p -}}
+{{- end -}}
+{{- end -}}
+{{- if not $probes -}}
+{{- fail "webhookGate.probes is empty. Every failurePolicy: Fail admission webhook the umbrella installs must be probed before it is activated (deploy#1761); an empty list would activate them all unproved." -}}
+{{- end -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gibson-webhook-gate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: webhook-gate
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "10"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        # The gibson namespace is default-deny. This label is what
+        # templates/networkpolicy-bringup-jobs.yaml selects; without it the
+        # pod cannot even reach CoreDNS and every probe reads as a dead
+        # webhook (deploy#1631 taught this the hard way).
+        app.kubernetes.io/component: webhook-gate
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+      - name: gate
+        image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+        # busybox ash: no `set -o pipefail` (deploy#603-605). `set -e` only.
+        command:
+        - sh
+        - -ec
+        args:
+        - |
+          DEADLINE={{ $gate.timeoutSeconds | default 900 }}
+          INTERVAL={{ $gate.intervalSeconds | default 5 }}
+
+          # config|webhook|namespace|service|port|path, one per line.
+          cat >/tmp/probes <<'PROBES'
+          {{- range $p := $probes }}
+          {{ $p.config }}|{{ $p.webhook }}|{{ $p.namespace | default $.Release.Namespace }}|{{ $p.service }}|{{ $p.port | default 443 }}|{{ $p.path }}
+          {{- end }}
+          PROBES
+
+          # A syntactically valid AdmissionReview with no request. Every
+          # admission server answers it: controller-runtime replies 200 with
+          # an AdmissionResponse, cert-manager's server replies 400. Both
+          # prove the path is served. Anything else does not.
+          REVIEW='{"apiVersion":"admission.k8s.io/v1","kind":"AdmissionReview"}'
+
+          probe() {
+            # $1 url. Echoes the outcome, returns 0 only when the path answers.
+            code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 \
+                     -X POST -H 'Content-Type: application/json' \
+                     --data "$REVIEW" "$1" 2>/dev/null) || {
+              echo "no answer (connection or TLS failure)"
+              return 1
+            }
+            case "$code" in
+              200|400) echo "HTTP $code"; return 0 ;;
+              404)     echo "HTTP 404 (the service answers but does not serve this path)"; return 1 ;;
+              *)       echo "HTTP $code"; return 1 ;;
+            esac
+          }
+
+          pending=/tmp/pending
+          cp /tmp/probes "$pending"
+          : >/tmp/last
+          start=0
+          while [ "$start" -lt "$DEADLINE" ]; do
+            : >/tmp/next
+            while IFS='|' read -r cfg wh ns svc port path; do
+              [ -n "$cfg" ] || continue
+              url="https://${svc}.${ns}.svc:${port}${path}"
+              if result=$(probe "$url"); then
+                echo "[webhook-gate] ok      ${wh} (${cfg}) ${url} -> ${result}"
+              else
+                echo "${cfg}|${wh}|${ns}|${svc}|${port}|${path}" >>/tmp/next
+                echo "${cfg}|${wh}|${url}|${result}" >>/tmp/last
+              fi
+            done <"$pending"
+            mv /tmp/next "$pending"
+            [ -s "$pending" ] || break
+            echo "[webhook-gate] $(wc -l <"$pending") webhook(s) not serving yet; ${start}s of ${DEADLINE}s used"
+            sleep "$INTERVAL"
+            start=$((start + INTERVAL))
+          done
+
+          if [ -s "$pending" ]; then
+            echo ""
+            echo "ERROR: the following admission webhooks never answered within ${DEADLINE}s."
+            echo "       The install stops here rather than applying resources these would"
+            echo "       refuse. Fix the operator behind each one, then rerun the install."
+            while IFS='|' read -r cfg wh ns svc port path; do
+              [ -n "$cfg" ] || continue
+              last=$(grep "^${cfg}|${wh}|" /tmp/last | tail -n1 | cut -d'|' -f4)
+              echo "  - ${wh}"
+              echo "      configuration: ${cfg}"
+              echo "      endpoint:      https://${svc}.${ns}.svc:${port}${path}"
+              echo "      last result:   ${last}"
+            done <"$pending"
+            exit 1
+          fi
+
+          echo "WEBHOOK_GATE_OK $(wc -l </tmp/probes) endpoint(s) answered"

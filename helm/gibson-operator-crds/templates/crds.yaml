@@ -1,0 +1,12 @@
+{{- /*
+Every vendored CRD, verbatim. See Chart.yaml for why these are files under
+files/crds/ (Helm would template the `{{ }}` examples in their descriptions)
+and why this is a subchart of gibson-crds (the 1 MiB release-record cap).
+Each CRD already carries helm.sh/resource-policy: keep, stamped by
+scripts/vendor-operator-crds.py, like every other CRD gibson-crds ships.
+*/}}
+{{- range $path, $_ := .Files.Glob "files/crds/*.yaml" }}
+---
+# Source file: {{ $path }}
+{{ $.Files.Get $path }}
+{{- end }}

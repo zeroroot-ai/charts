@@ -1,0 +1,194 @@
+{{/*
+helm-test pod: spire-attestation
+
+Asserts that SPIRE agent is healthy AND issues SVIDs to workloads.
+
+The pod verifies SVID issuance by:
+
+  1. Matching the daemon's ClusterSPIFFEID so the agent issues a real
+     daemon SVID to this pod.
+
+  2. Calling the SPIRE Workload API via the agent UDS socket and verifying
+     the returned SVID has a SPIFFE ID under spiffe://<trust-domain>/.
+
+Implementation detail:
+
+  - The official spire-agent image (ghcr.io/spiffe/spire-agent:1.10.4)
+    ships the `spire-agent` CLI which has a `api fetch x509` command that
+    speaks the Workload API to a local socket and prints the SVID details.
+
+  - We reach the socket the way every real workload in this chart does:
+    the csi.spiffe.io driver, published at /run/spire/sockets. The driver
+    republishes the agent's socket directory verbatim, so all three names
+    it carries resolve to the same endpoint:
+
+        api.sock -> spire-agent.sock
+        socket   -> spire-agent.sock
+        spire-agent.sock            (the socket itself)
+
+    `agent.workloadApiSocket` names api.sock, which is one of those
+    compatibility symlinks and is correct. deploy#1578 fixed the VOLUME,
+    not the filename — see the volumes block below for what was wrong.
+
+WHAT MAKES THE MATCH
+
+  - This pod wears `app.kubernetes.io/component: helm-test` and runs as
+    `gibson.helmTestServiceAccountName`. Together those satisfy the
+    `gibson-platform-helm-test` ClusterSPIFFEID: its podSelector matches the
+    label, and the SPIRE agent re-derives namespace and ServiceAccount from
+    kubelet at attestation time and checks them against the CR's literal
+    `k8s:ns:` / `k8s:sa:` workload selectors. Change either and the test
+    fails with `unable to fetch SVID` — that is the selector working.
+
+  - The SVID it receives is `spiffe://<td>/platform/helm-test`, which
+    appears in no `spiffe.callbackPeerSVIDs` and no
+    `spiffe.allowedPeerIDs`. It authorises nothing. That is deliberate:
+    the test proves the issuance path works, and a probe should not need
+    privilege to do that.
+
+RESOLVED — this pod no longer holds a platform identity.
+
+  It used to wear the daemon's component label and run as the daemon's
+  ServiceAccount, so it held a genuine, full daemon SVID for as long as it
+  ran. Under the platform-identity ValidatingAdmissionPolicy in Deny that
+  would have been rejected as a bare Pod, and the only way to pass would
+  have been to allow-list the installer identity — which partly reopens the
+  hole, because anyone who can run `helm install`/`helm test` against the
+  release could then mint a daemon identity. Giving the test its own
+  identity was the clean resolution this comment block used to call for,
+  and it is what is done here. Do not revert it to the daemon's SA to make
+  a deploy go green.
+
+Provenance: deploy#355 (slice 5.10 of production-readiness epic).
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "gibson.fullname" . }}-test-spire-attestation"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson-workloads.tests.labels" . | nindent 4 }}
+    # Matches the podSelector of the `gibson-platform-helm-test`
+    # ClusterSPIFFEID. This label selects the CR; the serviceAccountName
+    # below then has to satisfy its literal `k8s:sa:` workload selector.
+    app.kubernetes.io/component: helm-test
+  annotations:
+    {{- include "gibson-workloads.tests.annotations" . | nindent 4 }}
+    "helm.sh/hook-weight": "3"
+spec:
+  restartPolicy: Never
+  # Must equal the helm-test CR's literal `k8s:sa:` workload selector, which
+  # the SPIRE agent checks against kubelet at attestation time. Changing this
+  # breaks the test — that is the point of the selector.
+  serviceAccountName: {{ include "gibson.helmTestServiceAccountName" . }}
+  containers:
+    - name: svid-fetch
+      image: ghcr.io/spiffe/spire-agent:1.10.4
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          ERR='{{ include "gibson-workloads.tests.errorPrefix" . }}'
+          SOCK='{{ .Values.spire.agent.workloadApiSocket | default "/run/spire/sockets/api.sock" }}'
+          EXPECT_TD='{{ .Values.spire.server.trustDomain | default "zeroroot.ai" }}'
+
+          if [ ! -S "$SOCK" ]; then
+            echo "$ERR spire-attestation: workload-api socket missing at $SOCK"
+            echo "[spire-attestation] SPIRE agent has not started, or the socket is mounted at a different path"
+            ls -la "$(dirname "$SOCK")" 2>&1 || true
+            exit 1
+          fi
+          echo "[spire-attestation] workload-api socket present: $SOCK"
+
+          # `spire-agent api fetch x509` blocks until an SVID is available or
+          # the deadline expires. -timeout caps total wall-clock.
+          if ! spire-agent api fetch x509 -socketPath "$SOCK" -timeout 30s -write /tmp 2>/tmp/svid.err ; then
+            echo "$ERR spire-attestation: no SVID issued within 30s"
+            cat /tmp/svid.err >&2 || true
+            echo "[spire-attestation] check ClusterSPIFFEID selector matches this pod's labels:"
+            echo "[spire-attestation]   - app.kubernetes.io/component=helm-test"
+            echo "[spire-attestation]   - app.kubernetes.io/name=$(echo '{{ include "gibson.name" . }}')"
+            echo "[spire-attestation]   - SA: $(echo '{{ include "gibson.helmTestServiceAccountName" . }}')"
+            exit 1
+          fi
+
+          # `api fetch x509 -write /tmp` writes bundle.0.pem + svid.0.pem + svid.0.key.
+          if [ ! -s /tmp/svid.0.pem ]; then
+            echo "$ERR spire-attestation: SVID PEM not written"
+            exit 1
+          fi
+
+          # Verify the SAN URI is in the expected trust domain.
+          # openssl is in the spire-agent image. Parse the SAN block.
+          # The SPIFFE ID embeds as a URI SAN: spiffe://<td>/...
+          san_uri=$(openssl x509 -in /tmp/svid.0.pem -noout -ext subjectAltName 2>/dev/null \
+            | grep -oE 'URI:spiffe://[^,[:space:]]+' \
+            | head -1 \
+            | cut -d: -f2-)
+
+          if [ -z "$san_uri" ]; then
+            echo "$ERR spire-attestation: SVID has no SPIFFE-URI SAN"
+            openssl x509 -in /tmp/svid.0.pem -noout -text 2>&1 | head -50
+            exit 1
+          fi
+
+          # Strip leading "spiffe:" (cut -d: gave us the rest after URI:).
+          spiffe_id=$(printf '%s' "$san_uri" | sed 's|^//|spiffe://|')
+
+          echo "[spire-attestation] SVID issued, SPIFFE ID: $spiffe_id"
+
+          # Trust-domain prefix check.
+          case "$spiffe_id" in
+            "spiffe://${EXPECT_TD}/"*)
+              echo "[spire-attestation] OK trust domain matches: ${EXPECT_TD}"
+              ;;
+            *)
+              echo "$ERR spire-attestation: SPIFFE ID '$spiffe_id' is NOT under expected trust domain 'spiffe://${EXPECT_TD}/'"
+              exit 1
+              ;;
+          esac
+
+          echo "[spire-attestation] PASS"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+        - name: spire-agent-socket
+          mountPath: /run/spire/sockets
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    # The SPIRE Workload API socket, via the csi.spiffe.io driver — the same
+    # volume, by the same mechanism, that the daemon, ext-authz, the dashboard,
+    # Envoy and both operators use. This is what makes the test's attestation
+    # path identical to a real workload's.
+    #
+    # deploy#1578: this was a hostPath at /run/spire/sockets, which is not a
+    # path on the node — the agent's hostPath is /run/spire/agent-sockets, and
+    # /run/spire/sockets is only the in-pod mountPath the CSI driver publishes
+    # to (a tmpfs, per /proc/mounts inside a live consumer). `DirectoryOrCreate`
+    # therefore created an EMPTY directory on the node and the `[ ! -S "$SOCK" ]`
+    # gate below could never pass, in any environment.
+    - name: spire-agent-socket
+      csi:
+        driver: csi.spiffe.io
+        readOnly: true
+    - name: tmp
+      emptyDir: {}
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}

@@ -1,0 +1,1079 @@
+{{- /*
+  dashboard is structural infrastructure (one-code-path /
+  deploy#188). The previous outer `.Values.dashboard.enabled`
+  gate has been deleted — the dashboard is the customer-facing
+  surface (sign-up, sign-in, agent / tool / plugin management,
+  billing) and the platform has no other way for an end-user to
+  reach the daemon.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboard
+spec:
+  replicas: {{ .Values.dashboard.replicas }}
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dashboard
+  template:
+    metadata:
+      labels:
+        {{- include "gibson.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: dashboard
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/dashboard/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/dashboard/secret.yaml") . | sha256sum }}
+        # Pod-roll-on-Secret-change is delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). The prior pattern
+        # (a checksum annotation computing sha256sum over a lookup-loaded
+        # Secret) was broken under Argo's offline `helm template` render —
+        # lookup returned nil, the checksum was always the same, the
+        # annotation never changed, and pods never rolled when the Secret
+        # rotated. Reloader runs cluster-wide and watches the explicitly-
+        # named Secrets below; when any of them changes, Reloader triggers
+        # a rolling restart of this Deployment.
+        {{- /*
+          gibson-stripe-credentials is in this list because the dashboard reads
+          STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY / STRIPE_WEBHOOK_SECRET
+          from it into env, captured at pod start. Rotating the Secret without
+          a roll leaves the pod verifying against the old signing secret, and
+          the only symptom is a rejected webhook — so the roll has to be
+          declarative here rather than a kubectl restart at rotation time
+          (deploy#1144).
+        */}}
+        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-zitadel-signup-bot-pat,gibson-workloads-dashboard-secrets,gibson-workloads-redis-stack,{{ (((.Values.dashboard.billing).stripeSecretKeySecretRef)) | default "gibson-stripe-credentials" }}"
+    spec:
+      {{- include "gibson.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ .Values.dashboard.serviceAccount.name | default "gibson-dashboard" }}
+      {{- /* Spec 2 R18: priorityClassName via shared helper. */}}
+      {{- $pcn := include "gibson.priorityClassName" (dict "component" "dashboard") }}
+      {{- if $pcn }}
+      priorityClassName: {{ $pcn }}
+      {{- end }}
+      {{- /* Spec 3 §3 R8 — HA topology spread + anti-affinity. */}}
+      {{- include "gibson.spread" (dict "ctx" . "component" "dashboard") | nindent 6 }}
+      {{- /*
+        hostAliases — make the dashboard pod resolve the same hostnames the
+        browser uses (auth/app/api .<global.domain>) to Envoy's pinned
+        ClusterIP. This lets Auth.js's server-side OIDC discovery + token
+        exchange call exactly the URL the browser sees, so Zitadel's issuer
+        claim and discovery-doc URLs match what Auth.js validates against.
+        Without this, a separate "internal" issuer URL is needed and breaks
+        OIDC `iss` validation.
+
+        gibson-common library helper (deploy#179) emits the block — single
+        source of truth shared with daemon statefulset, tenant-operator
+        deployment, platform-operator deployment.
+      */}}
+      {{- include "gibson.hostAliases" . | nindent 6 }}
+      {{- /*
+        Per epic one-code-path (deploy#186), slices deploy#196 + #201 +
+        #203: the `.Values.zitadel.enabled` and `.Values.spire.enabled`
+        gates have been deleted (Zitadel + SPIRE are structurally
+        required), and wait-for-db-secrets is unconditional (the
+        dashboard always consumes NEO4J_PASSWORD). initContainers always
+        renders — wait-for-spire-socket, wait-for-zitadel-client +
+        secret, resolve-sa-identity-map are mandatory. Per-feature waits
+        (e.g. waitForGibson) remain gated on their feature flags. The
+        dashboard pod must not boot before the bootstrap Job has
+        populated gibson-dashboard-oidc.
+      */}}
+      initContainers:
+        {{- /* deploy#201: SPIRE is REQUIRED infrastructure — block pod start
+               until the agent socket is reachable on the node. Renders
+               unconditionally. NOTE: on THIS pod the gate currently guards a
+               capability no container gets — the `dashboard` container mounts
+               neither the socket nor SPIFFE_ENDPOINT_SOCKET, unlike the daemon,
+               ext-authz and both operators. Tracked as deploy#1532; not
+               resolved here. */}}
+        {{- include "gibson.waitForSpireSocket" . | nindent 8 }}
+        {{- if .Values.dashboard.initContainers.waitForGibson }}
+        - name: wait-for-gibson
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          command:
+            - sh
+            - -c
+            - |
+              # Dashboard reaches the daemon through Envoy (NetworkPolicy
+              # blocks direct dashboard→daemon traffic). Wait for Envoy's
+              # listener to be reachable instead of poking gibson:50051,
+              # which would always fail by design.
+              # Envoy is required infrastructure — deploy#200.
+              echo "Waiting for Envoy gateway (timeout: 300s)..."
+              SECONDS=0
+              until nc -z gibson-envoy {{ .Values.envoy.service.httpsPort | default 443 }}; do
+                if [ $SECONDS -ge 300 ]; then
+                  echo "ERROR: Envoy not ready after 300s, giving up"
+                  exit 1
+                fi
+                echo "Envoy not ready, waiting... (${SECONDS}s elapsed)"
+                sleep 2
+              done
+              echo "Envoy is ready!"
+        {{- end }}
+        # Block dashboard startup until the post-install zitadel-bootstrap
+        # Job has written the OIDC client_id AND client_secret into
+        # gibson-dashboard-oidc. Both keys are env-bound via
+        # secretKeyRef (resolved ONCE at pod start) — without this gate,
+        # on a fresh `helm install` the pod boots before the bootstrap
+        # Job runs, captures empty values, and Auth.js ships
+        # `?client_id=` empty on the OIDC authorize URL. The
+        # checksum/zitadel-client annotation above only protects re-deploys.
+        #
+        # The Secret volume is mounted with optional: true so the pod can
+        # schedule before the Secret exists; kubelet propagates the
+        # populated keys to the mount once the bootstrap Job creates them.
+        #
+        # one-code-path #203: previously waited only on client_id;
+        # extended to wait on client_secret as well, since the env entry
+        # for ZITADEL_CLIENT_SECRET was flipped from `optional: true` to
+        # required.
+        - name: wait-for-zitadel-client
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Zitadel OIDC client_id + client_secret (timeout: 600s)..."
+              SECONDS=0
+              until [ -s /var/run/zitadel-client/client_id ] && [ -s /var/run/zitadel-client/client_secret ]; do
+                if [ $SECONDS -ge 600 ]; then
+                  echo "ERROR: gibson-dashboard-oidc.client_id / client_secret not populated after 600s — bootstrap Job failed?"
+                  exit 1
+                fi
+                echo "client_id / client_secret not yet populated by zitadel-bootstrap Job, waiting... (${SECONDS}s elapsed)"
+                sleep 2
+              done
+              echo "Zitadel OIDC client_id + client_secret are populated"
+          volumeMounts:
+            - name: zitadel-client
+              mountPath: /var/run/zitadel-client
+              readOnly: true
+        # one-code-path #203: wait-for-signup-bot-pat blocks pod start
+        # until the gibson-zitadel-signup-bot-pat Secret has been minted
+        # by the post-install bootstrap Job + materialised via ESO. The
+        # ZITADEL_SIGNUP_BOT_PAT env entry was flipped from
+        # `optional: true` to required.
+        - name: wait-for-signup-bot-pat
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          command: ['/bin/bash', '-c']
+          args:
+            - |
+              set -eu
+              ns={{ .Release.Namespace | quote }}
+              echo "[wait-for-signup-bot-pat] waiting for Secret ${ns}/gibson-zitadel-signup-bot-pat key=pat..."
+              for i in $(seq 1 30); do
+                if kubectl get secret -n "${ns}" gibson-zitadel-signup-bot-pat \
+                    -o jsonpath='{.data.pat}' 2>/dev/null \
+                    | base64 -d 2>/dev/null | grep -q .; then
+                  echo "[wait-for-signup-bot-pat] ok"
+                  exit 0
+                fi
+                sleep 2
+              done
+              echo "[wait-for-signup-bot-pat] timed out after 60s -- the gibson-zitadel-signup-bot-pat Secret was not materialised. Check: kubectl get externalsecret,secret -n ${ns} | grep signup-bot" >&2
+              exit 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+        # one-code-path #203: wait-for-db-secrets blocks pod start until
+        # the Secret backing NEO4J_PASSWORD has been materialised. The
+        # NEO4J_PASSWORD env entry was flipped from `optional: true` to
+        # required.
+        - name: wait-for-db-secrets
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          command: ['/bin/bash', '-c']
+          args:
+            - |
+              set -eu
+              name={{ .Values.secrets.databases.existingSecret | default (include "gibson.dbSecrets.name" .) | quote }}
+              ns={{ .Release.Namespace | quote }}
+              echo "[wait-for-db-secrets] waiting for Secret ${ns}/${name} key=NEO4J_PASSWORD..."
+              for i in $(seq 1 30); do
+                if kubectl get secret -n "${ns}" "${name}" \
+                    -o jsonpath='{.data.NEO4J_PASSWORD}' 2>/dev/null \
+                    | base64 -d 2>/dev/null | grep -q .; then
+                  echo "[wait-for-db-secrets] ok"
+                  exit 0
+                fi
+                sleep 2
+              done
+              echo "[wait-for-db-secrets] timed out after 60s -- the dashboard DB-secrets Secret was not materialised. Check: kubectl get externalsecret,secret -n ${ns}" >&2
+              exit 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+        # one-code-path #203: wait-for-stripe-secrets blocks pod start
+        # until the Stripe Secrets (secret key + publishable key + webhook)
+        # are materialised. The STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY /
+        # STRIPE_WEBHOOK_SECRET env entries are required; an empty
+        # publishable key silently breaks the card-first Payment Element
+        # (dashboard#783), so we fail the pod at boot instead. Gated on the same
+        # value flags as the env entries: if you wired secretRefs in
+        # values, the Secrets MUST exist by pod-start.
+        {{- with .Values.dashboard.billing }}
+        {{- if or .stripeSecretKeySecretRef .stripeWebhookSecretSecretRef }}
+        - name: wait-for-stripe-secrets
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          command: ['/bin/bash', '-c']
+          args:
+            - |
+              set -eu
+              ns={{ $.Release.Namespace | quote }}
+              {{- if .stripeSecretKeySecretRef }}
+              secret_name={{ .stripeSecretKeySecretRef | quote }}
+              echo "[wait-for-stripe-secrets] waiting for Secret ${ns}/${secret_name} key=STRIPE_SECRET_KEY..."
+              for i in $(seq 1 30); do
+                if kubectl get secret -n "${ns}" "${secret_name}" \
+                    -o jsonpath='{.data.STRIPE_SECRET_KEY}' 2>/dev/null \
+                    | base64 -d 2>/dev/null | grep -q .; then
+                  echo "[wait-for-stripe-secrets] STRIPE_SECRET_KEY ok"
+                  break
+                fi
+                if [ $i -eq 30 ]; then
+                  echo "[wait-for-stripe-secrets] timed out after 60s waiting for ${secret_name}.STRIPE_SECRET_KEY. Create with: kubectl -n ${ns} create secret generic ${secret_name} --from-literal=STRIPE_SECRET_KEY=sk_test_..." >&2
+                  exit 1
+                fi
+                sleep 2
+              done
+              echo "[wait-for-stripe-secrets] waiting for Secret ${ns}/${secret_name} key=STRIPE_PUBLISHABLE_KEY..."
+              for i in $(seq 1 30); do
+                if kubectl get secret -n "${ns}" "${secret_name}" \
+                    -o jsonpath='{.data.STRIPE_PUBLISHABLE_KEY}' 2>/dev/null \
+                    | base64 -d 2>/dev/null | grep -q .; then
+                  echo "[wait-for-stripe-secrets] STRIPE_PUBLISHABLE_KEY ok"
+                  break
+                fi
+                if [ $i -eq 30 ]; then
+                  echo "[wait-for-stripe-secrets] timed out after 60s waiting for ${secret_name}.STRIPE_PUBLISHABLE_KEY (powers the card-first signup Payment Element — dashboard#783)" >&2
+                  exit 1
+                fi
+                sleep 2
+              done
+              {{- end }}
+              {{- if .stripeWebhookSecretSecretRef }}
+              webhook_name={{ .stripeWebhookSecretSecretRef | quote }}
+              echo "[wait-for-stripe-secrets] waiting for Secret ${ns}/${webhook_name} key=STRIPE_WEBHOOK_SECRET..."
+              for i in $(seq 1 30); do
+                if kubectl get secret -n "${ns}" "${webhook_name}" \
+                    -o jsonpath='{.data.STRIPE_WEBHOOK_SECRET}' 2>/dev/null \
+                    | base64 -d 2>/dev/null | grep -q .; then
+                  echo "[wait-for-stripe-secrets] STRIPE_WEBHOOK_SECRET ok"
+                  exit 0
+                fi
+                if [ $i -eq 30 ]; then
+                  echo "[wait-for-stripe-secrets] timed out after 60s waiting for ${webhook_name}.STRIPE_WEBHOOK_SECRET" >&2
+                  exit 1
+                fi
+                sleep 2
+              done
+              {{- end }}
+              exit 0
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+        {{- end }}
+        {{- end }}
+        # Spec: canonical-service-identity Req 5 — resolve the readable SA
+        # names in serviceAccounts.required against the gibson-sa-identity-map
+        # ConfigMap (populated by the post-install Zitadel Job) into:
+        #   /shared/allowed-service-subjects   — comma-joined NUMERIC subs
+        #                                        consumed by the main container
+        #                                        as ALLOWED_SERVICE_SUBJECTS
+        #   /shared/sa-identity-map.json       — full readable→numeric map
+        #                                        consumed by identity-resolver
+        #                                        for log enrichment
+        # Fail-fast on any "<unset>" value so the kubelet retries until the
+        # post-install Job has populated the map.
+        - name: resolve-sa-identity-map
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              REQUIRED='{{- range $i, $sa := (default (list) ((.Values.serviceAccounts | default dict).required)) }}{{- if $i }} {{ end }}{{ $sa }}{{- end }}'
+              # jq is not actually USED below — the loop just cats files
+              # and concatenates strings. Skip the apk-add entirely; kind
+              # has no outbound network to alpine repos.
+              echo "Resolving SA identity map (required: ${REQUIRED})..."
+              if [ -z "$REQUIRED" ]; then
+                : > /shared/allowed-service-subjects
+                printf '{}' > /shared/sa-identity-map.json
+                echo "Resolved: (no SAs required)"
+                exit 0
+              fi
+              SECONDS_=0
+              while :; do
+                ALL_SET="true"
+                JSON="{"
+                FIRST=true
+                OUT=""
+                for sa in $REQUIRED; do
+                  if [ -r "/var/run/sa-identity-map/${sa}" ]; then
+                    val=$(cat "/var/run/sa-identity-map/${sa}")
+                  else
+                    val=""
+                  fi
+                  if [ -z "$val" ] || [ "$val" = "<unset>" ]; then
+                    ALL_SET="false"
+                    break
+                  fi
+                  if [ "$FIRST" = "true" ]; then
+                    OUT="$val"; FIRST=false
+                    JSON="${JSON}\"${sa}\":\"${val}\""
+                  else
+                    OUT="${OUT},${val}"
+                    JSON="${JSON},\"${sa}\":\"${val}\""
+                  fi
+                done
+                if [ "$ALL_SET" = "true" ]; then
+                  JSON="${JSON}}"
+                  printf '%s' "$OUT" > /shared/allowed-service-subjects
+                  printf '%s' "$JSON" > /shared/sa-identity-map.json
+                  echo "Resolved: $OUT"
+                  exit 0
+                fi
+                if [ $SECONDS_ -ge 600 ]; then
+                  echo "ERROR: gibson-sa-identity-map not fully populated after 600s — post-install Zitadel Job has not completed."
+                  exit 1
+                fi
+                echo "sa-identity-map not yet populated for $sa, waiting..."
+                SECONDS_=$((SECONDS_+4))
+                sleep 4
+              done
+          volumeMounts:
+            - name: sa-identity-map
+              mountPath: /var/run/sa-identity-map
+              readOnly: true
+            - name: shared-identity
+              mountPath: /shared
+      containers:
+        - name: dashboard
+          image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.dashboard.image.repository "tag" .Values.dashboard.image.tag "digest" .Values.dashboard.image.digest "appVersion" .Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ .Values.dashboard.image.pullPolicy | default "IfNotPresent" }}
+          # Spec: canonical-service-identity Req 5 — the resolve-sa-identity-map
+          # init container writes the comma-joined numeric subs to
+          # /shared/allowed-service-subjects. Wrap the image's default CMD
+          # (node server.js) to source that file into ALLOWED_SERVICE_SUBJECTS
+          # before exec — keeps verifyZitadelBearer's env-var contract.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              if [ -s /shared/allowed-service-subjects ]; then
+                ALLOWED_SERVICE_SUBJECTS="$(cat /shared/allowed-service-subjects)"
+                export ALLOWED_SERVICE_SUBJECTS
+                echo "[startup] ALLOWED_SERVICE_SUBJECTS resolved from sa-identity-map"
+              elif [ -f /shared/allowed-service-subjects ]; then
+                # File exists but empty — the resolve-sa-identity-map init
+                # container short-circuited because serviceAccounts.required
+                # is empty (kind dev). Continue with no allowed subjects.
+                ALLOWED_SERVICE_SUBJECTS=""
+                export ALLOWED_SERVICE_SUBJECTS
+                echo "[startup] ALLOWED_SERVICE_SUBJECTS empty (no service accounts required)"
+              else
+                echo "[startup] FATAL: /shared/allowed-service-subjects missing or empty — resolve-sa-identity-map init container did not run" >&2
+                exit 1
+              fi
+              exec node server.js
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            # Gibson API Configuration — both vars resolve to the same unified
+            # URL. GIBSON_API_URL is retained because next.config.ts:58 still
+            # reads it explicitly for its dev-proxy rewrite destination.
+            - name: GIBSON_API_URL
+              value: {{ include "gibson.dashboard.daemonURL" . | quote }}
+            - name: GIBSON_DAEMON_URL
+              value: {{ include "gibson.dashboard.daemonURL" . | quote }}
+            # Admin RPCs from the dashboard go through Envoy's api.<domain>
+            # edge — same URL any external SDK caller would hit. Envoy
+            # terminates TLS, validates the SPIFFE JWT-SVID the dashboard
+            # mints, and forwards to the daemon. Spec: dashboard-admin-via-envoy.
+            - name: ADMIN_ENVOY_BASE_URL
+              value: {{ .Values.dashboard.adminEnvoyBaseUrl | default (printf "https://api.%s:%v" (.Values.global.domain | default "zeroroot.ai") (.Values.envoy.service.httpsPort | default 443)) | quote }}
+            # Spec in-cluster-mtls-restoration Phase 4 (Track B) backout flag.
+            # When "true" (default): gibson-client.ts routes ALL daemon RPCs
+            # through Envoy via JWT-SVID, mirroring gibson-admin-client.ts.
+            # When "false": gibson-client.ts falls back to the Track A direct
+            # mTLS path (X.509 SVID from /spire/svids). Retained for 30-day
+            # soak; removed by Phase 9. See values.yaml dashboard.useEnvoyForDaemon.
+            - name: USE_ENVOY_FOR_DAEMON
+              # Use ternary so explicit false is respected (Helm `default` treats
+              # falsy values as missing). Boolean-coerced via "%v" then quoted.
+              value: {{ ternary "true" "false" (hasKey .Values.dashboard "useEnvoyForDaemon" | ternary .Values.dashboard.useEnvoyForDaemon true) | quote }}
+            # Spec dashboard-fga-user-identity (R8) — user-token forwarding
+            # backout flag. When "true" (default): gibson-client.ts forwards
+            # the user's Zitadel access token to Envoy for per-user FGA. When
+            # "false": gibson-client.ts falls back to a SPIFFE workload
+            # JWT-SVID — degraded mode, per-user FGA disabled, audit
+            # attribution wrong. Retained for the 30-day soak hot-revert;
+            # Phase 9 deletes both the flag and the fallback branch.
+            - name: USE_USER_TOKEN_FORWARDING
+              value: {{ ternary "true" "false" (hasKey .Values.dashboard "userTokenForwarding" | ternary .Values.dashboard.userTokenForwarding true) | quote }}
+            # Audience claim written into the JWT-SVID and expected by
+            # Envoy's `spiffe` provider in envoy.yaml. Keep in sync with
+            # both sides; the chart default handles it.
+            - name: GIBSON_DAEMON_SPIFFE_AUDIENCE
+              value: {{ printf "spiffe://%s/platform/daemon" (.Values.spire.server.trustDomain | default "zeroroot.ai") | quote }}
+            # SPIFFE Workload API socket (deploy#1532). The dashboard IS a
+            # SPIFFE consumer: src/lib/gibson-client/transport.ts calls
+            # spiffeNodeOptions() on every outbound admin RPC to Envoy and
+            # lazy-loads src/lib/spiffe-mtls/svid.ts. Until this env var and
+            # the matching mount below existed, isSpiffeAvailable() returned
+            # false on every call and the transport silently fell back to
+            # plain HTTPS behind a single console.warn — the Pod paid the
+            # wait-for-spire-socket startup gate for a capability it never got.
+            #
+            # The mounted directory carries three equivalent names — the
+            # agent's real socket plus two compatibility symlinks:
+            #   api.sock -> spire-agent.sock
+            #   socket   -> spire-agent.sock
+            # so this value, the peers' /run/spire/sockets/api.sock, and the
+            # daemon ConfigMap's workload_api_socket all resolve to the same
+            # endpoint. deploy#1562 claimed the api.sock spelling was broken;
+            # that was WRONG (closed as invalid — the symlink is right there
+            # in the mount, and the agents have signed thousands of SVIDs for
+            # every platform workload). Nothing here needs to match a peer.
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: "unix:///run/spire/sockets/spire-agent.sock"
+            # Auth.js (next-auth v5) — spec zitadel-envoy-gateway-migration
+            # AUTH_URL is the externally-reachable URL of the dashboard so
+            # callbackUrl is built correctly (default 0.0.0.0:3000 from the
+            # in-pod listen address breaks browser-side redirects).
+            - name: AUTH_URL
+              value: {{ .Values.dashboard.authUrl | default (include "gibson.externalOrigin" .) | quote }}
+            # Marketing host origin (deploy#630 S11, deploy#1061 / dashboard#920).
+            # The dashboard middleware host-split serves marketing on www.<domain>
+            # and the product on app.<domain> (AUTH_URL).
+            #
+            # Deployment profile contract (/ deploy#1061):
+            #   SaaS: dashboard.wwwUrl is explicitly set to the marketing origin
+            #         (e.g. "https://www.zeroroot.ai"). WWW_URL is emitted; the
+            #         middleware redirects marketing paths off-cluster.
+            #   Self-hosted: dashboard.wwwUrl is left empty (the default "").
+            #         WWW_URL is NOT emitted; the dashboard handles absence
+            #         gracefully — no redirect, no dead links to a non-existent
+            #         marketing site (dashboard#918 / dashboard#920).
+            #
+            # Never use the config-derived gibson.wwwOrigin as a self-hosted
+            # fallback: that would set WWW_URL to www.<self-hosted-domain> which
+            # is unreachable and breaks the coherence guard (signup-seam.bats).
+            {{- if .Values.dashboard.wwwUrl }}
+            - name: WWW_URL
+              value: {{ .Values.dashboard.wwwUrl | quote }}
+            {{- end }}
+            # Signup seam gate (/ deploy#1055, dashboard#917).
+            # SIGNUP_SELF_SERVE present → /signup page is accessible.
+            # Absent → /signup redirects to /login (closed front door).
+            # Default: true (matches gibson.signupSelfServe — both must agree).
+            # Read server-side only; not exposed to the browser.
+            {{- /* deploy#1220: `| default true` swallowed an explicit
+                   `selfServe: false`, so a self-hosted install could not
+                   close the self-serve front door. */}}
+            {{- if ne (include "gibson.trueUnlessSet" ((.Values.dashboard.signup).selfServe)) "false" }}
+            - name: SIGNUP_SELF_SERVE
+              value: "true"
+            {{- end }}
+            # Docs URL — points to the in-cluster docs-svc when enabled (core
+            # optional-by-toggle, deploy#1034 /). When docs.enabled=false
+            # (no in-cluster docs-svc), falls back to publicFallbackUrl so the
+            # dashboard can still link operators to the canonical public docs.
+            {{- $docsEnabled := ne ((.Values.docs).enabled | toString) "false" }}
+            - name: DOCS_URL
+              {{- if $docsEnabled }}
+              value: {{ include "gibson.docsOrigin" . | quote }}
+              {{- else }}
+              value: {{ (.Values.docs).publicFallbackUrl | default "https://docs.zeroroot.ai" | quote }}
+              {{- end }}
+            # RP-initiated logout sends this exact URI to Zitadel's
+            # /oidc/v1/end_session as post_logout_redirect_uri. The
+            # dashboard does NOT synthesize the URI from request origin
+            # (which appended a trailing slash and silently drifted from
+            # the Zitadel registration). The chart projects the first
+            # entry of dashboard.auth.postLogoutRedirectURIs verbatim;
+            # the same list value MUST be registered on the
+            # gibson-dashboard OIDC client via the gibson-operators
+            # chart for Zitadel to accept the logout request.
+            {{- with (first (.Values.dashboard.auth.postLogoutRedirectURIs | default (list (include "gibson.externalOrigin" .)))) }}
+            - name: POST_LOGOUT_REDIRECT_URI
+              value: {{ . | quote }}
+            {{- end }}
+            - name: AUTH_TRUST_HOST
+              value: "true"
+            - name: AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.dashboardSecrets.name" . }}
+                  key: auth-secret
+            # Stable encryption key for Next.js Server Action IDs — see
+            # dashboard/secret.yaml + next.config.ts. Without this, every
+            # dashboard rebuild rotates action IDs and any browser tab that
+            # was loaded BEFORE the rebuild fails its next form submit with
+            # "Failed to find Server Action". Mounted from the dashboard
+            # secret so it survives upgrades.
+            - name: NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.dashboardSecrets.name" . }}
+                  key: next-server-actions-encryption-key
+            # Per epic one-code-path (deploy#186), slice deploy#196:
+            # dashboard.zitadel.issuer is required (chart render fails if
+            # empty). The previous `| default "http://localhost:30080"`
+            # silent fallback has been deleted — it was a workstation-only
+            # URL that production overlays could inherit by accident.
+            - name: ZITADEL_ISSUER
+              value: {{ ((.Values.dashboard.zitadel).issuer) | default (include "gibson.oidcIssuer" .) | quote }}
+            # Same URL the browser uses — hostAliases (above) makes
+            # app.<domain> resolve to Envoy's pinned ClusterIP from inside
+            # the pod, so server-side OIDC discovery + token exchange hit
+            # the same authority the browser does. No issuer mismatch.
+            #
+            # ZITADEL_INTERNAL_ISSUER stays as a deliberate divergence hatch
+            # for environments where pod-side and browser-side authorities
+            # MUST differ. When unset it inherits the (required) ZITADEL_ISSUER;
+            # there is no `http://localhost:30080` silent fallback.
+            - name: ZITADEL_INTERNAL_ISSUER
+              value: {{ ((.Values.dashboard.zitadel).internalIssuer) | default ((.Values.dashboard.zitadel).issuer) | default (include "gibson.oidcIssuer" .) | quote }}
+            # The Zitadel-generated OIDC clientId is written by the
+            # zitadel-bootstrap Job into this Secret after Zitadel creates
+            # the app. If the Job re-runs (e.g. after a DB wipe), it
+            # overwrites the value AND bumps the deployment via the
+            # checksum/zitadel-client annotation below so pods pick up the
+            # new id without a manual rollout.
+            # one-code-path #203: was `optional: true`; the
+            # wait-for-zitadel-client init container above blocks pod
+            # start until kubelet observes the Secret, so this entry is
+            # now strictly required.
+            - name: ZITADEL_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-dashboard-oidc
+                  key: client_id
+            # Service-account client_credentials for the dashboard's
+            # server-side service-acting calls (e.g. daemon entitlements
+            # RPCs invoked from the entitlements-provisioning route).
+            # Materialized by templates/auth/zitadel-service-accounts-secret.yaml
+            # with REPLACE_ME_* placeholders; the post-install bootstrap Job
+            # mints real Zitadel client_credentials and patches them in.
+            # Read by src/lib/auth/service-token.ts.
+            # Dashboard server-side service-acting calls use OAuth2
+            # client_credentials, which Zitadel ONLY supports for
+            # MACHINE_USER entities. The gibson-dashboard OIDC app
+            # above is OIDC_APP / authorization_code only, so a
+            # separate MACHINE_USER (gibson-dashboard-service) is
+            # minted by the platform-operator and lands its client
+            # credentials in gibson-zitadel-dashboard.
+            - name: ZITADEL_DASHBOARD_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-zitadel-dashboard
+                  key: ZITADEL_CLIENT_ID
+            - name: ZITADEL_DASHBOARD_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-zitadel-dashboard
+                  key: ZITADEL_CLIENT_SECRET
+            # Scoped Zitadel PAT for the dashboard-native signupAction
+            # (spec: dashboard-native-signup). Belongs to the `signup-bot`
+            # machine user which has IAM_USER_MANAGER only — it can create
+            # humans + read password policy, NOT touch orgs or admin the
+            # instance. This is INTENTIONALLY NOT the iam-admin-pat; a
+            # build-time guard at scripts/check-no-iam-admin-pat-in-dashboard.mjs
+            # keeps that separation enforced.
+            # one-code-path #203: was `optional: true`. The
+            # wait-for-signup-bot-pat init container above blocks pod
+            # start until the Secret has been minted by the post-install
+            # bootstrap Job + materialised via ESO.
+            - name: ZITADEL_SIGNUP_BOT_PAT
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-zitadel-signup-bot-pat
+                  key: pat
+            # The signupAction also needs the external domain to forge
+            # Host headers when the admin-client's apiUrl points at the
+            # in-cluster Zitadel Service (same trick as Envoy routing).
+            - name: ZITADEL_EXTERNAL_DOMAIN
+              value: {{ (.Values.zitadel.zitadel.configmapConfig.ExternalDomain | default (include "gibson.zitadelExternalDomain" .)) | quote }}
+            # OIDC client secret for the dashboard's browser-side
+            # authorization_code flow against Zitadel. Paired with
+            # ZITADEL_CLIENT_ID above; both MUST point at the same
+            # platform-operator-managed Secret so that a Zitadel reseed
+            # (Job re-run, secret rotation) writes both halves of the
+            # credential atomically. Previously this env was wired to a
+            # Helm value (.Values.dashboard.zitadel.clientSecret) that no
+            # values file ever sets — Auth.js v5 then sent
+            # `Basic base64(client_id:undefined)` on the token-exchange
+            # POST and Zitadel rejected it with `invalid_client / invalid
+            # secret` on every sign-in (zeroroot-ai/dashboard#40).
+            #
+            # The `gibson-dashboard-oidc` Secret already exposes both the
+            # snake_case `client_secret` (the canonical key the
+            # platform-operator's OIDCClient reconciler writes per
+            # spec.secretRef.key) and the screaming-snake alias
+            # `ZITADEL_CLIENT_SECRET` (added in platform-operator#22 for
+            # this exact reason). Reading the snake_case form matches the
+            # client_id wiring above and is stable across operator alias
+            # changes.
+            # one-code-path #203: was `optional: true`; same as
+            # ZITADEL_CLIENT_ID above, the wait-for-zitadel-client init
+            # container blocks pod start until both keys are populated.
+            - name: ZITADEL_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-dashboard-oidc
+                  key: client_secret
+            {{- if eq (include "gibson.envoyEdge.caRequired" .) "true" }}
+            # Trust Envoy's edge TLS cert when its CA is NOT in the system
+            # trust bundle (kind selfsigned-ca, vault-issuer). Auth.js's
+            # server-side calls to Zitadel go through Envoy at
+            # https://app.<domain>:30443; Node rejects unknown CAs by
+            # default. NODE_EXTRA_CA_CERTS appends the mounted PEM to Node's
+            # trust store. Letsencrypt / awspca issuers chain to roots
+            # already in the system bundle — no mount needed (deploy#126).
+            - name: NODE_EXTRA_CA_CERTS
+              value: /etc/ssl/envoy-ca/ca.crt
+            {{- end }}
+
+            # Gibson Platform Public URL (spec: naming-and-config-standardization).
+            # Required by the dashboard to render user-facing links to the platform
+            # API. Points to the Envoy ingress URL operators use from browsers.
+            - name: GIBSON_PLATFORM_PUBLIC_URL
+              value: {{ .Values.dashboard.gibsonPlatformPublicUrl | default (printf "https://api.%s" .Values.global.domain) | quote }}
+
+            # GIBSON_PUBLIC_URL — required by the dashboard's env-validator
+            # (src/lib/env-validator.ts). Surfaced to agents/tools/plugins via
+            # /api/config/public; matches GIBSON_PLATFORM_PUBLIC_URL in
+            # practice. Kept as a distinct env name for the wizard's mental
+            # model.
+            - name: GIBSON_PUBLIC_URL
+              value: {{ .Values.dashboard.gibsonPlatformPublicUrl | default (include "gibson.apiOrigin" .) | quote }}
+
+            # PUBLIC_URL — required by the dashboard's env-validator.
+            # Public base URL of the dashboard (matches AUTH_URL in
+            # single-origin deploys). Used for Stripe checkout return_url,
+            # billing-portal success_url, transactional emails.
+            - name: PUBLIC_URL
+              value: {{ .Values.dashboard.authUrl | default (include "gibson.externalOrigin" .) | quote }}
+
+            # LOKI_URL — required by the dashboard's env-validator.
+            # Loki query endpoint for the mission-log viewer. Default points
+            # at the in-cluster Loki service rendered by this chart. The
+            # viewer dies fast and loud rather than silently dialing the
+            # wrong host.
+            - name: LOKI_URL
+              value: {{ .Values.dashboard.lokiUrl | default (printf "http://%s:3100" (include "gibson.loki.host" .)) | quote }}
+
+            # Neo4j connection URI for the dashboard knowledge-graph client.
+            # Required — the dashboard Neo4j driver uses this at startup.
+            - name: NEO4J_URI
+              value: {{ .Values.dashboard.neo4j.uri | default (printf "bolt://%s-neo4j:7687" .Release.Name) | quote }}
+            - name: NEO4J_USER
+              value: {{ .Values.dashboard.neo4j.user | default "neo4j" | quote }}
+            # one-code-path #203: was `optional: true`. The
+            # wait-for-db-secrets init container above blocks pod start
+            # until the Secret is materialised by ESO.
+            - name: NEO4J_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.databases.existingSecret | default (include "gibson.dbSecrets.name" .) }}
+                  key: NEO4J_PASSWORD
+
+            # Database URL for the dashboard (Auth.js adapter + tenant
+            # provisioning state, rate-limit / lockout counters via
+            # daemon's gibson_platform schema). Wired through the
+            # gibson.platformPostgres helper family — Phase 2 of spec
+            # helm-eks-readiness-and-pg-split. In dev the helper resolves
+            # to the existing dashboard-postgresql alias; in prod it points
+            # at RDS via platformPostgres.external.host.
+            {{- if .Values.dashboard.postgres.enabled }}
+            - name: DASHBOARD_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.platformPostgres.passwordSecretName" . }}
+                  key: {{ include "gibson.platformPostgres.passwordSecretKey" . }}
+            - name: DATABASE_URL
+              value: {{ printf "postgres://%s:$(DASHBOARD_DB_PASSWORD)@%s:%v/%s?sslmode=%s"
+                (include "gibson.platformPostgres.username" .)
+                (include "gibson.platformPostgres.host" .)
+                (include "gibson.platformPostgres.port" .)
+                (include "gibson.platformPostgres.database" .)
+                (include "gibson.platformPostgres.sslMode" .) }}
+            {{- end }}
+
+            # Redis (shared kv for onboarding state, rate-limiter keys,
+            # account-lockout counters, Stripe webhook idempotency table).
+            # Redis is structural infrastructure (deploy#224
+            # deleted the `redis.provider` enum); the chart fails render
+            # when `redis.addr` is empty and the dashboard pod fails boot
+            # when REDIS_URL is unreachable. Redis auth is always on; the
+            # password Secret is sourced via gibson.redisPasswordSecretName.
+            #
+            # The shared gibson.redis.url helper emits `${REDIS_PASSWORD}` so
+            # the daemon's Go config-loader can interpolate at parse time;
+            # Node's `redis` client doesn't expand env references in the URL
+            # though, so for the dashboard we rebuild the URL with kubelet's
+            # `$(REDIS_PASSWORD)` substitution form. REDIS_PASSWORD MUST be
+            # declared before REDIS_URL for kubelet to expand it.
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.redisPasswordSecretName" . }}
+                  key: {{ include "gibson.redisPasswordSecretKey" . }}
+            - name: REDIS_URL
+              value: {{ printf "redis://:$(REDIS_PASSWORD)@%s:%d" (include "gibson.redis.host" .) (int (.Values.redis.service.port | default 6379)) | quote }}
+
+            # Optional: Observability
+            {{- if .Values.dashboard.observability.enabled }}
+            - name: LOG_LEVEL
+              value: {{ .Values.dashboard.logLevel | default "info" }}
+            {{- end }}
+
+            # Debug mode: surfaces full error stacks in API responses, raises
+            # Auth.js log level, and powers the /api/debug/recent-errors
+            # ring buffer + the in-page DebugErrorPanel.
+            {{- if .Values.dashboard.debug }}
+            - name: DASHBOARD_DEBUG
+              value: "1"
+            - name: NEXT_PUBLIC_DASHBOARD_DEBUG
+              value: "1"
+            {{- end }}
+
+            # Zitadel JWT verification — used by /api/admin/provisioning/*
+            # routes to authenticate in-cluster service accounts (operator,
+            # dashboard SA, tool-runner SA) via Zitadel-issued JWTs.
+            # Spec: service-acting-auth (R4.1, R9.2).
+            - name: ZITADEL_AUDIENCE
+              value: {{ (((.Values.dashboard).zitadel).audience) | default "gibson-platform" | quote }}
+            # ALLOWED_SERVICE_SUBJECTS is NOT a static env entry — spec
+            # canonical-service-identity Req 5: the resolve-sa-identity-map
+            # init container writes the comma-joined numeric subs to
+            # /shared/allowed-service-subjects, and the container's command
+            # wrapper above sources that into the env before exec.
+            #
+            # SA_IDENTITY_MAP_PATH points the in-process identity-resolver
+            # helper at the JSON map for log enrichment ONLY — never an auth
+            # decision (vitest visibility test pins the importer paths).
+            - name: SA_IDENTITY_MAP_PATH
+              value: "/shared/sa-identity-map.json"
+
+            # -----------------------------------------------------------------
+            # Dashboard auth-hardening controls (spec: auth-flow-hardening).
+            # Populated from .Values.dashboard.auth.*.  Sensitive values
+            # (captcha secret, email credentials) are pulled from the
+            # gibson-dashboard-secrets Secret; public values ride as plain
+            # env so the browser bundle can read NEXT_PUBLIC_* at runtime.
+            # -----------------------------------------------------------------
+            {{- with .Values.dashboard.auth }}
+            - name: DASHBOARD_HIBP_ENABLED
+              value: {{ .hibp.enabled | default false | quote }}
+
+            - name: DASHBOARD_CAPTCHA_PROVIDER
+              value: {{ .captcha.provider | default "disabled" | quote }}
+            - name: NEXT_PUBLIC_DASHBOARD_CAPTCHA_PROVIDER
+              value: {{ .captcha.provider | default "disabled" | quote }}
+            - name: NEXT_PUBLIC_DASHBOARD_CAPTCHA_SITE_KEY
+              value: {{ .captcha.siteKey | default "" | quote }} {{/* allowlist-silent-default: empty when captcha.provider=disabled (dev). */}}
+            - name: DASHBOARD_CAPTCHA_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.dashboardSecrets.name" $ }}
+                  key: captcha-secret-key
+
+            - name: DASHBOARD_EMAIL_PROVIDER
+              value: {{ .email.provider | default "log" | quote }}
+            - name: DASHBOARD_EMAIL_FROM
+              value: {{ .email.from | default "no-reply@zeroroot.ai" | quote }}
+            # Destination inbox for contact-sales form leads (deploy#854).
+            - name: CONTACT_SALES_INBOX
+              value: {{ .email.contactSalesInbox | default "sales@zeroroot.ai" | quote }}
+            {{- if eq (.email.provider | default "log") "ses" }}
+            # SES provider boots from exactly three envs; credentials come
+            # from IRSA on the dashboard ServiceAccount (deploy#855), never
+            # key env vars. All are hard requirements — an empty value ships
+            # a dashboard that crashes on first send, so fail the render.
+            - name: SES_FROM_ADDRESS
+              value: {{ required "dashboard.auth.email.provider=ses requires dashboard.auth.email.from — an address under a verified SES domain identity (deploy#854)" .email.from | quote }}
+            - name: AWS_REGION
+              value: {{ required "dashboard.auth.email.provider=ses requires aws.region — the SES endpoint region (deploy#854)" ($.Values.aws).region | quote }}
+            # Env-scoped configuration set, IaC-owned (deploy#880). Never
+            # derived from NODE_ENV — that is a build-mode flag, not a
+            # deployment environment.
+            - name: SES_CONFIGURATION_SET
+              value: {{ required "dashboard.auth.email.provider=ses requires dashboard.auth.email.sesConfigurationSet — the env-scoped SESv2 configuration set created by eks/<workspace>/modules/ses (deploy#880)" .email.sesConfigurationSet | quote }}
+            {{- end }}
+            - name: DASHBOARD_EMAIL_RESEND_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.dashboardSecrets.name" $ }}
+                  key: email-resend-api-key
+            - name: DASHBOARD_EMAIL_SMTP_HOST
+              value: {{ .email.smtp.host | default "" | quote }} {{/* allowlist-silent-default: empty when email.provider=log/resend (dev). */}}
+            - name: DASHBOARD_EMAIL_SMTP_PORT
+              value: {{ .email.smtp.port | default 587 | quote }}
+            - name: DASHBOARD_EMAIL_SMTP_USER
+              value: {{ .email.smtp.user | default "" | quote }} {{/* allowlist-silent-default: empty when email.provider=log/resend (dev). */}}
+            - name: DASHBOARD_EMAIL_SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.dashboardSecrets.name" $ }}
+                  key: email-smtp-password
+
+            - name: DASHBOARD_METRICS_ALLOWED_CIDRS
+              value: {{ .metrics.allowedCIDRs | default "" | quote }} {{/* allowlist-silent-default: empty disables CIDR filtering (cluster-internal only). */}}
+            {{- end }}
+
+            # Stripe billing (spec stripe-billing-integration; CLAUDE.md
+            # tier-repricing). Wired from .Values.dashboard.billing.*.
+            # The dashboard runtime graceful-degrades to the "Pricing
+            # temporarily unavailable" placeholder on /pricing (R7.3) when
+            # STRIPE_SECRET_KEY / STRIPE_PRICE_* are unset. Setting
+            # paidTiersEnabled=true ALSO forces a startup-time check
+            # (instrumentation.ts → validateBillingConfig) that throws if
+            # any required var is missing; leave it false for free-tier-only
+            # deployments.
+            {{- /*
+              HSTS is a real-cert concern. Behind a self-signed edge (kind /
+              self-hosted before a trusted cert), emitting Strict-Transport-Security
+              pins *.<domain> in the browser and then bricks it (the self-signed
+              cert is refused with no bypass). Disable HSTS whenever the edge is
+              self-signed; real-cert deployments (prod, or self-hosted with a
+              trusted cert) leave hstsDisabled false and keep HSTS strict.
+            */}}
+            {{- if .Values.dashboard.hstsDisabled }}
+            - name: DASHBOARD_HSTS_DISABLED
+              value: "1"
+            {{- end }}
+            {{- with .Values.dashboard.billing }}
+            {{- if .paidTiersEnabled }}
+            - name: DASHBOARD_BILLING_PAID_TIERS_ENABLED
+              value: "true"
+            {{- /*
+              Card-first-signup Stripe mode guard (dashboard#767). REQUIRED
+              whenever paid tiers are on — no silent default (one-code-path
+). "test" on staging (dummy cards only), "live" in
+              prod (real cards). instrumentation.ts fails closed at boot if
+              this disagrees with the Stripe key prefix.
+            */}}
+            - name: STRIPE_EXPECTED_MODE
+              value: {{ required "dashboard.billing.stripeExpectedMode is REQUIRED when paidTiersEnabled (epic card-first-signup / dashboard#767): set to \"test\" (staging) or \"live\" (prod)." .stripeExpectedMode | quote }}
+            {{- end }}
+            {{- /* STRIPE_ALLOW_TEST_KEY removed (card-first-signup / dashboard#767):
+                   the explicit STRIPE_EXPECTED_MODE guard supersedes the
+                   NODE_ENV-inferred check that allowTestKey used to suppress.
+                   Staging declares stripeExpectedMode: test directly. */}}
+            {{- if .portalConfigurationId }}
+            - name: STRIPE_PORTAL_CONFIGURATION_ID
+              value: {{ .portalConfigurationId | quote }}
+            {{- end }}
+            {{- /* STRIPE_PRICE_* env vars retired (dashboard#872): the dashboard
+                   resolves price IDs at runtime by stable lookup_key
+                   (gibson_<tier>_monthly_usd), so no per-env price IDs are
+                   injected. plans.yaml carries the lookupKey per plan. */ -}}
+            {{- if .stripeSecretKeySecretRef }}
+            # Externally-provisioned Secret. Production: ExternalSecret
+            # pulls gibson/{env}/dashboard/stripe-secret-key from AWS SM.
+            # Kind dev: create it once by hand —
+            #   kubectl -n gibson create secret generic gibson-stripe-credentials \
+            #     --from-literal=STRIPE_SECRET_KEY=sk_test_...
+            #
+            # one-code-path #203: previously `optional: true` with a
+            # "runtime graceful-degrades" comment. ONE deployment shape:
+            # if you wired a stripeSecretKeySecretRef in values, the
+            # Secret MUST exist by pod-start. The wait-for-stripe-secrets
+            # init container above blocks pod start until both Stripe
+            # keys are populated.
+            - name: STRIPE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .stripeSecretKeySecretRef | quote }}
+                  key: STRIPE_SECRET_KEY
+            # STRIPE_PUBLISHABLE_KEY (pk_test_/pk_live_): runtime-injected so the
+            # signup server component can hand it to the inline Payment Element.
+            # Same Secret as the secret key; not NEXT_PUBLIC (build-time would
+            # bake the wrong mode into the shared :main image — dashboard#783).
+            - name: STRIPE_PUBLISHABLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .stripeSecretKeySecretRef | quote }}
+                  key: STRIPE_PUBLISHABLE_KEY
+            {{- end }}
+            {{- if .stripeWebhookSecretSecretRef }}
+            - name: STRIPE_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .stripeWebhookSecretSecretRef | quote }}
+                  key: STRIPE_WEBHOOK_SECRET
+            {{- end }}
+            {{- end }}
+
+          # one-code-path #203: was `optional: true`. The chart renders
+          # the dashboard-config ConfigMap unconditionally, so the
+          # ConfigMap is always present at install time; no init
+          # container is needed.
+          envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-dashboard-config
+          resources:
+            {{- toYaml .Values.dashboard.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # Next.js needs write access for cache
+            runAsNonRoot: true
+            runAsUser: 1001  # nextjs user from Dockerfile
+            capabilities:
+              drop:
+                - ALL
+          # Per epic one-code-path (deploy#186), slice deploy#196 + #200:
+          # the shared-identity + envoy-ca mounts are unconditional —
+          # Zitadel + Envoy are structurally required, so the
+          # resolve-sa-identity-map init container always runs and the
+          # dashboard always reads /shared/allowed-service-subjects on
+          # startup.
+          volumeMounts:
+            {{- if eq (include "gibson.envoyEdge.caRequired" .) "true" }}
+            - name: envoy-ca
+              mountPath: /etc/ssl/envoy-ca
+              readOnly: true
+            {{- end }}
+            # SPIRE agent socket — matches SPIFFE_ENDPOINT_SOCKET above.
+            # Without this the wait-for-spire-socket init container gated the
+            # Pod on a socket the dashboard container could not then reach
+            # (deploy#1532). Same mountPath as every other SPIFFE consumer in
+            # the chart (daemon, ext-authz, envoy, both operators).
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+            # Spec: canonical-service-identity Req 5 — populated by
+            # resolve-sa-identity-map init container.
+            - name: shared-identity
+              mountPath: /shared
+              readOnly: true
+      volumes:
+        {{- /* deploy#201: SPIRE is REQUIRED — the wait-for-spire-socket init
+               container above is this volume's ONLY mounter. The `dashboard`
+               container does not mount it, and the spiffe-helper sidecar that
+               was to have been the second mounter never rendered (its template
+               was defined and never invoked; deleted by deploy#1456). Keep the
+               volume: without it the deploy#201 node-readiness gate cannot
+               run. */}}
+        - name: spire-agent-socket
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        {{- if eq (include "gibson.envoyEdge.caRequired" .) "true" }}
+        - name: envoy-ca
+          secret:
+            secretName: {{ required "envoy.tls.secretName is REQUIRED — see deploy#200." .Values.envoy.tls.secretName }}
+            # Mount the CA cert (signed by cert-manager in envoy-cert-unify)
+            # AND the leaf for completeness. Node trusts NODE_EXTRA_CA_CERTS
+            # pointed at ca.crt; the leaf is harmless and lets in-pod
+            # debugging inspect the chain. Key (tls.key) is NOT projected —
+            # only envoy holds it. Volume renders only when the Envoy edge
+            # CA is NOT in the system trust bundle (deploy#126).
+            items:
+              - key: ca.crt
+                path: ca.crt
+              - key: tls.crt
+                path: tls.crt
+            defaultMode: 0444
+        {{- end }}
+        # Per epic one-code-path (deploy#186), slice deploy#196: Zitadel
+        # volumes are unconditional. The OIDC client Secret + SA identity
+        # ConfigMap retain `optional: true` ONLY as the kubelet's
+        # projection contract during the bootstrap-Job window — the
+        # init containers above block dashboard startup until the files
+        # populate, so a never-running bootstrap Job surfaces as a stuck
+        # init container with a clear error, not as a "client_id is empty"
+        # silent OIDC failure. TODO(deploy#203): drop `optional: true`
+        # once bootstrap-Job sequencing is a hard pre-install dependency.
+        - name: zitadel-client
+          secret:
+            secretName: gibson-dashboard-oidc
+            # allowlist (one-code-path #203): VOLUME-level optional, not
+            # env-level. Slice #203 scope is env `valueFrom.*Ref` only;
+            # the wait-for-zitadel-client init container above blocks pod
+            # start until kubelet populates client_id + client_secret in
+            # this mount, so the pod never runs main containers with an
+            # unmaterialised mount.
+            optional: true
+            defaultMode: 0444
+        # Spec: canonical-service-identity Req 5.
+        # gibson-sa-identity-map projection: kubelet writes one file per
+        # ConfigMap key (readable SA name) with the value (numeric sub) as
+        # the file content. The resolve-sa-identity-map init container
+        # iterates these files and produces the consumed outputs in
+        # /shared/.
+        - name: sa-identity-map
+          configMap:
+            name: gibson-sa-identity-map
+            # allowlist (one-code-path #203): VOLUME-level optional, not
+            # env-level. Slice #203 scope is env `valueFrom.*Ref` only;
+            # the resolve-sa-identity-map init container above handles
+            # the not-yet-populated case (Spec canonical-service-identity
+            # Req 5).
+            optional: true
+            defaultMode: 0444
+        - name: shared-identity
+          emptyDir: {}
+{{/*
+  ClusterSPIFFEID for the dashboard pod is rendered centrally in
+  templates/spire-server/clusterspiffeids.yaml (Phase H/8.1) — one source of
+  truth for every Gibson workload identity. Do not re-add gibson.spiffeID
+  here.
+*/}}

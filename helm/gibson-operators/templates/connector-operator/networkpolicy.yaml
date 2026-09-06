@@ -1,0 +1,54 @@
+{{/* connector-operator NetworkPolicy.
+
+     Under the gibson-workloads namespace default-deny
+     (namespace-isolation/default-deny.yaml, deploy#1365), a workload whose
+     pods match no allow policy is severed in both directions. The
+     connector-operator is a plain controller-runtime manager: it dials the
+     kube-apiserver to reconcile ConnectorInstance -> ToolHive resources, and
+     serves metrics (:8080) and health probes (:8081). It has no webhook.
+
+     connector-operator is structural infrastructure (one-code-path):
+     no outer enable gate. The inner networkPolicy.enabled sub-feature flag is
+     preserved, matching tenant-operator/platform-operator.
+
+     The podSelector matches the labels the deployment's pod template actually
+     stamps (app.kubernetes.io/name: gibson-connector-operator plus the
+     component label) — the deploy#1365 lesson: a selector that names labels
+     the pods do not carry never selects them and leaves the workload severed. */}}
+{{- if ne (include "gibson.trueUnlessSet" (((.Values.connectorOperator).networkPolicy).enabled)) "false" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-connector-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: connector-operator
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gibson-connector-operator
+      app.kubernetes.io/component: connector-operator
+  policyTypes:
+    - Ingress
+    - Egress
+  {{- /* allow-all egress under the namespace default-deny — the manager must
+         reach the kube-apiserver (any ClusterIP) to watch and write CRs, the
+         same unrestricted-egress posture tenant-operator/platform-operator
+         keep (deploy#1365 / deploy#1462). */}}
+  egress:
+    - {}
+  ingress:
+    # Health/readiness probes: kubelet dials the probe port from the node IP.
+    - ports:
+        - protocol: TCP
+          port: 8081
+    # Metrics scrape from Prometheus.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}

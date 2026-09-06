@@ -1,0 +1,527 @@
+{{/*
+ext_authz Deployment.
+
+Sole authorization-decision service for the platform. Called synchronously by
+Envoy ExtAuthz for every authenticated RPC; mints Capability Grant JWTs for
+tool dispatch; validates API keys for the Envoy Lua filter. ≥2 replicas so
+that ext_authz unavailability never single-points the gateway.
+
+PodSecurityContext: distroless nonroot UID, read-only root filesystem, all
+caps dropped, RuntimeDefault seccomp profile, no privilege escalation. The
+container has no shell and no writable filesystem outside the explicit
+emptyDir for /tmp.
+
+Mounts:
+  - Grant key    → /etc/ext-authz/grant-key/ from gibson-extauthz-grant-key
+                   (this chart, see secret.yaml). Holds current.pem + current.kid
+                   and optional previous.pem/previous.kid for key rotation.
+  - RPC registry → /etc/gibson/registry.yaml from either:
+      (a) an init container that `oras pull`s the private gibson registry
+          artifact (oci://{{ .Values.sdk.registry }}:{{ .Values.sdk.version }})
+          into a shared emptyDir — requires imagePullSecrets for GHCR, OR
+      (b) the gibson-extauthz-rpc-registry ConfigMap directly when
+          .Values.sdk.bypassRegistryValidation=true AND
+          .Values.sdk.embeddedRegistry is set (air-gapped path).
+    The same path is used regardless — the main container does not know
+    which mode the chart rendered.
+    Spec: unified-identity-and-authorization Phase H/8.6.
+  - API keys DSN → EXT_AUTHZ_API_KEYS_DB_DSN env from gibson-db-secrets
+                   (added to db-secrets.yaml in this task). Points at the
+                   dashboard-postgresql DB where the api_keys table lives.
+
+Spec: zitadel-envoy-gateway-migration, task 9.
+ext-authz is structural infrastructure (deploy#188) — renders
+unconditionally; the extAuthz.enabled toggle was deleted.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gibson-ext-authz
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ext-authz
+spec:
+  replicas: {{ .Values.extAuthz.replicas }}
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ext-authz
+  template:
+    metadata:
+      labels:
+        {{- include "gibson.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: ext-authz
+      annotations:
+        {{- /*
+          Phase H/8.6: registry source switched from
+          templates/ext-authz/configmap.yaml (.Files.Get of
+          files/ext-authz/rpc_registry.yaml — both deleted in 8.7) to
+          templates/ext-authz/configmap-registry.yaml (init-container
+          pull from the SDK OCI artifact, or embedded YAML for
+          air-gapped). Hashing the new ConfigMap means sdk.version bumps
+          force a rolling restart that re-runs the init container.
+        */}}
+        checksum/registry: {{ include (print $.Template.BasePath "/ext-authz/configmap-registry.yaml") . | sha256sum }}
+        {{- /*
+          deploy#852 fetches the authz-registry from the daemon's mTLS endpoint
+          at ext-authz STARTUP (EXT_AUTHZ_REGISTRY_URL) and claims the policy "can
+          never drift behind the deployed daemon" — but that only holds if
+          ext-authz restarts when the daemon changes. It does NOT on its own: in
+          Argo/gitops a daemon image bump does not roll ext-authz, so a registry
+          change (any RPC→relation edit, e.g. RegisterComponent→can_poll_work,
+          sdk#521) would leave ext-authz enforcing the STALE policy until someone
+          restarts it. The registry is compiled INTO the daemon image, so it can
+          only change when that image changes: key a checksum on the daemon image
+          ref, and a daemon bump rolls ext-authz → it re-fetches the fresh
+          registry. Zero false-negatives (image digest ⇒ registry content).
+        */}}
+        checksum/daemon-registry: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.gibson.image.repository "tag" .Values.gibson.image.tag "digest" .Values.gibson.image.digest "appVersion" .Chart.AppVersion) | sha256sum }}
+        {{- /*
+          ext-authz pins its authorization-model id at pod start, reading
+          EXT_AUTHZ_FGA_MODEL_ID from the gibson-fga-config ConfigMap that the
+          fga-init Job populates at runtime. When an upgrade changes the FGA
+          model, the Job writes a NEW model id into that ConfigMap and ext-authz
+          keeps checking the OLD one — which does not have the relations the new
+          code checks. Every session-gated RPC then fails with
+          "invalid relation: relation 'tenant#active_session' not found", cluster
+          wide, reported as an FGA outage rather than a version skew
+          (deploy#1151).
+
+          A checksum annotation cannot express this: the ConfigMap is populated
+          at runtime by the Job, so its rendered content is empty at template
+          time. Reloader watches the live object instead.
+        */}}
+        configmap.reloader.stakater.com/reload: "gibson-fga-config"
+    spec:
+      {{- include "gibson.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ .Values.extAuthz.serviceAccount.name | default "gibson-ext-authz" }}
+      {{- /* Spec 2 R18: priorityClassName + Spec 3 §3 R8 spread. */}}
+      {{- $pcn := include "gibson.priorityClassName" (dict "component" "extAuthz") }}
+      {{- if $pcn }}
+      priorityClassName: {{ $pcn }}
+      {{- end }}
+      {{- include "gibson.spread" (dict "ctx" . "component" "extAuthz") | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      {{- /*
+        Init-container path (default).
+        ────────────────────────────────────────────────────────────────
+        When .Values.sdk.bypassRegistryValidation is FALSE (default), an
+        init container `oras pull`s the SDK release artifact at
+        oci://<sdk.registry>:<sdk.version> into the shared `registry`
+        emptyDir. The main container reads /etc/gibson/registry.yaml
+        from the same volume. Bumping .Values.sdk.version triggers a
+        rolling restart (via the configmap-registry checksum annotation
+        above) that re-runs the init container with the new pin.
+
+        Air-gapped path.
+        ────────────────────────────────────────────────────────────────
+        When .Values.sdk.bypassRegistryValidation=true AND
+        .Values.sdk.embeddedRegistry is set, the init container is
+        skipped and the gibson-extauthz-rpc-registry ConfigMap (which
+        carries the embedded YAML in its data) is mounted directly at
+        /etc/gibson/.
+      */}}
+      initContainers:
+        {{- /* deploy#201: SPIRE is REQUIRED infrastructure — block pod start
+               until the agent socket is reachable. Renders unconditionally. */}}
+        {{- include "gibson.waitForSpireSocket" . | nindent 8 }}
+        {{- /* deploy#190 M4: block until the fga-init Job seeds gibson-fga-config
+               so EXT_AUTHZ_FGA_STORE_ID / EXT_AUTHZ_FGA_MODEL_ID are non-empty
+               when the main container starts (replaces optional: true on those
+               configMapKeyRef env refs). */}}
+        {{- include "gibson.waitForFgaConfig" . | nindent 8 }}
+        {{- /*
+          deploy#852: the FGA registry is no longer hydrated from a
+          version-pinned OCI artifact by an oras init container. ext-authz now
+          fetches it from the daemon's mTLS authz-registry endpoint at startup
+          (EXT_AUTHZ_REGISTRY_URL below), so the daemon is the single source of
+          truth and the policy can never drift behind the deployed daemon. The
+          air-gapped path (sdk.embeddedRegistry) still mounts the registry from
+          a ConfigMap and points ext-authz at the file. No registry init
+          container in either case.
+        */}}
+      containers:
+        - name: ext-authz
+          image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.extAuthz.image.repository "tag" .Values.extAuthz.image.tag "digest" .Values.extAuthz.image.digest "appVersion" .Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ .Values.extAuthz.image.pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.extAuthz.ports.grpc | default 9001 }}
+              protocol: TCP
+            - name: http
+              containerPort: {{ .Values.extAuthz.ports.http | default 9002 }}
+              protocol: TCP
+          env:
+            - name: EXT_AUTHZ_LOG_LEVEL
+              value: {{ .Values.extAuthz.logLevel | default "info" | quote }}
+            - name: EXT_AUTHZ_GRPC_ADDR
+              value: ":{{ .Values.extAuthz.ports.grpc | default 9001 }}"
+            - name: EXT_AUTHZ_HTTP_ADDR
+              value: ":{{ .Values.extAuthz.ports.http | default 9002 }}"
+            {{- /* ext-authz speaks HTTP/JSON to OpenFGA (Go net/http client),
+                  NOT gRPC. Must point at OpenFGA's HTTP listener (8080), not
+                  the gRPC listener (8081) — pointing at gRPC causes
+                  `malformed HTTP response "\x00\x00..."` because the HTTP/1.x
+                  client can't parse the HTTP/2 SETTINGS frame. See deploy#140.
+                  Render-time guard below rejects gRPC-port overrides. */}}
+            {{- if .Values.extAuthz.fga.addr }}
+              {{- $grpcSuffix := printf ":%v" (.Values.openfga.service.grpcPort | default 8081) }}
+              {{- if hasSuffix $grpcSuffix .Values.extAuthz.fga.addr }}
+                {{- fail (printf "extAuthz.fga.addr=%q points at OpenFGA's gRPC port (%v); ext-authz uses HTTP/JSON and must dial the httpPort (%v). See deploy#140." .Values.extAuthz.fga.addr (.Values.openfga.service.grpcPort | default 8081) (.Values.openfga.service.httpPort | default 8080)) }}
+              {{- end }}
+            {{- end }}
+            {{- /* deploy#1382: the https:// scheme is STRUCTURAL — the
+                  template emits it as a literal and strips any scheme from
+                  an override, so no values file can downgrade this hop to
+                  plaintext (one-code-path; same shape as the https-only
+                  issuer fail above). The FGA client (gibson
+                  internal/infra/authz/authz.go) honours the prefix; the
+                  OpenFGA HTTP listener serves TLS from the
+                  cert-manager-issued gibson-openfga-http-tls keypair (see
+                  helm/gibson/values.yaml `openfga.http.tls`). The Check
+                  response on this hop is the allow/deny answer for every
+                  authenticated request — transport is its only integrity
+                  control (scripts/check-extauthz-trust-transport.py reads
+                  the literal scheme here; the #1187-era waiver line is
+                  deleted in the same change). SSL_CERT_DIR below adds the
+                  issuing CA without displacing the system bundle. */}}
+            {{- $fgaAddr := .Values.extAuthz.fga.addr | default (printf "gibson-openfga:%v" (.Values.openfga.service.httpPort | default 8080)) }}
+            {{- $fgaAddr = $fgaAddr | trimPrefix "http://" | trimPrefix "https://" }}
+            - name: EXT_AUTHZ_FGA_ADDR
+              value: "https://{{ $fgaAddr }}"
+            {{- /* Go's crypto/x509 reads SSL_CERT_DIR as a colon-separated
+                  list and skips missing entries: /etc/ssl/certs keeps the
+                  distro bundle (public roots for any other TLS dial), the
+                  second entry adds the in-cluster CA that signs the OpenFGA
+                  listener cert. */}}
+            - name: SSL_CERT_DIR
+              value: "/etc/ssl/certs:/etc/extauthz/tls/fga-ca"
+            # deploy#190 M4: `optional: true` removed. The wait-for-fga-config
+            # init container (above) blocks until gibson-fga-config exists with
+            # a non-empty store_id, so kubelet resolves these env vars against
+            # the populated ConfigMap at main-container start time.
+            - name: EXT_AUTHZ_FGA_STORE_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: gibson-fga-config
+                  key: store_id
+            - name: EXT_AUTHZ_FGA_MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: gibson-fga-config
+                  key: model_id
+            {{- /*
+              Capability-Grant JWT claim pins (deploy#1155, deploy#1311).
+
+              Key resolution is per-kid: ext-authz fetches
+              GET {EXT_AUTHZ_CGJWT_KEYS_URL}/{kid} from the daemon for
+              daemon-minted and component tokens alike — collapses
+              key resolution to that single fetch-by-kid path, and KEYS_URL is
+              set unconditionally further down. gibson#1306 retired the
+              JWKS-wide key document: the daemon publishes no key set, and the
+              binary has not read EXT_AUTHZ_CGJWT_JWKS_URL since, so the chart
+              no longer renders it (deploy#1311).
+
+              ISSUER is REQUIRED whenever KEYS_URL is set — cmd/ext-authz
+              refuses to start without it. It must equal the daemon's
+              apiOrigin, because that is what the daemon stamps as `iss` when
+              it mints CG tokens. AUDIENCE is optional; the binary defaults it
+              to "gibson-daemon".
+            */}}
+            - name: EXT_AUTHZ_CGJWT_ISSUER
+              value: {{ .Values.extAuthz.cgjwt.issuer | default (include "gibson.apiOrigin" .) | quote }}
+            {{- with .Values.extAuthz.cgjwt.audience }}
+            - name: EXT_AUTHZ_CGJWT_AUDIENCE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- /*
+              Component CG-JWT audience pin (gibson#1282 / deploy#1245).
+
+              REQUIRED whenever EXT_AUTHZ_CGJWT_KEYS_URL is set — and this
+              chart sets KEYS_URL unconditionally below — so this var renders
+              unconditionally too: since gibson#1282 an ext-authz that boots
+              without it refuses to start, by design (an unpinned audience
+              accepts a token minted for any other target).
+
+              The SDK mints `aud` from the gRPC dial authority as
+              https://<authority>/<proto.package.Service>; grpc-go strips a
+              literal :443 and keeps any other port, so the apiOrigin helper
+              (which omits :443 and keeps kind's :30443) produces exactly the
+              minted host part. Matching is exact-string. The default list is
+              the apiOrigin crossed with the three services Envoy's edge admits
+              for component tokens, plus the bare origin (sdk-ts shape,
+              sdk-ts#7) and the :50051 variants (sdk plugin.Serve port rewrite,
+              sdk#452).
+            */}}
+            {{- $api := include "gibson.apiOrigin" . }}
+            {{- $apiHost := include "gibson.apiHost" . }}
+            - name: EXT_AUTHZ_CGJWT_COMPONENT_AUDIENCE
+              value: {{ .Values.extAuthz.cgjwt.componentAudience | default (printf "%s/gibson.component.v1.ComponentService,%s/gibson.harness.v1.HarnessCallbackService,%s/gibson.identity.v1.IdentityService,%s,https://%s:50051/gibson.component.v1.ComponentService,https://%s:50051/gibson.harness.v1.HarnessCallbackService" $api $api $api $api $apiHost $apiHost) | quote }}
+            {{- if and .Values.sdk.bypassRegistryValidation .Values.sdk.embeddedRegistry }}
+            # Air-gapped: read the registry from the ConfigMap mounted at
+            # /etc/gibson (no daemon dependency). deploy#852.
+            - name: EXT_AUTHZ_REGISTRY_PATH
+              value: "/etc/gibson/registry.yaml"
+            {{- else }}
+            # Default (deploy#852): fetch the registry from the daemon's mTLS
+            # authz-registry endpoint, pinning the daemon's SVID so a
+            # poisoned/impersonated source can never feed ext-authz a forged
+            # enforcement policy. Single source of truth — no version pin, no
+            # drift.
+            - name: EXT_AUTHZ_REGISTRY_URL
+              value: "https://{{ include "gibson.fullname" . }}:{{ .Values.gibson.service.authzRegistry.port | default 8086 }}/authz/registry.yaml"
+            - name: EXT_AUTHZ_DAEMON_SVID
+              value: {{ .Values.spiffe.daemonID | default "spiffe://zeroroot.ai/platform/daemon" | quote }}
+            - name: EXT_AUTHZ_REGISTRY_FETCH_TIMEOUT
+              value: {{ .Values.extAuthz.registryFetchTimeout | default "600s" | quote }}
+            {{- end }}
+            - name: EXT_AUTHZ_GRANT_KEY_DIR
+              value: "/etc/ext-authz/grant-key"
+            # Per-kid Capability-Grant key descriptor endpoint (ext-authz#103). ext-authz fetches GET {KEYS_URL}/{kid} to verify a
+            # component's self-signed agent+jwt and resolve its daemon-asserted
+            # principal + tenant. Reached DIRECTLY on the pod network — the
+            # daemon NetworkPolicy opens ext-authz → daemon:8086 for exactly
+            # this — never through the Envoy edge, which no longer publishes the
+            # route at all (GHSA-88fg / GHSA-9q4v).
+            # Unset ⇒ component CG-JWT auth disabled.
+            #
+            # SVID-PINNED mTLS ON :8086 (deploy#1386, closing deploy#1187).
+            # This was `http://…:8085` — the daemon's plaintext bootstrap
+            # listener — for as long as ext-authz's descriptor fetcher was a
+            # bare `&http.Client{Timeout: 5s}` with no TLSClientConfig and no
+            # SPIFFE source in scope. gibson#1401 threaded the X509Source that
+            # the registry fetch already uses into that client, so the fetch now
+            # meets the same standard as EXT_AUTHZ_REGISTRY_URL two blocks up
+            # (tlsconfig.MTLSClientConfig pinned to EXT_AUTHZ_DAEMON_SVID).
+            #
+            # WHY IT HAD TO MOVE. The response is not a key set but an identity
+            # assertion — {keys, principal, tenant, status} — and ext-authz uses
+            # `principal` verbatim as the OpenFGA user, cached 5 minutes per
+            # pod. Substituting the document substitutes both the trust anchor
+            # and the identity bound to it. NetworkPolicy confined the hop but
+            # was never the integrity control: the exposure was never an
+            # off-cluster eavesdropper, it was a pod carrying the daemon's
+            # selector labels that joins the Service endpoints and answers a
+            # share of these requests — a legitimate endpoint as far as the
+            # policy is concerned. Only peer authentication closes that.
+            #
+            # SCHEME IS LOAD-BEARING, NOT COSMETIC. gibson#1401 makes ext-authz
+            # REFUSE TO START unless this is https (forbids a flag
+            # gating a cutover, and http.Transport applies TLSClientConfig only
+            # to https:// URLs, so a scheme-conditional path sits one edit away
+            # from silently fetching in the clear). So this value and the
+            # ext-authz image pin move TOGETHER: an older image cannot speak
+            # mTLS here, and a post-#1401 image will not boot against http.
+            # scripts/check-extauthz-trust-transport.py enforces the pairing
+            # from the other side — it fails if this becomes https while a
+            # waiver line for it survives in
+            # scripts/.extauthz-transport-waivers.txt, and vice versa.
+            - name: EXT_AUTHZ_CGJWT_KEYS_URL
+              value: "https://{{ include "gibson.fullname" . }}:{{ .Values.gibson.service.authzRegistry.port | default 8086 }}/capabilitygrant/v1/keys"
+            - name: EXT_AUTHZ_ZITADEL_ISSUER
+              # MUST equal the `iss` claim Zitadel writes into JWTs. Zitadel
+              # constructs iss from {ExternalScheme}://{ExternalDomain}[:{ExternalPort}],
+              # so this default mirrors Zitadel's own ExternalDomain — NOT
+              # the daemon's api.<domain> host (which is the bug this default
+              # had until edge-case zitadel-iss-port-vs-discovery was logged).
+              # Misalignment surfaces as `extauthz.issuer_mismatch` warnings
+              # and HTTP 403 "permission denied" on every authenticated
+              # daemon RPC. Environment overlays SHOULD override
+              # extAuthz.issuer explicitly only for an off-domain Zitadel edge;
+              # by default it derives from global.domain (gibson.oidcIssuer =
+              # the external origin app.<domain>[:port]), which already folds in
+              # the kind :30443 port. The old default hardcoded the retired
+              # `auth.<domain>` host (deploy#630 single-host; deploy#642).
+              #
+              # deploy#1187: this is not only a claim pin — ext-authz resolves
+              # the issuer's OIDC discovery document and fetches the JWKS from
+              # it, and that key set is what EVERY user JWT is verified
+              # against. So the scheme is a trust property, and it is asserted
+              # here rather than left to `global.scheme` defaulting to https.
+              # An overlay that pointed this at http:// would put the
+              # verification keys for every user session on an unauthenticated
+              # hop. scripts/check-extauthz-trust-transport.py cannot read the
+              # resolved value out of the template (it is one Helm expression),
+              # so this render-time check is the control it defers to.
+              {{- $zitadelIssuer := .Values.extAuthz.issuer | default (include "gibson.oidcIssuer" .) }}
+              {{- if not (hasPrefix "https://" $zitadelIssuer) }}
+              {{- fail (printf "extAuthz.issuer resolves to %q, which is not https. ext-authz fetches the JWKS for every user JWT from this issuer, so a plaintext hop there means an unauthenticated source for the keys that authenticate every session (deploy#1187). Set extAuthz.issuer to an https origin, or fix global.scheme." $zitadelIssuer) }}
+              {{- end }}
+              value: {{ $zitadelIssuer | quote }}
+            {{- /* deploy#201: SPIRE is REQUIRED — env vars + SVID pinning
+                   are unconditional. */}}
+            # SPIFFE Workload API socket the binary connects to in order to
+            # mint/verify identities. Mounted from the host path the SPIRE
+            # agent DaemonSet writes to. Required by main.go.
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: "unix:///run/spire/sockets/api.sock"
+            # Envoy peer SPIFFE ID — pin the gRPC peer (Envoy) to this SVID.
+            # Must match the ClusterSPIFFEID registered for the Envoy
+            # ServiceAccount (templates/spiffe/envoy-spiffeid.yaml). Comma-
+            # separated list also accepted.
+            - name: EXT_AUTHZ_ENVOY_SVID
+              value: {{ required "spiffe.envoyID is required (e.g. \"spiffe://zeroroot.ai/platform/envoy\") — SPIRE is REQUIRED infrastructure (deploy#201)" .Values.spiffe.envoyID | quote }}
+            {{- /* EXT_AUTHZ_HMAC_SECRET — symmetric-key identity-header signing
+                   path removed by Spec 3 R14 (SPIFFE-mTLS roots trust now). The
+                   legacyHmacEnabled toggle was a transitional shim and is
+                   removed in spec helm-eks-readiness-and-pg-split Phase 6. */}}
+            # Postgres DSN for the api_keys table (read-only at auth time).
+            - name: EXT_AUTHZ_API_KEYS_DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.extAuthz.apiKeysDb.secretName | default "gibson-db-secrets" }}
+                  key: {{ .Values.extAuthz.apiKeysDb.secretKey | default "EXT_AUTHZ_API_KEYS_DB_DSN" }}
+          volumeMounts:
+            - name: grant-key
+              mountPath: /etc/ext-authz/grant-key
+              readOnly: true
+            {{- if and .Values.sdk.bypassRegistryValidation .Values.sdk.embeddedRegistry }}
+            # Air-gapped only: the registry comes from a mounted ConfigMap. In
+            # the default daemon-fetch path (deploy#852) there is no registry
+            # mount — ext-authz fetches over mTLS into memory.
+            - name: registry
+              mountPath: /etc/gibson
+              readOnly: true
+            {{- end }}
+            # NOTE: sa-identity-map ConfigMap is NOT mounted on ext-authz.
+            # The ext-authz binary does not consume it — only the daemon
+            # (core/gibson identityresolver) does, for log enrichment.
+            # Nesting a separate ConfigMap mount inside the readonly
+            # /etc/gibson registry mount fails OCI runtime create with
+            # "read-only file system" because the parent mount masks the
+            # image-baked /etc/gibson/sa-identity-map directory.
+            {{- /* deploy#201: SPIRE + cert-manager are REQUIRED — these mounts
+                   are unconditional. */}}
+            # SPIRE agent socket — matches SPIFFE_ENDPOINT_SOCKET above.
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+            # cert-manager-issued component TLS material. Mount paths are
+            # the binary's defaults (EXT_AUTHZ_HEALTH_CERT_DIR /
+            # EXT_AUTHZ_GRPC_CERT_DIR) — see core/ext-authz/cmd/ext-authz/main.go.
+            - name: health-tls
+              mountPath: /etc/extauthz/tls/health
+              readOnly: true
+            - name: grpc-tls
+              mountPath: /etc/extauthz/tls/grpc
+              readOnly: true
+            # CA that signs the OpenFGA HTTP-listener cert (deploy#1382);
+            # picked up via SSL_CERT_DIR above.
+            - name: fga-http-ca
+              mountPath: /etc/extauthz/tls/fga-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          # The /healthz endpoint is served over HTTPS with mandatory client
+          # mTLS (RequireAndVerifyClientCert) — the kubelet has no SVID to
+          # present, so httpGet probes fail at the TLS handshake. tcpSocket
+          # checks the port is bound, which is sufficient given the binary
+          # exits on any startup error.
+          #
+          # startupProbe disables liveness/readiness until the container has
+          # had time to: (1) wait for SPIRE Agent to register and issue an
+          # SVID, (2) fetch the authz registry from the daemon over mTLS
+          # (deploy#852; retries while the daemon comes up), (3) bind port
+          # 9002. On a cold kind
+          # node or after a host reboot, the SPIFFE CSI mount can take 30-60s
+          # to attach because the CSI driver registers only after
+          # gibson-spire-agent is Ready. Without the startupProbe, the 5s
+          # initialDelaySeconds + 3×10s failureThreshold gave only ~35s total
+          # grace — too tight, causing 2-3 restarts per cluster bringup. See
+          # deploy#142: `Liveness probe failed: dial tcp ...:9002: connect:
+          # connection refused`. With 30×5s=150s of startup budget, kubelet
+          # holds off liveness/readiness until the port is bound, then the
+          # tighter steady-state probes take over.
+          startupProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.extAuthz.resources | nindent 12 }}
+      volumes:
+        - name: grant-key
+          secret:
+            secretName: gibson-extauthz-grant-key
+            defaultMode: 0400
+        # sa-identity-map volume removed from ext-authz: the binary does
+        # not read it, and mounting it inside /etc/gibson collides with the
+        # registry mount (OCI runtime: read-only file system). The daemon
+        # still mounts it (see gibson/statefulset.yaml) for log enrichment.
+        {{- /* deploy#201: SPIRE + cert-manager are REQUIRED — these volumes
+               are unconditional. */}}
+        # SPIRE Workload API socket via csi.spiffe.io CSI driver — see spec
+        # kind-dashboard-bringup-e2e (D2). hostPath /run/spire/sockets is
+        # not exposed by the SPIRE chart; only CSI driver inline volumes
+        # reach the workload API.
+        - name: spire-agent-socket
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        # cert-manager-issued Secrets via templates/cert-manager/component-
+        # certificates.yaml. tls.crt + tls.key + ca.crt are projected as
+        # files at the mount path the binary expects.
+        - name: health-tls
+          secret:
+            secretName: gibson-ext-authz-health-tls
+            defaultMode: 0400
+        - name: grpc-tls
+          secret:
+            secretName: gibson-ext-authz-grpc-tls
+            defaultMode: 0400
+        # CA for the OpenFGA HTTP-listener cert (deploy#1382). Only ca.crt
+        # is projected — ext-authz must never hold the listener's private
+        # key. Sourced from the same cert-manager Secret the server mounts.
+        - name: fga-http-ca
+          secret:
+            secretName: gibson-openfga-http-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 0444
+        {{- /*
+          registry volume: only the air-gapped path mounts one (ConfigMap).
+          The default daemon-fetch path (deploy#852) keeps the registry in
+          memory — no emptyDir, no oras cache/auth volumes.
+        */}}
+        {{- if and .Values.sdk.bypassRegistryValidation .Values.sdk.embeddedRegistry }}
+        - name: registry
+          configMap:
+            name: gibson-extauthz-rpc-registry
+            items:
+              - key: rpc_registry.yaml
+                path: registry.yaml
+        {{- end }}
+        - name: tmp
+          emptyDir: {}

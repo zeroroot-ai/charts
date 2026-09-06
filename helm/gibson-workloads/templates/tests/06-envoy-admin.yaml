@@ -1,0 +1,162 @@
+{{/*
+helm-test pod: envoy-admin
+
+Asserts Envoy's admin endpoint is reachable AND reports cluster-membership
+that's required for the platform to function:
+
+  - Envoy admin :9901/ready returns 200 (the listener is up + every cluster
+    has at least one healthy endpoint)
+  - /clusters?filter=gibson_daemon_grpc shows >0 healthy endpoints
+  - /clusters?filter=gibson_daemon_callback shows >0 healthy endpoints
+    (gibson#1450 — the daemon's harness callback listener is a separate port
+    and a separate cluster; the daemon gRPC cluster's health says nothing
+    about it)
+  - /clusters?filter=ext_authz shows >0 healthy endpoints
+
+The admin port is NOT exposed via the gibson-envoy Service (only :443/https),
+so we discover the Envoy pod IP via the K8s API and curl it directly.
+
+This catches the deploy#134/#136 class of regressions (cluster name typo +
+missing SPIFFE mTLS transport_socket) — both of which produced empty
+rawMessage ext_authz failures with no other observable signal.
+
+Provenance: deploy#355 (slice 5.10 of production-readiness epic).
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "gibson.fullname" . }}-test-envoy-admin"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson-workloads.tests.labels" . | nindent 4 }}
+    app.kubernetes.io/component: helm-test
+  annotations:
+    {{- include "gibson-workloads.tests.annotations" . | nindent 4 }}
+    "helm.sh/hook-weight": "4"
+spec:
+  restartPolicy: Never
+  serviceAccountName: "{{ include "gibson.fullname" . }}-test-bootstrap-reader"
+  containers:
+    - name: probe
+      image: "{{ include "gibson-workloads.tests.kubectlImage" . }}"
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          ERR='{{ include "gibson-workloads.tests.errorPrefix" . }}'
+          NS='{{ .Release.Namespace }}'
+
+          # 1. Discover an Envoy pod IP.
+          POD_IP=$(kubectl -n "$NS" get pod \
+            -l app.kubernetes.io/component=envoy \
+            -o jsonpath='{.items[0].status.podIP}' 2>/dev/null || echo "")
+          if [ -z "$POD_IP" ]; then
+            echo "$ERR envoy-admin: no Envoy pod with component=envoy in ns $NS"
+            exit 1
+          fi
+          echo "[envoy-admin] Envoy pod IP: $POD_IP"
+
+          ADMIN="http://${POD_IP}:9901"
+
+          # 2. /ready — should return 200 when every cluster has at least one
+          # healthy endpoint + every listener is up.
+          code=$(curl -sS -o /tmp/ready -w '%{http_code}' --max-time 10 "${ADMIN}/ready" || echo "000")
+          if [ "$code" != "200" ]; then
+            echo "$ERR envoy-admin: /ready returned HTTP $code (want 200)"
+            [ -s /tmp/ready ] && echo "[envoy-admin] body: $(cat /tmp/ready)"
+            exit 1
+          fi
+          echo "[envoy-admin] /ready OK"
+
+          # 3. /clusters?filter=gibson_daemon_grpc — assert at least one healthy
+          # endpoint for the daemon upstream cluster. The exact metric name
+          # depends on Envoy version; we just look for healthy endpoint count
+          # in the cluster's cx_total / health_flags lines.
+          curl -sS --max-time 10 "${ADMIN}/clusters?filter=gibson_daemon_grpc" > /tmp/clusters
+          if ! grep -q 'gibson_daemon_grpc::' /tmp/clusters ; then
+            echo "$ERR envoy-admin: gibson_daemon_grpc cluster not present in Envoy config"
+            echo "[envoy-admin] clusters dump:"
+            curl -sS --max-time 10 "${ADMIN}/clusters" | head -50
+            exit 1
+          fi
+          # "healthy" endpoints have health_flags=healthy or no failure flag.
+          # An EDS-failed cluster shows health_flags::/FAILED_ACTIVE_HC etc.
+          if grep -E '^gibson_daemon_grpc::.*health_flags::/(FAILED|DEGRADED|UNHEALTHY)' /tmp/clusters >/dev/null ; then
+            echo "$ERR envoy-admin: gibson_daemon_grpc cluster has unhealthy endpoints"
+            grep '^gibson_daemon_grpc::' /tmp/clusters | head -20
+            exit 1
+          fi
+          echo "[envoy-admin] gibson_daemon_grpc cluster looks healthy"
+
+          # 3b. Same for gibson_daemon_callback — the daemon's harness callback
+          # listener (gibson#1450). It is a SEPARATE cluster on a separate port,
+          # so gibson_daemon_grpc being healthy says nothing about it, and a
+          # dead callback cluster means every off-cluster component callback
+          # (session context, credential resolve, tool search) fails at the edge
+          # while everything else looks fine.
+          curl -sS --max-time 10 "${ADMIN}/clusters?filter=gibson_daemon_callback" > /tmp/cbclusters
+          if ! grep -q 'gibson_daemon_callback::' /tmp/cbclusters ; then
+            echo "$ERR envoy-admin: gibson_daemon_callback cluster not present in Envoy config"
+            echo "[envoy-admin] clusters dump:"
+            curl -sS --max-time 10 "${ADMIN}/clusters" | head -50
+            exit 1
+          fi
+          if grep -E '^gibson_daemon_callback::.*health_flags::/(FAILED|DEGRADED|UNHEALTHY)' /tmp/cbclusters >/dev/null ; then
+            echo "$ERR envoy-admin: gibson_daemon_callback cluster has unhealthy endpoints"
+            grep '^gibson_daemon_callback::' /tmp/cbclusters | head -20
+            exit 1
+          fi
+          echo "[envoy-admin] gibson_daemon_callback cluster looks healthy"
+
+          # 4. Same for ext_authz cluster (deploy#134/#136 class of regression).
+          curl -sS --max-time 10 "${ADMIN}/clusters?filter=ext_authz" > /tmp/extz
+          if ! grep -q '^ext_authz::' /tmp/extz ; then
+            echo "$ERR envoy-admin: ext_authz cluster not present"
+            exit 1
+          fi
+          if grep -E '^ext_authz::.*health_flags::/(FAILED|DEGRADED|UNHEALTHY)' /tmp/extz >/dev/null ; then
+            echo "$ERR envoy-admin: ext_authz cluster has unhealthy endpoints"
+            grep '^ext_authz::' /tmp/extz | head -20
+            exit 1
+          fi
+          echo "[envoy-admin] ext_authz cluster looks healthy"
+
+          # 5. jwt_authn filter — should NOT report jwks_fetch_failed.
+          curl -sS --max-time 10 "${ADMIN}/stats?filter=jwt_authn" > /tmp/jwt
+          if grep -E 'jwks_fetch_failed.*:\s*[1-9]' /tmp/jwt >/dev/null ; then
+            echo "$ERR envoy-admin: jwt_authn filter reports jwks_fetch_failed"
+            grep -E 'jwks_fetch|denied' /tmp/jwt | head -20
+            exit 1
+          fi
+          echo "[envoy-admin] jwt_authn JWKS fetch healthy"
+
+          echo ""
+          echo "[envoy-admin] PASS"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}

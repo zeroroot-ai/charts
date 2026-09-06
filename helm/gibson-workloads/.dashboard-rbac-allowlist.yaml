@@ -1,0 +1,74 @@
+# Dashboard ServiceAccount RBAC allow-list.
+#
+# This file is the canonical source of truth for the verbs that
+# gibson-dashboard's ClusterRole(s) are PERMITTED to hold.
+#
+# Spec: auth-resolution-hardening (R1, R1.5).
+#
+# How it's used
+# -------------
+# The dashboard repo's scripts/check-dashboard-rbac-minimal.mjs renders
+# THIS chart (gibson-workloads) with values-kind.yaml, parses the
+# resulting `gibson-dashboard-crd` ClusterRole (and any other
+# ClusterRole/Role named gibson-dashboard*), and diffs the rules against
+# this allow-list. Any verb in the rendered chart that isn't here fails
+# the build. The allow-list itself is reviewed in PR diffs — adding a
+# verb here is a deliberate, justified act.
+#
+# Relocated from the deleted umbrella chart (helm/gibson/) to
+# helm/gibson-workloads/ when the open-core restructure removed the old
+# umbrella (deploy#61); the dashboard RBAC now lives in this sub-chart.
+#
+# Format
+# ------
+# Each entry: { apiGroups, resources, verbs, justification }. Verbs are
+# the exact set permitted (no implicit star expansion). To add a verb,
+# add it here AND in templates/dashboard/crd-rbac.yaml in the same PR.
+
+rules:
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["tenants"]
+    verbs: ["get", "watch", "create", "update", "patch"]
+    justification: |
+      `get` + `watch` surface the active tenant's metadata; the cluster-wide
+      `list` was dropped under spec `tenant-membership-not-in-jwt`. `create`
+      is required by the signup Server Action (app/actions/signup.ts), which
+      applies a Tenant CR on workspace creation. `update`/`patch` were added
+      for the Stripe billing webhook, which stamps the `billing-active`
+      annotation onto the Tenant CR after a successful subscription
+      (dashboard#780, deploy#922). `list`/`delete` remain off — the dashboard
+      never enumerates or destroys Tenant CRs (the operator owns that).
+
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["tenants/status"]
+    verbs: ["get"]
+    justification: |
+      Read tenant status.phase to surface "provisioning / ready /
+      terminating" in dashboard tenant views.
+
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["tenantmembers", "agentenrollments", "componentgrants"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    justification: |
+      Per-tenant CRs the dashboard CRUDs directly today. A future spec
+      will move write paths to TenantAdminService / PlatformOperatorService
+      RPCs (matching the Tenant pattern) at which point the verbs reduce
+      to [get, list, watch]; the freshness guard catches the drift in
+      either direction.
+
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    justification: |
+      Read agent-enrollment bootstrap-token Secrets whose names are
+      dynamic (secretRef on the Tenant CRD). LLM provider credentials
+      are NOT in Kubernetes Secrets — they live in the daemon's
+      encrypted credential store (spec 25-daemon-driven-provider-config).
+
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+    justification: |
+      Tenant aggregate views read namespaces matching tenant-*. Read-only
+      access; the dashboard never creates/deletes namespaces (the
+      tenant-operator owns that lifecycle).

@@ -1,0 +1,117 @@
+{{- if .Values.stripeMock.enabled }}
+{{/*
+stripe-mock: Stripe's official mock API server for kind dev clusters.
+
+Replaces api.stripe.com so the tenant-operator's readyz Stripe probe
+(balance.Get) and billing saga steps (CreateCustomer, CreateSubscription)
+work without a live Stripe test key. The tenant-operator deployment sets
+STRIPE_API_BASE_URL=http://<this-service>:12111 when stripeMock is enabled.
+
+stripe-mock validates neither API keys nor idempotency keys — it returns
+schema-correct mock responses for every Stripe API endpoint.
+
+Production overlays MUST NOT enable this (stripeMock.enabled defaults to
+false). The strip-mock service is never reachable from external networks
+(ClusterIP + no Ingress).
+
+Upstream: https://github.com/stripe/stripe-mock
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gibson.stripeMock.host" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: stripe-mock
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: stripe-mock
+  template:
+    metadata:
+      labels:
+        {{- include "gibson.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: stripe-mock
+    spec:
+      containers:
+        - name: stripe-mock
+          image: "{{ .Values.stripeMock.image.repository }}:{{ .Values.stripeMock.image.tag }}"
+          imagePullPolicy: {{ .Values.stripeMock.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: 12111
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.stripeMock.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # stripe-mock writes tmp files at startup
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gibson.stripeMock.host" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: stripe-mock
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 12111
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "gibson.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: stripe-mock
+---
+{{- /* deploy#1365: allow policy under the namespace default-deny. Lives
+       HERE (inside the stripeMock.enabled gate) rather than in
+       templates/namespace-isolation/ because kind-profile-coherence.bats
+       asserts the literal name is absent from the saas render. Same shape
+       as the dev-observability policy: any same-namespace pod may dial
+       the mock; egress allow-all (deploy#1462 tracks tightening). */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-stripe-mock
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: stripe-mock
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: stripe-mock
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - {}
+{{- end }}

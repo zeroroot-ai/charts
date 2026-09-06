@@ -1,0 +1,111 @@
+# Flat air-gap mirror list for the Gibson Big Bang package.
+#
+# GENERATED — do not hand-edit. Regenerate with:
+#     ./bigbang/images/generate-image-list.py
+# CI (`airgap-image-list`) fails the build when this file is stale, because a
+# hand-maintained copy of a rendered artifact always drifts, and it drifts
+# invisibly: the failure lands in a disconnected customer environment
+# (deploy#1171).
+#
+# Derived from `helm template` over EVERY ci/ profile (staging, saas,
+# self-hosted), so the list is a superset — a mirror that omits an image
+# because one profile does not use it breaks the next profile.
+#
+# Digests are NOT resolved here. Almost every image is private now
+# (ghcr.io/zeroroot-ai/*, mirror included), so pinning needs registry auth:
+# run `./resolve-digests.sh` after `docker login ghcr.io` at mirror time.
+#
+# Mirror loop:
+#   while read -r img; do [ "${img#\#}" = "$img" ] || continue
+#     crane copy "$img" "registry.il.example.mil/${img#*/}"; done < images.txt
+#
+# DELIBERATELY ABSENT — checked, not forgotten:
+#
+#   ghcr.io/zeroroot-ai/{billing,www}
+#       SaaS-only. They ship in helm/saas-overlay/*, which this Big Bang
+#       package does not deploy — it deploys the umbrella chart only. billing
+#       is the closed seam and is bypassable on-prem (no-op provider); www is
+#       absent from any self-hosted install by design.
+#
+#   ghcr.io/zeroroot-ai/mirror/velero{,-plugin-for-aws}
+#       Velero ships as its own release, helm/gibson-velero, in its own
+#       namespace, for the RBAC reason that chart's Chart.yaml states. This
+#       package deploys the umbrella chart only, so its images are not in this
+#       render. An air-gapped operator who wants backups mirrors
+#       ghcr.io/zeroroot-ai/mirror/velero:v1.18.1 and
+#       ghcr.io/zeroroot-ai/mirror/velero-plugin-for-aws:v1.14.2 as well; the
+#       versions are pinned in helm/gibson-velero/values.yaml.
+#
+#   ghcr.io/zeroroot-ai/internal-authz-registry
+#       An OCI artifact, not a runtime image, and the air-gap path does not
+#       fetch it: the default path reads the registry from the daemon over
+#       mTLS, and an air-gapped install uses sdk.bypassRegistryValidation +
+#       sdk.embeddedRegistry (a mounted ConfigMap).
+
+
+# Helm OCI chart (the deployable artifact)
+ghcr.io/zeroroot-ai/charts/gibson:0.121.1
+
+# First-party platform images (private; ELv2 + the closed billing seam).
+ghcr.io/zeroroot-ai/connector-operator:main@sha256:39f5adcc513f03b6a711b854afd4c81d15c913a23d78ca6f05f1d354c408c252
+ghcr.io/zeroroot-ai/dashboard:main@sha256:8d796ee31429b88ecf4829e6e8ecc1919fc61a428c56ecaca375e9d5d8c887fb
+ghcr.io/zeroroot-ai/docs-site@sha256:fab0a860efe210cc9ac805b517d519cdfd2cc366c335233682945a3f5b60a82f
+ghcr.io/zeroroot-ai/ext-authz:sha-3af964a@sha256:1d381d24bc51ec0e248a5003e887f40f61ece6cecf0194cf2bdd4cd847babb55
+ghcr.io/zeroroot-ai/gibson-belief-sidecar:v0.1.1@sha256:f559cc08880e9d01a1ffab2dde050f2f7eb25157f9675d5077aae35966aacff2
+ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-080d9e8@sha256:8cdb89c7b4b6770820a7a1e699c799e0a6be7051eea940bf658be8bfe62a3ddf
+ghcr.io/zeroroot-ai/gibson:v0.134.0@sha256:df148db2ab862be1ac75ad0c6eb857022809fd0b1a77a4f6170d4ca387ffb068
+ghcr.io/zeroroot-ai/platform-operator:v0.132.0@sha256:447b442428e8d24052139ab1cc72cac8140517173d5ce9ed1826cff4f52956d3
+ghcr.io/zeroroot-ai/setec-frontend:v0.113.0@sha256:b009edc1a1e7a468c756fac710271ef581b4f684da45fa93039857b3c30e09d2
+ghcr.io/zeroroot-ai/setec-runtime-agent:v0.113.0@sha256:adfa0fd94e50a3c346eed665b20c79395f0fef518b687d03ec90ada46a9e7585
+ghcr.io/zeroroot-ai/setec:v0.113.0@sha256:37e8303bc2de91ddefc3abbea36caea415b2c192ce76f8821951822d887744eb
+ghcr.io/zeroroot-ai/tenant-operator:sha-ee35187@sha256:fb19509f541530645ded2f5fc58c81d98a8581639ff09390814b7928e45904fb
+ghcr.io/zeroroot-ai/zitadel-login:v4.14.0@sha256:f4b97af692f65111f852d389b31d2b5fd42bd791c9bc033289f0f4b793abe2cb
+
+# Re-mirrored upstreams under ghcr.io/zeroroot-ai/mirror (private).
+# Upstream sources live in zeroroot-ai/.github :: mirror-list.yaml — mirror
+# from there when standing up a fresh pull-through mirror.
+ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0
+ghcr.io/zeroroot-ai/mirror/alpine:3.21
+ghcr.io/zeroroot-ai/mirror/aws-cli:2.17.50
+ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0
+ghcr.io/zeroroot-ai/mirror/busybox:1.36
+ghcr.io/zeroroot-ai/mirror/coraza-proxy-wasm:0.6.0-busybox
+ghcr.io/zeroroot-ai/mirror/curl:8.10.1
+ghcr.io/zeroroot-ai/mirror/envoy:v1.34.0
+ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community
+ghcr.io/zeroroot-ai/mirror/openbao:2.5.3
+ghcr.io/zeroroot-ai/mirror/openfga:v1.15.1
+ghcr.io/zeroroot-ai/mirror/ratelimit:8fe6ea42
+ghcr.io/zeroroot-ai/mirror/redis-stack-server:7.4.0-v1
+ghcr.io/zeroroot-ai/mirror/redis:7.4.1-alpine
+ghcr.io/zeroroot-ai/mirror/wait4x:3.6
+
+# Third-party images pulled directly by subcharts (public upstream).
+# The SPIRE/SPIFFE entries ARE the platform auth edge preserved by this
+# package — they are not replaced by Istio.
+# helm test only — not a runtime workload
+busybox:1.37.0-uclibc
+# helm test only — not a runtime workload
+cgr.dev/chainguard/bash:latest@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e
+# helm test only — not a runtime workload
+cgr.dev/chainguard/min-toolkit-debug:latest@sha256:6ba4fb1b19bb35fa0b7e6bf08b308379a5b865727e50b7b3068efb824b39ebba
+# helm test only — not a runtime workload
+docker.io/smallstep/step-cli:0.30.2
+ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0
+ghcr.io/external-secrets/external-secrets:v2.10.0
+ghcr.io/spiffe/oidc-discovery-provider:1.14.5
+ghcr.io/spiffe/spiffe-csi-driver:0.2.7
+ghcr.io/spiffe/spiffe-helper:0.11.0
+ghcr.io/spiffe/spire-agent:1.10.4
+ghcr.io/spiffe/spire-agent:1.14.5
+ghcr.io/spiffe/spire-controller-manager:0.6.4
+ghcr.io/spiffe/spire-server:1.14.5
+ghcr.io/stakater/reloader:v1.4.6
+ghcr.io/zitadel/zitadel:v4.14.0
+quay.io/jetstack/cert-manager-cainjector:v1.21.1
+quay.io/jetstack/cert-manager-controller:v1.21.1
+quay.io/jetstack/cert-manager-webhook:v1.21.1
+registry.k8s.io/external-dns/external-dns:v0.21.0
+registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.9.4

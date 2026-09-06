@@ -1,0 +1,110 @@
+# PrometheusRule for the plugin rotation-propagation SLO defined in
+# spec plugin-runtime Requirement 10.6.
+#
+# SLO: end-to-end propagation latency from operator action (rotate a secret in
+# the dashboard) to plugin observation (cache invalidated) MUST meet a
+# 5-second p95 over a 10-minute rolling window.
+#
+# Companion script: enterprise/deploy/tests/plugin/rotation-monitor.sh
+# emits gibson_plugin_rotation_propagation_seconds samples on a CronJob
+# cadence; this rule alerts on p95 budget burn.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gibson-plugin-rotation-propagation
+  labels:
+    app.kubernetes.io/name: gibson-plugin-runtime
+    app.kubernetes.io/component: plugin-rotation-slo
+    spec: plugin-runtime
+    requirement: "10.6"
+spec:
+  groups:
+    # ----------------------------------------------------------------------
+    # SLO recording rules — referenced by the alerts below and by the
+    # plugin runtime Grafana dashboard.
+    #
+    # The histogram is emitted by the plugin SDK metrics package at
+    # core/sdk/plugin/metrics/metrics.go.  Cardinality is bounded by the
+    # plugin label (manifest.metadata.name); install_id is intentionally
+    # absent from the histogram per the cardinality discipline in the
+    # package doc.
+    # ----------------------------------------------------------------------
+    - name: plugin-rotation-slos
+      interval: 30s
+      rules:
+        - record: slo:plugin_rotation_propagation_p95_seconds
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum(rate(gibson_plugin_rotation_propagation_seconds_bucket[10m])) by (le, plugin)
+            )
+        - record: slo:plugin_rotation_propagation_p99_seconds
+          expr: |
+            histogram_quantile(
+              0.99,
+              sum(rate(gibson_plugin_rotation_propagation_seconds_bucket[10m])) by (le, plugin)
+            )
+
+    # ----------------------------------------------------------------------
+    # Alerts — page when the 10-minute rolling p95 exceeds the 5-second
+    # SLO.  The synthetic monitor CronJob runs hourly so the histogram
+    # contains a low-rate stream of samples; the 10m window matches the
+    # NFR Performance requirement and the requirement-10.6 SLO budget.
+    # ----------------------------------------------------------------------
+    - name: plugin-rotation-alerts
+      rules:
+        - alert: PluginRotationPropagationP95HighSlo
+          expr: |
+            slo:plugin_rotation_propagation_p95_seconds > 5
+          for: 10m
+          labels:
+            severity: page
+            component: plugin-runtime
+            slo: rotation-propagation
+            spec: plugin-runtime
+          annotations:
+            summary: "Plugin {{ $labels.plugin }} rotation-propagation p95 above 5s SLO"
+            description: |
+              The 10-minute p95 of gibson_plugin_rotation_propagation_seconds
+              for plugin {{ $labels.plugin }} has exceeded the 5-second SLO
+              for at least 10 minutes (Requirement 10.6).
+
+              Investigate:
+                - secrets-broker rotation event emission latency
+                  (gibson_secrets_rotation_emit_seconds);
+                - daemon-side component callback stream backlog
+                  (gibson_component_callback_lag_seconds);
+                - plugin event subscriber goroutine health
+                  (gibson_plugin_state{plugin="{{ $labels.plugin }}"}).
+
+              Synthetic monitor:
+                enterprise/deploy/tests/plugin/rotation-monitor.sh
+              emits one sample per CronJob run; correlate with that
+              monitor's logs for the failing rotation tag.
+
+        - alert: PluginRotationPropagationNoSamples
+          # If the synthetic monitor stops emitting samples for two
+          # consecutive scheduling windows we cannot observe the SLO at
+          # all.  Page so the on-call investigates the monitor itself.
+          expr: |
+            absent_over_time(
+              gibson_plugin_rotation_propagation_seconds_count[2h]
+            ) == 1
+          for: 30m
+          labels:
+            severity: warning
+            component: plugin-runtime
+            slo: rotation-propagation
+          annotations:
+            summary: "No rotation-propagation samples observed in the last 2h"
+            description: |
+              The plugin rotation-propagation synthetic monitor has not
+              produced a sample in the past 2 hours.  Either the CronJob
+              has stopped scheduling, the monitor's test plugin is down,
+              or the metrics scrape is failing.
+
+              Check:
+                - kubectl get cronjob gibson-plugin-rotation-monitor
+                - kubectl logs -l app=gibson-plugin-rotation-monitor
+                  --tail=200
+                - Prometheus target health for the monitor pod.

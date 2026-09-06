@@ -1,0 +1,488 @@
+{{- /*
+fga-init Job — seeds the OpenFGA store + authorization model and writes
+the resulting (store_id, model_id) into the `gibson-fga-config`
+ConfigMap that ext-authz / daemon / tenant-operator read at startup.
+
+Without this Job, the consumers spin on "FGA store_id and model_id
+could not be resolved" / CrashLoopBackOff and the dashboard is
+unreachable. Spec: deploy-simplification-bringup (W2 / 2.3).
+
+History: this template was deleted alongside the openfga subchart in
+#26 (Phase 4 — drop third-party subchart dependencies). OpenFGA is now
+a sibling ArgoCD app at gitops/apps/dev/openfga.yaml; the daemon chart
+still owns the FGA store + model bootstrap because it owns the FGA
+model file and the platform-operator tuple seed list.
+
+fga-init is required infrastructure (one-code-path epic / deploy#187).
+The previous `.Values.fgaInit.enabled` toggle was a degradation surface
+and has been deleted; ext-authz / daemon / tenant-operator all wait on
+the gibson-fga-config ConfigMap this Job produces, so there is no
+deployment shape that can legitimately skip it. Overlays that need to
+point at an externally-managed OpenFGA should override
+`.Values.fgaInit.openfgaService` / `.openfgaHttpPort` instead.
+*/}}
+---
+{{- /*
+The Job name carries the hash of the DAEMON IMAGE REFERENCE, because the daemon
+image is now where the model comes from (see the dump-model init container). A
+new daemon image on a plain `helm upgrade` (no Argo) creates a NEW Job, which
+POSTs that image's model to OpenFGA (idempotent) and refreshes model_id in
+gibson-fga-config; an unchanged image keeps the same completed Job, a no-op.
+This is the same guarantee the old content hash gave, now keyed on the artifact
+that actually carries the model rather than on a copy of it. Without this the Job was a static
+plain resource that never re-ran after first install, so an evolved model.fga
+never reached a Helm-only cluster (kind dev, self-hosted). The Argo path is
+unchanged: the Sync hook re-runs it every sync. Keyed by content, never by a
+hook (a helm hook here deadlocks the Argo sync, deploy#754). Nothing waits on
+the Job by name; consumers wait on the gibson-fga-config ConfigMap.
+*/ -}}
+{{- $daemonImage := include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.gibson.image.repository "tag" .Values.gibson.image.tag "digest" .Values.gibson.image.digest "appVersion" .Chart.AppVersion) }}
+{{- $modelHash := $daemonImage | sha256sum | trunc 8 }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "gibson.fullname" . }}-fga-init-{{ $modelHash }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fga-init
+  annotations:
+    # Argo Sync hook: Argo runs this Job during the Sync phase and deletes
+    # it on success. Previously declared as a regular Helm resource with
+    # ttlSecondsAfterFinished: 30, which caused Argo to perpetually see the
+    # Job as OutOfSync/Missing after self-deletion (deploy#494).
+    # BeforeHookCreation clears a prior FAILED run before the next sync
+    # recreates it — without it, a single DeadlineExceeded failure leaves the
+    # Job behind and wedges every subsequent sync indefinitely (deploy#645).
+    # NO HookSucceeded: that policy makes Argo add an
+    # `argocd.argoproj.io/hook-finalizer` and defer deletion until after the
+    # sync. If the controller restarts or the op is interrupted, the finalizer
+    # is never removed, the Job sticks in Terminating, and the sync wedges for
+    # hours ("waiting for deletion of hooks") — deploy#673. BeforeHookCreation
+    # alone cleans BOTH succeeded and failed prior runs at the next sync with
+    # no finalizer; the succeeded Job lingers as a hook, and hooks are excluded
+    # from drift detection so there is no OutOfSync (cf. deploy#494).
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    helm.sh/resource-policy: keep
+spec:
+  backoffLimit: 10
+  {{- /* Wall-clock from JOB CREATION, and it counts the wait for
+         prerequisites: the ghcr-credentials pull secret (ESO, behind the
+         OpenBao seeding, arrives t+2-3m) and OpenFGA behind its migrate hook
+         (Ready t+3m on the CI runner, t+7m on a loaded workstation, both
+         measured 2026-09-02, deploy#1766). When the deadline fires the Job is
+         dead for good — nothing recreates it on a plain helm install — and
+         every wait-for-fga-config consumer spins forever, so the value must
+         cover the WORST measured cold bring-up with headroom, not the happy
+         path. 1200s is ~1.7x the worst measurement. The deadline stays (an
+         Argo sync must not wait on a genuinely broken Job forever); only its
+         size changed. */}}
+  activeDeadlineSeconds: 1200
+  template:
+    metadata:
+      labels:
+        {{- include "gibson.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: fga-init
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ .Release.Name }}-fga-init
+      {{- /* The dump-model init container pulls the PRIVATE daemon image.
+             Without the pull secret the kubelet falls back to an anonymous
+             pull, GHCR answers 401, the pod never starts, and the Job dies at
+             its activeDeadlineSeconds with the pod deleted — so the wedge is
+             invisible in the pod list and every wait-for-fga-config consumer
+             spins forever (deploy#1766). */}}
+      {{- include "gibson.imagePullSecrets" . | nindent 6 }}
+      {{- $fgaSvc := .Values.fgaInit.openfgaService | default "gibson-openfga" }}
+      {{- $fgaPort := .Values.fgaInit.openfgaHttpPort | default 8080 }}
+      initContainers:
+        # The authorization model comes OUT OF THE DAEMON IMAGE. The daemon
+        # embeds model.fga (//go:embed, internal/platform/authz) and prints it
+        # as OpenFGA JSON via `gibson dump-fga-model` (gibson#1544).
+        #
+        # This replaced a vendored files/fga-model.json regenerated by hand
+        # through `make sync-fga-model`. That copy could drift from the model
+        # the daemon actually enforces, so it needed a CI gate to compare them,
+        # and that gate jammed the deploy queue on every authz change. Seeding
+        # from the image makes seeded == enforced by construction: there is no
+        # second copy, so there is nothing to drift and nothing to gate.
+        #
+        # The entrypoint is the gibson binary, so command overrides it to get a
+        # shell for the redirect. The runtime image is alpine-based and has one.
+        - name: dump-model
+          image: {{ $daemonImage | quote }}
+          imagePullPolicy: {{ .Values.gibson.image.pullPolicy }}
+          command: ['/bin/sh', '-c']
+          args:
+            - |
+              set -e
+              gibson dump-fga-model > /model/model.json
+              # A truncated or empty dump would POST an empty model and leave
+              # every consumer authorizing against nothing. Fail here instead.
+              [ -s /model/model.json ] || { echo "FATAL: dump-fga-model produced an empty model"; exit 1; }
+              echo "dumped $(wc -c < /model/model.json) bytes of authorization model"
+          volumeMounts:
+            - name: model
+              mountPath: /model
+        - name: wait-for-fga
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          command: ['sh', '-c']
+          args:
+            - |
+              set -e
+              # deploy#1382: the listener serves TLS. busybox wget has no
+              # --ca-certificate flag, so this READINESS probe (and only
+              # the probe) skips verification — every real API call below
+              # runs in the main container with curl + CURL_CA_BUNDLE.
+              FGA="https://{{ $fgaSvc }}:{{ $fgaPort }}"
+              echo "Waiting for OpenFGA at ${FGA}/healthz ..."
+              i=0
+              while [ $i -lt 90 ]; do
+                if wget --no-check-certificate -qO /dev/null "${FGA}/healthz" 2>/dev/null; then
+                  echo "OpenFGA is ready."
+                  exit 0
+                fi
+                i=$((i+1))
+                echo "  not ready (${i}/90), retrying in 2s ..."
+                sleep 2
+              done
+              echo "ERROR: OpenFGA did not become ready in 180s"
+              exit 1
+      containers:
+        # Image needs curl AND jq baked in. The alpine:3.21 image ships
+        # neither and apk-add fails in any cluster without outbound
+        # network to dl-cdn.alpinelinux.org (kind dev, air-gapped prod).
+        # alpine/k8s:1.31.0 bakes curl + jq + kubectl and is the same
+        # image our sibling Jobs (postgres-setup, sa-identity-map-populator,
+        # signup-bot-pat-minter) use; one pull serves every dependent Job.
+        # Override via .Values.gibson.config.security.fgaInit.image
+        # for air-gapped operators with a different mirror. deploy#322
+        # finding 4 (previous mirror image 404ed on first install).
+        - name: fga-init
+          image: {{ ((((.Values.gibson).config).security).fgaInit).image | default "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0" | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ['sh', '-c']
+          args:
+            - |
+              set -e
+              # jq + curl are baked into the image; apk-add not needed.
+              command -v curl >/dev/null 2>&1 || { echo "FATAL: curl missing from fga-init image"; exit 1; }
+              command -v jq   >/dev/null 2>&1 || { echo "FATAL: jq missing from fga-init image";   exit 1; }
+
+              # deploy#1382: https — server TLS from gibson-openfga-http-tls;
+              # curl trusts it via CURL_CA_BUNDLE (env below). The k8s API
+              # calls pass --cacert explicitly, which outranks the env var.
+              FGA="https://{{ $fgaSvc }}:{{ $fgaPort }}"
+              K8S="https://kubernetes.default.svc"
+              CACERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+              NS="{{ .Release.Namespace }}"
+              TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+
+              json_val() { echo "$1" | sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1; }
+
+              echo "=== FGA Init: ${FGA} ==="
+
+              echo "--- Step 1: ensure store 'gibson' ---"
+              RESP=$(curl -sS "${FGA}/stores") || { echo "FATAL: cannot list stores"; exit 1; }
+              STORE_ID=$(echo "$RESP" | jq -r '.stores[] | select(.name=="gibson") | .id' | head -1)
+
+              if [ -z "$STORE_ID" ]; then
+                echo "  creating store ..."
+                RESP=$(curl -sS -H 'Content-Type: application/json' -d '{"name":"gibson"}' "${FGA}/stores") \
+                  || { echo "FATAL: create store failed"; exit 1; }
+                STORE_ID=$(echo "$RESP" | jq -r '.id')
+              fi
+
+              if [ -z "$STORE_ID" ] || [ "$STORE_ID" = "null" ]; then
+                echo "FATAL: could not obtain store ID"; echo "Response: ${RESP}"; exit 1
+              fi
+              echo "  store_id=${STORE_ID}"
+
+              echo "--- Step 2: write authorization model ---"
+              MODEL_JSON=$(cat /model/model.json)
+              RESP=$(curl -sS -H 'Content-Type: application/json' --data-binary "$MODEL_JSON" \
+                "${FGA}/stores/${STORE_ID}/authorization-models") \
+                || { echo "FATAL: write model failed"; echo "$RESP"; exit 1; }
+              MODEL_ID=$(echo "$RESP" | jq -r '.authorization_model_id')
+
+              if [ -z "$MODEL_ID" ] || [ "$MODEL_ID" = "null" ]; then
+                echo "FATAL: could not parse model ID"; echo "Response: ${RESP}"; exit 1
+              fi
+              echo "  model_id=${MODEL_ID}"
+
+              # --- Step 2b: publish the model so the platform-operator sees it ---
+              # The platform-operator ALSO loads the FGA model, from the
+              # ConfigMap named by PlatformBootstrap.spec.fgaModel.modelConfigMapRef
+              # (its FGAModelLoaded condition and its own WriteAuthorizationModel
+              # call). That ConfigMap used to be chart-shipped from the vendored
+              # files/fga-model.json, which made two sources for one model.
+              #
+              # Publishing the dumped model here removes the second source: the
+              # operator and this Job now converge on the same bytes, out of the
+              # same daemon image, and neither can drift from what the daemon
+              # enforces.
+              #
+              # Written through the k8s API with curl, the same way Step 3 writes
+              # gibson-fga-config, rather than with kubectl: one mechanism per
+              # file, and Check 28 bans executed mutating kubectl in chart
+              # templates (deploy#925). jq --rawfile does the JSON escaping, so
+              # tens of KB of model never passes through shell quoting by hand.
+              MODEL_CM="{{ .Release.Name }}-fga-model"
+              echo "--- Step 2b: publish ${MODEL_CM} from the dumped model ---"
+              jq -n \
+                --arg ns "${NS}" \
+                --arg name "${MODEL_CM}" \
+                --rawfile model /model/model.json \
+                '{apiVersion:"v1",kind:"ConfigMap",
+                  metadata:{name:$name,namespace:$ns,
+                            labels:{"app.kubernetes.io/managed-by":"gibson-fga-init"}},
+                  data:{"model.json":$model}}' > /tmp/model-cm.json
+
+              MCM_GET_HTTP=$(curl -sS -o /tmp/mcm-get.json -w '%{http_code}' \
+                --cacert "${CACERT}" \
+                -H "Authorization: Bearer ${TOKEN}" \
+                "${K8S}/api/v1/namespaces/${NS}/configmaps/${MODEL_CM}")
+              if [ "${MCM_GET_HTTP}" = "200" ]; then
+                MRV=$(jq -r '.metadata.resourceVersion' /tmp/mcm-get.json)
+                jq --arg rv "${MRV}" '.metadata.resourceVersion = $rv' /tmp/model-cm.json > /tmp/model-cm-put.json
+                MCM_PUT_HTTP=$(curl -sS -o /tmp/mcm-put.json -w '%{http_code}' \
+                  --cacert "${CACERT}" \
+                  -H "Authorization: Bearer ${TOKEN}" \
+                  -H "Content-Type: application/json" \
+                  -X PUT --data-binary @/tmp/model-cm-put.json \
+                  "${K8S}/api/v1/namespaces/${NS}/configmaps/${MODEL_CM}")
+                case "${MCM_PUT_HTTP}" in
+                  20*) echo "  replaced ${MODEL_CM}" ;;
+                  *) echo "FATAL: PUT ${MODEL_CM} returned ${MCM_PUT_HTTP}"; cat /tmp/mcm-put.json; exit 1 ;;
+                esac
+              elif [ "${MCM_GET_HTTP}" = "404" ]; then
+                MCM_POST_HTTP=$(curl -sS -o /tmp/mcm-post.json -w '%{http_code}' \
+                  --cacert "${CACERT}" \
+                  -H "Authorization: Bearer ${TOKEN}" \
+                  -H "Content-Type: application/json" \
+                  -X POST --data-binary @/tmp/model-cm.json \
+                  "${K8S}/api/v1/namespaces/${NS}/configmaps")
+                case "${MCM_POST_HTTP}" in
+                  20*) echo "  created ${MODEL_CM}" ;;
+                  *) echo "FATAL: POST ${MODEL_CM} returned ${MCM_POST_HTTP}"; cat /tmp/mcm-post.json; exit 1 ;;
+                esac
+              else
+                echo "FATAL: GET ${MODEL_CM} returned ${MCM_GET_HTTP}"
+                cat /tmp/mcm-get.json
+                exit 1
+              fi
+              echo "  published ${MODEL_CM} ($(wc -c < /model/model.json) bytes)"
+
+              echo "--- Step 3: write gibson-fga-config ConfigMap ---"
+              CM_BODY="{
+                \"apiVersion\": \"v1\",
+                \"kind\": \"ConfigMap\",
+                \"metadata\": {
+                  \"name\": \"gibson-fga-config\",
+                  \"namespace\": \"${NS}\",
+                  \"labels\": { \"app.kubernetes.io/managed-by\": \"gibson-fga-init\" }
+                },
+                \"data\": {
+                  \"store_id\": \"${STORE_ID}\",
+                  \"model_id\": \"${MODEL_ID}\"
+                }
+              }"
+
+              CM_GET_HTTP=$(curl -sS -o /tmp/cm-get.json -w '%{http_code}' \
+                --cacert "${CACERT}" \
+                -H "Authorization: Bearer ${TOKEN}" \
+                "${K8S}/api/v1/namespaces/${NS}/configmaps/gibson-fga-config")
+              if [ "${CM_GET_HTTP}" = "200" ]; then
+                RV=$(jq -r '.metadata.resourceVersion' /tmp/cm-get.json)
+                CM_BODY_REPLACE=$(echo "$CM_BODY" | sed "s|\"namespace\": \"${NS}\"|\"namespace\": \"${NS}\", \"resourceVersion\": \"${RV}\"|")
+                CM_PUT_HTTP=$(curl -sS -o /tmp/cm-put.json -w '%{http_code}' \
+                  --cacert "${CACERT}" \
+                  -H "Authorization: Bearer ${TOKEN}" \
+                  -H "Content-Type: application/json" \
+                  -X PUT --data "$CM_BODY_REPLACE" \
+                  "${K8S}/api/v1/namespaces/${NS}/configmaps/gibson-fga-config")
+                case "${CM_PUT_HTTP}" in
+                  20*) echo "  replaced gibson-fga-config" ;;
+                  *) echo "FATAL: PUT gibson-fga-config returned ${CM_PUT_HTTP}"; cat /tmp/cm-put.json; exit 1 ;;
+                esac
+              elif [ "${CM_GET_HTTP}" = "404" ]; then
+                CM_POST_HTTP=$(curl -sS -o /tmp/cm-post.json -w '%{http_code}' \
+                  --cacert "${CACERT}" \
+                  -H "Authorization: Bearer ${TOKEN}" \
+                  -H "Content-Type: application/json" \
+                  -X POST --data "$CM_BODY" \
+                  "${K8S}/api/v1/namespaces/${NS}/configmaps")
+                case "${CM_POST_HTTP}" in
+                  20*) echo "  created gibson-fga-config" ;;
+                  *) echo "FATAL: POST gibson-fga-config returned ${CM_POST_HTTP}"; cat /tmp/cm-post.json; exit 1 ;;
+                esac
+              else
+                echo "FATAL: GET gibson-fga-config returned ${CM_GET_HTTP}"
+                cat /tmp/cm-get.json
+                exit 1
+              fi
+
+              echo "--- Step 4: seed platform-operator tuples (optional) ---"
+              # Wait for sa-identity-map population; on Kind it may not be
+              # populated synchronously, so allow a bounded soft-fail (60s)
+              # rather than the 360s hard-fail of the legacy chart. Daemon
+              # functions without these tuples for the unauthenticated /
+              # health paths needed to render the sign-in screen; tuples are
+              # only required for the platform_operator admin RPCs.
+              # Platform SAs that must hold a platform_operator tuple on
+              # system_tenant:_system. This is intentionally a SUPERSET of
+              # .Values.serviceAccounts.required (the dashboard's allowed-caller
+              # list, trimmed in deploy#826): the dashboard's OWN service
+              # identity (gibson-dashboard-service) needs the tuple to call the
+              # platform BillingService webhook RPCs (dashboard#780), even
+              # though it is not in the allowed-caller list.
+              #
+              # NOTE: gibson-tool-runner-sa was REMOVED — its MACHINE_USER
+              # OIDCClient no longer exists, so it never appears in the
+              # sa-identity-map. Listing it here previously wedged the
+              # all-or-nothing wait below and silently skipped EVERY tuple,
+              # including the dashboard's (dashboard#780).
+              REQUIRED='gibson-iam-admin gibson-tenant-operator gibson-dashboard-service'
+              MAP_JSON=""
+              ALL_SET="false"
+              i=0
+              while [ $i -lt 30 ]; do
+                MAP_JSON=$(curl -sS --cacert "$CACERT" \
+                  -H "Authorization: Bearer ${TOKEN}" \
+                  "${K8S}/api/v1/namespaces/${NS}/configmaps/gibson-sa-identity-map" 2>/dev/null)
+                ALL_SET="true"
+                for sa in $REQUIRED; do
+                  val=$(echo "$MAP_JSON" | jq -r --arg k "$sa" '.data[$k] // empty' 2>/dev/null)
+                  if [ -z "$val" ] || [ "$val" = "<unset>" ]; then
+                    ALL_SET="false"
+                    break
+                  fi
+                done
+                if [ "$ALL_SET" = "true" ]; then
+                  echo "  sa-identity-map fully populated"
+                  break
+                fi
+                i=$((i+1))
+                sleep 2
+              done
+
+              if [ "$ALL_SET" != "true" ]; then
+                # Do NOT skip everything: one missing SA (e.g. a removed
+                # MACHINE_USER) must not silently disable the dashboard's
+                # platform_operator tuple and re-break billing (dashboard#780).
+                # The bounded wait above already gave the post-install Zitadel
+                # Job time to populate the map; now seed whatever IS present
+                # and warn (not skip) on whatever is not.
+                echo "  WARNING: sa-identity-map not fully populated after 60s — seeding present SAs, warning on absent ones."
+              fi
+
+              SEEDED=0
+              SKIPPED=0
+              MISSING=0
+              for sa in $REQUIRED; do
+                numeric=$(echo "$MAP_JSON" | jq -r --arg k "$sa" '.data[$k] // empty')
+                if [ -z "$numeric" ] || [ "$numeric" = "<unset>" ]; then
+                  echo "  WARNING: ${sa} absent from sa-identity-map — platform_operator tuple NOT seeded for it."
+                  MISSING=$((MISSING+1))
+                  continue
+                fi
+                TUPLE_BODY="{
+                  \"writes\": {
+                    \"tuple_keys\": [
+                      { \"user\": \"user:${numeric}\",
+                        \"relation\": \"platform_operator\",
+                        \"object\": \"system_tenant:_system\" }
+                    ]
+                  }
+                }"
+                TUPLE_HTTP=$(curl -sS -o /tmp/tuple.json -w '%{http_code}' \
+                  -H 'Content-Type: application/json' \
+                  -X POST --data "$TUPLE_BODY" \
+                  "${FGA}/stores/${STORE_ID}/write")
+                RESP=$(cat /tmp/tuple.json)
+                case "$RESP" in
+                  *"already exists"*|*"already existed"*|*cannot_allow_duplicate_tuple*)
+                    echo "  ${sa} (user:${numeric}) tuple exists (idempotent)"
+                    SKIPPED=$((SKIPPED+1))
+                    ;;
+                  "{}"|"")
+                    echo "  seeded ${sa} (user:${numeric}) → platform_operator on system_tenant:_system"
+                    SEEDED=$((SEEDED+1))
+                    ;;
+                  *)
+                    echo "  WARNING: tuple write failed for ${sa} (HTTP ${TUPLE_HTTP}): ${RESP}"
+                    ;;
+                esac
+              done
+
+              echo "=== FGA Init Complete: store=${STORE_ID} model=${MODEL_ID} seeded=${SEEDED} skipped=${SKIPPED} missing=${MISSING} ==="
+          env:
+            # CA for the OpenFGA HTTP-listener cert (deploy#1382); curl
+            # reads CURL_CA_BUNDLE for every call that has no --cacert.
+            - name: CURL_CA_BUNDLE
+              value: /etc/gibson/tls/fga-ca/ca.crt
+          volumeMounts:
+            - name: model
+              mountPath: /model
+              readOnly: true
+            - name: fga-http-ca
+              mountPath: /etc/gibson/tls/fga-ca
+              readOnly: true
+      volumes:
+        # Written by the dump-model init container, read by fga-init. Not a
+        # ConfigMap any more: nothing vendored to mount.
+        - name: model
+          emptyDir: {}
+        - name: fga-http-ca
+          secret:
+            secretName: gibson-openfga-http-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 0444
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-fga-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fga-init
+  annotations:
+    helm.sh/resource-policy: keep
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-fga-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fga-init
+  annotations:
+    helm.sh/resource-policy: keep
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-fga-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: fga-init
+  annotations:
+    helm.sh/resource-policy: keep
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-fga-init
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+  name: {{ .Release.Name }}-fga-init

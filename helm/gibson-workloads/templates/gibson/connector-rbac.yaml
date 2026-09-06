@@ -1,0 +1,80 @@
+{{- /*
+  ConnectorInstance write access for the gibson daemon.
+
+  The ConnectorService (ListCatalog / EnableConnector / ListConnectors /
+  DisableConnector) writes a ConnectorInstance custom resource into the caller's
+  tenant namespace (tenant-<id>). The connector-operator then reconciles it into
+  a ToolHive MCPServer or MCPRemoteProxy. The daemon writes only the declarative
+  ConnectorInstance; it never writes the ToolHive resources or the pods.
+
+  ConnectorInstance is namespaced and lives in every tenant namespace, so the
+  grant is a ClusterRole. It is scoped to exactly one resource — connectorinstances
+  — and nothing else, so the daemon cannot reach other tenant primitives.
+*/}}
+{{- if .Values.gibson.serviceAccount.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "gibson.fullname" . }}-connectorinstances
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["connectorinstances"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["connectorinstances/status"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "gibson.fullname" . }}-connectorinstances
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "gibson.fullname" . }}-connectorinstances
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gibson.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+---
+# #1562: the daemon materializes the connector credential Secret
+# (<connector>-connector-cred, a "Bearer <token>" the ToolHive proxy forwards)
+# into each tenant namespace from its connector-token loop. The Secret is
+# namespaced and lives in every tenant namespace, so the grant is a ClusterRole
+# — the same shape as the connectorinstances grant above.
+#
+# Scope note: a ClusterRole cannot bound Secret access to the tenant namespaces
+# only; the per-tenant-namespace hardening (the tenant-operator binding the
+# daemon SA to a namespace-local secrets Role) is a follow-up. The daemon
+# already holds every tenant credential in-process (it resolves them from the
+# vault broker), so k8s Secret write is a comparable trust level.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "gibson.fullname" . }}-connector-creds
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "gibson.fullname" . }}-connector-creds
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "gibson.fullname" . }}-connector-creds
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gibson.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

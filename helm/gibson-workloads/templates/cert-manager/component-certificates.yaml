@@ -1,0 +1,206 @@
+{{/*
+Per-component TLS Certificate resources (Spec 3 §1 R20).
+
+Issued by the same ClusterIssuer used by the per-Postgres-alias certs:
+awspca-issuer in prod, vault-issuer in kind. Each cert lands in a Secret
+mounted by the corresponding workload (daemon callback, daemon metrics,
+ext-authz gRPC, ext-authz health).
+
+Coordination notes (handed off in the agent return summary):
+  - daemon Go agent: mount `gibson-daemon-callback-tls` at
+    `/etc/gibson/tls/callback/` and wrap the :50001 listener with
+    SPIFFE-mTLS (R1).
+  - daemon Go agent: mount `gibson-daemon-metrics-tls` at
+    `/etc/gibson/tls/metrics/` and wrap the :9090 metrics listener
+    (R20).
+  - ext-authz Go agent: mount `gibson-ext-authz-grpc-tls` at
+    `/etc/ext-authz/tls/grpc/` and wrap :9001 with SPIFFE-mTLS (R13).
+  - ext-authz Go agent: mount `gibson-ext-authz-health-tls` at
+    `/etc/ext-authz/tls/health/` and wrap :9002 with TLS (R20).
+
+The daemon main gRPC :50051 cert is already provisioned via SPIRE SDS in
+the existing wiring; this file does NOT duplicate that path.
+
+deploy#201: cert-manager itself is REQUIRED infrastructure — the
+`.Values.certManager.enabled` precondition is gone. Per-issuer toggles
+remain.
+*/}}
+
+{{- $issuerName := "" -}}
+{{- $issuerKind := "ClusterIssuer" -}}
+{{- if (((.Values.certManager).issuers).awspca).enabled }}
+{{- $issuerName = "awspca-issuer" -}}
+{{- $issuerKind = "AWSPCAClusterIssuer" -}}
+{{- else if (((.Values.certManager).issuers).vault).enabled }}
+{{- $issuerName = "vault-issuer" -}}
+{{- else if (((.Values.certManager).issuers).selfsigned).enabled }}
+{{- /* selfsigned-ca rendered by templates/cert-manager/cluster-issuer.yaml
+       as a namespaced Issuer (because cert-manager's
+       --cluster-resource-namespace points at the controller namespace,
+       not this release's). Used in kind/dev to root daemon + ext-authz
+       component TLS without an external CA. */ -}}
+{{- $issuerName = "selfsigned-ca" -}}
+{{- $issuerKind = "Issuer" -}}
+{{- end }}
+
+{{- if $issuerName -}}
+
+{{- /* Daemon callback TLS (port 50001).
+       gibson daemon is structural infrastructure (one-code-path /
+       deploy#188). The previous `.Values.gibson.enabled` gate has been
+       deleted — these certificates render unconditionally. */}}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gibson-daemon-callback-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: daemon-tls
+spec:
+  secretName: gibson-daemon-callback-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: {{ printf "%s.%s.svc" (include "gibson.fullname" .) .Release.Namespace | quote }}
+  dnsNames:
+    - {{ include "gibson.fullname" . | quote }}
+    - {{ printf "%s.%s" (include "gibson.fullname" .) .Release.Namespace | quote }}
+    - {{ printf "%s.%s.svc" (include "gibson.fullname" .) .Release.Namespace | quote }}
+    - {{ printf "%s.%s.svc.cluster.local" (include "gibson.fullname" .) .Release.Namespace | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ $issuerName | quote }}
+    kind: {{ $issuerKind | quote }}
+    group: {{ ternary "awspca.cert-manager.io" "cert-manager.io" (eq $issuerKind "AWSPCAClusterIssuer") | quote }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gibson-daemon-metrics-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: daemon-tls
+spec:
+  secretName: gibson-daemon-metrics-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: {{ printf "%s.%s.svc" (include "gibson.fullname" .) .Release.Namespace | quote }}
+  dnsNames:
+    - {{ include "gibson.fullname" . | quote }}
+    - {{ printf "%s.%s.svc" (include "gibson.fullname" .) .Release.Namespace | quote }}
+    - {{ printf "%s.%s.svc.cluster.local" (include "gibson.fullname" .) .Release.Namespace | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ $issuerName | quote }}
+    kind: {{ $issuerKind | quote }}
+    group: {{ ternary "awspca.cert-manager.io" "cert-manager.io" (eq $issuerKind "AWSPCAClusterIssuer") | quote }}
+
+{{- /* ext-authz gRPC + health TLS.
+       ext-authz is structural infrastructure (deploy#188) —
+       these certificates render unconditionally; the extAuthz.enabled
+       toggle was deleted. */}}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gibson-ext-authz-grpc-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ext-authz-tls
+spec:
+  secretName: gibson-ext-authz-grpc-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: {{ printf "%s-ext-authz.%s.svc" .Release.Name .Release.Namespace | quote }}
+  dnsNames:
+    - {{ printf "%s-ext-authz" .Release.Name | quote }}
+    - {{ printf "%s-ext-authz.%s" .Release.Name .Release.Namespace | quote }}
+    - {{ printf "%s-ext-authz.%s.svc" .Release.Name .Release.Namespace | quote }}
+    - {{ printf "%s-ext-authz.%s.svc.cluster.local" .Release.Name .Release.Namespace | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ $issuerName | quote }}
+    kind: {{ $issuerKind | quote }}
+    group: {{ ternary "awspca.cert-manager.io" "cert-manager.io" (eq $issuerKind "AWSPCAClusterIssuer") | quote }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gibson-ext-authz-health-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ext-authz-tls
+spec:
+  secretName: gibson-ext-authz-health-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: {{ printf "%s-ext-authz.%s.svc" .Release.Name .Release.Namespace | quote }}
+  dnsNames:
+    - {{ printf "%s-ext-authz" .Release.Name | quote }}
+    - {{ printf "%s-ext-authz.%s.svc" .Release.Name .Release.Namespace | quote }}
+    - {{ printf "%s-ext-authz.%s.svc.cluster.local" .Release.Name .Release.Namespace | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ $issuerName | quote }}
+    kind: {{ $issuerKind | quote }}
+    group: {{ ternary "awspca.cert-manager.io" "cert-manager.io" (eq $issuerKind "AWSPCAClusterIssuer") | quote }}
+---
+{{- /* OpenFGA HTTP-listener server TLS (deploy#1382).
+
+       The vendored openfga subchart exposes `http.tls.{enabled,cert,key}`
+       (server-side TLS on :8080) but ships no Certificate of its own; the
+       umbrella's `openfga.extraVolumes` mounts the Secret this Certificate
+       produces (see helm/gibson/values.yaml). The Secret's ca.crt is also
+       what every FGA CLIENT (ext-authz, daemon, both operators, fga-init,
+       active-session-backfill) mounts to trust the listener.
+
+       The service name is the subchart's umbrella-rendered fullname
+       (gibson-openfga) — the same default the fga-init Job and ext-authz
+       use; override via fgaInit.openfgaService alongside them.
+
+       NOTE: `http.tls` has NO `ca` field (unlike `grpc.tls`), so the
+       listener cannot verify client certificates — this closes the
+       on-path/rogue-endpoint exploit (server authentication + transport
+       integrity) but does NOT authenticate ext-authz to OpenFGA. Mutual
+       auth would be `authn.method: preshared` — tracked as a follow-up,
+       deliberately not bundled here. */}}
+{{- $fgaSvc := .Values.fgaInit.openfgaService | default "gibson-openfga" }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gibson-openfga-http-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openfga-tls
+spec:
+  secretName: gibson-openfga-http-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: {{ printf "%s.%s.svc" $fgaSvc .Release.Namespace | quote }}
+  dnsNames:
+    - {{ $fgaSvc | quote }}
+    - {{ printf "%s.%s" $fgaSvc .Release.Namespace | quote }}
+    - {{ printf "%s.%s.svc" $fgaSvc .Release.Namespace | quote }}
+    - {{ printf "%s.%s.svc.cluster.local" $fgaSvc .Release.Namespace | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ $issuerName | quote }}
+    kind: {{ $issuerKind | quote }}
+    group: {{ ternary "awspca.cert-manager.io" "cert-manager.io" (eq $issuerKind "AWSPCAClusterIssuer") | quote }}
+
+{{- end }}

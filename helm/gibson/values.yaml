@@ -1,0 +1,1345 @@
+# Gibson umbrella chart values.
+#
+# Each sub-chart is configured under its own key. With no overrides the
+# umbrella renders exactly what installing the three sub-charts with their
+# own defaults produces; per-environment shape (replicas, resources, DNS,
+# image digests) is supplied by an env overlay
+# (gitops envs/<env>/values.yaml — slice #787/#790/gitops#250), not here.
+#
+# Sub-chart defaults live in each sub-chart's own values.yaml and are NOT
+# duplicated here; only cross-cutting umbrella-level overrides belong in this
+# file.
+
+# Helm propagates `global` into every sub-chart, so the platform external
+# domain is set ONCE here and read by gibson-common's `gibson.domain` helper
+# (deploy#630 — single source of truth, no hardcoded hostname fallback). The
+# env overlay sets the real value (e.g. staging.zeroroot.ai); the default is
+# the prod apex so an un-overlaid render is prod-shaped. (deploy#805)
+# =============================================================================
+# Operator-substitution seams.
+#
+# Each selects WHOSE operator runs, never WHETHER one runs. Every install runs
+# exactly one cert-manager, one External Secrets Operator, one ExternalDNS and
+# one CloudNativePG. Default true: a greenfield cluster needs to set nothing.
+#
+# Set false when the cluster already owns that operator — Big Bang, OpenShift,
+# or any brownfield estate. The platform then uses theirs, and this chart
+# installs neither the operator nor its CRDs.
+#
+# NOT an optional service and NOT a feature flag. One code path, two possible
+# owners. A cluster with zero of any of these does not boot, and nothing here
+# makes that shape reachable.
+#
+# The CRDs follow the same switch: shipping a subset of
+# certificates.cert-manager.io would overwrite a customer's copy underneath
+# their running controller.
+# =============================================================================
+# =============================================================================
+# Image registry.
+#
+# Every first-party image resolves to `global.registry` unless its own
+# `repository` names a host. Repointing a whole install at a mirror is one
+# value; repointing a single image — which a rebuild under different naming
+# needs — is still that image's own `repository` key.
+#
+# The pull credential follows the same host by default, so an install that
+# moves the images moves the credential with them.
+# =============================================================================
+imageCredentials:
+  # Host the credential is scoped to. Defaults to global.registry.
+  registry: ""
+  # Username presented at that registry. ghcr.io accepts any non-empty value
+  # alongside a PAT; a registry that wants a real login sets it here.
+  username: "x-access-token"
+  # Where the credential lands, and where it is read from in the secret store.
+  secretName: "ghcr-credentials"
+  remoteKey: "ghcr-pull-secret"
+  remoteProperty: "pat"
+
+
+certManager:
+  enabled: true
+
+externalDns:
+  enabled: true
+
+
+global:
+  # Host every first-party image resolves against, unless its own
+  # `repository` names one. The pull credential follows this by default.
+  registry: ghcr.io
+  domain: zeroroot.ai
+  # (deploy#1733): OpenBao is the one External Secrets backend on
+  # every substrate, so there is no backend selector and no key prefix.
+  # `global.secretBackend` and `global.secretPrefix` are DELETED. A values
+  # file that still sets either one fails the render and names the key
+  # (gibson.assertSecretKnobsDeleted).
+
+  # First-tenant seed (gibson#1496) — headless first-admin bring-up for a
+  # self-hosted install that has no self-serve signup. `global` so BOTH
+  # subcharts read ONE identity: the tenant-operator (gibson-operators) enqueues
+  # the tenant over its SPIFFE identity — bypassing the session gate that denies
+  # a headless AdminProvisionTenant — and the first-admin Job (gibson-workloads)
+  # creates the owner user once that tenant's Zitadel org exists. Split values
+  # would hang the Job waiting on a tenant id the operator never seeded.
+  # Disabled by default: SaaS/staging/prod create the first tenant via signup.
+  firstTenant:
+    enabled: false
+    tenantId: ""
+    displayName: ""
+    ownerEmail: ""
+
+# In-cluster CNPG `Cluster` shape (deploy#1389), rendered by
+# templates/postgres/platform-postgres-cluster.yaml on EVERY profile
+# (deploy#1730). The `externalPostgres` knob that used to select a
+# managed Postgres is gone; a values file that still sets it fails the
+# render.
+#
+# THE REDUNDANCY POSTURE (deploy#1729). Aurora leaves the platform
+# only because this Cluster carries the same durability, so the defaults
+# below ARE the staging and prod shape. Every install that does not override
+# them gets three instances, synchronous replication (a commit is on a second
+# copy before it returns), one instance per zone, a WAL volume of its own, a
+# switchover on every primary roll, and the operator's PodDisruptionBudgets.
+# kind sets `instances: 1` as a PROFILE value
+# (test/vanilla/ci-2core-resources.values.yaml in CI, gitops envs/dev for the
+# dev cluster). That count is the only difference between kind and prod: no
+# flag gates any setting below. helm/gibson/tests/cnpg-posture.bats asserts
+# the staging and prod renders, and the primary-kill step of
+# .github/workflows/exit-test-backup-restore.yml proves the posture live.
+platformPostgres:
+  # 3 = one primary and two replicas. 1 = kind. The synchronous block renders
+  # only above one instance, because a single instance has no standby to wait
+  # for and CNPG rejects synchronous.number >= instances. Nothing else changes
+  # with the count.
+  instances: 3
+  storage:
+    size: 10Gi
+    # Empty → the cluster's default StorageClass. Overlays set an explicit
+    # class where the default is unsuitable.
+    storageClass: ""
+  # WAL on its own volume: a full data volume never stops WAL, and a WAL burst
+  # never fills the data volume. Same StorageClass rule as storage.
+  walStorage:
+    size: 5Gi
+    storageClass: ""
+  # A commit returns only after ANY 1 standby has the WAL on disk. `required`
+  # keeps that true when a standby is down: writes then wait rather than land
+  # on one copy. Durability over availability, on purpose.
+  synchronous:
+    method: any
+    number: 1
+    dataDurability: required
+  # One instance per zone, enforced. A node with no zone label matches no
+  # rule, so kind and a single-node self-host schedule every instance anyway.
+  # A cluster whose nodes carry zone labels but sit in ONE zone must set
+  # topologyKey to kubernetes.io/hostname, or two of three instances stay
+  # Pending.
+  affinity:
+    podAntiAffinityType: required
+    topologyKey: topology.kubernetes.io/zone
+  # A primary roll promotes a replica first (switchover), then restarts the
+  # old primary as a replica. `restart` takes the primary down first.
+  primaryUpdateMethod: switchover
+  # The operator performs the switchover on its own. `supervised` waits for a
+  # human to promote, which no recreate has.
+  primaryUpdateStrategy: unsupervised
+  # The operator's PodDisruptionBudgets: a drain cannot evict the primary and
+  # cannot take the last replica.
+  enablePDB: true
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 2
+      memory: 2Gi
+
+  # postgresql.conf. archive_timeout is the recovery point objective for
+  # unplanned loss (docs/bringup.md § Cadence): a WAL segment is
+  # shipped to the durable bucket at least every 300 s, so at most five
+  # minutes of commits are lost when every instance dies at once.
+  parameters:
+    archive_timeout: "300s"
+
+  # Restore-on-bringup (deploy#1739). EMPTY on every profile and
+  # in every values file: with no id the Cluster renders `bootstrap.initdb`
+  # and the database is empty, always, even when the barman catalog in the
+  # durable bucket is full. `make recreate ENV=<env> RESTORE_FROM=<name>`
+  # is the ONLY producer of a value here: it reads the CNPG base backup id
+  # out of the named Velero backup and passes it as a Helm parameter, so
+  # Postgres recovers from the backup that was named and never from the
+  # newest one in the catalog. There is no `latest` and no auto-detect.
+  #
+  # Setting this by hand in a values file is a mistake: the id would then
+  # survive into every later sync and the Cluster would try to recover on a
+  # bringup that asked for an empty database.
+  recovery:
+    backupID: ""
+
+  # Continuous backup to the DURABLE BUCKET (deploy#1730), on every
+  # profile. The bucket is a substrate input: stage 0 creates it (MinIO on
+  # kind, S3 on AWS, the operator's own store on-prem) and preflight proves
+  # it live before stage 1 starts, so the chart never asks whether it exists.
+  #
+  # What the platform writes: every completed WAL segment (continuous, and at
+  # least every archive_timeout), plus one base backup a day. What restores
+  # it: `bootstrap.recovery` from the same prefix on a recreate that names a
+  # backup. Retention is the bucket's lifecycle rule on backups/
+  # and nothing else: the platform credential cannot delete an object, and
+  # the render carries no retentionPolicy for exactly that reason.
+  #
+  # Three keys are the seam `make recreate` fills from substrate.env
+  # (deploy#1737): destinationPath (BUCKET_NAME), endpointURL
+  # (BUCKET_ENDPOINT) and the two credential Secret refs below, which the
+  # bringup writes into the release namespace from the keyring. The defaults
+  # are kind's stage 0 (kind/substrate/substrate.sh).
+  backup:
+    # s3://<durable-bucket>/backups/postgres/. REQUIRED, and the render fails
+    # unless the path sits under backups/, the prefix the lifecycle rule
+    # covers. gibson-kind is the bucket kind's stage 0 creates.
+    destinationPath: "s3://gibson-kind/backups/postgres/"
+
+    # The S3 API endpoint. Empty means AWS S3 for the bucket's region. kind's
+    # MinIO listens on the last-but-two address of the kind Docker subnet,
+    # which substrate.sh pins (http://172.18.255.250:9000 on the default
+    # subnet). recreate overrides it from substrate.env BUCKET_ENDPOINT.
+    endpointURL: "http://172.18.255.250:9000"
+
+    # Which instance serves the base backup. `prefer-standby` keeps the load
+    # off the primary on the three-instance profiles and degrades to the
+    # primary on its own at instances: 1 (kind), so one value is correct for
+    # every profile.
+    target: prefer-standby
+
+    # The bucket credential: the BUCKET_ACCESS_KEY and BUCKET_SECRET_KEY
+    # members of the bringup keyring, written by the bringup as the
+    # `bringup-keyring` Secret in the release namespace BEFORE the chart
+    # syncs (the same Secret the OpenBao static seal reads its key from,
+    # deploy#1731). Both names are REQUIRED at render time. The chart renders
+    # no Secret for them: the keyring never comes from the chart.
+    s3Credentials:
+      accessKeyIdSecret:
+        name: "bringup-keyring"
+        key: "bucket-access-key"
+      secretAccessKeySecret:
+        name: "bringup-keyring"
+        key: "bucket-secret-key"
+
+    wal:
+      compression: gzip
+      maxParallel: 4
+    data:
+      compression: gzip
+      jobs: 2
+
+    # The ScheduledBackup CR, the base-backup half. Without it the
+    # barmanObjectStore config gives WAL archiving and nothing else.
+    scheduledBackup:
+      # CNPG cron is SIX fields (leading seconds), not five. A five-field
+      # expression is rejected by the operator's webhook. One a day.
+      schedule: "0 30 2 * * *"
+      # Take one immediately on creation, so a fresh install has a base backup
+      # without waiting up to a day for the first tick.
+      immediate: true
+      # `self` ties the Backup objects' lifetime to the ScheduledBackup, so
+      # removing the schedule cleans up its Backup CRs (the bucket objects are
+      # untouched — those are the lifecycle rule's business).
+      backupOwnerReference: self
+
+
+# Under the umbrella (release `gibson`), the daemon Service rendered by the
+# gibson-workloads sub-chart is gibson.fullname = "gibson-gibson-workloads" —
+# chart+release name composition, the same divergence as the spire className
+# knob below. The gibson-operators BASE default ("gibson-workloads:50051")
+# was computed for the standalone gitops/kind shape where the workloads chart
+# is its own release named gibson-workloads; under the umbrella no Service by
+# that name exists, so the tenant-operator's operator→daemon dial
+# fails on the first tenant reconcile (deploy#879, found during the staging
+# signup outage 2026-06-12).
+gibson-operators:
+  tenantOperator:
+    daemonGrpcAddress: "gibson-gibson-workloads:50051"
+
+# The umbrella installs everything in ONE Argo Application/sync, so the
+# secret-provisioning chain (ClusterSecretStore + ExternalSecrets) must be
+# ordered before the init Jobs that mount the resulting secrets — otherwise a
+# cold sync deadlocks (deploy#820). The chain is ordered with NEGATIVE
+# SYNC-WAVES on regular resources (store -10 → ExternalSecrets -8 → zitadel
+# config/SA/masterkey -6 → init/setup Sync hooks -4/-3 → everything at 0),
+# NOT with PreSync hooks: hook lifecycle deletes hook objects between sync
+# attempts, which cascade-deleted the store, the ExternalSecrets and their
+# owned Secrets mid-sync on staging (2026-06-11). Kind keeps this off (its
+# separate wave-ordered Applications already order secrets first).
+gibson-workloads:
+  externalSecrets:
+    preSyncBringup: true
+  # Match the kind-proven contract (values-kind.yaml): the sa-identity-map is
+  # populated by PlatformBootstrap from the platformBootstrap CR's OIDCClients
+  # (gibson-daemon, gibson-dashboard-service, gibson-iam-admin,
+  # gibson-tenant-operator). The gibson-workloads BASE default still lists the
+  # stale gibson-dashboard-sa / gibson-tool-runner-sa names, which never appear
+  # in the map — the dashboard's resolve-sa-identity-map init waited forever on
+  # staging (deploy#826, 2026-06-11).
+  serviceAccounts:
+    required:
+      - gibson-iam-admin
+      - gibson-tenant-operator
+  gibson:
+    embedder:
+      cache:
+        # Without a hydrated model cache the daemon's GraphRAG bridge falls
+        # back to its built-in 10-second HuggingFace download against a
+        # READ-ONLY rootfs — CrashLoopBackOff at 'failed to create embedder'
+        # (observed live on staging 2026-06-11). kind uses initMode=image
+        # with a locally-built model image; that image is not published to
+        # ghcr, so the umbrella uses the chart's `download` init container
+        # (proper timeout, hydrates the PVC once; NAT egress to
+        # huggingface.co is available on EKS).
+        enabled: true
+        initMode: download
+  spiffe:
+    # Platform peer contracts (same set as values-kind.yaml — they are
+    # trust-domain-level, not env-specific). callbackPeerSVIDs feeds
+    # GIBSON_CALLBACK_PEER_SVIDS; the daemon FAIL-LOUDS at boot when SPIFFE
+    # mTLS is on and the list is empty (critical-tls-no-fallbacks Component 4
+    # — hit live on staging 2026-06-11). allowedPeerIDs is the daemon main
+    # gRPC listener's direct control-plane allow-list.
+    callbackPeerSVIDs:
+      - "spiffe://zeroroot.ai/platform/dashboard"
+      - "spiffe://zeroroot.ai/platform/envoy"
+      - "spiffe://zeroroot.ai/platform/daemon"
+    allowedPeerIDs:
+      - "spiffe://zeroroot.ai/platform/tenant-operator"
+      # The connector-operator's ConnectorInstance finalizer revokes the
+      # connector grant through the daemon (§5, gibson#1566); the
+      # daemon's method policy limits this peer to RevokeConnectorGrant.
+      - "spiffe://zeroroot.ai/platform/connector-operator"
+  spire:
+    controllerManager:
+      # MUST equal the className the umbrella's spire sub-chart computes for
+      # its controller-manager (chart+release composition under release
+      # `gibson` → "gibson-gibson"). The gibson-workloads default
+      # ("gibson-gibson-spire") was computed for the old standalone
+      # gibson-spire release; under the umbrella every gibson-platform-*
+      # ClusterSPIFFEID was silently ignored → zero registration entries →
+      # NewX509Source blocked forever → daemon/ext-authz/dashboard/
+      # tenant-operator all hung at startup with no log line (observed live
+      # on staging 2026-06-11; the failure mode is documented at the knob in
+      # gibson-workloads/values.yaml).
+      className: "gibson-gibson"
+
+# Cross-cutting platform secrets folded from gitops (deploy#787).
+externalSecrets:
+  # Operator-substitution seam; see the block at the top of this file.
+  enabled: true
+  # Render the folded ExternalSecrets at sync-wave -8 (regular resources, not
+  # hooks — see the ordering note above). Umbrella-only.
+  preSyncBringup: true
+  # The `gibson-secrets` ClusterSecretStore these reference is rendered by
+  # the gibson-workloads sub-chart (externalSecrets.clusterSecretStore), not
+  # here, so there is exactly one store for both. It reads OpenBao and there
+  # is no other backend.
+
+# Third-party app values folded from gitops apps/*.yaml (deploy#787).
+
+neo4j:
+  # Argo renders charts offline (`helm template`), where every `lookup`
+  # already returns nil; this makes the chart's lookup-guarded
+  # validations explicit no-ops instead of accidental ones, and is the
+  # neo4j chart's documented ArgoCD switch. Required for
+  # passwordFromSecret below — without it the chart fail()s on the
+  # offline lookup of the referenced Secret.
+  disableLookups: true
+  neo4j:
+    name: gibson-neo4j
+    minimumClusterSize: 1
+    acceptLicenseAgreement: "yes"
+    edition: community
+    # (ESO-only secrets) / deploy#865: the chart must NOT
+    # render Secret/gibson-neo4j-auth — the ExternalSecret in
+    # templates/externalsecrets/ owns it (creationPolicy: Owner,
+    # NEO4J_AUTH: neo4j/<backend password>). With passwordFromSecret
+    # set, the upstream chart's neo4j-auth.yaml renders nothing and the
+    # pods consume the ESO-owned Secret directly; the previous inline
+    # placeholder password made Argo's desired state carry a Secret
+    # whose data ESO immediately rewrote — permanent OutOfSync
+    # (gitops#181's ignoreDifferences was the workaround; this is the
+    # root-cause fix).
+    passwordFromSecret: gibson-neo4j-auth
+    # Dev sizing — single-tenant kind cluster. The chart's default
+    # (cpu=1000m used for both requests + limits, Guaranteed QoS)
+    # is the largest single CPU consumer on the cluster's budget.
+    # Drop to 200m req on dev so the cluster fits within a 4 vCPU
+    # GH Actions runner for signup-smoke (deploy#331). The chart's
+    # `neo4j.resources` block supports both shorthand and
+    # requests/limits full shape; we use the full shape so limits
+    # can burst above requests during JVM warmup. Prod overlay
+    # lives on gitops main branch and keeps chart defaults.
+    resources:
+      requests:
+        # Chart v2026.4.0 enforces min 500m CPU and 2Gi memory.
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: 1000m
+        memory: 3Gi
+  volumes:
+    data:
+      mode: defaultStorageClass
+      defaultStorageClass:
+        requests:
+          storage: 5Gi
+  services:
+    neo4j:
+      enabled: true
+      # Kind clusters have no cloud load balancer; LoadBalancer type
+      # causes EXTERNAL-IP=<pending> forever → Argo health check returns
+      # Progressing indefinitely (gitops#185). Use ClusterIP for dev
+      # since the service is only needed for intra-cluster access.
+      spec:
+        type: ClusterIP
+    admin:
+      enabled: false
+  image:
+    customImage: ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community
+  # ---------------------------------------------------------------------------
+  # APOC Core provisioning (deploy#1330, prerequisite for gibson#1257;
+  # single-writer graph ingress).
+  #
+  # The graph projector shapes nodes with `apoc.merge.node`, so APOC Core is
+  # a REQUIRED plugin on every Neo4j the projector writes to — including this
+  # in-chart instance (the static Neo4jURI / self-hosted path).
+  #
+  # The jar is COPIED OUT OF THE IMAGE by an init container — NEVER installed
+  # via NEO4J_PLUGINS. The image entrypoint's plugin installer appends
+  # `dbms.security.procedures.unrestricted=apoc.*` to neo4j.conf BEFORE
+  # NEO4J_-prefixed settings apply, so no environment variable can undo it,
+  # and Neo4j Community has no in-database RBAC — `unrestricted` would apply
+  # to every connection holding the bolt credential. says it is
+  # never set; tests/neo4j-apoc-clean-state.bats enforces both halves.
+  #
+  # These values mirror gibson's APOC provisioning contract
+  # (pkg/platform/dataplane/apoc.go: APOCCoreJarGlob, APOCInstallCommand,
+  # Neo4jProcedureAllowlist, Neo4jSecuritySettings) — the same wiring the
+  # tenant-operator applies to per-tenant instances. Keep them in lockstep.
+  #
+  # The image entrypoint points server.directories.plugins at /plugins
+  # whenever that directory exists; the emptyDir mount below makes it exist.
+  # The init container inherits the pinned customImage (the subchart defaults
+  # any initContainer without an `image` to the neo4j image), so the jar
+  # version is locked to the server version and needs no network.
+  podSpec:
+    initContainers:
+      - name: install-apoc-core
+        command:
+          - "bash"
+          - "-c"
+          - "cp /var/lib/neo4j/labs/apoc-*-core.jar /plugins/apoc.jar"
+        volumeMounts:
+          - name: neo4j-plugins
+            mountPath: /plugins
+  additionalVolumes:
+    - name: neo4j-plugins
+      emptyDir: {}
+  additionalVolumeMounts:
+    - name: neo4j-plugins
+      mountPath: /plugins
+  # Merge-only procedure allowlist. Everything APOC can do with the
+  # filesystem or network (apoc.export.*, apoc.load.*, apoc.cypher.runFile)
+  # is absent from this list and therefore never registered with the
+  # database at all. Consequence, recorded  and NOT a bug:
+  # gibson-backup needs apoc.export.* and stays non-functional ("store
+  # skipped"). Enabling export needs its own ADR.
+  config:
+    dbms.security.procedures.allowlist: "apoc.merge.node,apoc.merge.relationship"
+    # Explicit memory sizing (deploy#1766). Without these, Neo4j computes its
+    # heap and page cache from DETECTED memory, and inside a kind node on a
+    # GitHub runner that detection lies: the computed sizes exceeded what the
+    # 3Gi container limit allows and Neo4j refused to start, every restart:
+    #   Invalid memory configuration - exceeds physical memory. Check the
+    #   configured values for server.memory.pagecache.size and
+    #   server.memory.heap.max_size
+    # (exit-test-vanilla-install run 33577946023, gibson-0 x64 restarts; the
+    # same chart starts on a workstation kind cluster.) Sizing must not depend
+    # on environment detection. 1g heap + 512m page cache inside the 3Gi limit
+    # leaves ~1.5Gi for JVM native overhead, matching Neo4j's own guidance for
+    # a small single instance.
+    server.memory.heap.initial_size: "1g"
+    server.memory.heap.max_size: "1g"
+    server.memory.pagecache.size: "512m"
+  # Restate APOC's own file-access defaults so flipping either is a visible
+  # diff; the allowlist above is what actually binds.
+  apoc_config:
+    apoc.export.file.enabled: "false"
+    apoc.import.file.enabled: "false"
+
+openfga:
+  # deploy#1170 — the openfga subchart defaults to `openfga/openfga` on Docker
+  # Hub with an empty tag (so the tag falls out of the subchart's appVersion
+  # and moves silently on every dependency bump). Pin it to the ghcr mirror
+  # with an explicit tag. This is the ONLY place OpenFGA's image is set:
+  # gibson-workloads' `openfga:` block carries service ports only.
+  image:
+    repository: ghcr.io/zeroroot-ai/mirror/openfga
+    tag: "v1.15.1"
+  # The SA is a plain main-sync resource on purpose. It was briefly a PreSync
+  # hook (deploy#825) to outrun the migrate Job, but the SA is STANDING
+  # infrastructure used by the running Deployment's pods — hook lifecycle
+  # deletes it between sync attempts (observed live on staging 2026-06-11).
+  # With the migrate Job pinned to sync-wave 0 (below), SA + datastore Secret
+  # + Job all land in the same wave-0 batch, and kind-ordering applies the SA
+  # before the Job. No hook needed.
+  # Dev sizing — the openfga chart defaults to replicaCount=3
+  # (HA prod default). On a single-tenant kind dev cluster
+  # there's no HA requirement; three replicas are pure cluster
+  # overhead. Drop to 1 to free runtime CPU + memory + 2 pod
+  # slots. Prod overlay lives on gitops main branch and keeps
+  # chart defaults. Refs deploy#331 cost-reduction.
+  replicaCount: 1
+  podAnnotations:
+    # Restart OpenFGA when ESO rotates openfga-postgres-credentials
+    # so the pod picks up the new password from env (deploy#559), and
+    # when cert-manager renews the HTTP-listener keypair (deploy#1382) —
+    # OpenFGA reads the cert files at startup only.
+    secret.reloader.stakater.com/reload: "openfga-postgres-credentials,gibson-openfga-http-tls"
+  # ---------------------------------------------------------------------------
+  # Server-side TLS on the HTTP listener (deploy#1382). The Check response on
+  # this listener is the allow/deny answer for every authenticated request the
+  # platform serves; plaintext let any pod that joined the Service's endpoints
+  # answer Checks. The keypair comes from the cert-manager Certificate
+  # `gibson-openfga-http-tls` (gibson-workloads
+  # templates/cert-manager/component-certificates.yaml), whose ca.crt every
+  # FGA client mounts. NOTE: the subchart's `http.tls` has NO `ca` field
+  # (unlike `grpc.tls`) — this is server authentication only; client identity
+  # on this hop would need `authn.method: preshared` (follow-up, see #1382).
+  # The gRPC listener (:8081) stays as-is: no first-party client dials it
+  # (ext-authz is HTTP/JSON — deploy#140 — and its render guard rejects
+  # gRPC-port overrides).
+  # ---------------------------------------------------------------------------
+  http:
+    tls:
+      enabled: true
+      cert: /etc/openfga/tls/http/tls.crt
+      key: /etc/openfga/tls/http/tls.key
+  # The openfga image is distroless-nonroot (USER 65532); the subchart sets
+  # no fsGroup by default, so a root-owned 0400 Secret mount would be
+  # unreadable. fsGroup + group-readable mode make the keypair readable by
+  # the server without making it world-readable.
+  podSecurityContext:
+    fsGroup: 65532
+  extraVolumes:
+    - name: http-tls
+      secret:
+        secretName: gibson-openfga-http-tls
+        defaultMode: 0440
+  extraVolumeMounts:
+    - name: http-tls
+      mountPath: /etc/openfga/tls/http
+      readOnly: true
+  datastore:
+    engine: postgres
+    # Shared platform-postgres-rw, role openfga, db openfga.
+    uri: "postgres://placeholder@platform-postgres-rw.gibson.svc.cluster.local:5432/openfga?sslmode=disable"
+    existingSecret: openfga-postgres-credentials
+    secretKeys:
+      usernameKey: username
+      passwordKey: password
+    waitForMigrations: false
+  migrate:
+    # Run the migration as a normal main-sync Job (NOT a PreSync hook). In the
+    # single-Application umbrella, a PreSync migrate deadlocks: it needs the
+    # ServiceAccount + datastore-secret, which the openfga sub-chart only
+    # creates in the main Sync phase (deploy#826). As a main-sync Job those
+    # prereqs apply in the same phase, and openfga runs waitForMigrations=false
+    # so the Deployment self-heals once the schema lands. The openfga chart
+    # HARDCODES helm.sh/hook: post-install (→ Argo PostSync), which deadlocks in
+    # a single Application: PostSync only fires after the app is Healthy, but
+    # openfga crashloops until migrated (gitops#140). Override to a Sync-PHASE
+    # hook at wave 0 so it runs CONCURRENTLY with the Deployment (not before/
+    # after) — neither waits on the other; the migrate completes and openfga
+    # self-heals. (A later wave, e.g. the old wave-5 attempt, re-introduces the
+    # deadlock.) Replace=true makes the immutable Job re-appliable each sync.
+    #
+    # sync-wave "0" is LOAD-BEARING: the upstream chart also hardcodes
+    # helm.sh/hook-weight: "-5", and ArgoCD falls back to helm.sh/hook-weight
+    # as the sync wave when argocd.argoproj.io/sync-wave is absent. Without the
+    # explicit wave the Job runs alone at wave -5, BEFORE the wave-0 batch that
+    # creates gibson-openfga-datastore-secret → CreateContainerConfigError →
+    # the sync wedges on the hook forever (deploy#826, observed live on
+    # staging). Pinning wave 0 batches the Job with the Secret/Deployment.
+    annotations:
+      argocd.argoproj.io/hook: Sync
+      argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+      argocd.argoproj.io/sync-options: Replace=true
+      argocd.argoproj.io/sync-wave: "0"
+  playground:
+    enabled: false
+  telemetry:
+    metrics:
+      enabled: false
+
+zitadel:
+  # Identity provider — sole canonical IdP for the gibson stack.
+  # Postgres: shared platform-postgres-rw, role/db zitadel.
+
+  # deploy#888: the login UI now ships from the PRIVATE first-party
+  # ghcr.io/zeroroot-ai/zitadel-login fork (see zitadel.login.image below), so
+  # the zitadel subchart pods need the ghcr pull secret. The zitadel chart's
+  # login Deployment reads only this chart-top-level `imagePullSecrets` (its
+  # `login.imagePullSecrets` value is not referenced by deployment_login.yaml
+  # in 9.34.1). `ghcr-credentials` is chart-owned — rendered by
+  # templates/externalsecrets/ghcr-credentials.yaml into the gibson namespace
+  # in every env (kind included; the login image is pulled from ghcr
+  # everywhere, never kind-loaded) — so this default is env-agnostic. Extra
+  # pull secrets on the public core-zitadel image are a no-op.
+  imagePullSecrets:
+    - name: ghcr-credentials
+
+  # deploy#1170 — the zitadel chart composes its two HELPER images (not the
+  # core/login app images, which carry a full repository each) as
+  # `{{ imageRegistry | default "docker.io" }}/{{ tools.<t>.image.repository }}`.
+  # Left alone that is two unauthenticated Docker Hub pulls: alpine/k8s for the
+  # setup + cleanup Jobs and wait4x for the login Deployment's init container.
+  # Point the prefix at ghcr and the repositories at the mirror.
+  #
+  # tools.kubectl.image.tag MUST be set explicitly. Empty means "derive from
+  # the live cluster's kubeVersion", so the tag changes with the control-plane
+  # minor and can name an alpine/k8s tag that was never mirrored (and, on
+  # Docker Hub, may not exist at all). Pin it, and add the new tag to
+  # zeroroot-ai/.github :: mirror-list.yaml before moving it.
+  imageRegistry: ghcr.io
+  tools:
+    kubectl:
+      image:
+        repository: zeroroot-ai/mirror/alpine-k8s
+        tag: "1.33.0"
+    wait4x:
+      image:
+        repository: zeroroot-ai/mirror/wait4x
+        tag: "3.6"
+
+  zitadel:
+    # deploy#1348 — the masterkey is ESO-materialised, never a literal.
+    #
+    # This key used to be `masterkey: "kindDevZitadelMasterkey32CharsXX"`,
+    # with a comment promising that production overlays override it via
+    # masterkeySecretName. None did (ci/values-{saas,staging,self-hosted}.yaml
+    # all had zero masterkey lines, and the gitops overlays set only the
+    # unrelated platform KEK `masterKey.keyName: master-kek`), so every
+    # profile shipped the IdP's encryption root key as a constant committed
+    # to this repository.
+    #
+    # `gibson-zitadel-masterkey` is now produced by gibson-workloads'
+    # templates/external-secrets/zitadel-masterkey-externalsecret.yaml from
+    # OpenBao, the one ESO backend, at the flat key `zitadel-masterkey`
+    #. The upstream chart requires
+    # exactly one of masterkey / masterkeySecretName and `fail`s otherwise
+    # (secret_zitadel-masterkey.yaml), so re-adding a literal here is a hard
+    # render failure; scripts/check-chart-secret-plumbing.py catches it first.
+    #
+    # There is deliberately no kind-only literal either — kind reads the same
+    # backend as every other profile (one code path).
+    masterkey: ""
+    masterkeySecretName: "gibson-zitadel-masterkey"
+
+    # NOTE: `masterkeyAnnotations` was deleted with the literal. It only ever
+    # annotated the Secret the upstream chart renders from an inline
+    # `masterkey:` (secret_zitadel-masterkey.yaml is gated on that value), and
+    # existed to strip the chart's helm.sh/hook: pre-install — as a hook the
+    # Secret was deleted by hook lifecycle mid-sync on staging 2026-06-11 and
+    # any zitadel pod restart would then crashloop. The chart no longer renders
+    # that Secret at all; the equivalent ordering now lives on the
+    # ExternalSecret (sync-wave -8, ahead of the init Jobs at -4/-3).
+
+    configmapConfig:
+      # Empty = derive from global.domain (app.<global.domain>) at render
+      # time, the same contract gibson-workloads uses (values.yaml
+      # `ExternalDomain: ""` + template `default app.<domain>`). A hardcoded
+      # literal here is drift that silently diverges from global.domain and
+      # trips the hostname-guard (deploy#630/#938). Per-env overlays
+      # (ci/values-staging.yaml) still pin the env-specific host explicitly.
+      ExternalDomain: ""
+      ExternalPort: 30443
+      ExternalSecure: true
+      TLS:
+        Enabled: false
+      # Disable Zitadel self-service registration. The hosted Login-V2 app
+      # exposes /ui/v2/login/register (and a "Register" link on the sign-in
+      # page) whenever the instance login policy allows it — Zitadel's
+      # default is allowRegister=true. That lets anyone create an account
+      # OUTSIDE the controlled signup (no plan / Stripe / Tenant CR / FGA
+      # owner tuple), so registration must be off (deploy#886).
+      #
+      # NOTE: DefaultInstance.* is applied ONLY at FIRST-INSTANCE creation,
+      # so this closes the hole for fresh standups only. Already-running
+      # instances (staging/prod) are enforced idempotently by the
+      # platform-operator's bootstrap reconcile via the Admin login-policy
+      # API — that reconcile, not this value, is the authoritative guard.
+      # The controlled signup creates users via the admin API
+      # (POST /v2/users/human), which does NOT consult allowRegister, so
+      # this does not affect /signup.
+      DefaultInstance:
+        LoginPolicy:
+          AllowUsernamePassword: true
+          AllowExternalIDP: true
+          AllowRegister: false
+      Database:
+        Postgres:
+          Host: platform-postgres-rw.gibson.svc.cluster.local
+          Port: 5432
+          Database: zitadel
+          MaxOpenConns: 20
+          MaxConnLifetime: 30m
+          MaxConnIdleTime: 5m
+          User:
+            Username: zitadel
+            SSL:
+              Mode: disable
+          Admin:
+            Username: zitadel
+            SSL:
+              Mode: disable
+
+      # SystemAPIUsers (platform-operator#28).
+      # Provisions a SYSTEM_OWNER machine user `gibson-system-bot`
+      # whose public key Zitadel verifies on every JWT submitted
+      # against /system/v1/*. The matching private key is mounted
+      # on the platform-operator pod (deploy#321), which signs
+      # JWTs to call AddInstanceTrustedDomain — registering the
+      # cluster-internal Zitadel Service name so every Gibson pod
+      # can dial Zitadel by Service name without the per-pod
+      # hostAliases workaround.
+      #
+      # Path points at the mounted Secret (see extraVolumeMounts below).
+      # There is NO KeyType field: v4.14's SystemAPIUser struct is exactly
+      # {Path, KeyData, Memberships} (internal/api/authz/system_token.go) and
+      # the previous `KeyType: 1` here was silently ignored — with a comment
+      # asserting Zitadel behaviour nobody had verified. PEM is detected from
+      # the bytes.
+      SystemAPIUsers:
+        - gibson-system-bot:
+            Memberships:
+              - MemberType: System
+                Roles:
+                  - SYSTEM_OWNER
+            Path: /etc/zitadel-system-keys/system-bot-pub.pem
+
+  # deploy#1631: DO NOT LET ZITADEL BOOT WITHOUT ITS SYSTEM KEY.
+  #
+  # SystemAPIUsers.Path is read from disk ONCE, at boot. Measured on two
+  # separate vanilla installs, ESO materialises gibson-zitadel-system-key about
+  # two minutes AFTER Zitadel starts:
+  #
+  #   zitadel started 21:41:25 / secret created 21:43:34
+  #
+  # A Zitadel that booted without the file registers no system-bot key, so it
+  # verifies the operator's self-signed assertion as an ordinary OIDC access
+  # token and rejects it:
+  #
+  #   issuer does not match: Expected: https://<domain>, got: gibson-system-bot
+  #
+  # which stalls the platform-operator at TrustedDomainReady, so it never
+  # reaches the master-key step, so gibson-master-key is never created, so the
+  # daemon never leaves init, and nobody can log in.
+  #
+  # The Reloader annotation below is NOT sufficient on its own: Reloader reacts
+  # to updates of Secrets it is already tracking, and here the Secret is
+  # CREATED after the pod exists — observed doing nothing on a fresh install.
+  # This init container closes the hole deterministically: the pod cannot start
+  # until the key is on disk and non-empty.
+  initContainers:
+    - name: wait-for-system-key
+      image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+      command:
+        - sh
+        - -c
+        - |
+          set -eu
+          KEY=/etc/zitadel-system-keys/system-bot-pub.pem
+          echo "waiting for ${KEY} (SystemAPIUsers is read once, at boot)"
+          for _ in $(seq 1 180); do
+            if [ -s "$KEY" ]; then
+              echo "system key present ($(wc -c < "$KEY") bytes)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "FATAL: ${KEY} never appeared. Zitadel would boot trusting no" >&2
+          echo "system-bot key and reject every System API call, stalling the" >&2
+          echo "platform-operator at TrustedDomainReady (deploy#1631)." >&2
+          exit 1
+      volumeMounts:
+        - name: zitadel-system-key
+          mountPath: /etc/zitadel-system-keys
+          readOnly: true
+
+  # Belt and braces: if the key is ever ROTATED, Reloader restarts the pod so
+  # the new public key is loaded. It does not cover first creation (above).
+  #
+  # SystemAPIUsers.Path is read from disk at boot. On a fresh install Zitadel
+  # starts before ESO has materialised gibson-zitadel-system-key, so it comes
+  # up trusting no system-bot key and answers every System API call with
+  #
+  #   zitadel system 401: Errors.Token.Invalid (AUTH-7fs1e)
+  #
+  # which stalls the platform-operator at TrustedDomainReady, so it never
+  # reaches the master-key step, so gibson-master-key is never created, so the
+  # daemon never leaves init and nobody can log in. Measured on a vanilla
+  # install: Zitadel started at 20:48:20, the Secret was created at 20:50:27.
+  #
+  # Reloader is already deployed; it just was not told to watch this Secret.
+  annotations:
+    secret.reloader.stakater.com/reload: "gibson-zitadel-system-key"
+
+  # Mount the public-key half of gibson-zitadel-system-key on
+  # the Zitadel pods so the SystemAPIUsers Path: above resolves.
+  # The Secret is materialised by ESO (see standalone-
+  # externalsecrets/zitadel-system-key-externalsecret.yaml).
+  extraVolumes:
+    - name: zitadel-system-key
+      secret:
+        secretName: gibson-zitadel-system-key
+        items:
+          - key: public-key.pem
+            path: system-bot-pub.pem
+  extraVolumeMounts:
+    - name: zitadel-system-key
+      mountPath: /etc/zitadel-system-keys
+      readOnly: true
+
+  env:
+    - name: ZITADEL_DATABASE_POSTGRES_USER_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: zitadel-postgres-credentials
+          key: password
+    - name: ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: zitadel-postgres-credentials
+          key: password
+
+  podAnnotations:
+    # Restart Zitadel when ESO rotates gibson-zitadel-system-key so
+    # the pod reloads the SystemAPIUsers public key from disk (#192).
+    # Without this, Zitadel keeps the old in-memory key and rejects
+    # platform-operator System API JWTs signed with the new private key.
+    secret.reloader.stakater.com/reload: "gibson-zitadel-system-key"
+  replicaCount: 1
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: false
+
+  # Pin ZITADEL to v4.14.0. The chart's appVersion is v4.13.1; we run
+  # one app-minor ahead (forward-compatible, migrations auto-apply on
+  # start — verified on kind). The full chart bump to 10.x (which ships
+  # v4.14.0 natively) is deferred: chart 10.0.0 replaces the login
+  # client's PAT auth with X.509 cert auth (breaking, needs migration).
+  # Both core and the Login-V2 container must move together.
+  image:
+    tag: "v4.14.0"
+
+  # ---- Hook-lifecycle correction (deploy#820, observed live 2026-06-11) ----
+  # The zitadel chart defaults its ConfigMaps / ServiceAccounts (+ the RBAC
+  # rendered off serviceAccount.annotations) to helm.sh/hook pre-install.
+  # Argo maps those to PreSync hooks, and hook lifecycle (operation-retry
+  # cleanup / BeforeHookCreation) DELETES them between sync attempts — on
+  # staging the SA, both ConfigMaps and the masterkey vanished while the
+  # Deployment was running. Standing infrastructure must be regular resources:
+  # null the chart-default helm hooks and order with sync-wave -6 (after the
+  # ExternalSecrets at -8, before the init chain at -4/-3).
+  #
+  # The init/setup Jobs stay hooks (genuinely run-once) but move from PreSync
+  # to Sync-phase at waves -4/-3: in PreSync they ran before the ExternalSecret
+  # chain existed (the original #820 deadlock); as Sync hooks at negative waves
+  # they run after the secret layer (-10/-8/-6) and before the wave-0
+  # workloads. helm.sh hooks are kept on the Jobs so a plain `helm install`
+  # still orders them; argocd.argoproj.io/* takes precedence under Argo, and
+  # the explicit sync-wave overrides Argo's helm.sh/hook-weight fallback
+  # (the #828 lesson).
+  configMap:
+    annotations:
+      helm.sh/hook: null
+      helm.sh/hook-delete-policy: null
+      helm.sh/hook-weight: null
+      argocd.argoproj.io/sync-wave: "-6"
+  serviceAccount:
+    annotations:
+      helm.sh/hook: null
+      helm.sh/hook-delete-policy: null
+      helm.sh/hook-weight: null
+      argocd.argoproj.io/sync-wave: "-6"
+  # `zitadel init` and `zitadel setup` both connect to Postgres and need their
+  # credentials Secret. The zitadel chart's own values annotate them
+  # `helm.sh/hook: pre-install,pre-upgrade` (weights 1 and 2), and these
+  # annotation maps MERGE with the chart's, so the phase has to be overridden
+  # here or the vendor default stands.
+  #
+  # Under Helm that default cannot work: pre-install hooks run to completion
+  # before any main-phase manifest is applied, so both Jobs waited on the
+  # platform-postgres Cluster and an ESO Secret that the same release had not
+  # created yet, and the install hung to its timeout (deploy#1627). Moving them
+  # to post-install puts them after the Cluster and the Secrets exist, and after
+  # the -6 postgres-setup Jobs that create their roles.
+  #
+  # The vendor's weights 1 and 2 are kept, so init still precedes setup. Argo is
+  # unaffected — it honours the argocd.* annotations below, and sync-waves order
+  # hooks and ordinary resources on a single axis.
+  initJob:
+    annotations:
+      helm.sh/hook: post-install,post-upgrade
+      argocd.argoproj.io/hook: Sync
+      argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+      argocd.argoproj.io/sync-wave: "-4"
+  setupJob:
+    # The upstream default is 300s, and a COLD bringup does not fit in it.
+    # MEASURED (kind, deploy#1737, 2026-09-02): 8m27s. The pod SUCCEEDED —
+    # "setup completed", iam-admin, iam-admin-pat and login-client all
+    # created — and the Job was still marked Failed/DeadlineExceeded,
+    # because the deadline counts the whole run and this one ran the full
+    # Zitadel migration and projection prefill against a freshly initialised
+    # Postgres. A hook Job that reports Failed fails the Argo sync, and with
+    # `hook-delete-policy: BeforeHookCreation` every retry re-runs the same
+    # 8 minutes into the same 300s wall, so the retries exhaust and the
+    # umbrella never converges.
+    #
+    # 1200s is the same sizing deploy#1772 gave fga-init,
+    # openbao-jwt-auth-init, openbao-approle-cert-manager-init and
+    # active-session-backfill for the same reason. Those four are in
+    # gibson-workloads; this Job comes from the zitadel subchart, which is
+    # why it was outside that sweep.
+    # Guard: helm/gibson/tests/zitadel-setup-deadline.bats.
+    activeDeadlineSeconds: 1200
+    annotations:
+      helm.sh/hook: post-install,post-upgrade
+      argocd.argoproj.io/hook: Sync
+      argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+      argocd.argoproj.io/sync-wave: "-3"
+  login:
+    image:
+      # deploy#888: self-hosted Login V2 image — a THIN fork of the upstream
+      # Zitadel login app (zeroroot-ai/zitadel-login) that adds the logo
+      # click-through link + repointed loginname back button, which Zitadel's
+      # branding/label-policy API cannot express. Drop-in compatible: same env
+      # contract / port / entrypoint as upstream ghcr.io/zitadel/zitadel-login,
+      # so the Reloader branding cache-bust below is unaffected. CORE Zitadel
+      # image is UNCHANGED. The tag tracks the upstream Zitadel version and MUST
+      # move in lockstep with core on every bump (the fork is rebased onto the
+      # matching upstream login tag first — see the zitadel-login README).
+      #
+      # Digest-pinned (deploy#789 digest-pin-check): zitadel-login is a
+      # first-party ghcr.io/zeroroot-ai image, so the staging/prod surface
+      # requires this immutable `<tag>@sha256:<digest>` pin. On every Zitadel
+      # bump, resolve the fresh digest via
+      #   gh api /orgs/zeroroot-ai/packages/container/zitadel-login/versions
+      # AFTER the fork's image build publishes the new tag (see the
+      # zitadel-login README per-bump checklist — the NEXT_PUBLIC_LANDING_URL
+      # Actions variable must be set on that repo or the build silently
+      # produces an unbranded image).
+      repository: "ghcr.io/zeroroot-ai/zitadel-login"
+      tag: "v4.14.0@sha256:f4b97af692f65111f852d389b31d2b5fd42bd791c9bc033289f0f4b793abe2cb"
+    # deploy#943: declarative, Reloader-driven cache-bust. The login UI caches
+    # the Zitadel label policy in process memory, so a rebrand needs a pod
+    # restart. Instead of the old imperative `kubectl patch deployment` poked
+    # by the branding Job, the upstream login Deployment opts into Stakater
+    # Reloader keyed on the chart-rendered zitadel-login-branding-marker
+    # ConfigMap (its branding-hash = sha256 of files/branding/*). Reloader
+    # (gibson-operators, namespace-scoped to gibson) rolls this Deployment when
+    # the brand source changes and leaves it alone otherwise. The login
+    # Deployment renders in the gibson namespace, within Reloader's watch.
+    annotations:
+      configmap.reloader.stakater.com/reload: "zitadel-login-branding-marker"
+    configMap:
+      annotations:
+        helm.sh/hook: null
+        helm.sh/hook-delete-policy: null
+        helm.sh/hook-weight: null
+        argocd.argoproj.io/sync-wave: "-6"
+    serviceAccount:
+      annotations:
+        helm.sh/hook: null
+        helm.sh/hook-delete-policy: null
+        helm.sh/hook-weight: null
+        argocd.argoproj.io/sync-wave: "-6"
+
+# NOTE (deploy#1343): the top-level `redis:` block that used to sit here
+# configured the Bitnami redis subchart, which has been removed from
+# Chart.yaml. It had no consumer: the platform dials the redis-stack
+# Deployment in gibson-workloads at `gibson-redis-stack:6379`. Do not
+# reintroduce a top-level `redis:` key — under the umbrella it addresses the
+# (now absent) subchart alias, NOT redis-stack. redis-stack is tuned through
+# `gibson-workloads.redis.*`, which is a different tree.
+
+spire:
+  global:
+    spire:
+      trustDomain: zeroroot.ai
+      # Override upstream chart's default jwtIssuer
+      # (https://oidc-discovery.$trustDomain) with the cluster-internal
+      # OIDC discovery provider Service hostname. This is the value
+      # SPIRE stamps as `iss` on every JWT-SVID; it MUST match Vault's
+      # `auth/jwt/config.bound_issuer` (overlay vault.jwtAuth.spireOidcIssuer)
+      # AND must RESOLVE in-cluster: OpenBao dials ${issuer}/keys to fetch
+      # the JWKS. Under the umbrella release naming the Service renders as
+      # gibson-spiffe-oidc-discovery-provider (no "spire-" segment — that
+      # was the kind-era standalone-app name, which resolves to nothing
+      # here and wedged jwt-auth-init with "error checking jwks URL").
+      # Without this override, Vault rejects every per-tenant
+      # `auth/jwt/login` with "invalid issuer (iss) claim", taking
+      # down the entire per-tenant data plane (Findings, LLM
+      # settings, agent registry, mission listing). See deploy#426.
+      jwtIssuer: https://gibson-spiffe-oidc-discovery-provider
+    # Argo applies via `helm template` semantics, not `helm
+    # install/upgrade`. The chart's installAndUpgradeHooks +
+    # deleteHooks (PreSync Jobs running `kubectl` against the
+    # SPIRE server) assume a live Helm lifecycle and fail on
+    # every Argo sync — `gibson-spire-server-pre-upgrade-*`
+    # pods hit BackoffLimitExceeded after 7 retries because
+    # they try to query a SPIRE server that doesn't exist yet
+    # (first sync) or whose pod just rolled (every other sync).
+    # The chart itself documents this exact case:
+    #   "Enable Helm hooks to autofix common install/upgrade
+    #    issues (should be disabled when using `helm template`)"
+    # Surfaced by zeroroot-ai/deploy#319 cycle N+1; deploy#322
+    # finding 1. Same family as gitops#112 — Helm lifecycle hooks
+    # misbehaving under Argo.
+    installAndUpgradeHooks:
+      enabled: false
+    deleteHooks:
+      enabled: false
+  spire-server:
+    # Datastore: shared platform-postgres-rw, role spire, database spire.
+    dataStore:
+      sql:
+        databaseType: postgres
+        databaseName: spire
+        host: platform-postgres-rw.gibson.svc.cluster.local
+        port: 5432
+        username: spire
+        externalSecret:
+          enabled: true
+          name: spire-postgres-credentials
+          key: password
+    controllerManager:
+      enabled: true
+    telemetry:
+      prometheus:
+        enabled: false
+
+# =============================================================================
+# The cluster operators (deploy#1728). The umbrella owns
+# cert-manager, external-secrets, external-dns and the CloudNativePG
+# operator on every substrate. Stage 1 (Terraform) installs Argo CD only.
+#
+# ORDERING UNDER ARGO. The umbrella is one Application, and Argo applies it
+# in sync-waves. The ClusterSecretStore syncs at -10, the ExternalSecrets at
+# -8, the platform-postgres Cluster at -7 and the postgres-setup hooks at -6.
+# Argo waits for each wave to be Healthy, and a ClusterSecretStore or a
+# Cluster CR is only Healthy once its operator reconciles it. So every
+# resource of external-secrets, cert-manager and the CNPG operator carries
+# sync-wave -20, ahead of the first CR that needs it. external-dns has no CR
+# in this chart and no consumer that waits on it, so it syncs at wave 0.
+#
+# cert-manager and external-secrets expose an annotation seam for their
+# Deployments, ServiceAccounts, Services and webhook configurations, but not
+# for their RBAC. The subcharts therefore render with RBAC off, and the
+# umbrella ships a vendored, wave-annotated copy of exactly that RBAC in
+# templates/operators/ (regenerated by scripts/vendor-operator-rbac.py, whose
+# --check fails CI on drift from the pinned chart version).
+#
+# CRDs. None of these subcharts installs CRDs here: the umbrella renders CRs
+# of every one of them, and Helm refuses a CRD and a CR of it in one release
+# (deploy#1627). gibson-crds carries the CRDs, vendored from these chart
+# versions by scripts/vendor-operator-crds.py.
+#
+# The Helm-native path needs no waves: Helm applies unknown kinds in
+# alphabetical order, so Certificate, Cluster, ClusterSecretStore,
+# ExternalSecret and Issuer land before Mutating/ValidatingWebhookConfiguration
+# and are never refused by a webhook whose pod is not up yet.
+# =============================================================================
+
+cert-manager:
+  # Canonical names (cert-manager, cert-manager-webhook, cert-manager-cainjector)
+  # rather than gibson-cert-manager-*: the vendored RBAC in templates/operators/
+  # names these ServiceAccounts, and the admission inventory pins the webhook
+  # configuration names.
+  fullnameOverride: cert-manager
+  crds:
+    # CRDs come from gibson-crds. See the header above.
+    enabled: false
+  global:
+    rbac:
+      # Rendered by templates/operators/cert-manager-rbac.yaml with the sync-wave
+      # the upstream chart cannot set. Never flip this on: two owners of one
+      # ClusterRole is a permanent Argo diff.
+      create: false
+  # The install-time API check is a Helm hook Job that waits for the webhook.
+  # Under Argo it becomes a PostSync hook that adds nothing the waves do not
+  # already guarantee, and on the Helm-native path the chart's CRs are created
+  # before the webhook configuration exists (see the header). Off.
+  startupapicheck:
+    enabled: false
+  deploymentAnnotations:
+    argocd.argoproj.io/sync-wave: "-20"
+  serviceAnnotations:
+    argocd.argoproj.io/sync-wave: "-20"
+  serviceAccount:
+    annotations:
+      argocd.argoproj.io/sync-wave: "-20"
+  webhook:
+    deploymentAnnotations:
+      argocd.argoproj.io/sync-wave: "-20"
+    serviceAnnotations:
+      argocd.argoproj.io/sync-wave: "-20"
+    serviceAccount:
+      annotations:
+        argocd.argoproj.io/sync-wave: "-20"
+    mutatingWebhookConfigurationAnnotations:
+      argocd.argoproj.io/sync-wave: "-20"
+    validatingWebhookConfigurationAnnotations:
+      argocd.argoproj.io/sync-wave: "-20"
+  cainjector:
+    deploymentAnnotations:
+      argocd.argoproj.io/sync-wave: "-20"
+    serviceAnnotations:
+      argocd.argoproj.io/sync-wave: "-20"
+    serviceAccount:
+      annotations:
+        argocd.argoproj.io/sync-wave: "-20"
+
+external-secrets:
+  # Canonical name: the ClusterSecretStore (gibson-workloads) authenticates to
+  # OpenBao as ServiceAccount `external-secrets` in the release namespace, and
+  # the OpenBao kubernetes auth role binds exactly that name.
+  fullnameOverride: external-secrets
+  # CRDs come from gibson-crds. See the header above.
+  installCRDs: false
+  rbac:
+    # Rendered by templates/operators/external-secrets-rbac.yaml. See cert-manager.
+    create: false
+  deploymentAnnotations:
+    argocd.argoproj.io/sync-wave: "-20"
+  serviceAccount:
+    annotations:
+      argocd.argoproj.io/sync-wave: "-20"
+  webhook:
+    # The two ValidatingWebhookConfigurations (secretstore-validate,
+    # externalsecret-validate).
+    annotations:
+      argocd.argoproj.io/sync-wave: "-20"
+    deploymentAnnotations:
+      argocd.argoproj.io/sync-wave: "-20"
+    secretAnnotations:
+      argocd.argoproj.io/sync-wave: "-20"
+    service:
+      annotations:
+        argocd.argoproj.io/sync-wave: "-20"
+    serviceAccount:
+      annotations:
+        argocd.argoproj.io/sync-wave: "-20"
+  certController:
+    rbac:
+      create: false
+    deploymentAnnotations:
+      argocd.argoproj.io/sync-wave: "-20"
+    serviceAccount:
+      annotations:
+        argocd.argoproj.io/sync-wave: "-20"
+
+external-dns:
+  fullnameOverride: external-dns
+  # The provider is the one per-cloud seam these two operators keep
+  #. `inmemory` starts on a cluster with no cloud attached: it
+  # watches Services and keeps the records it would publish in memory. The
+  # substrate overlay swaps the real provider in (values-eks.yaml: aws).
+  provider:
+    name: inmemory
+  policy: sync
+  # The ownership TXT for the zone apex must not collide with the apex SPF
+  # record, or the provider rejects the whole change batch (deploy#826).
+  txtOwnerId: gibson
+  txtPrefix: extdns-
+  sources:
+    - service
+    - ingress
+
+cnpg:
+  # Operator-substitution seam; see the block at the top of this file.
+  enabled: true
+  # The CNPG operator locates its own Deployment by the hardcoded label
+  # filter app.kubernetes.io/name=cloudnative-pg (pkg/certs PKI setup). The
+  # dependency alias `cnpg` renames the chart and that label, so the operator
+  # crashloops with 'no operator deployment found' (deploy#832, observed live
+  # on staging 2026-06-11). nameOverride restores the canonical chart name.
+  nameOverride: cloudnative-pg
+  replicaCount: 1
+  # Every resource of the operator, RBAC included: this chart has the seam
+  # the other two lack.
+  commonAnnotations:
+    argocd.argoproj.io/sync-wave: "-20"
+  # EXCEPT the ValidatingWebhookConfiguration. Upstream's
+  # validatingwebhookconfiguration.yaml annotates from rbac.annotations, not
+  # commonAnnotations (an upstream asymmetry: the mutating template reads
+  # commonAnnotations, and rbac.annotations is read nowhere else in the
+  # chart). Without the wave here, the validating configuration lands at
+  # wave 0 while the operator Deployment sits at -20 — and the operator
+  # PATCHES both configurations by name at startup and exits when one is
+  # absent. On a cold Argo sync that deadlocks the whole install: the
+  # operator crashloops at -20, wave 0 never applies, the sync fails after
+  # its retries (first cold recreate, deploy#1737, kind 2026-09-02). A
+  # helm-direct install never sees this because Helm ignores waves.
+  rbac:
+    annotations:
+      argocd.argoproj.io/sync-wave: "-20"
+  crds:
+    # CRDs come from gibson-crds. See the header above.
+    create: false
+  # Disable the operator's monitoring sidecar — kind doesn't run
+  # Prometheus (monitoring stack is opt-in on dev branch).
+  monitoring:
+    podMonitorEnabled: false
+  # NOTE (deploy#1594): a comment used to sit here claiming "webhook config
+  # disabled until cert-manager wave -20 is Healthy" — but no setting ever
+  # followed it, so nothing was disabled and the claim was false. The CNPG
+  # webhooks DO render, at `failurePolicy: Fail`, which is the posture we
+  # want; `scripts/check-teardown-webhook-coverage.py` pins that against the
+  # render.
+
+# =============================================================================
+# The admission-webhook readiness gate (deploy#1761).
+#
+# A `failurePolicy: Fail` webhook configuration refuses writes from the moment
+# the API server sees it until the pod behind it answers. The umbrella installs
+# the operators AND the custom resources those operators admit, so a fresh
+# install has a window in which the configuration exists and the endpoint does
+# not. `make vanilla-fresh` was refused four times in that window.
+#
+# `gibson-webhook-gate` closes it: templates/webhook-gate.yaml carries the full
+# reasoning, including why the webhook CONFIGURATIONS cannot be the thing that
+# is deferred.
+#
+# `probes` is the list the gate walks. It is not decoration:
+# `scripts/check-webhook-ordering.py` renders the umbrella per profile and
+# fails the build when a `failurePolicy: Fail` webhook exists in the render
+# with no probe here, when a probe names a webhook the render does not
+# install, or when a probe's service, port or path disagrees with the
+# `clientConfig` the API server will actually dial. Add a webhook and the
+# guard tells you to add its probe.
+#
+# `component` marks a probe that only exists on profiles where that component
+# is enabled. Today the one such component is setec, which ci/values-saas.yaml
+# turns off. A probe with no `component` is unconditional.
+#
+# `namespace` defaults to the release namespace.
+# =============================================================================
+webhookGate:
+  # One shared deadline for every probe. Long enough for cert-manager to issue
+  # the webhook serving certificates on a cold kind node, short enough that a
+  # genuinely broken operator fails the install rather than hanging to the helm
+  # --timeout.
+  timeoutSeconds: 900
+  intervalSeconds: 5
+  probes:
+    - config: cert-manager-webhook
+      webhook: webhook.cert-manager.io
+      service: cert-manager-webhook
+      port: 443
+      path: /mutate
+    - config: cert-manager-webhook
+      webhook: webhook.cert-manager.io
+      service: cert-manager-webhook
+      port: 443
+      path: /validate
+    - config: cnpg-mutating-webhook-configuration
+      webhook: mbackup.cnpg.io
+      service: cnpg-webhook-service
+      port: 443
+      path: /mutate-postgresql-cnpg-io-v1-backup
+    - config: cnpg-mutating-webhook-configuration
+      webhook: mcluster.cnpg.io
+      service: cnpg-webhook-service
+      port: 443
+      path: /mutate-postgresql-cnpg-io-v1-cluster
+    - config: cnpg-mutating-webhook-configuration
+      webhook: mdatabase.cnpg.io
+      service: cnpg-webhook-service
+      port: 443
+      path: /mutate-postgresql-cnpg-io-v1-database
+    - config: cnpg-mutating-webhook-configuration
+      webhook: mscheduledbackup.cnpg.io
+      service: cnpg-webhook-service
+      port: 443
+      path: /mutate-postgresql-cnpg-io-v1-scheduledbackup
+    - config: cnpg-validating-webhook-configuration
+      webhook: vbackup.cnpg.io
+      service: cnpg-webhook-service
+      port: 443
+      path: /validate-postgresql-cnpg-io-v1-backup
+    - config: cnpg-validating-webhook-configuration
+      webhook: vcluster.cnpg.io
+      service: cnpg-webhook-service
+      port: 443
+      path: /validate-postgresql-cnpg-io-v1-cluster
+    - config: cnpg-validating-webhook-configuration
+      webhook: vdatabase.cnpg.io
+      service: cnpg-webhook-service
+      port: 443
+      path: /validate-postgresql-cnpg-io-v1-database
+    - config: cnpg-validating-webhook-configuration
+      webhook: vpooler.cnpg.io
+      service: cnpg-webhook-service
+      port: 443
+      path: /validate-postgresql-cnpg-io-v1-pooler
+    - config: cnpg-validating-webhook-configuration
+      webhook: vscheduledbackup.cnpg.io
+      service: cnpg-webhook-service
+      port: 443
+      path: /validate-postgresql-cnpg-io-v1-scheduledbackup
+    - config: externalsecret-validate
+      webhook: validate.externalsecret.external-secrets.io
+      service: external-secrets-webhook
+      port: 443
+      path: /validate-external-secrets-io-v1-externalsecret
+    - config: secretstore-validate
+      webhook: validate.clustersecretstore.external-secrets.io
+      service: external-secrets-webhook
+      port: 443
+      path: /validate-external-secrets-io-v1-clustersecretstore
+    - config: secretstore-validate
+      webhook: validate.secretstore.external-secrets.io
+      service: external-secrets-webhook
+      port: 443
+      path: /validate-external-secrets-io-v1-secretstore
+    - config: gibson-tenant-operator-owner-ref
+      webhook: ownerref.gibson.zeroroot.ai
+      service: gibson-tenant-operator-webhook
+      port: 443
+      path: /mutate-owner-ref
+    - config: gibson-tenant-operator-tenant-validator
+      webhook: tenant.gibson.zeroroot.ai
+      service: gibson-tenant-operator-webhook
+      port: 443
+      path: /validate-tenant
+    - config: setec-mutating-sandboxclass
+      webhook: msandboxclass.setec.zeroroot.ai
+      component: setec
+      namespace: setec-system
+      service: setec-webhook
+      port: 443
+      path: /mutate-setec-zeroroot-ai-v1alpha1-sandboxclass
+    - config: setec-validating-sandboxclass
+      webhook: vsandboxclass.setec.zeroroot.ai
+      component: setec
+      namespace: setec-system
+      service: setec-webhook
+      port: 443
+      path: /validate-setec-zeroroot-ai-v1alpha1-sandboxclass
+    - config: setec-validating-webhook
+      webhook: vsandbox.setec.zeroroot.ai
+      component: setec
+      namespace: setec-system
+      service: setec-webhook
+      port: 443
+      path: /validate-setec-zeroroot-ai-v1alpha1-sandbox

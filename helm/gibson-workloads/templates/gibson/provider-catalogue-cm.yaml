@@ -1,0 +1,25 @@
+{{- /*
+Provider catalogue ConfigMap — mounted into the gibson StatefulSet at
+/etc/gibson/provider-catalogue.yaml so the daemon can hot-reload the
+model list without a restart when the ConfigMap is updated.
+
+The daemon reads GIBSON_PROVIDERS_CATALOGUE_PATH and polls the file
+every 5 minutes, swapping in a new catalogue when the file mtime
+changes (parse errors retain the previous catalogue).
+
+The YAML content here must stay byte-identical to the embedded copy at
+  enterprise/platform/gibson/internal/llm/providers/catalogue/provider-catalogue.yaml
+Use the sync-provider-catalogue Makefile target (or the update-provider-catalogue
+GitHub Actions workflow) to keep both files in sync.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gibson.fullname" . }}-provider-catalogue
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: daemon
+data:
+  provider-catalogue.yaml: |-
+{{ .Files.Get "files/provider-catalogue.yaml" | indent 4 }}

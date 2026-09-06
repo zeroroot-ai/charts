@@ -1,0 +1,773 @@
+# Vanilla-cluster profile: the supported self-hosted install.
+#
+# This is a DEPLOYMENT SOURCE, not a render fixture. It is installed and tested,
+# not merely rendered — a profile that had never run anywhere is the defect
+# exists to fix.
+#
+# It assumes a Kubernetes cluster and nothing cloud:
+#   - a default StorageClass
+#   - an image pull secret for the private registry
+# cert-manager, external-secrets, external-dns and the CloudNativePG operator
+# are subcharts of this umbrella (deploy#1728); their CRDs come from
+# the gibson-crds release that installs first.
+#
+# No IRSA, no cloud KMS, no cloud secret manager, no cloud load-balancer
+# annotations, no DNS-01 solver. A cluster on EKS, OpenShift, Rancher, kind or
+# bare metal installs the same file. kind IS a vanilla cluster, so proving this
+# profile there is the target shape rather than a compromise ahead of it.
+#
+# A SUBSTRATE OVERLAY (values-eks.yaml, values-gke.yaml, values-aks.yaml) layers
+# ON TOP of this file and carries only that provider's deltas (CONTEXT.md § Substrate). Anything cloud-specific belongs there, never here.
+#
+# WHAT AN OPERATOR MUST SUPPLY (only what only they can know):
+#   - global.domain
+#   - a TLS issuer, or accept the self-signed one below for a private install
+#   - the registry credential, as the GHCR_PULL_TOKEN keyring member. The
+#     chart materialises the pull Secret from it; do not create one by hand.
+#   - the bringup keyring Secret: `bringup-keyring`, key `openbao-seal-key`,
+#     in the release namespace, holding the 32-byte OpenBao seal key
+#     (deploy#1731). The chart renders no Secret for it. Create it
+#     BEFORE install and keep the value outside the cluster: it is the only
+#     thing that opens the OpenBao archive. `scripts/vanilla-up.sh` does this
+#     for local and CI installs from a keyring file it generates once.
+#   - spire.identityAdmission.workloadCreators — the principal that APPLIES
+#     this chart. The default below is ZeroRoot's Argo CD controller, which
+#     does not exist on your cluster. Get it wrong and the admission policy
+#     denies every platform workload with "written by <principal>, which is
+#     not a permitted creator". It was missing from this list even though the
+#     comment below has always said operators must replace it (deploy#1628).
+#
+#     NOTE it takes TWO `helm upgrade`s to change: the policy and the workloads
+#     ship in one release, and the live policy is enforced against the workload
+#     patches before Helm gets to update the policy itself.
+#
+gibson-workloads:
+  # Who may create a workload whose pod template claims a Gibson platform
+  # identity (spire.identityAdmission.workloadCreators). Required because
+  # the admission policy ships in Deny.
+  #
+  # SELF-HOSTED OPERATORS MUST REPLACE THIS. The value below is the Argo CD
+  # application-controller ServiceAccount, which is what ZeroRoot's own
+  # clusters use; it is here so this CI fixture renders. On your cluster it
+  # is whichever principal applies the chart — your GitOps controller's
+  # ServiceAccount, or the identity that runs `helm install`. Run
+  # `kubectl auth whoami` as that identity to read it. Leaving a principal
+  # here that does not exist on your cluster does not fail open: it fails
+  # your rollout, loudly.
+  spire:
+    identityAdmission:
+      workloadCreators:
+        - "system:serviceaccount:argocd:argocd-application-controller"
+  global:
+    domain: "selfhosted.example.com"
+    imagePullSecrets:
+      - name: ghcr-credentials
+  externalSecrets:
+    # The one ClusterSecretStore, backed by the platform's own OpenBao
+    #. The chart renders it on every profile.
+    clusterSecretStore:
+      name: "gibson-secrets"
+  certManager:
+    # A vanilla cluster has no cloud DNS to solve a DNS-01 challenge against, so
+    # the base profile ships a self-signed edge issuer. Honest for a private
+    # install and wrong for a public one: supply your own issuer (an internal
+    # CA, an ACME account with a solver your DNS supports, or a pre-provisioned
+    # certificate) before exposing this to anyone.
+    # values-eks.yaml swaps in Let's Encrypt over Route53.
+    issuers:
+      letsencrypt:
+        enabled: false
+      selfsigned:
+        enabled: true
+      vault:
+        enabled: false
+      awspca:
+        enabled: false
+    envoyEdge:
+      enabled: true
+      issuer: "selfsigned-ca"
+      secretName: "gibson-envoy-tls"
+      dnsNames: []
+  envoy:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+    podDisruptionBudget:
+      enabled: true
+    service:
+      type: LoadBalancer
+      httpsPort: 443
+      # A PINNED ClusterIP, required by the chart: consuming pods (dashboard,
+      # bootstrap Job, daemon) reach Envoy through a hostAlias, and a hostAlias
+      # takes an IP, not a Service name (deploy#200).
+      #
+      # It therefore has to sit inside the cluster's Service CIDR, and that is
+      # cluster-specific. 10.96.0.0/12 is the kubeadm and kind default, so this
+      # is the right default for a vanilla cluster. EKS uses 172.20.0.0/16, and
+      # this profile was extracted from the EKS one and carried 172.20.0.250
+      # across — kind rejected it outright (deploy#1627):
+      #
+      #   Service "gibson-envoy" is invalid: spec.clusterIPs: failed to
+      #   allocate IP 172.20.0.250: the provided IP is not in the valid range.
+      #   The range of valid IPs is 10.96.0.0/16
+      #
+      # A customer whose Service CIDR is neither must override this. There is no
+      # portable default, which is why the chart requires the value rather than
+      # inventing one.
+      clusterIP: "10.96.0.250"
+      annotations: {}
+    tls:
+      selfSigned: false
+      secretName: "gibson-envoy-tls"
+    zitadel: {}
+    spiffe:
+      enabled: true
+      trustDomain: "zeroroot.ai"
+  spiffe:
+    envoyID: "spiffe://zeroroot.ai/platform/envoy"
+  # deploy#1631: the first-admin Job creates the owner user + credential for
+  # the tenant the operator seeds (global.firstTenant above). The Job gates on
+  # global.firstTenant.enabled and reads its identity from there — the
+  # credential is generated and written to the gibson-first-admin Secret; the
+  # install output says how to read it and to rotate it.
+
+  openbao:
+    mode: ha
+    replicas: 1
+    # No literal "root" token on any profile (deploy#1732). The seal is the
+    # chart's static seal from the bringup keyring Secret (`bringup-keyring` /
+    # `openbao-seal-key`, chart defaults).
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: ""   # cluster default
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+    jwtAuth:
+      # MUST equal the umbrella's spire.global.spire.jwtIssuer (deploy#426):
+      # that value is the `iss` SPIRE actually stamps on every JWT-SVID, and
+      # OpenBao's bound_issuer is a string-compare against it. The previous
+      # external name here never matched what SPIRE stamps, so every
+      # per-tenant auth/jwt/login failed with "invalid issuer (iss) claim"
+      # the moment the operator reconciled the auth method from these values
+      # — taking down the whole per-tenant data plane (providers, datapool,
+      # LLM routing) while the install looked Ready. jwks_url is a separate
+      # field and stays the in-cluster FQDN for the key fetch.
+      spireOidcIssuer: "https://gibson-spiffe-oidc-discovery-provider"
+      spireOidcJwksURL: "https://gibson-spiffe-oidc-discovery-provider.gibson.svc.cluster.local/keys"
+      spireBundleConfigMap: "spire-bundle"
+      audience: "gibson-saas"
+  gibson:
+    replicas: 1
+    # First-party plugin SVID enrollment. The vanilla install always
+    # provisions tenant "primary", so bind plugin SVIDs to it. The owner sub is
+    # per-instance runtime data (a fresh Zitadel org on every cluster recreate),
+    # so platformTenantOwner is NOT set here — it is supplied at deploy via
+    # --set / EXTRA_VALUES. Without the owner set, SVID enrollment stays off (a
+    # safe no-op) rather than binding to a stale sub.
+    platformTenant: "primary"
+    # Daemon → setec dispatch. Untrusted tools AND the platform agent
+    # (zerocool) run as ephemeral setec sandboxes launched through the frontend
+    # under the platform tenant. gibson.validateSetecDispatch rejects enabled=true
+    # without a running in-chart frontend (setec.frontend.enabled above) or without
+    # a tenant. sandbox_class is the tool/catalog class; agent_sandbox_class is the
+    # ephemeral platform-agent class (: named, never inherited).
+    sandbox:
+      enabled: true
+      setec:
+        tenant: "primary"
+        sandboxClass: "tool"
+        agentSandboxClass: "agent"
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 2Gi
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+    serviceAccount:
+      create: true
+      name: "gibson"
+      annotations: {}
+    # The tenant-operator dials the daemon DIRECTLY on :50051 over SPIFFE mTLS
+    # for operator-pull provisioning — ListPendingTenantProvisioning,
+    # AckTenantProvisioned, and EnqueueTenantProvisioning (the first-tenant seed,
+    # gibson#1496). The daemon's default NetworkPolicy admits only Envoy on :50051
+    # ("Envoy is the sole ingress"), so without this the operator's dial is DROPPED
+    # (i/o timeout) and NO tenant is ever provisioned — the whole seam had only ever
+    # been render-tested. Mirrors values-kind.yaml's escape-hatch rule; the vanilla
+    # profile was missing it. (Promotion to a first-class chart helper is
+    # tenant-operator#76 Module 6.)
+    networkPolicy:
+      additionalIngressFrom:
+        - from:
+            - podSelector:
+                matchLabels:
+                  app.kubernetes.io/component: tenant-operator
+                  app.kubernetes.io/name: gibson-tenant-operator
+          ports:
+            - protocol: TCP
+              port: 50051
+        # The connector-operator's finalizer dials the daemon on :50051 over
+        # SPIFFE mTLS to revoke the connector grant on delete.
+        - from:
+            - podSelector:
+                matchLabels:
+                  app.kubernetes.io/component: connector-operator
+                  app.kubernetes.io/name: gibson-connector-operator
+          ports:
+            - protocol: TCP
+              port: 50051
+    persistence:
+      enabled: true
+      storageClassName: ""   # cluster default
+      size: 20Gi
+    embedder:
+      cache:
+        enabled: false
+        initMode: skip
+    # Self-hosted profile: signup seam is ON by default (no-card open signup).
+    # This is the OSS/self-hosted default — no card required, unlimited-but-metered.
+    # Set to false for a closed front-door install (admin-only provisioning).
+    # signup-seam.bats asserts SIGNUP_SELF_SERVE=true in this render.
+    signupSelfServe: true
+    # Self-hosted profile: entitlements seam knob is UNSET (ConfigProvider).
+    # The no-closed-refs guard asserts this renders with no billing image ref.
+    entitlementsEndpoint: ""
+    # Self-hosted profile: entitlements-required guard MUST be absent/false.
+    # The OSS fail-open unlimited posture is the correct default here.
+    entitlementsRequired: false
+    # Mail transport: "log" — signup emails are written to the daemon log and
+    # nothing is sent. This is the ONLY setting that installs out of the box:
+    # the previous provider:"smtp" block referenced an EXAMPLE Secret
+    # (gibson-signup-smtp-credentials) that no template produces by design,
+    # and the daemon container sat in CreateContainerConfigError forever on a
+    # Secret the operator was never told to create (deploy#1631). A profile
+    # whose defaults cannot start is a broken profile, whatever the comment
+    # beside it says.
+    #
+    # The daemon boots fine on "log" (gibson#1228); self-serve signup is inert
+    # until real mail exists, and the seeded first admin (global.firstTenant above)
+    # is how the operator gets in. To wire real mail, switch to path A:
+    #
+    #   email:
+    #     provider: "smtp"
+    #     from: "no-reply@<your-domain>"
+    #     smtp:
+    #       host: "<your-relay>"
+    #       port: 587
+    #       username: "<user>"           # then CREATE the Secret first:
+    #       passwordSecretName: "gibson-signup-smtp-credentials"
+    #       passwordSecretKey: "password"
+    email:
+      provider: "log"
+      from: "no-reply@selfhosted.example.com"
+  dashboard:
+    # Self-hosted profile: signup page accessible (matches signupSelfServe above).
+    # signup-seam.bats asserts SIGNUP_SELF_SERVE=true on the dashboard in this render.
+    signup:
+      selfServe: true
+    replicas: 1
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+    serviceAccount:
+      create: true
+      annotations: {}
+    zitadel:
+      issuer: ""
+      authUrl: ""
+    postgres:
+      host: "platform-postgres-rw.gibson.svc.cluster.local"
+  extAuthz:
+    replicas: 1
+    serviceAccount:
+      create: true
+      name: "gibson-ext-authz"
+      annotations: {}
+  # NOTE: no zitadel block here. The zitadel subchart hangs off the UMBRELLA,
+  # not gibson-workloads — an override nested here renders into nothing. That
+  # exact mistake shipped ExternalPort:443 at this dead path while the base's
+  # 30443 (a kind NodePort relic) won, and the System API rejected every
+  # operator JWT on audience: expected https://<domain>:30443, got
+  # https://<domain> (deploy#1631). The real override lives at the top-level
+  # `zitadel:` block below.
+  idp:
+    zitadel:
+      issuer: ""
+      # Route the daemon's Zitadel admin client IN-CLUSTER, at the Envoy edge
+      # Service, so its OIDC discovery AND its Management API writes bypass the
+      # public gateway's jwt_authn/ext_authz (which 403s admin writes — the
+      # audience is `zitadel`, not `gibson-platform`). Without this the
+      # founding-owner bootstrap fails with "admin client lacks permission:
+      # CreateHumanUser" and no one can log in (gibson#1560). The gibson daemon
+      # fix (gibson#1561) sends all admin API calls to this base; the in-cluster
+      # Envoy listener host-rewrites to app.<domain>, so instance routing stays
+      # correct. Namespace is `gibson` (this profile installs there); an install
+      # into another namespace must change it. Validated by
+      # gibson.validateIdpDiscoveryURL (must be an in-cluster host).
+      discoveryURL: "https://gibson-envoy.gibson.svc.cluster.local:443"
+  redis:
+    master:
+      persistence:
+        enabled: true
+        storageClass: ""   # cluster default
+        size: 10Gi
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          cpu: 1000m
+          memory: 1Gi
+  platformPostgres:
+    external:
+      enabled: true
+      host: "platform-postgres-rw.gibson.svc.cluster.local"
+      port: 5432
+      database: "gibson_platform"
+      username: "gibson_platform"
+      sslMode: "require"
+      passwordSecretName: "gibson-platform-postgres-credentials"
+      passwordSecretKey: "password"
+  dashboardPostgres:
+    host: "platform-postgres-rw.gibson.svc.cluster.local"
+    port: 5432
+    database: "dashboard"
+    user: "dashboard"
+    sslmode: "require"
+    passwordSecretName: "dashboard-postgres-credentials"
+    passwordSecretKey: "password"
+  tenantPostgres:
+    host: "platform-postgres-rw.gibson.svc.cluster.local"
+    port: 5432
+    sslmode: "require"
+  thirdPartyPostgres:
+    external:
+      enabled: true
+      host: "platform-postgres-rw.gibson.svc.cluster.local"
+      port: 5432
+      sslMode: "require"
+  dataPlane:
+    postgres:
+      host: "platform-postgres-rw.gibson.svc.cluster.local"
+      port: 5432
+      admin_database: "postgres"
+      admin_username: "gibson_admin"
+      admin_password_secret_ref:
+        name: "gibson-gibson-workloads-db-secrets"
+        key: "TENANT_POSTGRES_ADMIN_PASSWORD"
+  tests:
+    postgres:
+      host: "platform-postgres-rw.gibson.svc.cluster.local"
+      port: 5432
+  saas:
+    enabled: false
+  ingress:
+    enabled: false
+  componentIngress:
+    enabled: false
+  # ---------------------------------------------------------------------------
+  # Setec sandbox runtime — the SANCTIONED kind profile. There is
+  # exactly ONE sanctioned kind shape and this is it: setec ON, gvisor the one
+  # backend. gvisor is a userspace kernel (runsc) — real escape containment, no
+  # /dev/kvm and no metal nodes, ~40MiB overhead. EKS runs the high-assurance
+  # kata profile instead (values-eks.yaml). There is no setec-off variant.
+  #
+  # NODE PREP: gvisor needs the runsc binary + a containerd runtime handler on
+  # the node. Unlike kata, the setec installer does NOT lay gvisor down, so the
+  # bring-up does it (scripts/vanilla-up.sh: install runsc + a containerd
+  # config drop-in registering runsc under the containerd 2.x plugin path
+  # `io.containerd.cri.v1.runtime`). installer.enabled is therefore false —
+  # there is no kata payload to lay.
+  setec:
+    enabled: true
+    # Kata node-prep DaemonSet — OFF. gvisor is the only backend and its
+    # node-prep is done by the bring-up, not this installer.
+    installer:
+      enabled: false
+    # The gRPC frontend the daemon dials to launch sandboxes (mTLS on :50051).
+    # Required for tool and platform-agent dispatch. TLS secret names default
+    # to setec-frontend-tls (minted by templates/setec/frontend-tls.yaml).
+    frontend:
+      enabled: true
+    # The runtime-agent must READ the node's containerd config to verify runsc
+    # before it advertises setec.zeroroot.ai/runtime.gvisor=true. Mount it
+    # read-only; without this the node stays gvisor=false and no Sandbox
+    # schedules.
+    runtimeAgent:
+      mountContainerdConfig: true
+    webhook:
+      enabled: true
+      failurePolicy: Fail
+      certManager:
+        enabled: true
+        issuerRef:
+          kind: ClusterIssuer
+          name: setec-webhook-selfsigned
+    # gvisor is the default and only enabled microVM-alternative backend.
+    defaults:
+      runtime:
+        backend: gvisor
+    runtimes:
+      kata-fc:
+        enabled: false
+      kata-qemu:
+        enabled: false
+      gvisor:
+        enabled: true
+      runc:
+        enabled: true
+    netpol:
+      reservedCIDRs:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+        - 169.254.0.0/16
+        - 100.64.0.0/10
+        - 127.0.0.0/8
+        - 224.0.0.0/4
+      resolvers:
+        - 1.1.1.1
+        - 8.8.8.8
+    sandboxClasses:
+      enabled: true
+      classes:
+        - name: tool
+          spec:
+            runtime:
+              backend: gvisor
+            maxResources:
+              vcpu: 4
+              memory: 8Gi
+            defaultNetworkMode: external-only
+            allowedNetworkModes:
+              - external-only
+              - egress-allow-list
+              - none
+            default: true
+        - name: connector
+          spec:
+            runtime:
+              backend: gvisor
+            maxResources:
+              vcpu: 4
+              memory: 8Gi
+            defaultNetworkMode: none
+            allowedNetworkModes:
+              - egress-allow-list
+              - none
+        # agent: the class a platform-agent launch names, and the
+        # class an always-on bank member runs in (gibson#1706).
+        #
+        # A member stays up for weeks and idles most of that time, so it
+        # RESERVES a small slice of the node and bursts to its ceiling. The
+        # two halves come from two places:
+        #   requests      the reservation, a chart value (this block).
+        #                 setec 0.113.0+ writes min(request, limit) onto the
+        #                 Pod, so the class can only ever lower what the
+        #                 scheduler sets aside. Unset keeps requests = limits.
+        #   maxResources  the ceiling a Sandbox may ask for. The actual limit
+        #                 is the Sandbox's own spec.resources, which the daemon
+        #                 sends on Launch from the claude manifest (gibson#1717,
+        #                 2 vCPU / 4Gi). defaultResources is NOT that limit:
+        #                 setec reads it for the warm-pool template only.
+        #
+        # Two idle members cost 0.5 vCPU / 1.5Gi of reservation. The vendored
+        # SandboxClass CRD must carry spec.requests (setec 0.113.0+), or the
+        # API server prunes the block and the reservation silently becomes the
+        # limit. helm/gibson/tests/bank-member-sizing.bats pins all of this.
+        - name: agent
+          spec:
+            runtime:
+              backend: gvisor
+            requests:
+              cpu: 250m
+              memory: 768Mi
+            maxResources:
+              vcpu: 2
+              memory: 4Gi
+            defaultNetworkMode: external-only
+            allowedNetworkModes:
+              - external-only
+              - egress-allow-list
+              - none
+            egressExemptCIDRs: []
+    sandboxNamespaces:
+      - setec-sandboxes
+    rbac:
+      allowClusterWideSandboxWrite: false
+    multiTenancy:
+      enabled: false
+  # First-party plugins (R5): the `plugins` mechanism is shipped by the
+  # gibson-workloads chart and is EMPTY here on purpose. values-vanilla.yaml is
+  # the customer-install-grade profile — every first-party image it names must
+  # be an @sha256 digest of a RELEASED image (digest-pin-check, deploy#789). The
+  # github reference plugin's image is published by the integrations-repo CI and
+  # is not yet a released, digest-pinned artifact, so it is brought up through
+  # the sanctioned moving-tag overlay (test/vanilla/plugins.values.yaml, layered
+  # by `make vanilla-plugins` / EXTRA_VALUES) rather than pinned here. Once the
+  # plugin image is published and a release is cut, promote it into this file
+  # digest-pinned (bump-image-digest) and retire the overlay — the standard
+  # first-party image onboarding lifecycle documented in scripts/vanilla-up.sh.
+gibson-operators:
+  global:
+    domain: "selfhosted.example.com"
+  tenantOperator:
+    image:
+      pullPolicy: IfNotPresent
+    zitadelURL: "http://gibson-zitadel:8080"
+    serviceAccount:
+      annotations: {}
+    billing:
+      stripeExpectedMode: test
+      devAutoConfirm: false
+    brokerConfig:
+      platformPg:
+        host: "platform-postgres-rw.gibson.svc.cluster.local"
+        port: 5432
+        database: "gibson_platform"
+        username: "gibson_platform"
+        sslMode: "require"
+        passwordSecretRef:
+          name: "gibson-platform-postgres-credentials"
+          key: "password"
+      systemTenantKekSecretRef:
+        name: "gibson-master-key"
+        key: "master-key"
+      vault:
+        namespaceTemplate: "tenant-{tenant_id}"
+        authMethod: "jwt"
+        mountPath: "secret"
+  dashboard:
+    zitadel:
+      issuer: ""
+  envoy:
+    service:
+      # Must match envoy.service.clusterIP above — same Service, and the
+      # dashboard's hostAlias points at this IP.
+      clusterIP: "10.96.0.250"
+    tls:
+      secretName: "gibson-envoy-tls"
+  # Names below are the UMBRELLA-rendered names (release `gibson`), not the
+  # standalone-release names (gibson-workloads-*) this profile was originally
+  # copied from. The same divergence broke the operator's OpenBao address and
+  # Zitadel's audience in this profile — when a "waiting for Secret X" hangs,
+  # compare X against `kubectl get secret`, not against another values file.
+  redis:
+    addr: "gibson-redis-stack:6379"
+    auth:
+      existingSecret: "gibson-redis-stack"
+      passwordSecretKey: "redis-password"
+  fga:
+    url: "https://gibson-openfga:8080"
+  zitadel:
+    zitadel:
+      configmapConfig:
+        ExternalDomain: ""
+  platformPostgres:
+    host: "platform-postgres-rw.gibson.svc.cluster.local"
+    port: 5432
+    database: "gibson_platform"
+    user: "gibson_platform"
+    passwordSecretName: "gibson-platform-postgres-credentials"
+    passwordSecretKey: "password"
+  dataPlane:
+    vault:
+      addr: "http://gibson-openbao.gibson.svc:8200"
+      transitKey: "master-kek"
+      adminTokenSecretRef:
+        name: "gibson-openbao-keys"
+        key: "VAULT_ADMIN_TOKEN"
+  vault:
+    jwtAuth:
+      audience: "gibson-saas"
+      # MUST equal the umbrella's spire.global.spire.jwtIssuer (deploy#426):
+      # that value is the `iss` SPIRE actually stamps on every JWT-SVID, and
+      # OpenBao's bound_issuer is a string-compare against it. The previous
+      # external name here never matched what SPIRE stamps, so every
+      # per-tenant auth/jwt/login failed with "invalid issuer (iss) claim"
+      # the moment the operator reconciled the auth method from these values
+      # — taking down the whole per-tenant data plane (providers, datapool,
+      # LLM routing) while the install looked Ready. jwks_url is a separate
+      # field and stays the in-cluster FQDN for the key fetch.
+      spireOidcIssuer: "https://gibson-spiffe-oidc-discovery-provider"
+      spireOidcJwksURL: "https://gibson-spiffe-oidc-discovery-provider.gibson.svc.cluster.local/keys"
+      spireBundleConfigMap: "spire-bundle"
+  # No cloud KMS. OpenBao seals with the static seal from the bringup keyring
+  #.
+  platformBootstrap:
+    zitadel:
+      issuer: "http://gibson-zitadel:8080"
+      externalDomain: ""
+      adminTokenRef:
+        name: iam-admin-pat
+        key: pat
+      project:
+        name: gibson
+        ensureExists: true
+      systemClient:
+        systemUserName: "gibson-system-bot"
+        trustedClusterDomain: "gibson-zitadel.gibson.svc.cluster.local"
+      serviceUsers:
+        - name: "gibson-iam-admin"
+          roles: ["IAM_OWNER"]
+          patSecretRef:
+            name: "gibson-iam-admin-pat"
+            key: "pat"
+        - name: "gibson-tenant-operator"
+          roles: ["IAM_USER_MANAGER"]
+          patSecretRef:
+            name: "gibson-zitadel-tenant-operator-pat"
+            key: "pat"
+        - name: "gibson-signup-bot"
+          roles: ["IAM_USER_MANAGER"]
+          patSecretRef:
+            name: "gibson-zitadel-signup-bot-pat"
+            key: "pat"
+    oidcClients:
+      - name: gibson-daemon
+        applicationType: MACHINE_USER
+        secretRef:
+          name: idp-admin-credentials
+          key: client_secret
+      - name: gibson-tenant-operator
+        applicationType: MACHINE_USER
+        secretRef:
+          name: gibson-zitadel-tenant-operator
+          key: ZITADEL_CLIENT_SECRET
+      - name: gibson-dashboard
+        redirectURIs: []
+        postLogoutRedirectURIs: []
+        secretRef:
+          name: gibson-dashboard-oidc
+          key: client_secret
+      - name: gibson-dashboard-service
+        applicationType: MACHINE_USER
+        secretRef:
+          name: gibson-zitadel-dashboard
+          key: ZITADEL_CLIENT_SECRET
+      - name: gibson-native-login
+        applicationType: NATIVE
+        grantTypes:
+          - DEVICE_CODE
+          - AUTHORIZATION_CODE
+          - REFRESH_TOKEN
+        accessTokenLifetimeSeconds: 900
+        secretRef:
+          name: gibson-native-login-oidc
+          key: client_secret
+    fgaModel:
+      apiEndpoint: https://gibson-openfga.gibson.svc:8080
+    vaultTransit:
+      address: http://gibson-openbao.gibson.svc:8200
+      tokenRef:
+        name: gibson-openbao-keys
+        key: VAULT_ADMIN_TOKEN
+      keyName: master-kek
+    masterKey:
+      secretName: gibson-master-key
+      namespace: gibson
+      key: master-key
+    postgresBundle:
+      cluster:
+        host: "platform-postgres-rw.gibson.svc.cluster.local"
+        port: 5432
+        superuserSecretRef:
+          name: platform-postgres-superuser
+          namespace: gibson
+          key: password
+      databases:
+        - {name: gibson_platform, owner: gibson_platform}
+        - {name: dashboard, owner: dashboard}
+        - {name: tenant_admin, owner: tenant_admin}
+        - {name: zitadel, owner: zitadel}
+        - {name: openfga, owner: openfga}
+        - {name: spire, owner: spire}
+  platformOperator:
+    vaultAddr: "http://gibson-openbao.gibson.svc:8200"
+    vaultTokenSecretRef:
+      name: gibson-openbao-keys
+      key: VAULT_ADMIN_TOKEN
+  docs:
+    enabled: true
+    image:
+      tag: "0.1.0"
+      digest: ""
+global:
+  # No backend selector and no key prefix (deploy#1733). The
+  # platform's own OpenBao is the one External Secrets backend, so an install
+  # stands up nothing extra. The earlier `kubernetes` backend pointed ESO at a
+  # namespace and a reader ServiceAccount that only our own Terraform created,
+  # so on a customer cluster the store came up InvalidProviderConfig and every
+  # workload blocked on a Secret that could never materialize.
+  domain: selfhosted.example.com
+  # Headless first-admin: the operator seeds this tenant (session-less, over
+  # its SPIFFE identity) and the first-admin Job creates its owner once the
+  # Zitadel org exists. Read by gibson-operators AND gibson-workloads.
+  firstTenant:
+    # NB: tenantId is a tenant SLUG and must avoid the reserved-names denylist
+    # (gibson-reserved-names ConfigMap: default, admin, system, root, gibson,
+    # kube-*, system-*, gibson-* …). "default" — the value this profile shipped —
+    # is reserved, so the admission webhook rejected the first Tenant CR and the
+    # seed could never converge. "primary" is a plain, non-reserved slug.
+    enabled: true
+    tenantId: "primary"
+    displayName: "Primary Workspace"
+    ownerEmail: "admin@selfhosted.example.com"
+# TLS to Postgres, kept on for a customer install (deploy#1197 / deploy#1239).
+# These were inherited from the EKS profile, where RDS force_ssl=1 requires
+# them. They are kept here rather than dropped: CNPG generates its own server
+# certificates and serves TLS by default, and the daemon, dashboard and
+# ext-authz DSNs already use sslmode=require against platform-postgres-rw in
+# EVERY profile, so this is proven against the in-cluster cluster too. Dropping
+# them would quietly downgrade a self-hosted customer's database traffic to
+# plaintext.
+openfga:
+  datastore:
+    uri: "postgres://placeholder@platform-postgres-rw.gibson.svc.cluster.local:5432/openfga?sslmode=require"
+# SPIRE's datastore sets no options at all, so its libpq connection string
+# carries no sslmode and defaults to `prefer`. Make it explicit.
+spire:
+  spire-server:
+    dataStore:
+      sql:
+        options:
+          - sslmode: require
+zitadel:
+  zitadel:
+    configmapConfig:
+      ExternalDomain: app.selfhosted.example.com
+      # 443, NOT the base's 30443. Zitadel computes its issuer/audience as
+      # BuildHTTP(ExternalDomain, ExternalPort, ExternalSecure) and INCLUDES
+      # the port unless it is the scheme default. With 30443 every self-signed
+      # system JWT (aud https://app.<domain>) fails CheckAudience with
+      # Errors.Token.Invalid — proven live: portless aud -> 401, aud with
+      # :30443 -> 200. A vanilla install serves 443 behind the LoadBalancer,
+      # so the port must be elided or every OIDC issuer URL is wrong too.
+      ExternalPort: 443
+      ExternalSecure: true
+      # Zitadel opens two Postgres pools; both default to SSL.Mode=disable in
+      # the umbrella base. Keep both encrypted here.
+      Database:
+        Postgres:
+          User:
+            SSL:
+              Mode: require
+          Admin:
+            SSL:
+              Mode: require

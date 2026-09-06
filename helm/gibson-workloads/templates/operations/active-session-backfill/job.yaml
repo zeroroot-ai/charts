@@ -1,0 +1,235 @@
+{{- /*
+active-session-backfill Job — SECURITY repair net (deploy#1186, gibson#627 S2).
+
+Runs the gibson image's `/usr/local/bin/active-session-backfill` binary. For
+every existing human tenant member it writes the FGA `active_session`
+conditional tuple if missing. That tuple is a standalone direct relation
+(model.fga:155) with NO path into the role hierarchy, so an absent tuple DENIES
+every tenant-scoped RPC with a 403 that reads as an authz bug. The
+tenant-operator writes it on membership creation but non-fatally, and several
+role-grant paths write no tuple at all — so without this Job a transient write
+failure or an existing-tenant migration locks users out at cutover.
+
+Runtime shape:
+  - IDEMPOTENT and exits zero unconditionally (already-present tuples log
+    outcome=already_seeded; per-member failures are logged and skipped), so it
+    is a safe no-op on every re-run. No enable toggle — structural like fga-init
+    (one-code-path / deploy#187). Renders in ALL profiles (authz, not billing).
+  - PostSync (Argo) / post-install,post-upgrade (Helm) hook so it runs AFTER
+    fga-init has seeded the store+model and the tenant-operator has provisioned
+    members — never before. BeforeHookCreation clears the prior run at the next
+    sync with no finalizer (the fga-init rationale: deploy#494/#645/#673).
+  - The wait-for-fga-config init container blocks until gibson-fga-config
+    carries a store_id, so EXT_AUTHZ_FGA_STORE_ID / EXT_AUTHZ_FGA_MODEL_ID are
+    non-empty when the binary starts (same guard ext-authz uses).
+
+RBAC: the binary enumerates Tenant CRs (cluster-scoped) and TenantMember CRs
+(namespaced, per tenant) via the dynamic client — a ClusterRole with list/get
+on both. The wait init container reads the gibson-fga-config ConfigMap — a
+namespaced Role with get/list on configmaps.
+*/}}
+{{- $fgaSvc := .Values.activeSessionBackfill.openfgaService | default .Values.fgaInit.openfgaService | default "gibson-openfga" }}
+{{- $fgaPort := .Values.activeSessionBackfill.openfgaHttpPort | default .Values.fgaInit.openfgaHttpPort | default 8080 }}
+{{- /* A Job's spec.template is immutable, so a `helm upgrade` that changes the
+       pod template cannot patch this Job and the whole release fails:
+         UPGRADE FAILED: cannot patch "...-active-session-backfill" with kind Job
+       Measured on the bank exit test, gibson run 33658069271, where the upgrade
+       only swapped the daemon image tag. fga-init solved this by naming its Job
+       after the daemon image (templates/fga-init/job.yaml), so a new image is a
+       new Job rather than a patch of an old one. Same rule here: name by the
+       image the binary ships in. The Job is idempotent, so an extra run is a
+       no-op, and resource-policy:keep still stops uninstall racing a live run. */}}
+{{- $backfillImage := include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.gibson.image.repository "tag" .Values.gibson.image.tag "digest" .Values.gibson.image.digest "appVersion" .Chart.AppVersion) }}
+{{- $backfillHash := $backfillImage | sha256sum | trunc 8 }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "gibson.fullname" . }}-active-session-backfill
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: active-session-backfill
+  annotations:
+    helm.sh/resource-policy: keep
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "gibson.fullname" . }}-active-session-backfill
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: active-session-backfill
+  annotations:
+    helm.sh/resource-policy: keep
+rules:
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["tenants", "tenantmembers"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "gibson.fullname" . }}-active-session-backfill
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: active-session-backfill
+  annotations:
+    helm.sh/resource-policy: keep
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gibson.fullname" . }}-active-session-backfill
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  apiGroup: rbac.authorization.k8s.io
+  name: {{ include "gibson.fullname" . }}-active-session-backfill
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "gibson.fullname" . }}-active-session-backfill
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: active-session-backfill
+  annotations:
+    helm.sh/resource-policy: keep
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "gibson.fullname" . }}-active-session-backfill
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: active-session-backfill
+  annotations:
+    helm.sh/resource-policy: keep
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gibson.fullname" . }}-active-session-backfill
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+  name: {{ include "gibson.fullname" . }}-active-session-backfill
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "gibson.fullname" . }}-active-session-backfill-{{ $backfillHash }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: active-session-backfill
+  annotations:
+    # Modelled on fga-init's annotation set (templates/fga-init/job.yaml), one
+    # phase later. Argo runs this during PostSync — AFTER fga-init (a Sync hook)
+    # has written gibson-fga-config and the tenant-operator has provisioned
+    # members — and re-runs it every sync, so the repair net fires on each
+    # deploy. BeforeHookCreation clears both succeeded and failed prior runs at
+    # the next sync with NO finalizer wedge (fga-init rationale:
+    # deploy#494/#645/#673); NO HookSucceeded, for the same reason.
+    #
+    # Deliberately NOT a helm.sh/hook: this Job's only network peer is the
+    # OpenFGA sibling Argo app, which carries no in-chart NetworkPolicy for a
+    # hook to be allow-listed against (scripts/lint-hook-jobs.py). Under plain
+    # Helm (kind) it is therefore a normal resource that runs once at install —
+    # exactly how fga-init behaves off-Argo — and the wait-for-fga-config init
+    # container below handles ordering. resource-policy:keep stops uninstall
+    # racing the running Job.
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    helm.sh/resource-policy: keep
+spec:
+  backoffLimit: 6
+  {{- /* Wall-clock from JOB CREATION. The wait-for-fga-config init container
+         and the daemon dependency put the whole cold bring-up inside this
+         window (fga-config t+4-7m, daemon Ready after the master-key mints,
+         t+8-12m measured 2026-09-02, deploy#1766). A fired deadline is
+         permanent on a plain helm install. 1200s covers the worst measured
+         cold bring-up with headroom; the deadline stays for Argo sync
+         hygiene. */}}
+  activeDeadlineSeconds: 1200
+  template:
+    metadata:
+      labels:
+        {{- include "gibson.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: active-session-backfill
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ include "gibson.fullname" . }}-active-session-backfill
+      {{- include "gibson.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        {{- include "gibson.waitForFgaConfig" . | nindent 8 }}
+      containers:
+        - name: active-session-backfill
+          image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.gibson.image.repository "tag" .Values.gibson.image.tag "digest" .Values.gibson.image.digest "appVersion" .Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ .Values.gibson.image.pullPolicy | default "IfNotPresent" }}
+          # allowlist-bringup-job-idempotency (deploy#928): the command is a
+          # single Go binary, not a shell script — there is no multi-step shell
+          # to make fail-loud. The binary is itself fail-loud (exit 1 on fatal
+          # config/FGA errors) and idempotent by design (already-present tuples
+          # → outcome=already_seeded, exits 0), and the Job carries
+          # restartPolicy: OnFailure + a bounded backoffLimit below.
+          command: ["/usr/local/bin/active-session-backfill"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+          env:
+            # deploy#1382: explicit https:// — the OpenFGA HTTP listener
+            # serves TLS (cert-manager keypair gibson-openfga-http-tls).
+            # authz.NewFgaAuthorizer honours the scheme; SSL_CERT_DIR below
+            # adds the issuing CA without displacing the system bundle.
+            - name: EXT_AUTHZ_FGA_ADDR
+              value: {{ printf "https://%s:%v" $fgaSvc $fgaPort | quote }}
+            - name: SSL_CERT_DIR
+              value: "/etc/ssl/certs:/etc/gibson/tls/fga-ca"
+            # store_id / model_id are guaranteed non-empty by the
+            # wait-for-fga-config init container above.
+            - name: EXT_AUTHZ_FGA_STORE_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: gibson-fga-config
+                  key: store_id
+            - name: EXT_AUTHZ_FGA_MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: gibson-fga-config
+                  key: model_id
+            - name: HOME
+              value: /tmp
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # CA for the OpenFGA HTTP-listener cert (deploy#1382).
+            - name: fga-http-ca
+              mountPath: /etc/gibson/tls/fga-ca
+              readOnly: true
+          resources:
+            {{- toYaml .Values.activeSessionBackfill.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: fga-http-ca
+          secret:
+            secretName: gibson-openfga-http-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 0444

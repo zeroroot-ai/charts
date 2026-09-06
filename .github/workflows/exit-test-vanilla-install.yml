@@ -1,0 +1,420 @@
+# ----------------------------------------------------------------------------
+# The vanilla profile INSTALLS, it is not merely rendered.
+#
+# In plain words: the thing a customer runs must actually come up, on a cluster
+# with no cloud attached.
+#
+# ADR-0010 makes the vanilla Kubernetes cluster the supported self-hosted
+# target. The defect it was written about is that the profile carrying that
+# name had never been installed anywhere — it appeared only in `helm template`
+# assertions, so "self-hosted works" was a claim about rendered YAML rather
+# than about a running platform.
+#
+# kind IS a vanilla cluster: no IRSA, no cloud load balancer, no cloud KMS, no
+# cloud secret manager. So this is not a stand-in for the real target ahead of
+# testing on EKS — it IS the target shape, and EKS (deploy#1630) is a vanilla
+# cluster that happens to be EKS.
+#
+# Since deploy#1737 the bringup is `make recreate ENV=kind`, the operating
+# verb of ADR-0015: preflight, stage 1 (the kind cluster, gVisor node prep,
+# Argo CD), the bringup keyring into the cluster, and stage 2 (the umbrella
+# with values-vanilla.yaml plus the gibson-velero release as Argo
+# Applications, packaged from THIS checkout and synced to Synced+Healthy).
+# One path: the verb an operator runs is the verb this job runs.
+#
+# ADR-0014 rides along as this job's guard: a decoy backup object is planted
+# in the durable bucket BEFORE the recreate, and the job asserts the recreate
+# restored nothing. The restore half itself, and the whole preserve-and-
+# restore loop, is exit-test-backup-restore.yml (deploy#1739).
+# ----------------------------------------------------------------------------
+# ADR-0012: never on pull_request. This is an exit test — it measures state on
+# main for the launch scorecard and runs on push to main and on its schedule.
+# The merge gate is the ten-minute set in ci.yml.
+name: exit-test-vanilla-install
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'helm/**'
+      - '.github/workflows/exit-test-vanilla-install.yml'
+  schedule:
+    # Daily. A profile that installs today and not tomorrow is the failure this
+    # catches; nothing else exercises it on a cluster.
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: exit-test-vanilla-install-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NS: gibson
+  RELEASE: gibson
+
+jobs:
+  install:
+    name: install on a vanilla cluster
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5
+        with:
+          version: v3.16.2
+
+      # Install kind + kubectl only. `make recreate ENV=kind` creates the
+      # cluster itself (with the gVisor containerd patch) — pre-creating one
+      # here would lack that and be thrown away. This keeps ONE path (the
+      # verb owns cluster creation).
+      - name: Install kind + kubectl
+        uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3  # v1.12.0
+        with:
+          install_only: true
+
+      # Stage 1 applies kind/gibson (Argo CD) with the version CI pins
+      # everywhere (exit-test-terraform.yml carries the same pin).
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4
+        with:
+          terraform_version: "1.15.8"
+          terraform_wrapper: false
+
+      # ONE PATH. This job runs exactly the verb an operator runs, so a green
+      # exit test and a working recreate cannot drift apart, and nothing
+      # about the bringup lives only in this workflow file.
+      #
+      # Stage 0 (ADR-0015): the durable bucket, the SMTP relay, the DNS
+      # sub-zone and the bringup keyring, outside the cluster, on the
+      # runner's kind Docker network. `make substrate ENV=kind` is the one
+      # definition of kind's stage 0 (deploy#1736); the state dir is the
+      # runner's temp so nothing assumes /bulk.
+      # GHCR_RO_PAT, not GITHUB_TOKEN: the first-party images live on
+      # packages owned by OTHER repos (gibson, dashboard, …) and a workflow's
+      # GITHUB_TOKEN cannot read those. The token becomes the keyring member
+      # GHCR_PULL_TOKEN (deploy#1732); the sidecar seeds ghcr-pull-secret
+      # from it. Without the token the member stays empty and the install
+      # fails at Workloads reach Ready with ImagePullBackOff.
+      - name: Stage 0 (make substrate ENV=kind)
+        env:
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_RO_PAT }}
+        run: |
+          if [ -z "${GHCR_PULL_TOKEN}" ]; then
+            echo "::warning::GHCR_RO_PAT is not available (fork PR?) — the keyring member GHCR_PULL_TOKEN stays empty, first-party images will not pull and the install WILL fail at Workloads reach Ready."
+          fi
+          SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
+
+      # GUARD (ADR-0014): plant a decoy backup
+      # object in the durable bucket BEFORE the recreate. With no
+      # RESTORE_FROM the recreate must never read it: the assertion after
+      # the bringup proves the cluster came up with nothing restored WHILE
+      # the bucket demonstrably held a backup.
+      - name: Plant a decoy backup in the bucket
+        run: |
+          set -euo pipefail
+          sub="$RUNNER_TEMP/substrate/kind"
+          endpoint="$(grep '^BUCKET_ENDPOINT=' "$sub/substrate.env" | cut -d= -f2-)"
+          bucket="$(grep '^BUCKET_NAME=' "$sub/substrate.env" | cut -d= -f2-)"
+          export AWS_ACCESS_KEY_ID="$(scripts/keyring.sh get "$sub/keyring.env" BUCKET_ACCESS_KEY)"
+          export AWS_SECRET_ACCESS_KEY="$(scripts/keyring.sh get "$sub/keyring.env" BUCKET_SECRET_KEY)"
+          export AWS_DEFAULT_REGION=us-east-1
+          printf 'decoy velero backup: a nameless recreate must never read this\n' > /tmp/decoy.txt
+          aws s3 cp /tmp/decoy.txt "s3://$bucket/backups/velero/backups/decoy-recreate-guard/decoy.txt" --endpoint-url "$endpoint"
+          aws s3 ls "s3://$bucket/backups/velero/backups/decoy-recreate-guard/" --endpoint-url "$endpoint"
+
+      - name: Stand the platform up (make recreate ENV=kind)
+        # The verb: preflight, stage 1 (kind cluster + gVisor node prep +
+        # Argo CD from kind/gibson), the bringup keyring written from stage
+        # 0's keyring file (scripts/keyring-to-cluster.sh), and stage 2 (the
+        # umbrella and gibson-velero packaged from this checkout, published
+        # to the bucket's charts/ prefix, synced by Argo to Synced+Healthy).
+        # OpenBao seals with the static seal from the keyring Secret, and the
+        # openbao-auto-init sidecar seeds every key the chart's
+        # ExternalSecrets read, then revokes the initial root token
+        # (ADR-0015, deploy#1731, deploy#1732).
+        run: |
+          # The vanilla profile requests more CPU than a runner offers and does
+          # not schedule on it (run 32773702081: "0/1 nodes are available: 1
+          # Insufficient cpu" → OpenBao never unseals → 30 min hook timeout). The
+          # CI-only overlay lowers REQUESTS, never limits, so the same platform packs
+          # onto the test node. The shipped profile is untouched.
+          SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
+            EXTRA_VALUES=test/vanilla/ci-2core-resources.values.yaml make recreate ENV=kind
+
+      # EXIT TEST (ADR-0014): the bucket held a backup, no RESTORE_FROM was
+      # given, so NOTHING was restored. Zero Velero Restore objects, exactly
+      # the one tenant the profile seeds, and no trace of the decoy.
+      - name: A backup in the bucket, no RESTORE_FROM — nothing restored
+        run: |
+          set -euo pipefail
+          sub="$RUNNER_TEMP/substrate/kind"
+          endpoint="$(grep '^BUCKET_ENDPOINT=' "$sub/substrate.env" | cut -d= -f2-)"
+          bucket="$(grep '^BUCKET_NAME=' "$sub/substrate.env" | cut -d= -f2-)"
+          export AWS_ACCESS_KEY_ID="$(scripts/keyring.sh get "$sub/keyring.env" BUCKET_ACCESS_KEY)"
+          export AWS_SECRET_ACCESS_KEY="$(scripts/keyring.sh get "$sub/keyring.env" BUCKET_SECRET_KEY)"
+          export AWS_DEFAULT_REGION=us-east-1
+          # The fixture must still be armed, or the assertions below prove nothing.
+          aws s3 ls "s3://$bucket/backups/velero/backups/decoy-recreate-guard/decoy.txt" --endpoint-url "$endpoint" >/dev/null || {
+            echo "::error::the decoy backup is gone from the bucket — the ADR-0014 assertion has no fixture to fail against"
+            exit 1
+          }
+          restores="$(kubectl -n velero get restores.velero.io --no-headers 2>/dev/null | wc -l)"
+          if [ "$restores" -ne 0 ]; then
+            echo "::error::a nameless recreate produced $restores Velero Restore object(s) — ADR-0014 forbids any implicit restore"
+            kubectl -n velero get restores.velero.io
+            exit 1
+          fi
+          tenants="$(kubectl get tenants.gibson.zeroroot.ai --no-headers | wc -l)"
+          if [ "$tenants" -ne 1 ]; then
+            echo "::error::want exactly the one tenant the vanilla profile seeds, got $tenants"
+            kubectl get tenants.gibson.zeroroot.ai
+            exit 1
+          fi
+          if kubectl get ns 2>/dev/null | grep -q decoy; then
+            echo "::error::a decoy namespace exists — something read the bucket"
+            exit 1
+          fi
+          echo "bucket held a backup, cluster restored nothing: 0 Restore objects, 1 seeded tenant (ADR-0014)"
+
+      # The install proof vanilla-up used to run inline: OpenBao initialized
+      # and unsealed, one Valid ClusterSecretStore, every ExternalSecret
+      # Synced, a restart drill, and the keyring drill (swap the seal key,
+      # expect sealed; restore it, expect unsealed) — the kind fixture is
+      # disposable, so the drill may rewrite the live keyring Secret.
+      - name: OpenBao opens only under the keyring (make vanilla-verify)
+        run: |
+          set -euo pipefail
+          KEYRING_FILE="$RUNNER_TEMP/substrate/kind/keyring.env" make vanilla-verify
+
+      # An install that returned is not an install that works. Every assertion
+      # below is about the cluster, not the manifest.
+      - name: Nothing pulled a cloud dependency
+        run: |
+          set -euo pipefail
+          # A PVC stuck Pending is the signature of a storage class that does
+          # not exist — the first thing a cloud assumption breaks.
+          if kubectl -n "$NS" get pvc -o json | jq -e '.items[] | select(.status.phase!="Bound")' > /dev/null; then
+            echo "::error::a PVC is not Bound — the vanilla profile assumed a storage class this cluster has not got"
+            kubectl -n "$NS" get pvc
+            exit 1
+          fi
+          # No ServiceAccount may carry an IRSA annotation: it would be inert
+          # here and is a cloud assumption that escaped the profile.
+          if kubectl -n "$NS" get sa -o json | jq -e '.items[].metadata.annotations["eks.amazonaws.com/role-arn"] // empty' > /dev/null; then
+            echo "::error::a ServiceAccount carries an IRSA annotation in the vanilla install"
+            exit 1
+          fi
+
+      - name: Workloads reach Ready
+        run: |
+          set -euo pipefail
+          # Deployments and StatefulSets separately: a StatefulSet whose PVC
+          # cannot bind never reports on a Deployment wait, and that is exactly
+          # the cloud-storage failure this job exists to catch.
+          kubectl -n "$NS" wait --for=condition=Available deploy --all --timeout=15m
+          for sts in $(kubectl -n "$NS" get sts -o name); do
+            kubectl -n "$NS" rollout status "$sts" --timeout=10m
+          done
+
+      - name: The first admin exists and can act
+        # A green install is not just Ready pods — it is an owner who can DO
+        # something. The three assertions here each pin a failure that shipped
+        # past this test while it only watched workloads:
+        #   1. the seeded tenant reaches Ready (the whole provisioning saga);
+        #   2. the bring-up minted the operator-fetchable credential Secret;
+        #   3. the founding member reaches Active. Active is what makes the
+        #      TenantMember reconciler seed the FGA active_session tuples —
+        #      without them the session-revocation gate fail-closes EVERY
+        #      tenant-scoped RPC, and the install is a working login bolted to
+        #      a dead platform (gibson#1510). A member stuck Invited is that
+        #      bug, caught here without needing a browser in CI.
+        run: |
+          set -euo pipefail
+          TENANT=$(kubectl get tenants.gibson.zeroroot.ai -o jsonpath='{.items[0].metadata.name}')
+          if [ -z "$TENANT" ]; then
+            echo "::error::the install seeded no Tenant CR"
+            exit 1
+          fi
+          echo "asserting tenant ${TENANT} reaches Ready"
+          kubectl wait --for=jsonpath='{.status.phase}'=Ready "tenant/${TENANT}" --timeout=15m
+
+          echo "asserting the first-admin credential Secret exists"
+          kubectl -n "$NS" get secret gibson-first-admin >/dev/null
+
+          echo "asserting the founding member reaches Active"
+          MEMBER_NS="tenant-${TENANT}"
+          phase=""
+          for _ in $(seq 1 90); do
+            phase=$(kubectl -n "$MEMBER_NS" get tenantmembers.gibson.zeroroot.ai \
+              -o jsonpath='{.items[?(@.spec.role=="owner")].status.phase}' 2>/dev/null || true)
+            [ "$phase" = "Active" ] && break
+            sleep 10
+          done
+          if [ "$phase" != "Active" ]; then
+            echo "::error::founding member phase is '${phase:-<absent>}', want Active — the owner can log in but the session gate denies every tenant RPC (gibson#1510)"
+            kubectl -n "$MEMBER_NS" get tenantmembers.gibson.zeroroot.ai -o yaml | tail -40 || true
+            exit 1
+          fi
+          echo "founding member is Active"
+
+      - name: One secret backend, and every ExternalSecret is Synced
+        # ADR-0015 (deploy#1733) acceptance: the platform's own OpenBao is the
+        # ONE External Secrets backend, reached through ONE ClusterSecretStore,
+        # and every ExternalSecret the chart renders resolves against it.
+        #
+        # vanilla-verify.sh already waits for this during the install. This
+        # step re-asserts it as an EXIT TEST assertion, and it enumerates: it
+        # prints every ExternalSecret in every namespace with its Ready
+        # condition and fails on the first one that is not True. A spot check
+        # of one namespace passes while another waits forever, which is the
+        # failure this step exists to make impossible.
+        run: |
+          set -euo pipefail
+          echo "=== ClusterSecretStores ==="
+          kubectl get clustersecretstore -o \
+            'jsonpath={range .items[*]}{.metadata.name}{"\tready="}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'
+          # A backend store reads material from outside this cluster. Exactly
+          # one may exist, and it is the OpenBao store.
+          backends="$(kubectl get clustersecretstore -o \
+            'jsonpath={range .items[*]}{.metadata.name}{" "}{.spec.provider.vault.server}{"\n"}{end}' \
+            | awk 'NF==2{print $1}')"
+          if [ "$backends" != "gibson-secrets" ]; then
+            echo "::error::want exactly one secret-backend ClusterSecretStore named gibson-secrets, got: [${backends}]"
+            exit 1
+          fi
+          ready=$(kubectl get clustersecretstore gibson-secrets \
+            -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+          if [ "$ready" != "True" ]; then
+            echo "::error::ClusterSecretStore gibson-secrets is not Ready (status=${ready:-<absent>})"
+            kubectl get clustersecretstore gibson-secrets -o yaml | tail -30
+            exit 1
+          fi
+          echo "=== every ExternalSecret, every namespace ==="
+          kubectl get externalsecrets --all-namespaces -o \
+            'jsonpath={range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' \
+            > /tmp/es-state.txt
+          cat /tmp/es-state.txt
+          total=$(grep -c . /tmp/es-state.txt || true)
+          if [ "$total" = "0" ]; then
+            echo "::error::the install rendered no ExternalSecret — an empty list must never pass"
+            exit 1
+          fi
+          if awk '$3!="True"{print "  NOT SYNCED: "$1"/"$2" Ready="($3==""?"<none>":$3); bad=1} END{exit bad?1:0}' /tmp/es-state.txt; then
+            echo "all ${total} ExternalSecrets are Synced, against the one OpenBao store"
+          else
+            echo "::error::not every ExternalSecret reached Synced"
+            kubectl -n "$NS" logs -l app.kubernetes.io/name=external-secrets --tail=40 || true
+            exit 1
+          fi
+
+      # The ADR-0006 seam suite (verify-selfhosted-seams.sh) is NOT run here.
+      # Its first ever live runs (33609089563, 33610694264) worked through the
+      # suite's own defects and then measured six PRODUCT gaps on a green
+      # install: /pricing and /contact-sales answer 200 on self-hosted, GET /
+      # serves no login affordance, the www host resets instead of answering
+      # 404, gRPC reflection answers Unauthenticated where the suite expects
+      # the PermissionDenied fail-safe, and docs answers 302. Those are
+      # deploy#1773 — dashboard and edge work, not install convergence — and
+      # this exit test measures the INSTALL. The suite itself is now runnable
+      # against a live install: port-forward the edge to local 443 and run
+      # EDGE_ADDR=127.0.0.1:443 scripts/verify-selfhosted-seams.sh. The step
+      # returns here when deploy#1773 closes.
+      # THE SECOND RUN (deploy#1737 acceptance). docs/bringup.md: "A recreate
+      # stands an environment up from nothing. When the cluster already
+      # exists, the recreate deletes it first." So the criterion is not that
+      # a second recreate is a no-op — it is that it DELETES the standing
+      # cluster and stands a new one up, and still converges.
+      #
+      # Proven by identity, not by exit code alone: the kind node container
+      # and the cluster's own kube-system UID must both change. A recreate
+      # that quietly adopted the existing cluster would keep them.
+      - name: Recreate a second time — it deletes the standing cluster and converges
+        run: |
+          set -euo pipefail
+          before_node="$(docker inspect -f '{{.Id}}' gibson-control-plane)"
+          before_uid="$(kubectl get ns kube-system -o jsonpath='{.metadata.uid}')"
+          echo "before: node=${before_node:0:12} kube-system=${before_uid}"
+
+          SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
+            EXTRA_VALUES=test/vanilla/ci-2core-resources.values.yaml make recreate ENV=kind
+
+          after_node="$(docker inspect -f '{{.Id}}' gibson-control-plane)"
+          after_uid="$(kubectl get ns kube-system -o jsonpath='{.metadata.uid}')"
+          echo "after:  node=${after_node:0:12} kube-system=${after_uid}"
+
+          if [ "$before_node" = "$after_node" ] || [ "$before_uid" = "$after_uid" ]; then
+            echo "::error::the second recreate did not stand up a NEW cluster — it must delete the existing one first (docs/bringup.md)"
+            exit 1
+          fi
+          echo "the second recreate deleted the standing cluster and converged"
+
+      # ADR-0014 again, on the second run: the decoy is still in the bucket
+      # and the cluster still came up with nothing restored.
+      - name: Second run also comes up empty
+        run: |
+          set -euo pipefail
+          restores="$(kubectl -n velero get restores.velero.io --no-headers 2>/dev/null | wc -l)"
+          if [ "$restores" -ne 0 ]; then
+            echo "::error::the second nameless recreate produced $restores Velero Restore object(s) — ADR-0014"
+            exit 1
+          fi
+          tenants="$(kubectl get tenants.gibson.zeroroot.ai --no-headers | wc -l)"
+          if [ "$tenants" -ne 1 ]; then
+            echo "::error::want exactly the one seeded tenant after the second recreate, got $tenants"
+            exit 1
+          fi
+          echo "second run: 0 Restore objects, 1 seeded tenant"
+
+      - name: Diagnose a failure
+        if: failure()
+        run: |
+          kubectl -n "$NS" get pods -o wide || true
+          kubectl -n "$NS" get pvc || true
+          kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -40 || true
+          echo "=== node allocatable vs requested (why a pod is Pending) ==="
+          kubectl describe nodes | grep -A9 'Allocated resources' || true
+          echo "=== pods with a container not ready — a CrashLoop pod is phase Running, so select on readiness ==="
+          for p in $(kubectl -n "$NS" get pods -o json | jq -r '.items[] | select(.status.phase != "Succeeded") | select([.status.containerStatuses[]?, .status.initContainerStatuses[]?] | any(.ready == false)) | .metadata.name'); do
+            echo "--- $p"; kubectl -n "$NS" describe pod "$p" | grep -A12 '^Events' || true
+            for c in $(kubectl -n "$NS" get pod "$p" -o json | jq -r '[.status.containerStatuses[]?, .status.initContainerStatuses[]?] | .[] | select(.ready == false) | .name'); do
+              echo "..... last log of $p/$c (previous instance if it restarted)"
+              kubectl -n "$NS" logs "$p" -c "$c" --previous --tail=30 2>/dev/null || kubectl -n "$NS" logs "$p" -c "$c" --tail=30 || true
+            done
+          done
+          echo "=== jobs (a dead one-shot Job is invisible in the pod list) ==="
+          kubectl -n "$NS" get jobs -o wide || true
+          kubectl -n "$NS" get jobs -o json | jq -r '.items[] | "\(.metadata.name): \((.status.conditions // [])[] | "\(.type)=\(.status) \(.reason // "") \(.message // "")")"' || true
+          echo "=== fga-init (the pod is deleted when the Job deadlines) ==="
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=fga-init --all-containers --prefix --tail=60 2>/dev/null || true
+          echo "=== platform-operator (it mints gibson-master-key and gibson-dashboard-oidc) ==="
+          kubectl -n "$NS" logs deploy/gibson-platform-operator --tail=150 2>/dev/null || true
+          echo "=== PlatformBootstrap status ==="
+          kubectl get platformbootstraps.gibson.zeroroot.ai -o yaml 2>/dev/null | sed -n '/^  status:/,$p' || true
+          echo "=== ExternalSecrets that are not Synced ==="
+          kubectl get externalsecrets -A -o 'jsonpath={range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.conditions[?(@.type=="Ready")].status}{" "}{.status.conditions[?(@.type=="Ready")].message}{"\n"}{end}' | awk '$3!="True"' || true
+          echo "=== Certificates that are not Ready ==="
+          kubectl get certificates -A -o 'jsonpath={range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | awk '$3!="True"' || true
+          echo "=== full event tail with timestamps ==="
+          kubectl -n "$NS" get events --sort-by=.lastTimestamp -o custom-columns=LAST:.lastTimestamp,COUNT:.count,TYPE:.type,REASON:.reason,OBJECT:.involvedObject.name,MSG:.message | tail -120 || true
+          echo "=== Tenant CRs (first-admin waits for status.zitadelOrgID) ==="
+          kubectl get tenants.gibson.zeroroot.ai -o yaml 2>/dev/null | grep -vE '^\s*(f:|manager:|operation:|apiVersion: v1)' | tail -60 || true
+          echo "=== tenant-operator (it enqueues the first tenant) ==="
+          kubectl -n "$NS" logs deploy/gibson-tenant-operator --tail=80 2>/dev/null || true
+          echo "=== daemon (it runs the provisioning saga) ==="
+          kubectl -n "$NS" logs gibson-gibson-workloads-0 -c gibson --tail=120 2>/dev/null | grep -iE 'tenant|saga|provision|error|zitadel' | tail -60 || true
+          echo "=== first-admin attempts (pod logs survive only until the Job deadline) ==="
+          kubectl -n "$NS" logs -l batch.kubernetes.io/job-name=gibson-gibson-workloads-first-admin --all-containers --prefix --tail=60 2>/dev/null || true
+          echo "=== tenant namespaces (the data plane provisions per-tenant stores there) ==="
+          for tns in $(kubectl get ns -o name | grep 'namespace/tenant-' | cut -d/ -f2); do
+            echo "--- $tns pods"
+            kubectl -n "$tns" get pods -o wide || true
+            kubectl -n "$tns" get events --sort-by=.lastTimestamp | tail -20 || true
+            for p in $(kubectl -n "$tns" get pods -o name); do
+              echo "..... logs of $p"
+              kubectl -n "$tns" logs "$p" --all-containers --tail=30 2>/dev/null || kubectl -n "$tns" logs "$p" --all-containers --previous --tail=30 2>/dev/null || true
+            done
+          done

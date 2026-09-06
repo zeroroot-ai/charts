@@ -1,0 +1,39 @@
+apiVersion: v2
+name: gibson-operators
+description: |
+  Operators for the gibson platform: tenant-operator + platform-operator.
+  Ships Deployments, ServiceAccounts, RBAC, webhook configurations, and
+  the cross-namespace ESO bridge RBAC.
+
+  Must be installed AFTER gibson-crds (controllers register watches at
+  startup; CRDs must exist) and BEFORE gibson-workloads (workloads
+  consume CRD-backed resources the operators provision).
+
+  Spec: .spec-workflow/specs/deploy-architecture-refactor (Phase 7.2-7.4).
+type: application
+version: 0.3.0
+# appVersion is the last-resort image tag for the tenant/platform operators:
+# `gibson.image` falls back to `.Chart.AppVersion` when a component pins
+# neither `tag` nor `digest`. It is NOT stamped by the publish workflow (that
+# only sets the umbrella's --app-version), so it is hand-maintained — kept at
+# the current platform release rather than the fossil `0.1.0` (deploy#1179).
+appVersion: "0.132.0"
+kubeVersion: ">=1.27.0-0"
+maintainers:
+  - name: Zero Root AI
+    email: team@zeroroot.ai
+keywords:
+  - gibson
+  - operators
+home: https://github.com/zeroroot-ai/deploy
+sources:
+  - https://github.com/zeroroot-ai/deploy
+
+# gibson-common: library chart of cross-chart helpers (gibson.daemonAddress,
+# gibson.hostAliases). Pulled in via a relative file:// path so every chart
+# in this repo gets the same helpers without an OCI publish step.
+# Spec: tenant-operator#76 PRD Module 6 / deploy#179.
+dependencies:
+  - name: gibson-common
+    version: "0.2.0"
+    repository: "file://../gibson-common"

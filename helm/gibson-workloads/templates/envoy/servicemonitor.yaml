@@ -1,0 +1,23 @@
+{{/* Envoy ServiceMonitor (Week 2 §3 R21). Scrapes Envoy admin /stats/prometheus on :9901.
+     Renders unconditionally: both observability provider shapes (in-chart Prometheus
+     and external grafana-agent → Grafana Cloud) consume ServiceMonitors. deploy#313. */}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-envoy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: envoy
+spec:
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: envoy
+  endpoints:
+    - port: admin
+      path: /stats/prometheus
+      interval: 30s
+
+{{- end }}

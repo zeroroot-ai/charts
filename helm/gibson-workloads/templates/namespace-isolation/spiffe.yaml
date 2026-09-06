@@ -1,0 +1,147 @@
+{{/*
+Allow policies for the SPIRE subchart's workloads (deploy#1365). See
+namespace-isolation/subchart-workloads.yaml for the design rationale
+(precise ingress, allow-all egress, contained-by-default for everything
+unselected).
+
+The SPIRE agent DaemonSet is deliberately ABSENT here: it runs with
+hostNetwork: true, so its traffic originates from node IPs and CNI
+NetworkPolicies neither select nor constrain it
+(scripts/check-netpol-coverage.py exempts hostNetwork workloads for the
+same reason). That is also why the spire-server :8081 rule below cannot
+name the agents as a podSelector and must admit any source.
+*/}}
+{{- $devDisabled := false -}}
+{{- with .Values.dev -}}{{- with .networkPolicy -}}{{- $devDisabled = .disabled -}}{{- end -}}{{- end -}}
+{{- if not $devDisabled -}}
+{{/* SPIRE server (+ controller-manager sidecar).
+     :8081 gRPC — agents attest here from node IPs (hostNetwork) and the
+     OIDC discovery provider fetches the bundle; unselectable sources, so
+     any-source on the port. :9443 is the controller-manager's admission
+     webhook (kube-apiserver). :8080 healthz for scrapers. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-spire-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-server-isolation
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: server
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Agent attestation (node IPs) + OIDC discovery provider bundle fetch.
+    - ports:
+        - protocol: TCP
+          port: 8081
+    # spire-controller-manager admission webhook (kube-apiserver).
+    - ports:
+        - protocol: TCP
+          port: 9443
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: prometheus
+        - podSelector:
+            matchLabels:
+              app: grafana-agent
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - {}
+---
+{{/* SPIFFE CSI driver — node-plugin DaemonSet; all real I/O is over
+     hostPath unix sockets to kubelet and the agent. No network ingress;
+     egress kept open like every covered component. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-spiffe-csi-driver
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spiffe-csi-driver-isolation
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: spiffe-csi-driver
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - {}
+---
+{{/* SPIFFE OIDC discovery provider — serves the trust domain's JWKS on
+     :8443. Callers: Envoy (publishes it at the edge for external
+     federation), ext-authz + daemon (JWT-SVID validation), OpenBao (the
+     jwt auth method validates daemon SVIDs against it, configured by the
+     openbao-jwt-auth-init Job), and both operators. :8008 healthz for
+     scrapers. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-spiffe-oidc-discovery-provider
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spiffe-oidc-discovery-provider-isolation
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: spiffe-oidc-discovery-provider
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: envoy
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: ext-authz
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: daemon
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: openbao
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: openbao-jwt-auth-init
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: tenant-operator
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: platform-operator
+      ports:
+        - protocol: TCP
+          port: 8443
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: prometheus
+        - podSelector:
+            matchLabels:
+              app: grafana-agent
+      ports:
+        - protocol: TCP
+          port: 8008
+  egress:
+    - {}
+{{- end }}

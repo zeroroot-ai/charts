@@ -1,0 +1,357 @@
+{{- /*
+first-admin — create the owner of the seeded first tenant on a self-hosted
+install (deploy#1631, gibson#1496).
+
+A vanilla install has no self-serve signup, so nothing creates the initial
+principal. Without this the platform comes up perfectly and NOBODY CAN LOG IN.
+
+The tenant itself is seeded WITHOUT this Job: the tenant-operator enqueues it
+over its SPIFFE identity (global.firstTenant -> EnqueueTenantProvisioning), the
+session-less path — because the interactive AdminProvisionTenant RPC is gated by
+a session-revocation check no headless caller satisfies (gibson#1496). This Job
+does the one remaining step, which needs the tenant's Zitadel org to exist:
+
+  `bootstrap-tenant-owner` creates the owner's user IN THAT ORG, grants the
+  membership and writes the FGA tuple. It waits until the Tenant CR the operator
+  seeded reports status.zitadelOrgID, then runs.
+
+WHY THIS LIVES AT THE UMBRELLA LEVEL, NOT IN gibson-workloads:
+The Job is a post-install helm hook. Inside a gibson-* subchart a helm hook
+becomes an ArgoCD Pre/PostSync hook and can deadlock the umbrella sync
+(cross-chart-check Check 22, deploy#754). The umbrella chart is the sanctioned
+home for bring-up hook Jobs (same as signup-bot-pat-minter, deploy#788), so the
+Job renders here and reads the gibson-workloads value subtree explicitly.
+
+first-admin is off unless global.firstTenant.enabled (vanilla only); SaaS uses
+self-serve signup and never renders this.
+*/ -}}
+{{- $wl := index .Values "gibson-workloads" -}}
+{{- $ft := .Values.global.firstTenant | default dict -}}
+{{- $fa := $wl.firstAdmin | default dict -}}
+{{- if $ft.enabled -}}
+{{- $img := ($wl.bootstrap | default dict).image | default dict -}}
+{{- $ns := .Release.Namespace -}}
+{{- /* The shared gibson.* helpers read a subchart-shaped context. imagePullSecrets
+       lives at gibson-workloads.global.imagePullSecrets (NOT the umbrella top-level
+       global), and hostAliases reads .Values.envoy + .Values.global.domain. Forward a
+       context whose global = umbrella global overlaid with the gibson-workloads global
+       (so imagePullSecrets is present) and whose envoy = the gibson-workloads envoy. */ -}}
+{{- $fwdGlobal := mergeOverwrite (deepCopy .Values.global) (default dict $wl.global) -}}
+{{- $ctx := dict "Values" (dict "global" $fwdGlobal "envoy" $wl.envoy) -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gibson-gibson-workloads-first-admin
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: first-admin
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "9"
+    helm.sh/hook-delete-policy: before-hook-creation
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+---
+{{/*
+Tenant is a CLUSTER-SCOPED CRD, so its `get` MUST come from a ClusterRole +
+ClusterRoleBinding — a namespaced Role silently grants nothing for a
+cluster-scoped resource, and the Job's `kubectl get tenant` then returns
+Forbidden, which the wait loop swallows (`|| true`) and spins on until the Job
+deadlines (deploy#1631). The Secret create stays namespaced.
+*/ -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gibson-gibson-workloads-first-admin-{{ $ns }}
+  labels:
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: first-admin
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "9"
+    helm.sh/hook-delete-policy: before-hook-creation
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+rules:
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["tenants"]
+    verbs: ["get"]
+  # bootstrap-tenant-owner pre-accepts the founding-owner TenantMember
+  # (gibson#1510): it lists the members in the tenant's own namespace
+  # (tenant-<slug>, which does not exist at render time, so this cannot be a
+  # namespaced Role) and patches spec.acceptedByUserID on the owner. Without
+  # the pre-accept the member sits Invited forever, the reconciler never
+  # seeds the FGA active_session tuples, and the owner can log in but every
+  # tenant-scoped RPC is denied by the session gate.
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["tenantmembers"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gibson-gibson-workloads-first-admin-{{ $ns }}
+  labels:
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: first-admin
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "9"
+    helm.sh/hook-delete-policy: before-hook-creation
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gibson-gibson-workloads-first-admin-{{ $ns }}
+subjects:
+  - kind: ServiceAccount
+    name: gibson-gibson-workloads-first-admin
+    namespace: {{ $ns }}
+---
+{{/*
+`create` cannot be pinned with resourceNames (Kubernetes RBAC does not allow
+create + resourceNames together), but there is deliberately NO update, patch or
+get on Secrets beyond the one credential Secret: the Job may write the credential
+once and can never read one back or overwrite one — the create-only rule the
+binary enforces.
+*/ -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gibson-gibson-workloads-first-admin
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: first-admin
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "9"
+    helm.sh/hook-delete-policy: before-hook-creation
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+rules:
+  # get and delete are scoped by resourceNames to ONLY the credential Secret.
+  # get: the bootstrap reads it to decide whether the owner was already set up
+  # (idempotence: never reset a rotated password).
+  # delete: once Zitadel shows the password changed after this Secret was
+  # written, the value inside it is one Zitadel no longer accepts. The Secret
+  # says "sign in, change it, then delete this Secret" and operators skip the
+  # last step, leaving a stale password that still reads as the way in — found
+  # out during a break-glass event. The bootstrap completes the instruction.
+  # resourceNames is permitted with both verbs (unlike create), so this stays
+  # minimal: the Job can read and remove that one Secret, no others.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "delete"]
+    resourceNames: ["{{ $fa.credentialSecret | default "gibson-first-admin" }}"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gibson-gibson-workloads-first-admin
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: first-admin
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "9"
+    helm.sh/hook-delete-policy: before-hook-creation
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gibson-gibson-workloads-first-admin
+subjects:
+  - kind: ServiceAccount
+    name: gibson-gibson-workloads-first-admin
+    namespace: {{ $ns }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gibson-gibson-workloads-first-admin
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: first-admin
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  backoffLimit: {{ $fa.backoffLimit }}
+  activeDeadlineSeconds: {{ $fa.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        # Pod-template labels: the gibson-openfga + gibson-bringup-jobs
+        # NetworkPolicies admit first-admin by app.kubernetes.io/component,
+        # so this label is load-bearing under the namespace default-deny.
+        app.kubernetes.io/name: gibson-workloads
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: first-admin
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: gibson-gibson-workloads-first-admin
+      {{- /* The runner image is private ghcr.io/zeroroot-ai/*; without the pull
+             secret the kubelet falls back to an anonymous pull and GHCR 401s,
+             so the Job never starts and first-admin times out (deploy#1631). */}}
+      {{- include "gibson.imagePullSecrets" $ctx | nindent 6 }}
+      {{- /* bootstrap-tenant-owner does OIDC discovery against the external
+             issuer host (app.<domain>); in-cluster that host has no DNS. The
+             same hostAliases the daemon carries pin the platform hostnames to
+             the Envoy ClusterIP so discovery + token both resolve. */}}
+      {{- include "gibson.hostAliases" $ctx | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+      containers:
+        - name: first-admin
+          image: "{{ $img.repository }}:{{ $img.tag }}"
+          imagePullPolicy: {{ $img.pullPolicy | default "IfNotPresent" }}
+          env:
+            - name: BOOTSTRAP_ADMIN_EMAIL
+              value: {{ required "global.firstTenant.ownerEmail is REQUIRED — it is the address the operator signs in with (gibson#1496)." $ft.ownerEmail | quote }}
+            - name: BOOTSTRAP_TENANT_ID
+              value: {{ $ft.tenantId | default "default" | quote }}
+            - name: BOOTSTRAP_TENANT_DISPLAY_NAME
+              value: {{ $ft.displayName | default "Default Workspace" | quote }}
+            - name: GIBSON_IDP_ADMIN_ISSUER
+              value: {{ ((($wl.idp).zitadel).issuer) | default (include "gibson.oidcIssuer" $ctx) | quote }}
+            {{- /* bootstrap-tenant-owner shares the daemon's admin client (gibson#1561:
+                   DiscoveryURL||Issuer). The daemon statefulset already gets
+                   GIBSON_IDP_ADMIN_DISCOVERY_URL (deploy#1689) so its OIDC discovery
+                   goes to the in-cluster Envoy listener; the first-admin Job was left
+                   on the external issuer host, which the edge does not serve
+                   in-cluster, so discovery timed out. Forward the same in-cluster URL
+                   when set; empty (non-vanilla) keeps the issuer-host fallback. */}}
+            {{- with ((($wl.idp).zitadel).discoveryURL) }}
+            - name: GIBSON_IDP_ADMIN_DISCOVERY_URL
+              value: {{ . | quote }}
+            {{- end }}
+            - name: GIBSON_IDP_ADMIN_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $wl.idp.adminCredentialsSecret | quote }}
+                  key: client_id
+            - name: GIBSON_IDP_ADMIN_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $wl.idp.adminCredentialsSecret | quote }}
+                  key: client_secret
+            - name: GIBSON_IDP_ZITADEL_ORG_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $wl.idp.adminCredentialsSecret | quote }}
+                  key: org_id
+            - name: EXT_AUTHZ_FGA_ADDR
+              # OpenFGA's HTTP API is https on :8080 (:8081 is gRPC). bootstrap
+              # speaks HTTP, so :8081 hangs. Same value ext-authz uses.
+              value: {{ $fa.fgaAddr | default "https://gibson-openfga:8080" | quote }}
+            # bootstrap-tenant-owner writes the owner's FGA tuple, so it needs
+            # the store + model ids the fga-init Job seeded into gibson-fga-config
+            # (same source ext-authz reads).
+            - name: EXT_AUTHZ_FGA_STORE_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: gibson-fga-config
+                  key: store_id
+            - name: EXT_AUTHZ_FGA_MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: gibson-fga-config
+                  key: model_id
+            # bootstrap-tenant-owner does OIDC discovery over https against the
+            # external issuer (resolved to Envoy by the hostAliases above). Envoy
+            # serves the platform cert signed by the in-cluster CA, so the CA
+            # bundle must be on the trust path — same envoy-ca the daemon mounts.
+            - name: SSL_CERT_DIR
+              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              TENANT="${BOOTSTRAP_TENANT_ID}"
+              NS="{{ $ns }}"
+
+              echo "[first-admin] waiting for tenant ${TENANT} (operator-seeded) to report a Zitadel org"
+              ORG=""
+              for _ in $(seq 1 120); do
+                ORG=$(kubectl -n "${NS}" get tenant "${TENANT}" \
+                        -o jsonpath='{.status.zitadelOrgID}' 2>/dev/null || true)
+                if [ -n "${ORG}" ]; then break; fi
+                sleep 5
+              done
+              if [ -z "${ORG}" ]; then
+                echo "[first-admin] FATAL: tenant ${TENANT} never reported status.zitadelOrgID." >&2
+                echo "  The operator seed was enqueued but the tenant-operator did not converge." >&2
+                exit 1
+              fi
+              echo "[first-admin] tenant org ${ORG} is ready"
+
+              echo "[first-admin] creating the owner with a generated credential"
+              bootstrap-tenant-owner \
+                -tenant "${TENANT}" \
+                -owner-email "${BOOTSTRAP_ADMIN_EMAIL}" \
+                -generate-password \
+                -credential-secret "{{ $fa.credentialSecret | default "gibson-first-admin" }}" \
+                -credential-namespace "${NS}"
+          volumeMounts:
+            - name: envoy-ca
+              mountPath: /etc/ssl/envoy-ca
+              readOnly: true
+            - name: fga-ca
+              mountPath: /etc/ssl/fga-ca
+              readOnly: true
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        # The Envoy serving cert's CA, so the OIDC discovery TLS handshake to
+        # the external issuer (pinned to Envoy by hostAliases) verifies.
+        - name: envoy-ca
+          secret:
+            secretName: {{ ($wl.gibson).envoyTLSSecretName | default "gibson-envoy-tls" }}
+            defaultMode: 0o444
+        # OpenFGA's HTTP API serves TLS; bootstrap's FGA client must trust its CA.
+        - name: fga-ca
+          secret:
+            secretName: {{ ($wl.gibson).fgaHTTPTLSSecretName | default "gibson-openfga-http-tls" }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 0o444
+{{- end }}

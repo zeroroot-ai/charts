@@ -1,0 +1,63 @@
+{{/*
+NetworkPolicy isolating ext-authz (Week 2 §2 R13).
+
+Allow:
+  - :9001 (gRPC) from Envoy pods only.
+  - :9002 (health) from any pod with the prometheus scrape label OR
+    from kubelet (not selectable; rely on ingressFrom-namespace allow).
+Deny everything else (default-deny baseline via empty podSelector ingress).
+
+Egress is intentionally NOT restricted here — ext-authz dials FGA, dashboard
+postgres, Zitadel JWKS, and Vault/KMS, all of which can resolve via the
+cluster DNS service. A future tightening can scope this with a per-target
+NP block.
+*/}}
+{{- if ne (include "gibson.trueUnlessSet" (((.Values.extAuthz).networkPolicy).enabled)) "false" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-ext-authz
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ext-authz
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: ext-authz
+  policyTypes:
+    - Ingress
+    - Egress
+  {{- /* deploy#1365: allow-all egress under the namespace default-deny
+         (namespace-isolation/default-deny.yaml) — preserves this
+         component's pre-existing unrestricted-egress posture; per-
+         component egress tightening is tracked separately (deploy#1462). */}}
+  egress:
+    - {}
+  ingress:
+    # Envoy → ext-authz gRPC :9001 (Check/CheckV3)
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "gibson.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: envoy
+      ports:
+        - protocol: TCP
+          port: {{ .Values.extAuthz.service.grpcPort | default 9001 }}
+    # Prometheus / scrapers → ext-authz :9002 (health + metrics)
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        - podSelector:
+            matchLabels:
+              app: grafana-agent
+      ports:
+        - protocol: TCP
+          port: {{ .Values.extAuthz.service.healthPort | default 9002 }}
+{{- end }}

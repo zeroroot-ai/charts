@@ -1,0 +1,53 @@
+apiVersion: v2
+name: gibson-workloads
+description: |
+  Gibson platform workloads: daemon (gibson), dashboard, ext-authz, Envoy
+  gateway, SPIFFE wiring, observability, and the PlatformBootstrap CR.
+
+  Must be installed AFTER gibson-crds AND gibson-operators (operators must
+  be running to reconcile PlatformBootstrap and OIDCClient resources that
+  this chart creates).
+
+  Spec: .spec-workflow/specs/deploy-architecture-refactor (Phase 7.5-7.8).
+type: application
+version: 0.2.0
+# appVersion is the last-resort image tag for this subchart's components: the
+# `gibson.image` helper and docs/deployment.yaml fall back to `.Chart.AppVersion`
+# when a component pins neither `tag` nor `digest`. It is NOT stamped by the
+# publish workflow (that only sets the umbrella's --app-version), so it is
+# hand-maintained — kept at the current platform release so the fallback
+# resolves to a plausible tag rather than the fossil `0.3.0` (deploy#1179).
+appVersion: "0.132.0"
+kubeVersion: ">=1.27.0-0"
+maintainers:
+  - name: Zero Root AI
+    email: team@zeroroot.ai
+keywords:
+  - gibson
+  - workloads
+  - daemon
+  - dashboard
+home: https://github.com/zeroroot-ai/deploy
+sources:
+  - https://github.com/zeroroot-ai/deploy
+
+dependencies:
+  # gibson-common: library chart of cross-chart helpers (gibson.daemonAddress,
+  # gibson.hostAliases). Same pattern as gibson-operators's dependency.
+  # Spec: tenant-operator#76 PRD Module 6 / deploy#179.
+  - name: gibson-common
+    version: "0.2.0"
+    repository: "file://../gibson-common"
+
+  # Setec — Firecracker microVM sandbox operator. Kept as a subchart
+  # dependency (NOT vendored) to preserve the OSS governance boundary (NFR-A1).
+  # Spec setec-sandbox-prod-default §C2 (R2.C.1, NFR-A1).
+  - name: setec
+    version: "0.113.1"
+    # The PUBLISHED chart, from setec's own repo. It was vendored under
+    # the setec chart because setec published no chart; that copy then
+    # drifted to 0.113.0 against an upstream 0.112.2, carrying RBAC and CRD
+    # changes never sent home. setec publishes its own signed OCI chart now
+    # (setec#388), so there is one artifact and one source of truth.
+    repository: "oci://ghcr.io/zeroroot-ai/charts"
+    condition: setec.enabled

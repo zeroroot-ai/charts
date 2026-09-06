@@ -1,0 +1,81 @@
+{{- /*
+Release-namespace RBAC for the gibson-tenant-operator.
+
+Spec: secrets-blast-radius-reduction Phase 1.1 (T1.1.2).
+
+Grants the operator ServiceAccount only the verbs it needs INSIDE the
+chart's release namespace (.Release.Namespace). Per-tenant namespaces
+get their own Role+RoleBinding written by the operator at tenant-provision
+time (internal/saga/flows/tenant_namespace_rbac.go).
+
+What's in here:
+
+  Secrets        — chart-rendered Secrets the operator reads at startup
+                   (gibson-zitadel-tenant-operator client_id/secret) and
+                   the post-install bootstrap Job's writes (gibson-zitadel-
+                   dashboard-client, gibson-zitadel-signup-bot-pat, etc.).
+                   Full CRUD because the operator both reads existing
+                   chart-rendered Secrets and writes new ones during
+                   bootstrap.
+
+  ConfigMaps     — read-only for chart configmaps (FGA model staging,
+                   SPIFFE bundle config, dataplane templates).
+
+  NetworkPolicies — read-only for verifying chart-rendered NPs.
+
+  Roles+RoleBindings — operator may need to mint a Role+RoleBinding in
+                   the release namespace (e.g., spire-jwks-exporter
+                   projected SA token RBAC). Full CRUD here is bounded
+                   to the release namespace by Role scope.
+
+  Leases         — controller-runtime leader-election lock lives in the
+                   operator's own namespace.
+
+tenant-operator is structural infrastructure (one-code-path /
+deploy#188). The previous outer `.Values.tenantOperator.enabled`
+gate has been deleted; the inner `releaseNamespaceRBAC.enabled`
+sub-feature flag is preserved (legitimate sub-feature toggle).
+*/ -}}
+{{- if (default false (.Values.tenantOperator.releaseNamespaceRBAC).enabled) }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gibson-tenant-operator-platform
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gibson-tenant-operator-platform
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gibson-tenant-operator-platform
+subjects:
+  - kind: ServiceAccount
+    name: gibson-tenant-operator
+    namespace: {{ .Release.Namespace }}
+{{- end }}

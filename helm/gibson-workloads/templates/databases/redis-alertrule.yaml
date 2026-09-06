@@ -1,0 +1,79 @@
+{{- /*
+  Redis auth-failure PrometheusRule (deploy#516).
+
+  Requires both:
+    - prometheus-operator CRDs (monitoring.coreos.com/v1) — renders nothing on
+      clusters without prometheus-operator (e.g. kind with in-chart prometheus).
+    - redis.metrics.enabled=true — enables the redis-exporter sidecar whose
+      metrics back the RedisAuthenticationFailure alert. The RedisStackUnhealthy
+      alert fires on kube-state-metrics data and is independent of the exporter.
+
+  Limitation: RedisAuthenticationFailure fires when the redis-exporter itself
+  cannot authenticate (redis_up == 0). It will NOT fire during a password
+  rotation window where the exporter has the new password but daemon/tenant-op
+  still have the old one — those clients emit errors in their own logs. The
+  ordered restart CronJob (deploy#517) minimises that window to <90s. Full
+  per-client auth-failure metrics require daemon-side instrumentation.
+*/}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-redis-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  groups:
+    - name: redis-health-alerts
+      rules:
+        {{- if default false ((.Values.redis).metrics).enabled }}
+        # Fires when the redis-exporter sidecar reports redis_up == 0.
+        # Causes: wrong password (deploy#516 primary target), redis-stack down,
+        # network partition, or exporter misconfiguration.
+        - alert: RedisAuthenticationFailure
+          expr: |
+            redis_up{job="{{ .Release.Name }}-redis-stack"} == 0
+          for: 2m
+          labels:
+            severity: page
+            component: redis
+          annotations:
+            summary: "Redis exporter cannot authenticate — possible WRONGPASS after rotation"
+            description: |
+              The redis-exporter sidecar in {{ .Release.Namespace }} cannot reach
+              or authenticate to redis-stack. This is the primary indicator of a
+              failed password rotation or redis-stack being down.
+
+              Steps:
+                1. Check redis-stack pod: kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=redis
+                2. Verify rotation state: kubectl get secret {{ .Release.Name }}-redis-rotation-state -n {{ .Release.Namespace }}
+                3. If rotation is in progress, the CronJob {{ .Release.Name }}-redis-rotation
+                   handles ordered restarts automatically — check its recent job runs.
+                4. Manual recovery: see docs/runbooks/redis-password-rotation.md
+        {{- end }}
+
+        # Fires when the redis-stack StatefulSet has 0 ready replicas for >2m.
+        # Does not require the redis-exporter — uses kube-state-metrics if present.
+        # Relies on kube_statefulset_status_replicas_ready; omitted gracefully if
+        # kube-state-metrics is not installed (the expression simply returns no series).
+        - alert: RedisStackUnhealthy
+          expr: |
+            kube_statefulset_status_replicas_ready{
+              namespace="{{ .Release.Namespace }}",
+              statefulset="{{ .Release.Name }}-redis-stack"
+            } == 0
+          for: 2m
+          labels:
+            severity: page
+            component: redis
+          annotations:
+            summary: "redis-stack StatefulSet has 0 ready replicas"
+            description: |
+              redis-stack in {{ .Release.Namespace }} has had 0 ready replicas for
+              >2 minutes. All Redis-dependent operations (daemon, tenant-operator)
+              will be failing.
+
+              Check: kubectl describe statefulset/{{ .Release.Name }}-redis-stack -n {{ .Release.Namespace }}
+{{- end }}

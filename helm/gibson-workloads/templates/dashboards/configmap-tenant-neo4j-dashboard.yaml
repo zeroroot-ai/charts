@@ -1,0 +1,33 @@
+{{- /*
+Grafana dashboard ConfigMap for the per-tenant Neo4j surface.
+
+Spec: per-tenant-data-plane-completion Task 31 / Req 10.3.
+
+The dashboard JSON lives at `files/grafana-dashboards/tenant-neo4j.json` at
+the chart root and is loaded via `.Files.Get`. Same sidecar-discovery
+pattern as the auth dashboard (`grafana_dashboard: "1"` label +
+k8s-sidecar-target-directory annotation).
+
+Panels:
+  - Heap usage per tenant (timeseries)
+  - Page cache hit rate (timeseries, percent)
+  - Query throughput per tenant (timeseries, qps)
+  - Slow / failed queries (5m bar chart)
+A `tenant_id` template variable filters all panels.
+*/ -}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gibson.grafana.host" . }}-tenant-neo4j-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+    grafana_dashboard: "1"
+  annotations:
+    k8s-sidecar-target-directory: "/var/lib/grafana/dashboards/gibson"
+data:
+  tenant-neo4j.json: |-
+{{ .Files.Get "files/grafana-dashboards/tenant-neo4j.json" | indent 4 }}
+{{- end }}

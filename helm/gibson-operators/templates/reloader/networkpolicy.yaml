@@ -1,0 +1,40 @@
+{{/* Reloader NetworkPolicy (deploy#1365). Reloader is a pure
+     kube-apiserver client (watches Secrets/ConfigMaps, patches
+     workloads); it accepts nothing but metrics scrapes on :9090.
+     Egress is allow-all under the namespace default-deny added by
+     deploy#1365; the kube-apiserver is unselectable by pod labels. */}}
+{{- if ne (include "gibson.trueUnlessSet" (((.Values.reloader).networkPolicy).enabled)) "false" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-reloader
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: reloader
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: reloader
+      app.kubernetes.io/component: reloader
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - {}
+  ingress:
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: prometheus
+        - podSelector:
+            matchLabels:
+              app: grafana-agent
+      ports:
+        - protocol: TCP
+          port: 9090
+{{- end }}

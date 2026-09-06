@@ -1,0 +1,42 @@
+{{/*
+AWS Private CA-backed ClusterIssuer for the prod overlay.
+
+Spec: first-deploy-unblock-and-ha R7.18-R7.23 + R6 (KMS-rooted authority).
+
+In prod the chart issues every internal TLS material through cert-manager
++ awspca-issuer (https://github.com/cert-manager/aws-privateca-issuer),
+which chains to AWS Private CA backed by AWS KMS via the daemon's IRSA
+role. This keeps the cluster's TLS roots inside the same KMS authority
+that signs capability-grant JWTs (R6).
+
+Gating:
+  - certManager.issuers.awspca.enabled    — per-issuer toggle (true in prod)
+
+deploy#201: cert-manager itself is REQUIRED infrastructure — no top-level
+toggle. The per-issuer toggle is the only choice.
+
+Required values when enabled:
+  - certManager.issuers.awspca.arn        — the ACM-PCA ARN
+  - certManager.issuers.awspca.region     — the AWS region (e.g. us-east-1)
+
+Operators MUST install the awspca-issuer CRD set out-of-band before
+deploying the chart with this issuer enabled (the chart's
+validateCertManagerCRDs guard does not introspect awspca-issuer CRDs
+specifically, but the AWSPCAClusterIssuer kind below will fail to apply
+if the CRD is absent).
+*/}}
+{{- if (((.Values.certManager).issuers).awspca).enabled }}
+{{- $arn := required "certManager.issuers.awspca.arn is required when awspca issuer is enabled (the AWS Private CA ARN)" .Values.certManager.issuers.awspca.arn }}
+{{- $region := required "certManager.issuers.awspca.region is required when awspca issuer is enabled" .Values.certManager.issuers.awspca.region }}
+---
+apiVersion: awspca.cert-manager.io/v1beta1
+kind: AWSPCAClusterIssuer
+metadata:
+  name: awspca-issuer
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cert-manager-issuer
+spec:
+  arn: {{ $arn | quote }}
+  region: {{ $region | quote }}
+{{- end }}

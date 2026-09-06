@@ -1,0 +1,50 @@
+{{/* Neo4j NetworkPolicy (Week 2 §3 R17). Per-tenant Neo4j is reached by daemon only.
+     Tenant-namespace selector matches the convention used by per-tenant pods. */}}
+{{- if and .Values.neo4j.enabled (ne (include "gibson.trueUnlessSet" (((.Values.neo4j).networkPolicy).enabled)) "false") }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-neo4j
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: neo4j
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: neo4j
+  policyTypes:
+    - Ingress
+    - Egress
+  {{- /* deploy#1462: NARROWED to DNS only. Neo4j is a leaf data store,
+         reached by the daemon on :7687/:7474 and originating nothing —
+         this is a single instance, so there is no cluster discovery or
+         causal-clustering traffic to allow.
+
+         This narrowing is worth more than the others in the tranche.
+         Neo4j ships APOC, whose apoc.load.json / apoc.load.jdbc /
+         apoc.load.xml procedures fetch a caller-supplied URL from
+         inside the database process — a server-side request forgery
+         primitive reachable by anyone who can run Cypher. Allow-all
+         egress made that primitive able to reach the whole namespace
+         (openbao :8200, openfga, cnpg) and the internet, including the
+         cloud instance metadata endpoint. Restricting egress is the
+         containment for it; the alternative, keeping APOC's allowlist
+         in step with every deployment, is configuration that has to be
+         right forever.
+
+         DNS stays allowed — Neo4j resolves its own advertised address
+         at boot. */}}
+  egress:
+    {{- include "gibson.netpolEgressDNS" . | nindent 4 }}
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: daemon
+      ports:
+        - protocol: TCP
+          port: 7687
+        - protocol: TCP
+          port: 7474
+{{- end }}

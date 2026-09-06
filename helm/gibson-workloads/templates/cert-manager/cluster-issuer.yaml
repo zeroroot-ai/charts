@@ -1,0 +1,136 @@
+{{/*
+cert-manager ClusterIssuers for the Envoy edge listener.
+
+Spec: unified-identity-and-authorization Phase H/8.3 (Req 3.7).
+deploy#201 / epic deploy#186: cert-manager is REQUIRED infrastructure —
+the `.Values.certManager.enabled` toggle is gone. The chart assumes
+cert-manager is already installed cluster-wide; the validator
+`gibson.validateCertManagerCRDs` asserts at least one issuer is enabled.
+
+Each issuer is gated independently:
+  - certManager.issuers.letsencrypt.enabled → letsencrypt-staging + letsencrypt-prod
+  - certManager.issuers.selfsigned.enabled  → selfsigned-root + selfsigned-ca
+*/}}
+
+{{- define "gibson.certManager.letsencryptSolvers" -}}
+{{- $le := .Values.certManager.issuers.letsencrypt -}}
+{{- $s := $le.solver | default "http01" -}}
+{{- if eq $s "http01" }}
+- http01:
+    ingress:
+      class: {{ $le.ingressClass | default "nginx" | quote }}
+{{- else if eq $s "dns01-route53" }}
+- dns01:
+    route53:
+      region: {{ $le.dns01Route53.region | quote }}
+      {{- if $le.dns01Route53.hostedZoneID }}
+      hostedZoneID: {{ $le.dns01Route53.hostedZoneID | quote }}
+      {{- end }}
+{{- end -}}
+{{- end -}}
+
+{{- if .Values.certManager.issuers.letsencrypt.enabled }}
+{{- if not .Values.certManager.issuers.letsencrypt.email }}
+{{- fail "certManager.issuers.letsencrypt.enabled=true requires certManager.issuers.letsencrypt.email — Let's Encrypt requires a registered ACME contact email. Set certManager.issuers.letsencrypt.email to a real address (or set certManager.issuers.letsencrypt.enabled=false to skip Let's Encrypt issuers)." }}
+{{- end }}
+{{- $solver := .Values.certManager.issuers.letsencrypt.solver | default "http01" }}
+{{- if not (or (eq $solver "http01") (eq $solver "dns01-route53")) }}
+{{- fail (printf "certManager.issuers.letsencrypt.solver must be one of: http01, dns01-route53. Got: %q. Tracked at deploy#362." $solver) }}
+{{- end }}
+{{- if eq $solver "dns01-route53" }}
+{{- if not .Values.certManager.issuers.letsencrypt.dns01Route53.region }}
+{{- fail "certManager.issuers.letsencrypt.solver=dns01-route53 requires certManager.issuers.letsencrypt.dns01Route53.region — set it to the AWS region of the public Route53 zone (e.g. us-east-1)." }}
+{{- end }}
+{{- end }}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cert-manager-issuer
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: {{ .Values.certManager.issuers.letsencrypt.email | quote }}
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      {{- include "gibson.certManager.letsencryptSolvers" . | nindent 6 }}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cert-manager-issuer
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: {{ .Values.certManager.issuers.letsencrypt.email | quote }}
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      {{- include "gibson.certManager.letsencryptSolvers" . | nindent 6 }}
+{{- end }}
+
+{{- if .Values.certManager.issuers.selfsigned.enabled }}
+---
+# Bootstrap self-signed Issuer — used to mint a root CA cert below.
+# This is NOT the issuer the Envoy edge cert uses; the edge cert uses
+# selfsigned-ca (the CA-backed signer further down).
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-bootstrap
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cert-manager-issuer
+spec:
+  selfSigned: {}
+---
+# Root CA cert. Signed by selfsigned-bootstrap; lives in the Secret
+# `gibson-selfsigned-ca` for selfsigned-ca to use as its signing material.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gibson-selfsigned-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cert-manager-issuer
+spec:
+  isCA: true
+  commonName: "Gibson Self-Signed Root CA"
+  secretName: gibson-selfsigned-ca
+  duration: 87600h   # 10 years
+  renewBefore: 8760h # 1 year
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+# CA-backed Issuer that signs end-entity certs (e.g., the Envoy edge cert,
+# the daemon callback/metrics certs, the ext-authz grpc/health certs) with
+# the gibson-selfsigned-ca root above. Namespaced Issuer (not ClusterIssuer)
+# because the CA Secret lives in this release's namespace; cert-manager's
+# --cluster-resource-namespace defaults to the controller's namespace, so
+# a ClusterIssuer would not see the Secret. component-certificates.yaml
+# selects "Issuer" kind for the selfsigned path accordingly.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned-ca
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cert-manager-issuer
+spec:
+  ca:
+    secretName: gibson-selfsigned-ca
+{{- end }}

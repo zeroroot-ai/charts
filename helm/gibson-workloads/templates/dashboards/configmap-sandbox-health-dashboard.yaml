@@ -1,0 +1,47 @@
+{{- /*
+Grafana dashboard ConfigMap for the Setec sandbox.
+
+Spec setec-sandbox-prod-default Task 53 / R10.1.
+
+The dashboard JSON lives at `dashboards/sandbox-health.json` at the chart
+root and is loaded via `.Files.Get` so it can be edited with a JSON-aware
+editor (linting, schema validation) without embedding the payload inline
+in YAML.
+
+The `grafana_dashboard: "1"` label is Grafana's sidecar-discovery
+convention (kiwigrid/k8s-sidecar, used by kube-prometheus-stack and the
+Grafana Helm chart). The `k8s-sidecar-target-directory` annotation puts
+the dashboard under /var/lib/grafana/dashboards/gibson alongside the
+existing auth dashboard.
+
+Panels covered (R10.1):
+  - Setec tier indicator (production)
+  - Sandbox health (5m avg of up/degraded/down)
+  - Live microVM count
+  - Detonation rate per tenant (success outcome)
+  - p50/p95/p99 detonation latency (with cold_start label)
+  - Quota-exceeded rate per tenant
+  - Sandbox-unavailable / detonation-error / timeout rate
+  - Sandbox-host CPU + memory utilisation
+
+Render gates:
+  - setec.enabled=true
+  - observability.provider="in-chart"
+*/ -}}
+{{- if and .Values.setec.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gibson.grafana.host" . }}-sandbox-health-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+    grafana_dashboard: "1"
+  annotations:
+    k8s-sidecar-target-directory: "/var/lib/grafana/dashboards/gibson"
+    gibson.zeroroot.ai/spec: setec-sandbox-prod-default
+data:
+  sandbox-health.json: |-
+{{ .Files.Get "dashboards/sandbox-health.json" | indent 4 }}
+{{- end }}

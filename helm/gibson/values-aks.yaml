@@ -1,0 +1,75 @@
+# Substrate overlay: aks. The Azure deltas, layered ON TOP of
+# values-vanilla.yaml.
+#
+#   helm install gibson . -f values-vanilla.yaml -f values-aks.yaml
+#
+# Proof: rendered in CI, not yet installed on a cluster
+#        (exit-test-substrate.yml, deploy#1661, flips this line to the run).
+#
+# the vanilla cluster is the supported self-hosted target and a
+# substrate is one specialisation of it. This file contains ONLY what is true
+# because the cluster is AKS, from the allowlist in CONTEXT.md § Substrate
+# (scripts/check-substrate-overlay-allowlist.py). The Envoy config it renders
+# is byte-identical to every other substrate's
+# (scripts/check-edge-config-identical.sh).
+#
+# Client-IP contract: the Azure Standard Load Balancer preserves the client
+# source address natively, and the Service is externalTrafficPolicy: Local
+# structurally, so kube-proxy does not SNAT it on the node; the cloud provider
+# then probes healthCheckNodePort so only nodes running Envoy receive traffic.
+# Envoy's socket peer is the client. Nothing else to configure.
+#
+# Not in this overlay, on purpose:
+#   - a DNS-01 solver for Azure DNS: the chart has no such solver yet, so the
+#     vanilla self-signed edge issuer stays until an operator supplies one.
+# There is no secret-backend line on any substrate: the platform's own OpenBao
+# is the one External Secrets backend, reached through one ClusterSecretStore
+#. Its seal is the static seal from the bringup keyring.
+#
+# The DNS-01 gap is an honest gap, not an omission: closing it means a chart
+# feature, not an overlay line.
+#
+# Client IDs are GENERICIZED PLACEHOLDERS for OSS publication. Supply real
+# ones per install.
+
+gibson-workloads:
+  envoy:
+    service:
+      # Read by cloud-provider-azure. On a non-AKS cluster this is an inert
+      # string, which is why it is not in the vanilla base.
+      annotations:
+        # Internet-facing Standard LB (the AKS default). Stated so the intent
+        # survives a future default change on the provider side.
+        service.beta.kubernetes.io/azure-load-balancer-internal: "false"
+
+  # Premium SSD managed disk rather than the cluster default.
+  openbao:
+    persistence:
+      storageClass: managed-csi-premium
+  redis:
+    master:
+      persistence:
+        storageClass: managed-csi-premium
+  gibson:
+    persistence:
+      storageClassName: managed-csi-premium
+    # Microsoft Entra Workload ID. Each user-assigned managed identity is
+    # provisioned out of band; the annotation binds the Kubernetes
+    # ServiceAccount to it.
+    serviceAccount:
+      annotations:
+        azure.workload.identity/client-id: "00000000-0000-0000-0000-000000000001"
+  dashboard:
+    serviceAccount:
+      annotations:
+        azure.workload.identity/client-id: "00000000-0000-0000-0000-000000000002"
+  extAuthz:
+    serviceAccount:
+      annotations:
+        azure.workload.identity/client-id: "00000000-0000-0000-0000-000000000003"
+
+gibson-operators:
+  tenantOperator:
+    serviceAccount:
+      annotations:
+        azure.workload.identity/client-id: "00000000-0000-0000-0000-000000000004"

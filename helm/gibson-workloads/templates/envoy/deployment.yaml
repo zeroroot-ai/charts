@@ -1,0 +1,384 @@
+{{/*
+Envoy Deployment — SaaS-edge gateway.
+
+Spec: zitadel-envoy-gateway-migration, task 10.
+
+Mounts:
+  - /etc/envoy/                 → ConfigMap gibson-envoy (envoy.yaml + Lua).
+  - /etc/envoy/tls/             → TLS Secret (self-signed wildcard for now;
+                                  cert-manager Certificate target later).
+  - /run/spire/sockets/         → SPIRE Workload API hostPath socket (matches
+                                  the daemon/tenant-operator pattern in this
+                                  chart). Optional; SDS for SPIFFE mTLS will be
+                                  wired in a follow-up. SPIRE may not be
+                                  present in every cluster — mount remains
+                                  optional and the SPIRE filter chain is a
+                                  no-op when the socket is absent.
+
+Filter chain summary (api.<domain> only): TLS → optional SPIFFE/mTLS →
+JWT (Zitadel + capability-grant) → Lua API-key → ExtAuthz (FGA) → router.
+The app.<domain> chain terminates TLS only and proxies (the auth.<domain>
+chain was retired in the single-host consolidation).
+
+Edge TLS material (Secret `gibson-envoy-tls`) is produced exclusively by a
+cert-manager Certificate (templates/cert-manager/certificate.yaml). The
+chart no longer mints cert material — see zeroroot-ai/deploy#123 for the
+unification rationale. envoy.tls.selfSigned=true is a render-time error.
+
+Envoy is required infrastructure (deploy#200); this Deployment renders
+unconditionally — there is no `envoy.enabled` opt-out.
+*/}}
+{{- include "gibson.validateEnvoyTlsNotSelfSigned" . }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gibson-envoy
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: envoy
+spec:
+  replicas: {{ .Values.envoy.replicas }}
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: envoy
+  template:
+    metadata:
+      labels:
+        {{- include "gibson.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: envoy
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/envoy/configmap.yaml") . | sha256sum }}
+        # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
+        # parent deploy#123 — envoy-cert-unify slice D).
+        #
+        # 1. `gibson-envoy-tls` — Envoy reads the edge cert at process start
+        #    (no SDS for the edge listener); when cert-manager renews the leaf
+        #    and rewrites the Secret, Reloader restarts this Deployment so the
+        #    pods serve the new cert.
+        # 2. `gibson-dashboard-oidc` — the dashboard OAuth client_id is
+        #    substituted into envoy.yaml at pod startup (see initContainer
+        #    `render-envoy-config` below) and accepted by the
+        #    `zitadel_dashboard` jwt_authn provider as a JWT `aud` value.
+        #    Zitadel mints a new client_id on every reset, platform-operator
+        #    rewrites this Secret, Reloader rolls Envoy so the new client_id
+        #    is read by the next pod. Without this annotation, the old
+        #    client_id stays in the live envoy.yaml and every dashboard JWT
+        #    fails with `Audiences in Jwt are not allowed`.
+        secret.reloader.stakater.com/reload: "{{ .Values.envoy.tls.secretName | default "gibson-envoy-tls" }},gibson-dashboard-oidc,gibson-native-login-oidc"
+    spec:
+      {{- include "gibson.imagePullSecrets" . | nindent 6 }}
+      {{- /* Dedicated ServiceAccount (envoy/serviceaccount.yaml). This is a
+             workload-attestation attribute, not an API credential: the
+             `gibson-platform-envoy` ClusterSPIFFEID carries a literal
+             `k8s:sa:gibson-envoy` workload selector that the SPIRE agent
+             re-derives from kubelet at attestation time, and the platform
+             identity ValidatingAdmissionPolicy keys on this SA name. Before
+             this line Envoy ran as the namespace `default` SA. Changing or
+             removing it silently widens who can be issued the Envoy SVID —
+             tests/clusterspiffeid-selectors.bats fails the render if this
+             name and the CSID selector ever drift apart. */}}
+      serviceAccountName: {{ include "gibson.envoyServiceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- /* Spec 2 R18: priorityClassName + Spec 3 §3 R8 spread. */}}
+      {{- $pcn := include "gibson.priorityClassName" (dict "component" "envoy") }}
+      {{- if $pcn }}
+      priorityClassName: {{ $pcn }}
+      {{- end }}
+      {{- include "gibson.spread" (dict "ctx" . "component" "envoy") | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # render-envoy-config
+        # ------------------
+        # Substitutes the literal placeholder `${DASHBOARD_CLIENT_ID}` in the
+        # mounted bootstrap template with the LIVE OAuth client_id from
+        # Secret `gibson-dashboard-oidc` (key `client_id`, written by
+        # platform-operator on every Zitadel reset / OIDC re-mint).
+        #
+        # The chart no longer hardcodes the client_id in env overlays
+        # (values-kind.yaml, values-aws-prod.yaml etc.) because Zitadel
+        # mints a fresh numeric id on every reset, and the chart-time
+        # value drifts STALE — Envoy's jwt_authn rejects every dashboard
+        # JWT with `Audiences in Jwt are not allowed`. Argo's repo-server
+        # cannot `lookup` cluster Secrets at chart-render time
+        # (zeroroot-ai/deploy#130), so resolution moved to pod startup.
+        #
+        # The render uses `sed` (no template engine, no envsubst dependency)
+        # against an alpine/k8s base — same image the chart already uses
+        # for kubectl-bearing probes (values.yaml kubectlImage). The
+        # rendered file is written to a shared emptyDir at /etc/envoy/
+        # which the main envoy container reads with `-c
+        # /etc/envoy/envoy.yaml`. The original ConfigMap remains mounted
+        # read-only at /etc/envoy-template/ for transparency / debug.
+        #
+        # Failure modes (all fail loud so the pod CrashLoops, surfacing
+        # the problem instead of producing a half-broken Envoy):
+        #   - Secret missing / not yet projected → cat fails → exit 1
+        #   - client_id key absent or empty       → fail loud, exit 2
+        #   - sed substitution leaves a literal placeholder still present
+        #     → fail loud, exit 3
+        # copy-coraza-wasm (/ deploy#1658)
+        # ---------------------------------------
+        # The Edge WAF module. The mirrored coraza-proxy-wasm image carries
+        # the compiled Coraza + Core Rule Set at /plugin.wasm; copy it into an
+        # emptyDir the envoy container loads as a local file. No network at
+        # pod start, so air-gapped installs work, and the CRS version is the
+        # image tag. Fails loud on a missing or empty module.
+        - name: copy-coraza-wasm
+          image: "{{ .Values.envoy.waf.image.repository }}:{{ .Values.envoy.waf.image.tag }}"
+          imagePullPolicy: {{ .Values.envoy.waf.image.pullPolicy | default "IfNotPresent" }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              [ -s /plugin.wasm ] || { echo "FATAL: /plugin.wasm missing or empty in the coraza-proxy-wasm image" >&2; exit 2; }
+              cp /plugin.wasm /wasm/coraza.wasm
+              echo "[copy-coraza-wasm] $(wc -c < /wasm/coraza.wasm) bytes"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 101
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: wasm
+              mountPath: /wasm
+        - name: render-envoy-config
+          image: "{{ .Values.envoy.initImage.repository | default "ghcr.io/zeroroot-ai/mirror/alpine-k8s" }}:{{ .Values.envoy.initImage.tag | default "1.31.0" }}"
+          imagePullPolicy: {{ .Values.envoy.initImage.pullPolicy | default "IfNotPresent" }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              CLIENT_ID=$(cat /etc/dashboard-oidc/client_id)
+              if [ -z "$CLIENT_ID" ]; then
+                echo "FATAL: gibson-dashboard-oidc Secret has empty client_id key" >&2
+                echo "platform-operator must populate it before Envoy can start." >&2
+                exit 2
+              fi
+              # gibson#693 — the native-login (gibson login / device-grant) OAuth
+              # client_id. CLI user tokens carry this audience; jwt_authn must
+              # accept it so they flow through ext_authz like dashboard tokens.
+              # OPTIONAL (unlike the dashboard client_id which gates sign-in):
+              # the gibson-native-login-oidc Secret is provisioned asynchronously
+              # by the gibson-native-login OIDCClient CR. Envoy MUST start without
+              # it — substitute a non-matching sentinel so the audience entry is
+              # valid-but-inert until the Secret lands (Reloader then rolls Envoy).
+              # A hard exit here previously risked taking the edge down on a
+              # not-yet-provisioned CLI-login secret.
+              NATIVE_LOGIN_CLIENT_ID=$(cat /etc/native-login-oidc/client_id 2>/dev/null || true)
+              if [ -z "$NATIVE_LOGIN_CLIENT_ID" ]; then
+                echo "render-envoy-config: gibson-native-login-oidc not yet provisioned; CLI login disabled until it lands" >&2
+                NATIVE_LOGIN_CLIENT_ID="native-login-unconfigured"
+              fi
+              echo "render-envoy-config: substituting DASHBOARD_CLIENT_ID=$CLIENT_ID NATIVE_LOGIN_CLIENT_ID=$NATIVE_LOGIN_CLIENT_ID"
+              # Use a non-/ delimiter so numeric client_ids never collide
+              # with regex metacharacters (they're all digits today, but
+              # this hedges against future opaque ids).
+              sed -e "s|\${DASHBOARD_CLIENT_ID}|$CLIENT_ID|g" \
+                  -e "s|\${NATIVE_LOGIN_CLIENT_ID}|$NATIVE_LOGIN_CLIENT_ID|g" \
+                /etc/envoy-template/envoy.yaml > /etc/envoy/envoy.yaml
+              if grep -F '${DASHBOARD_CLIENT_ID}' /etc/envoy/envoy.yaml >/dev/null; then
+                echo "FATAL: placeholder \${DASHBOARD_CLIENT_ID} still present after sed" >&2
+                exit 3
+              fi
+              if grep -F '${NATIVE_LOGIN_CLIENT_ID}' /etc/envoy/envoy.yaml >/dev/null; then
+                echo "FATAL: placeholder \${NATIVE_LOGIN_CLIENT_ID} still present after sed" >&2
+                exit 3
+              fi
+              echo "render-envoy-config: ok"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 101
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config-template
+              mountPath: /etc/envoy-template
+              readOnly: true
+            - name: config-rendered
+              mountPath: /etc/envoy
+            - name: dashboard-oidc
+              mountPath: /etc/dashboard-oidc
+              readOnly: true
+            - name: native-login-oidc
+              mountPath: /etc/native-login-oidc
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      containers:
+        - name: envoy
+          image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.envoy.image.repository "tag" .Values.envoy.image.tag "appVersion" .Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ .Values.envoy.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - "-c"
+            - "/etc/envoy/envoy.yaml"
+            - "--service-cluster"
+            - "gibson-envoy"
+            - "--service-node"
+            - "gibson-envoy"
+            - "--log-level"
+            - "{{ .Values.envoy.logLevel | default "info" }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 101
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_BIND_SERVICE"]
+          ports:
+            - name: https
+              containerPort: 10000
+              protocol: TCP
+            - name: admin
+              containerPort: 9901
+              protocol: TCP
+          volumeMounts:
+            # The main envoy container reads its bootstrap from the
+            # post-init emptyDir, NOT directly from the ConfigMap. The
+            # `render-envoy-config` initContainer writes
+            # /etc/envoy/envoy.yaml here after substituting the live
+            # dashboard client_id from the gibson-dashboard-oidc Secret.
+            # `readOnly: false` is intentional: the kubelet bind-mounts
+            # the TLS Secret onto `/etc/envoy/tls` below, which requires
+            # the parent directory to be writable enough to mkdir the
+            # sub-mount. The rendered envoy.yaml itself is treated as
+            # read-only by the envoy process (no writes happen inside
+            # the container — readOnlyRootFilesystem stays true).
+            - name: config-rendered
+              mountPath: /etc/envoy
+            - name: tls
+              mountPath: /etc/envoy/tls
+              readOnly: true
+            {{- if .Values.envoy.spiffe.enabled }}
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+            - name: wasm
+              mountPath: /etc/envoy/wasm
+              readOnly: true
+          # Envoy /ready returns 200 only when all listeners + clusters are
+          # warm. With async_fetch.fast_listener: true the listener IS up
+          # quickly, but JWKS upstreams (Zitadel + ext_authz JWKS) may take
+          # tens of seconds on a fresh deploy. Generous startupProbe gives
+          # Envoy room to recover before liveness can kill it.
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: admin
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 60   # 5min total grace for cold-start
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: admin
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: admin
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.envoy.resources | nindent 12 }}
+      volumes:
+        # Read-only bootstrap TEMPLATE from the ConfigMap. The literal
+        # placeholder `${DASHBOARD_CLIENT_ID}` in this file is replaced by
+        # the `render-envoy-config` initContainer at pod startup.
+        - name: config-template
+          configMap:
+            name: gibson-envoy
+        # Rendered config the main envoy container actually reads. Written
+        # to by the initContainer; treated read-only by the envoy process.
+        - name: config-rendered
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        # Live OAuth client_id of the gibson-dashboard OIDC app. Owned
+        # by platform-operator; rewritten on every Zitadel reset.
+        # Stakater Reloader (annotation on this Deployment) rolls the
+        # pod when this Secret changes.
+        - name: dashboard-oidc
+          secret:
+            secretName: gibson-dashboard-oidc
+            defaultMode: 0400
+            items:
+              - key: client_id
+                path: client_id
+        # gibson#693 — native-login (gibson login) client_id, minted by the
+        # gibson-native-login OIDCClient CR. Substituted into the jwt_authn
+        # audience list so CLI user tokens are accepted + flow through ext_authz.
+        - name: native-login-oidc
+          secret:
+            secretName: gibson-native-login-oidc
+            defaultMode: 0400
+            # optional: the gibson-native-login OIDCClient provisions this
+            # asynchronously; Envoy must start without it (the initContainer
+            # substitutes a non-matching sentinel). Required-mount previously
+            # risked CreateContainerConfigError on the edge.
+            optional: true
+            items:
+              - key: client_id
+                path: client_id
+        - name: tls
+          secret:
+            secretName: {{ .Values.envoy.tls.secretName | default "gibson-envoy-tls" }}
+            defaultMode: 0400
+        {{- if .Values.envoy.spiffe.enabled }}
+        # SPIRE Workload API socket — exposed by the spire-agent DaemonSet
+        # via the csi.spiffe.io CSI driver. The hostPath /run/spire/sockets
+        # we previously declared doesn't exist on the host: the SPIRE chart
+        # puts its socket at /run/spire/agent-sockets/ and only the CSI
+        # driver exposes it to pods. See spec kind-dashboard-bringup-e2e (D2).
+        - name: spire-agent-socket
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
+        # The Edge WAF module, filled by copy-coraza-wasm. ~18MiB.
+        - name: wasm
+          emptyDir:
+            sizeLimit: 64Mi
+{{/*
+  ClusterSPIFFEID for the Envoy gateway pod (spiffe://<td>/platform/envoy)
+  is rendered centrally in templates/spire-server/clusterspiffeids.yaml
+  (Phase H/8.1). Envoy still uses SDS over the agent socket to fetch its
+  own SVID + trust bundle and validates the daemon's SPIFFE server cert on
+  the upstream gRPC cluster — that wiring is unchanged; only the
+  registration-entry source moved out of this file.
+*/}}

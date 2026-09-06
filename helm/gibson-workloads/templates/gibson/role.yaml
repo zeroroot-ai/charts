@@ -1,0 +1,39 @@
+{{- /*
+  gibson daemon is structural infrastructure (one-code-path /
+  deploy#188). The previous outer `.Values.gibson.enabled` gate has
+  been deleted; the inner `serviceAccount.create` sub-feature flag
+  is preserved (legitimate sub-feature toggle).
+*/}}
+{{- if .Values.gibson.serviceAccount.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "gibson.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+rules:
+  # secrets get/list/watch — used by daemon Pod init containers
+  # (wait-for-idp-admin-secret, wait-for-llm-secret) to poll for
+  # ESO-materialised Secrets before the daemon container starts.
+  # NOT used by daemon Go code — forbids daemon-side K8s API.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  # pods get/list/watch — used by the wait-for-prerequisites init
+  # container to poll for tenant-operator Pod Ready before the daemon
+  # container starts.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # RBAC narrowing (post-rip):
+  # - configmaps DROPPED — gibson-reserved-names + gibson-fga-config
+  #   are now projected as file mounts / env vars (gibson#221, #222).
+  # - services / endpoints DROPPED — daemon never used K8s service
+  #   discovery API; verified no remaining caller post-rip.
+  # - networkpolicies (templates/gibson/rbac.yaml, deleted in this PR)
+  #   DROPPED — the startup network_policy_check was deleted by S7.
+  # - gibson.zeroroot.ai/tenants (templates/gibson/rbac.yaml, deleted
+  #   in this PR) DROPPED — startup_migration_check + recover_missions
+  #   both deleted; daemon no longer enumerates tenants.
+{{- end }}

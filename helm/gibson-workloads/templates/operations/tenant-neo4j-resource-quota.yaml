@@ -1,0 +1,86 @@
+{{/*
+ResourceQuota that caps total memory across all per-tenant Neo4j pods.
+
+Spec: per-tenant-data-plane-completion Task 33 / Req 10.4.
+
+Why: a runaway tenant-operator (or a chart misconfig that schedules dozens
+of large-tier StatefulSets) can OOM the kind node and take down the whole
+dev cluster. This quota is the safety net.
+
+Scope: kind only. Production overlays leave .Values.tenantNeo4j.kindResourceCap
+unset, which short-circuits this template (no rendering). Production
+multi-node clusters use cluster-wide LimitRange and Karpenter / cluster
+autoscaler signals instead — a single namespace ResourceQuota is the wrong
+shape for a multi-AZ prod EKS.
+
+The scopeSelector restricts the quota to objects labeled
+`app.kubernetes.io/component=tenant-neo4j` so non-tenant pods (daemon,
+dashboard, etc.) are NOT counted against the cap.
+
+NOTE: Kubernetes ResourceQuota's scopeSelector only supports the built-in
+"PriorityClass" / "BestEffort" / "Terminating" / "NotTerminating" /
+"NotBestEffort" / "CrossNamespacePodAffinity" operators on the upstream
+"object" axis. To filter by an arbitrary pod label we use a per-namespace
+ResourceQuota in combination with a separate LimitRange that caps any
+single tenant pod's memory limit (already enforced by the chart's
+tenantNeo4j.tiers.* values).
+
+For label-scoped quotas at namespace granularity, the ResourceQuota's
+hard.{count,pods,memory} fields apply to ALL pods in the namespace. Since
+tenant pods land in per-tenant namespaces under the operator-provisioning
+path, we instead emit ONE ResourceQuota per tenant namespace at runtime
+(operator concern, not chart concern), AND a single CHART-level quota in
+the gibson namespace as a belt-and-suspenders cap on the
+operator-provisioned StatefulSets that share the gibson namespace in
+single-namespace dev mode.
+*/}}
+---
+# Cluster-scoped PriorityClass referenced by:
+#   (a) every per-tenant Neo4j StatefulSet pod (set by the operator's
+#       Go-built StatefulSets today; moves into the tenant-neo4j-template
+#       ConfigMap once Task 22 renders it — deploy#1437), and
+#   (b) the ResourceQuota's scopeSelector below (kind only).
+# Rendered unconditionally so the PriorityClass exists in every overlay,
+# even when the kind quota is not active.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: tenant-neo4j
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tenant-neo4j
+# value: 100 — well below cluster-critical (1B), above the default 0.
+# tenant Neo4j evicts before system-critical pods on node pressure but
+# preempts unprivileged workloads in the same namespace.
+value: 100
+globalDefault: false
+description: >
+  Per-tenant Neo4j StatefulSet pods. Used by gibson-tenant-neo4j-cap
+  ResourceQuota to scope the kind memory cap (Task 33 / Req 10.4).
+{{- if .Values.tenantNeo4j.kindResourceCap }}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: gibson-tenant-neo4j-cap
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tenant-neo4j-quota
+  annotations:
+    gibson.zeroroot.ai/spec: "per-tenant-data-plane-completion"
+    gibson.zeroroot.ai/req: "10.4"
+spec:
+  hard:
+    # Total memory cap across all pods bound to the tenant-neo4j
+    # PriorityClass in this namespace. Default 8Gi for kind ~= 4 small-tier
+    # tenants at 2Gi each; the 5th onboard pends with a clear
+    # quota-exceeded event on the StatefulSet.
+    limits.memory: {{ .Values.tenantNeo4j.kindResourceCap | quote }}
+  scopeSelector:
+    matchExpressions:
+      - operator: In
+        scopeName: PriorityClass
+        values:
+          - tenant-neo4j
+{{- end }}

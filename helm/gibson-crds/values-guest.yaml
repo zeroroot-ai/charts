@@ -1,0 +1,12 @@
+# Guest profile for gibson-crds: a cluster that already owns cert-manager,
+# External Secrets, CloudNativePG and Prometheus Operator keeps its own CRDs.
+#
+#   helm install gibson-crds helm/gibson-crds -f helm/gibson-crds/values-guest.yaml
+#
+# SPIRE is deliberately NOT a seam. The platform's identity plane is SPIRE and
+# the chart ships the server, so it owns those CRDs on every cluster.
+gibson-operator-crds:
+  enabled: false
+
+prometheus-operator-crds:
+  enabled: false

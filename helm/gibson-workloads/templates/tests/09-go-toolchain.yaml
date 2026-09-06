@@ -1,0 +1,100 @@
+{{/*
+helm-test pod: go-toolchain-assertion
+
+Restores the security-hardening Requirement 5 control that deploy#1157 found
+had gone silently absent — the values comment documented a
+`templates/tests/test-go-version.yaml` that no longer existed, so nothing
+enforced the toolchain pin.
+
+What it asserts: the DEPLOYED daemon image (the exact repo@digest the daemon
+StatefulSet runs — `gibson.image` with .Values.gibson.image.*) was compiled
+with the Go toolchain pinned in `.Values.gibson.expectedGoToolchain`.
+
+How: this pod runs the daemon image itself and execs `gibson --version`.
+pkg/version.String() emits `Gibson <v> (commit: …, built: …, go: goX.Y.Z)`
+where the `go:` token is `runtime.Version()` — the toolchain the binary was
+built with. The `--version` flag is parsed and printed before any config is
+loaded (pkg/gibsond), so this needs no cluster wiring, secrets, or network.
+
+Why it can't be a render-time bats check: the pin lives in this chart and the
+toolchain lives in github.com/zeroroot-ai/gibson's go.mod — two repos. This
+pod is the tripwire that fires when a daemon image is rolled onto a newer
+toolchain without bumping the pin in lock-step (or vice-versa). It runs on
+`helm test`, not at PR time.
+
+Skipped entirely when .Values.gibson.expectedGoToolchain is "" (ad-hoc dev
+images) — the whole manifest is guarded by the `if` below so nothing renders.
+
+Provenance: deploy#1157 (security-hardening Requirement 5, revived).
+*/}}
+{{- if .Values.gibson.expectedGoToolchain }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "gibson.fullname" . }}-test-go-toolchain"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson-workloads.tests.labels" . | nindent 4 }}
+    app.kubernetes.io/component: helm-test
+  annotations:
+    {{- include "gibson-workloads.tests.annotations" . | nindent 4 }}
+spec:
+  restartPolicy: Never
+  containers:
+    - name: assert-toolchain
+      # The daemon image itself — same repo@digest the StatefulSet runs — so
+      # `gibson --version` reports the toolchain the DEPLOYED binary was built
+      # with, not some proxy. The runtime image is alpine-based (has /bin/sh).
+      image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.gibson.image.repository "tag" .Values.gibson.image.tag "digest" .Values.gibson.image.digest "appVersion" .Chart.AppVersion) | quote }}
+      imagePullPolicy: {{ .Values.gibson.image.pullPolicy }}
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          ERR='{{ include "gibson-workloads.tests.errorPrefix" . }}'
+          WANT='{{ .Values.gibson.expectedGoToolchain }}'
+
+          OUT="$(/usr/local/bin/gibson --version 2>&1)"
+          echo "[go-toolchain] gibson --version -> $OUT"
+
+          # Extract the `go: goX.Y.Z` token emitted by pkg/version.String().
+          GOT="$(printf '%s\n' "$OUT" | sed -n 's/.*go: \(go[0-9][0-9.]*\).*/\1/p')"
+          if [ -z "$GOT" ]; then
+            echo "$ERR could not parse a 'go:' toolchain token from gibson --version output above"
+            exit 1
+          fi
+
+          if [ "$GOT" != "$WANT" ]; then
+            echo "$ERR deployed daemon Go toolchain $GOT != pinned gibson.expectedGoToolchain $WANT"
+            echo "$ERR bump gibson.expectedGoToolchain in lock-step with zeroroot-ai/gibson go.mod (or roll the daemon image)"
+            exit 1
+          fi
+
+          echo "[go-toolchain] OK: daemon built with $GOT (matches the pin)"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          cpu: 100m
+          memory: 64Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 65532
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

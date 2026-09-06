@@ -1,0 +1,205 @@
+{{- /*
+Stakater Reloader — watches Secrets and ConfigMaps in the gibson namespace
+and triggers rolling restarts of Deployments / StatefulSets / DaemonSets
+that carry the `secret.reloader.stakater.com/reload` annotation.
+
+Required by design deploy (PRD deploy#255) / slice S7 (deploy#263):
+the chart's daemon StatefulSet, dashboard Deployment, and redis-stack
+StatefulSet all carry the explicit-annotation form of Reloader's contract.
+Without the controller running, the annotations are no-ops and Secret
+rotations require manual `kubectl rollout restart`.
+
+This template inlines the Reloader manifests rather than pulling the
+upstream Helm chart as a dependency so the gibson-operators chart stays
+self-contained — same shape as cert-manager / SPIRE / OpenFGA, which the
+chart also assumes are present in the cluster but doesn't bundle.
+
+Scope: --namespace=gibson watch-only. The controller's RBAC is scoped to
+the workload namespace; no cross-namespace authority.
+
+References:
+  - https://github.com/stakater/Reloader
+  - PRD deploy#255 slice S7 (annotations) and deploy#278 (this install)
+*/ -}}
+{{- $ns := .Values.tenantOperator.namespace | default "gibson" -}}
+{{- $image := .Values.reloader.image | default (dict) -}}
+{{- $repo := $image.repository | default "ghcr.io/stakater/reloader" -}}
+{{- $tag := $image.tag | default "v1.4.6" -}}
+{{- $pullPolicy := $image.pullPolicy | default "IfNotPresent" -}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: reloader
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: reloader
+    app.kubernetes.io/component: reloader
+---
+# Reloader v1.4.6 issues a cluster-scoped LIST on its Secret and ConfigMap
+# informers at startup — the client-go reflector does not accept a namespace
+# filter at the informer level. A namespace-scoped Role is therefore
+# insufficient; the informer fails with "cannot list resource at cluster scope"
+# and Reloader never watches anything (deploy#555).
+#
+# Fix: ClusterRole + ClusterRoleBinding for read-only discovery of secrets and
+# configmaps across the cluster. Workload patch rights stay namespace-scoped
+# (Role + RoleBinding below) — Reloader only ever restarts workloads in $ns.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: reloader
+  labels:
+    app.kubernetes.io/name: reloader
+    app.kubernetes.io/component: reloader
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps"]
+    verbs: ["list", "get", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: reloader
+  labels:
+    app.kubernetes.io/name: reloader
+    app.kubernetes.io/component: reloader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: reloader
+subjects:
+  - kind: ServiceAccount
+    name: reloader
+    namespace: {{ $ns }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: reloader
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: reloader
+    app.kubernetes.io/component: reloader
+rules:
+  # update+patch on a workload's pod template is a platform-identity grant,
+  # not a restart button: Kubernetes has no `serviceaccounts/use` verb, so
+  # whoever can rewrite `.spec.template` can set `serviceAccountName` to any
+  # SA in this namespace and take that workload's SVID (deploy#1210). RBAC
+  # cannot restrict a patch to one field path, so the narrowing available
+  # here is the resource list, and it is kept to what the chart actually
+  # annotates.
+  #
+  # `daemonsets` is NOT in that list. No DaemonSet in any of the three
+  # charts carries a `*.reloader.stakater.com/reload` annotation — the
+  # annotated set is the envoy / ext-authz / dashboard / tenant-operator
+  # Deployments and the daemon / redis-stack StatefulSets. Re-add it only
+  # together with the DaemonSet that needs it.
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["list", "get", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["list", "get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: reloader
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: reloader
+    app.kubernetes.io/component: reloader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: reloader
+subjects:
+  - kind: ServiceAccount
+    name: reloader
+    namespace: {{ $ns }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reloader
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: reloader
+    app.kubernetes.io/component: reloader
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: reloader
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: reloader
+        app.kubernetes.io/component: reloader
+    spec:
+      serviceAccountName: reloader
+      {{- include "gibson.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reloader
+          image: "{{ $repo }}:{{ $tag }}"
+          imagePullPolicy: {{ $pullPolicy }}
+          args:
+            # Reloader's actual namespace-scope flag is `--namespace-selector`
+            # (key:value label selector), not `--namespaces`. v1.4.6 rejects
+            # `--namespaces=foo` with a parse error → prints --help → exits 0
+            # → Deployment CrashLoopBackOff. Same failure mode that prompted
+            # the prior `--namespaces-to-ignore=` ripout (deploy#339 / #346).
+            #
+            # Namespace scope is already enforced via Reloader's Role +
+            # RoleBinding above (namespace-scoped RBAC, not cluster-scoped),
+            # so the controller can only watch + patch workloads in $ns
+            # regardless of args. The CLI flag would be belt-and-suspenders;
+            # the RBAC alone is sufficient.
+            #
+            # Roll strategy: annotations only (explicit opt-in). Workloads
+            # opt in via `secret.reloader.stakater.com/reload: "<csv>"`.
+            - "--reload-strategy=annotations"
+            # Log JSON for parity with the rest of the platform's
+            # observability surface.
+            - "--log-format=json"
+          ports:
+            - name: http
+              containerPort: 9090
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

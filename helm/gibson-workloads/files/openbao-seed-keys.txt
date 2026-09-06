@@ -1,0 +1,55 @@
+# The OpenBao seed contract (deploy#1732). ONE definition.
+#
+# The openbao-auto-init sidecar reads this table and makes sure every key
+# exists in the kv v2 mount `secret` at `secret/data/<key>` with every
+# property listed. helm/gibson-workloads/tests/lib/check_seed_coverage.py
+# reads the same table and fails the build when a profile renders an
+# ExternalSecret that reads a key or a property this table does not seed.
+#
+# Format: one key per line, `<key> <property>:<kind>[:<arg>] ...`.
+# Comment lines start with `#`.
+#
+# Kinds, and what the sidecar does when the property is ABSENT:
+#   rand           32 random bytes, URL-safe base64, no padding (43 chars)
+#   randb64        32 random bytes, standard base64 (44 chars)
+#   rand8          8 random bytes, URL-safe base64, no padding (11 chars)
+#   ecpem:<name>   the private key of transit key <name> (ecdsa-p256), PEM
+#   rsapem:<name>  the private key of transit key <name> (rsa-2048), PEM
+#   rsapub:<name>  the public key of transit key <name> (rsa-2048), PEM
+#   literal:<v>    the literal value <v>
+#   empty          the empty string. The operator fills it in later with
+#                  scripts/vanilla-set-secret.sh
+#   input:<file>   the bringup keyring input mounted at /etc/openbao/inputs/<file>
+#   inputjson:<f>  the property of the same name in the JSON object mounted at
+#                  /etc/openbao/inputs/<f>
+#   svctoken       the platform service token the sidecar minted
+#
+# A property that is PRESENT is never overwritten, with two exceptions:
+# `input` and `inputjson` follow the keyring (a non-empty keyring value that
+# differs from the stored one is written), and `svctoken` follows the token
+# in the gibson-platform-operator-vault Secret. Everything else is generated
+# once and kept, so an upgrade never rotates a credential under a workload.
+gibson-gibson-platform-postgres-password password:rand
+gibson-dashboard-postgres-password password:rand
+gibson-tenant-admin-postgres-password password:rand
+gibson-zitadel-postgres-password password:rand
+gibson-openfga-postgres-password password:rand
+gibson-spire-postgres-password password:rand
+gibson-neo4j-password password:rand
+gibson-redis-password password:rand
+gibson-impersonation-key value:rand
+gibson-impersonation-key-previous value:rand
+zitadel-masterkey value:rand
+gibson-billing-webhook-secret secret:rand
+grafana-admin-password value:rand
+gibson-dashboard-session-secrets auth_secret:rand server_actions_key:randb64
+gibson-cg-signing-key key:rand kid:rand8
+gibson-extauthz-grant-current pem:ecpem:extauthz-grant-current kid:rand8
+gibson-extauthz-grant-previous pem:ecpem:extauthz-grant-previous kid:rand8
+gibson-zitadel-system-bot-key private_key:rsapem:zitadel-system-bot public_key:rsapub:zitadel-system-bot
+ghcr-pull-secret pat:input:ghcr-pull-token
+gibson-llm-keys anthropic_api_key:inputjson:llm-keys-json google_api_key:inputjson:llm-keys-json openai_api_key:inputjson:llm-keys-json
+gibson-dashboard-auth-hardening captcha_secret_key:empty email_resend_api_key:empty email_smtp_password:empty
+gibson-stripe-credentials publishable_key:literal:pk_test_placeholder secret_key:literal:sk_test_placeholder webhook_secret:literal:whsec_placeholder
+ses-smtp-credentials username:empty password:empty
+gibson-vault-admin-token token:svctoken

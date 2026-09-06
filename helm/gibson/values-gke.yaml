@@ -1,0 +1,76 @@
+# Substrate overlay: gke. The Google Cloud deltas, layered ON TOP
+# of values-vanilla.yaml.
+#
+#   helm install gibson . -f values-vanilla.yaml -f values-gke.yaml
+#
+# Proof: rendered in CI, not yet installed on a cluster
+#        (exit-test-substrate.yml, deploy#1661, flips this line to the run).
+#
+# the vanilla cluster is the supported self-hosted target and a
+# substrate is one specialisation of it. This file contains ONLY what is true
+# because the cluster is GKE, from the allowlist in CONTEXT.md § Substrate
+# (scripts/check-substrate-overlay-allowlist.py). The Envoy config it renders
+# is byte-identical to every other substrate's
+# (scripts/check-edge-config-identical.sh).
+#
+# Client-IP contract: a backend-service-based external passthrough Network
+# Load Balancer preserves the client source address natively, and the Service
+# is externalTrafficPolicy: Local structurally, so kube-proxy does not SNAT it
+# on the node. Envoy's socket peer is the client. Nothing else to configure.
+#
+# Not in this overlay, on purpose:
+#   - a DNS-01 solver for Cloud DNS: the chart has no such solver yet, so the
+#     vanilla self-signed edge issuer stays until an operator supplies one.
+# There is no secret-backend line on any substrate: the platform's own OpenBao
+# is the one External Secrets backend, reached through one ClusterSecretStore
+#. Its seal is the static seal from the bringup keyring.
+#
+# The DNS-01 gap is an honest gap, not an omission: closing it means a chart
+# feature, not an overlay line.
+#
+# Project and service-account names are GENERICIZED PLACEHOLDERS for OSS
+# publication. Supply real ones per install.
+
+gibson-workloads:
+  envoy:
+    service:
+      # Read by the GKE service controller. On a non-GKE cluster this is an
+      # inert string, which is why it is not in the vanilla base.
+      annotations:
+        # Backend-service-based external passthrough NLB (RBS). Preserves the
+        # client IP, supports externalTrafficPolicy: Local with the
+        # healthCheckNodePort probe, and is what Google recommends over the
+        # legacy target-pool LB.
+        cloud.google.com/l4-rbs: "enabled"
+
+  # SSD-backed persistent disk rather than the cluster default.
+  openbao:
+    persistence:
+      storageClass: premium-rwo
+  redis:
+    master:
+      persistence:
+        storageClass: premium-rwo
+  gibson:
+    persistence:
+      storageClassName: premium-rwo
+    # Workload Identity Federation for GKE. Each Google service account is
+    # provisioned out of band; the annotation binds the Kubernetes
+    # ServiceAccount to it.
+    serviceAccount:
+      annotations:
+        iam.gke.io/gcp-service-account: "self-hosted-daemon@example-project.iam.gserviceaccount.com"
+  dashboard:
+    serviceAccount:
+      annotations:
+        iam.gke.io/gcp-service-account: "self-hosted-dashboard@example-project.iam.gserviceaccount.com"
+  extAuthz:
+    serviceAccount:
+      annotations:
+        iam.gke.io/gcp-service-account: "self-hosted-ext-authz@example-project.iam.gserviceaccount.com"
+
+gibson-operators:
+  tenantOperator:
+    serviceAccount:
+      annotations:
+        iam.gke.io/gcp-service-account: "self-hosted-tenant-operator@example-project.iam.gserviceaccount.com"

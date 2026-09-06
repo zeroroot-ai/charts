@@ -1,0 +1,103 @@
+{{- /*
+Cross-namespace ESO RBAC — allows External Secrets Operator to read the
+iam-admin-pat Secret from the zitadel namespace and sync it into the gibson
+namespace.
+
+Architecture:
+  1. ServiceAccount `gibson-zitadel-admin-reader` in the zitadel namespace —
+     the ESO ServiceAccount references this SA via the ClusterSecretStore spec
+     to gain read access in that namespace.
+  2. Role + RoleBinding in the zitadel namespace — grants the SA read access
+     to the iam-admin-pat Secret only.
+  3. ClusterSecretStore `gibson-cross-ns-zitadel` in the gibson namespace —
+     wraps the SA reference so ESO can mint ExternalSecrets that pull from
+     zitadel ns into gibson ns.
+
+Spec: deploy-architecture-refactor Phase 7.3.
+
+ESO + the Zitadel admin PAT are required infrastructure (one-code-path
+epic / deploy#187). The previous `.Values.crossNamespaceESO.enabled`
+toggle was a degradation surface and has been deleted; this RBAC always
+renders.
+*/}}
+---
+# Ensure the zitadel ns exists — this chart drops RBAC into it, but
+# zitadel itself is installed by a sibling Application (cnpg-operator's
+# zitadel sub-app in apps/<env>/zitadel.yaml). In kind dev where that
+# sibling isn't yet present, this template creates the ns so the
+# RBAC has somewhere to land.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.crossNamespaceESO.zitadelNamespace | default "zitadel" }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    "helm.sh/resource-policy": keep
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.crossNamespaceESO.serviceAccountName | default "gibson-zitadel-admin-reader" }}
+  namespace: {{ .Values.crossNamespaceESO.zitadelNamespace | default "zitadel" }}
+  labels:
+    app.kubernetes.io/name: gibson-zitadel-admin-reader
+    app.kubernetes.io/part-of: gibson
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gibson-zitadel-admin-reader
+  namespace: {{ .Values.crossNamespaceESO.zitadelNamespace | default "zitadel" }}
+  labels:
+    app.kubernetes.io/name: gibson-zitadel-admin-reader
+    app.kubernetes.io/part-of: gibson
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - {{ .Values.crossNamespaceESO.patSecretName | default "iam-admin-pat" }}
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gibson-zitadel-admin-reader
+  namespace: {{ .Values.crossNamespaceESO.zitadelNamespace | default "zitadel" }}
+  labels:
+    app.kubernetes.io/name: gibson-zitadel-admin-reader
+    app.kubernetes.io/part-of: gibson
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gibson-zitadel-admin-reader
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.crossNamespaceESO.serviceAccountName | default "gibson-zitadel-admin-reader" }}
+    namespace: {{ .Values.crossNamespaceESO.zitadelNamespace | default "zitadel" }}
+---
+# ESO is required infrastructure (one-code-path #203); the chart-wide
+# on/off conditional that used to wrap this ClusterSecretStore was
+# deleted along with the toggle.
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: gibson-cross-ns-zitadel
+  labels:
+    app.kubernetes.io/name: gibson-cross-ns-zitadel
+    app.kubernetes.io/part-of: gibson
+spec:
+  provider:
+    kubernetes:
+      remoteNamespace: {{ .Values.crossNamespaceESO.zitadelNamespace | default "zitadel" }}
+      server:
+        caProvider:
+          type: ConfigMap
+          name: kube-root-ca.crt
+          key: ca.crt
+          namespace: {{ .Values.crossNamespaceESO.workloadNamespace | default "gibson" }}
+      auth:
+        serviceAccount:
+          name: {{ .Values.crossNamespaceESO.serviceAccountName | default "gibson-zitadel-admin-reader" }}
+          namespace: {{ .Values.crossNamespaceESO.zitadelNamespace | default "zitadel" }}

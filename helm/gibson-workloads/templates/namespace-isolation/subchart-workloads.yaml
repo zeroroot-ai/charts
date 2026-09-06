@@ -1,0 +1,315 @@
+{{/*
+Per-component allow policies for the umbrella's SUBCHART workloads
+(deploy#1365). The openfga, zitadel and neo4j charts are third-party
+dependencies of the umbrella and ship no NetworkPolicies of their own, so
+the namespace default-deny (namespace-isolation/default-deny.yaml) would
+sever them. These policies are first-party wrappers that select the
+subcharts' rendered pod labels.
+
+Ingress lists each component's real in-namespace callers (enumerated from
+the umbrella render — the connection strings and env vars in this chart's
+templates are the source of truth). Egress is deliberately allow-all for
+every covered first-party workload: the default-deny exists to contain
+UNSELECTED pods (the containment ask of deploy#1365), and per-component
+egress tightening is tracked separately (deploy#1462). A missed egress rule is a
+runtime outage that no render catches; a missed ingress caller fails
+loudly at bringup. Enforcement is real as of deploy#1430
+(NETWORK_POLICY_ENFORCING_MODE=standard).
+
+Caller sets are label-based ORs; entries whose pods are absent in a given
+profile are inert.
+*/}}
+{{- $devDisabled := false -}}
+{{- with .Values.dev -}}{{- with .networkPolicy -}}{{- $devDisabled = .disabled -}}{{- end -}}{{- end -}}
+{{- if not $devDisabled -}}
+{{/* ---------------------------------------------------------------------
+     OpenFGA (subchart `openfga`, Deployment + migrate hook Job).
+     :8080 HTTP + :8081 gRPC — the allow/deny decision surface. Callers:
+     ext-authz (every Check), daemon, both operators (FGA aggregate root /
+     tenant provisioning), fga-init (model bootstrap), the
+     active-session-backfill operations Job, the first-admin bootstrap Job. :2112 metrics for scrapers.
+     The migrate Job shares these labels and inherits the egress allowance
+     (it dials Postgres directly).
+--------------------------------------------------------------------- */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-openfga
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openfga-isolation
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: openfga
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: ext-authz
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: daemon
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: tenant-operator
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: platform-operator
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: fga-init
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: active-session-backfill
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: first-admin
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8081
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: prometheus
+        - podSelector:
+            matchLabels:
+              app: grafana-agent
+      ports:
+        - protocol: TCP
+          port: 2112
+  egress:
+    - {}
+---
+{{/* ---------------------------------------------------------------------
+     Zitadel (subchart `zitadel`, Deployment + init/setup/cleanup hook
+     Jobs — all carry app.kubernetes.io/name: zitadel, so the hook Jobs
+     inherit the egress allowance they need to reach Postgres). :8080 is
+     the single HTTP/2 listener (OIDC + gRPC APIs). Callers: Envoy (login
+     + OIDC routes), zitadel-login (Login V2 UI), ext-authz (JWKS),
+     daemon (IdP admin), dashboard (server-action token exchange), both
+     operators (OIDC app provisioning), and the umbrella bringup Jobs
+     signup-bot-pat-minter / zitadel-login-branding.
+--------------------------------------------------------------------- */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-zitadel
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: zitadel-isolation
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: zitadel
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: envoy
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: zitadel-login
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: ext-authz
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: daemon
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: dashboard
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: tenant-operator
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: platform-operator
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: signup-bot-pat-minter
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: zitadel-login-branding
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - {}
+---
+{{/* Zitadel Login V2 UI — reached only through the Envoy edge. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-zitadel-login
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: zitadel-login-isolation
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: zitadel-login
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: envoy
+      ports:
+        - protocol: TCP
+          port: 3000
+  egress:
+    - {}
+---
+{{/* ---------------------------------------------------------------------
+     Platform Neo4j (subchart `neo4j`). The subchart's pods carry
+     helm.neo4j.com/* labels, NOT app.kubernetes.io/component: neo4j —
+     the pre-existing databases/neo4j-networkpolicy.yaml selects the
+     latter (per-tenant convention) and does not cover the umbrella
+     instance (deploy#1378 notes the same naming divergence). Callers:
+     daemon (GraphRAG) and tenant-operator (per-tenant DB provisioning
+     inside the shared instance). Bolt :7687 + HTTP :7474.
+--------------------------------------------------------------------- */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-platform-neo4j
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: platform-neo4j-isolation
+spec:
+  podSelector:
+    matchLabels:
+      helm.neo4j.com/pod_category: neo4j-instance
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: daemon
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: tenant-operator
+      ports:
+        - protocol: TCP
+          port: 7687
+        - protocol: TCP
+          port: 7474
+  egress:
+    - {}
+---
+{{/* CloudNativePG operator isolation lives in the umbrella
+     (helm/gibson/templates/networkpolicy-platform-operators.yaml) with the
+     other cluster operators the umbrella owns (deploy#1728). */}}
+{{/* ---------------------------------------------------------------------
+     CNPG-managed Postgres instances (platform-postgres). These pods are
+     created at RUNTIME by the CNPG operator from a Cluster CR, so they
+     never appear in a chart render — this policy is written against the
+     labels CNPG stamps on every instance pod (cnpg.io/podRole: instance).
+     The Cluster renders on every profile, so this policy is
+     live everywhere. :5432 callers: every platform component with
+     a database, the CNPG operator itself, and instance-to-instance
+     replication. :8000 is the operator's instance-status probe;
+     :9187 metrics. The postgres-setup bringup Jobs are NOT listed — they
+     reach the primary via `kubectl exec`, not the network.
+--------------------------------------------------------------------- */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-cnpg-instances
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cnpg-instances-isolation
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/podRole: instance
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: daemon
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: dashboard
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: ext-authz
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: tenant-operator
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: platform-operator
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: active-session-backfill
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: zitadel
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openfga
+        # SPIRE server datastore.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: server
+        # CNPG operator + instance-to-instance replication.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudnative-pg
+        - podSelector:
+            matchLabels:
+              cnpg.io/podRole: instance
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Operator status probe.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudnative-pg
+      ports:
+        - protocol: TCP
+          port: 8000
+    - from:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: prometheus
+        - podSelector:
+            matchLabels:
+              app: grafana-agent
+      ports:
+        - protocol: TCP
+          port: 9187
+  egress:
+    - {}
+{{- end }}

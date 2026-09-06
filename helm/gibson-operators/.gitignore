@@ -1,0 +1,9 @@
+# `helm dependency update` build output. Neither is content this repo authors:
+# charts/ holds packaged subcharts, and Chart.lock is regenerated with a fresh
+# `generated:` timestamp on every run. Tracking the lock made every chart-deps
+# build dirty the working tree for a timestamp — noise that hides real drift,
+# and it pins nothing: every dependency of this chart is a file:// path, so
+# there is no version to resolve. Same rule the umbrella already applies
+# (helm/gibson/.gitignore). deploy#1600.
+charts/
+Chart.lock

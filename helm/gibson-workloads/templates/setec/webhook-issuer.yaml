@@ -1,0 +1,33 @@
+{{- if and .Values.setec.enabled ((.Values.setec.webhook).certManager).enabled }}
+{{- /*
+Dedicated self-signed ClusterIssuer for the Setec admission webhook's
+serving certificate.
+
+Why its own issuer rather than one of the shared ones in
+templates/cert-manager/cluster-issuer.yaml: those are environment-
+dependent (awspca in prod, vault, or the selfsigned pair on kind), and
+`certManager.issuers.selfsigned.enabled` is false wherever a real CA is
+in use. The webhook would then reference an issuer that does not exist,
+its Certificate would never become Ready, and — because failurePolicy is
+Fail — every Sandbox launch would be rejected.
+
+A self-signed issuer is the correct choice here regardless of what the
+rest of the cluster uses. A webhook serving cert needs no shared trust
+chain: cert-manager stamps the issuing CA into the
+ValidatingWebhookConfiguration via the inject-ca-from annotation, so the
+API server trusts exactly this certificate and nothing else has to.
+
+This is deliberately NOT the path used for the Setec frontend's mTLS
+(templates/setec/frontend-tls.yaml), where client and server certs must
+chain to a common CA and the environment's real issuer is required.
+*/}}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.setec.webhook.certManager.issuerRef.name }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cert-manager-issuer
+spec:
+  selfSigned: {}
+{{- end }}

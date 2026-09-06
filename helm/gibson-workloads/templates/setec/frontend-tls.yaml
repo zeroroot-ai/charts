@@ -1,0 +1,215 @@
+{{/*
+Setec frontend mTLS material (deploy#1084).
+
+The Setec subchart's gRPC frontend hard-fails render unless
+frontend.tlsCertSecretName + frontend.tlsClientCASecretName are set, and it
+never mints its own TLS material — the parent chart owns provisioning (the
+same split as the subchart's own snapshots.mTLS.certManager.issuerRef seam).
+This template materialises the Secrets with cert-manager, in the SETEC
+namespace (setec.namespace — the frontend Deployment mounts them there, NOT
+in the release namespace).
+
+Three Certificates from one CA:
+  - setec-frontend-tls          server cert for the frontend listener; SANs
+                                cover <fullname>-frontend.<ns>.svc[.cluster.local].
+                                cert-manager also writes the issuing CA into
+                                this secret's `ca.crt`, which is why
+                                setec.frontend.tlsClientCASecretName points at
+                                THIS secret (the frontend only reads ca.crt
+                                from its tls-ca mount; reusing the server
+                                secret keeps the CA private key out of the pod).
+  - setec-frontend-client-tls   client cert for callers of the frontend.
+                                gibson's e2e-setec-roundtrip job fetches
+                                tls.crt/tls.key/ca.crt from this secret (RBAC:
+                                gitops envs/staging/manifests/arc-runners/
+                                rbac.yaml resourceNames).
+
+Issuer selection mirrors component-certificates.yaml, with one twist: the
+selfsigned path cannot use the release-namespace `selfsigned-ca` Issuer
+(namespaced Issuers cannot sign Certificates in another namespace), so this
+template bootstraps a setec-local CA from the cluster-scoped
+`selfsigned-bootstrap` ClusterIssuer instead. awspca / vault are
+ClusterIssuers and are used directly.
+
+Dev parity: setec's development/k3s env provisions the same shape by hand
+(openssl PKI → Secrets setec-frontend-tls / setec-frontend-ca); this is the
+cert-manager equivalent for umbrella-managed clusters.
+*/}}
+
+{{- if and .Values.setec.enabled .Values.setec.frontend.enabled }}
+
+{{- /* Names come from templates/_helpers.tpl, the same place the daemon's
+       dial address and TLS serverName are derived from (deploy#1106). The
+       SANs below and the name the daemon verifies have to be the same
+       string, and they were separately open-coded here and in
+       templates/gibson/statefulset.yaml before that. */ -}}
+{{- $setecFullname := include "gibson.setecFullname" . -}}
+{{- $setecNamespace := include "gibson.setecNamespace" . -}}
+{{- $frontendName := include "gibson.setecFrontendName" . -}}
+{{- $serverSecret := .Values.setec.frontend.tlsCertSecretName -}}
+
+{{- $issuerName := "" -}}
+{{- $issuerKind := "ClusterIssuer" -}}
+{{- $issuerGroup := "cert-manager.io" -}}
+{{- if (((.Values.certManager).issuers).awspca).enabled }}
+{{- $issuerName = "awspca-issuer" -}}
+{{- $issuerKind = "AWSPCAClusterIssuer" -}}
+{{- $issuerGroup = "awspca.cert-manager.io" -}}
+{{- else if (((.Values.certManager).issuers).vault).enabled }}
+{{- $issuerName = "vault-issuer" -}}
+{{- else if (((.Values.certManager).issuers).selfsigned).enabled }}
+{{- /* Bootstrap a setec-namespace CA + Issuer below. */ -}}
+{{- $issuerName = "setec-frontend-ca" -}}
+{{- $issuerKind = "Issuer" -}}
+---
+# Setec-local root CA, minted by the cluster-scoped selfsigned-bootstrap
+# issuer (templates/cert-manager/cluster-issuer.yaml). Lives in the setec
+# namespace so the namespaced Issuer below can sign the frontend certs there.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: setec-frontend-ca
+  namespace: {{ $setecNamespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: setec-frontend-tls
+spec:
+  isCA: true
+  commonName: "Setec Frontend CA"
+  secretName: setec-frontend-ca
+  duration: 87600h   # 10 years
+  renewBefore: 8760h # 1 year
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: setec-frontend-ca
+  namespace: {{ $setecNamespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: setec-frontend-tls
+spec:
+  ca:
+    secretName: setec-frontend-ca
+{{- end }}
+
+{{- if not $issuerName }}
+{{- fail "setec.frontend.enabled=true requires a cert-manager issuer to mint the frontend mTLS Secrets — enable one of certManager.issuers.{awspca,vault,selfsigned} (templates/setec/frontend-tls.yaml, deploy#1084)." }}
+{{- end }}
+---
+# Frontend server certificate → Secret {{ $serverSecret }} (tls.crt/tls.key/
+# ca.crt). Mounted by the frontend as BOTH its listener keypair and (via
+# ca.crt) its client-verification CA — see values.yaml setec.frontend notes.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: setec-frontend-tls
+  namespace: {{ $setecNamespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: setec-frontend-tls
+spec:
+  secretName: {{ $serverSecret | quote }}
+  duration: 2160h    # 90d
+  renewBefore: 360h  # 15d
+  commonName: {{ printf "%s.%s.svc" $frontendName $setecNamespace | quote }}
+  dnsNames:
+    - {{ $frontendName | quote }}
+    - {{ printf "%s.%s" $frontendName $setecNamespace | quote }}
+    - {{ printf "%s.%s.svc" $frontendName $setecNamespace | quote }}
+    - {{ printf "%s.%s.svc.cluster.local" $frontendName $setecNamespace | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+  issuerRef:
+    name: {{ $issuerName | quote }}
+    kind: {{ $issuerKind | quote }}
+    group: {{ $issuerGroup | quote }}
+---
+# Client certificate for frontend callers → Secret setec-frontend-client-tls.
+# gibson's e2e-setec-roundtrip workflow reads tls.crt/tls.key/ca.crt from it
+# (SETEC_FRONTEND_CERT_SECRET); ca.crt doubles as the trust root the caller
+# verifies the frontend's server cert against (same CA signs both).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: setec-frontend-client-tls
+  namespace: {{ $setecNamespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: setec-frontend-tls
+spec:
+  secretName: setec-frontend-client-tls
+  duration: 2160h    # 90d
+  renewBefore: 360h  # 15d
+  commonName: "setec-frontend-client"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - client auth
+  issuerRef:
+    name: {{ $issuerName | quote }}
+    kind: {{ $issuerKind | quote }}
+    group: {{ $issuerGroup | quote }}
+
+{{- if .Values.gibson.sandbox.enabled }}
+---
+# Client certificate for the GIBSON DAEMON → Secret setec-daemon-client-tls
+# (deploy#1106). Same CA as the two certs above, which is the whole point:
+# the frontend verifies clients against ca.crt from setec-frontend-tls, and
+# the daemon verifies the frontend against the same ca.crt, so one root
+# closes both directions.
+#
+# WHY THIS CA AND NOT A SPIRE SVID. The daemon holds a SPIFFE workload SVID
+# and uses it everywhere else, so a SPIFFE identity on this leg is the shape
+# you would expect and it is not what is here. Neither end implements it:
+# setec's frontend takes `--tls-cert/--tls-key/--tls-client-ca` file paths
+# and knows nothing about the Workload API or URI SANs, and gibson's setec
+# adapter builds a file-based component.TLSConfig and hands it to
+# credentials.NewTLS. Choosing SPIFFE would mean a spiffe-helper sidecar or
+# csi-driver-spiffe on the frontend plus a SPIRE trust-bundle client CA — new
+# code in setec, an OSS repo, for a leg that does not place a
+# tenancy boundary on (setec is tenancy-unaware; the boundary it owns is
+# untrusted-code execution). The cert-manager chain already authenticates the
+# frontend's only other caller. It authenticates this one too.
+#
+# A SEPARATE cert from setec-frontend-client-tls, not a reuse: that Secret is
+# the e2e round-trip's credential and its RBAC grant is written by name in
+# gitops envs/staging/manifests/arc-runners/rbac.yaml. Sharing one keypair
+# between a CI job and the daemon would put the daemon's client identity in
+# the runner's blast radius and make either one's revocation the other's
+# outage.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: setec-daemon-client-tls
+  namespace: {{ $setecNamespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: setec-frontend-tls
+spec:
+  secretName: setec-daemon-client-tls
+  duration: 2160h    # 90d
+  renewBefore: 360h  # 15d
+  commonName: "gibson-daemon"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - client auth
+  issuerRef:
+    name: {{ $issuerName | quote }}
+    kind: {{ $issuerKind | quote }}
+    group: {{ $issuerGroup | quote }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,130 @@
+{{/*
+docs-svc Deployment — core optional-by-toggle docs surface (/ deploy#1034).
+
+Serves ghcr.io/zeroroot-ai/docs-site (nginx static site). This is a CORE
+component — present in BOTH self-hosted and SaaS deployments. Default-on:
+a self-hosted operator may disable local docs via .Values.docs.enabled=false
+to link to public docs.zeroroot.ai instead.
+
+image.tag falls back to .Chart.AppVersion when unset, but base values always
+sets a digest (see the docs: block comment in values.yaml, deploy#1438) and
+digest wins below whenever it is non-empty — so that fallback is dead code
+on the default path. The docs image is kept current by the automated
+image-published fan-out instead, not by a chart-version match. Per-env
+overlays may still override tag/digest (gitops staging tracks `main`).
+
+ component taxonomy: Core, optional-by-toggle.
+Contrast: billing/www-svc are SaaS-only (absent self-hosted, separate overlay).
+*/}}
+{{- if ne ((.Values.docs).enabled | toString) "false" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gibson-docs-svc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: docs-svc
+spec:
+  replicas: {{ (.Values.docs).replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: docs-svc
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: docs-svc
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: docs-svc
+    spec:
+      {{- /* docs-site is a first-party image. The previous
+             `.Values.imagePullSecrets` knob read a chart-top-level value no
+             profile sets, so the pod pulled anonymously and only worked while
+             the package happened to be public (deploy#1766). One mechanism:
+             the shared helper, from global.imagePullSecrets. */}}
+      {{- include "gibson.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: docs-svc
+          {{- $repo := ((.Values.docs).image).repository | default "ghcr.io/zeroroot-ai/docs-site" }}
+          {{- $tag := ((.Values.docs).image).tag | default .Chart.AppVersion }}
+          {{- $digest := ((.Values.docs).image).digest }}
+          {{- if $digest }}
+          image: {{ printf "%s@%s" $repo $digest | quote }}
+          {{- else }}
+          image: {{ printf "%s:%s" $repo $tag | quote }}
+          {{- end }}
+          imagePullPolicy: {{ ((.Values.docs).image).pullPolicy | default "IfNotPresent" }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+            runAsUser: 101
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              # 8080, not 80: this pod runs as uid 101 with ALL capabilities
+              # dropped (above), so it cannot bind a privileged port. The
+              # image is nginx-unprivileged, which listens on 8080
+              # (docs-site#10). Declaring 80 here described a container that
+              # could never start — nginx died with EACCES on bind and the
+              # docs vhost served 503.
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # Cross-surface origins for the static docs image's start-time
+            # link substitution (docs-site#19, epic env-derived-links).
+            # Derived from global.domain like every other external hostname
+            # (deploy#630). Old images ignore them; new images default to the
+            # prod origins when absent, so chart and image roll independently.
+            - name: APP_ORIGIN
+              value: {{ include "gibson.externalOrigin" . | quote }}
+            - name: WWW_ORIGIN
+              value: {{ include "gibson.wwwOrigin" . | quote }}
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 20
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            {{- $defaultResources := dict "requests" (dict "cpu" "50m" "memory" "64Mi") "limits" (dict "cpu" "200m" "memory" "128Mi") }}
+            {{- toYaml ((.Values.docs).resources | default $defaultResources) | nindent 12 }}
+          volumeMounts:
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+{{- end }}

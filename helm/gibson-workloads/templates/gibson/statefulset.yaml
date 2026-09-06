@@ -1,0 +1,1340 @@
+{{/*
+Gibson daemon StatefulSet.
+
+Spec: zitadel-envoy-gateway-migration (tasks 11, 12).
+
+Deploy posture (post-cutover):
+
+    client ──TLS──▶ Envoy ──ext_authz──▶ ext_authz (Zitadel JWT / SPIFFE / API key)
+                     │                          │
+                     │       returns OK + signed identity headers
+                     │◀─────────────────────────┘
+                     │
+                     │  injects x-gibson-{tenant,subject,roles,...}
+                     │  signed with HMAC(/etc/gibson/hmac/secret)
+                     ▼
+                   daemon (this StatefulSet)
+                     │
+                     │  internal/identity verifies HMAC, trusts headers,
+                     │  applies them as the request principal — never
+                     │  re-validates the upstream JWT/SPIFFE/API key.
+                     ▼
+                   handler
+
+The daemon Service is ClusterIP-only across every overlay; ingress is
+gated by templates/gibson/networkpolicy.yaml so only Envoy and Prometheus
+can reach the daemon ports. Liveness/readiness probes use HTTP /healthz on
+the dedicated `health` (8080) container port — kubelet reaches that from
+the node IP and is not subject to the daemon NetworkPolicy.
+
+When gibson.config.identity.requireEnvoy=true the chart fails to render
+unless Envoy and ext_authz are both deployed; see
+gibson.validateEnvoyGateway in templates/_helpers.tpl.
+
+When gibson.auth.spiffe is missing or empty the chart fails to render
+(guard added by spec in-cluster-mtls-restoration Phase 6); see
+gibson.validateSpiffeRequired in templates/_helpers.tpl. Daemon SPIFFE
+mTLS stays ON in every overlay, with no debugging shortcuts permitted.
+*/}}
+{{- include "gibson.validateEnvoyGateway" . }}
+{{- include "gibson.validateSpiffeRequired" . }}
+{{- include "gibson.validateEnvoySdsWired" . }}
+{{- /* Phase H/8.4 validators (templates/_validators.tpl) */ -}}
+{{- include "gibson.validateAllPathsViaEnvoy" . }}
+{{- include "gibson.validateRegistryFromSDK" . }}
+{{- include "gibson.validateKMSConfigured" . }}
+{{- /* Phase I/9.4 validator (templates/_validators.tpl) */ -}}
+{{- include "gibson.validateTenantStoresConfigured" . }}
+{{- /* Spec tenant-operator-saga-capabilities validator. */ -}}
+{{- include "gibson.validateKindRootTokenSafety" . }}
+{{- /* Spec zero-trust-hardening Task 5.2 (templates/_validators.tpl) */ -}}
+{{- include "gibson.validateGhcrCredentials" . }}
+{{- /* Observability provider enum (deploy#313, templates/_validators.tpl) */ -}}
+{{- /* Retired 5-toggle pattern — dead keys that read as config (deploy#1199 b) */ -}}
+{{- include "gibson.validateObservabilityRetiredToggles" . }}
+{{- /* Spec first-deploy-unblock-and-ha R7.18, OD-6 (templates/_validators.tpl) */ -}}
+{{- include "gibson.validateCertManagerCRDs" . }}
+{{- /* validateExternalSecretsCRDs removed — ESO is required infrastructure
+       (one-code-path #203); enabled/required toggles deleted. */ -}}
+{{- /* Spec first-deploy-unblock-and-ha R13 — fail render if any pinned image tag is :latest. */ -}}
+{{- include "gibson.validateNoLatestTags" . }}
+{{- /* Spec setec-sandbox-prod-default Task 34 (revised deploy#1080) — reject
+       setec.tier=demo and reject a non-empty setec.nodeSelector/tolerations
+       (cost-guard: those pin the operator, not Sandbox Pods). */ -}}
+{{- include "gibson.validateSetecTier" . }}
+{{- /* Sandbox containment: admission must be on and fail-closed, the
+       reserved egress ranges must be stated, and every SandboxClass must
+       declare an explicit default network mode. Each of these renders
+       fine when wrong, so the guard is the only thing that catches it. */ -}}
+{{- include "gibson.validateSetecContainment" . }}
+{{- /* deploy#1106 — the daemon→frontend dispatch leg. Reject
+       gibson.sandbox.enabled=true when the frontend this chart would point
+       it at is not being installed, or when no setec tenant is named. */ -}}
+{{- include "gibson.validateSetecDispatch" . }}
+{{- /* Spec tier-2-host-aliases-cluster-dns Req 2 — validate the optional
+       in-cluster IdP discovery URL knob (allow-list: *.svc.cluster.local,
+       *.svc, localhost, or exactly equal to idp.zitadel.issuer). */ -}}
+{{- include "gibson.validateIdpDiscoveryURL" . }}
+{{- /*
+  gibson daemon is structural infrastructure (one-code-path /
+  deploy#188). The previous outer `.Values.gibson.enabled` gate has
+  been deleted — the daemon StatefulSet renders unconditionally.
+*/}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "gibson.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: daemon
+    # spec zero-trust-hardening Task 5.4 — operational traceability of the
+    # post-fix configuration. Daemon-only label (NOT a selector key); other
+    # workloads in the chart do not carry this label by design.
+    zeroroot.ai/zero-trust-hardening-version: {{ include "gibson.zeroTrustHardeningVersion" . | quote }}
+spec:
+  serviceName: {{ include "gibson.fullname" . }}
+  replicas: {{ .Values.gibson.replicas }}
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: daemon
+  template:
+    metadata:
+      labels:
+        {{- include "gibson.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: daemon
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/gibson/configmap.yaml") . | sha256sum }}
+        # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). Consumer envFrom
+        # resolution is frozen for the pod's lifetime; Reloader watches the
+        # named Secrets and triggers a rolling restart when any changes.
+        #
+        # NOTE: gibson-workloads-redis-stack is intentionally NOT listed here.
+        # Redis password rotation requires ordered restarts (redis-stack first,
+        # then daemon, then tenant-operator); the rotation CronJob
+        # (deploy#517) enforces that order. Listing this Secret in Reloader
+        # would race-restart the daemon simultaneously with redis-stack,
+        # causing WRONGPASS. See docs/runbooks/redis-password-rotation.md.
+        {{- /*
+          The LLM secret is in this list because the daemon reads
+          ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY into env, captured
+          at pod start. Seeding or rotating a provider key otherwise changes
+          nothing until someone happens to restart the daemon, and the symptom
+          is every completion failing against the OLD key — including "no key
+          configured" long after one was seeded (deploy#1147).
+
+          Unlike the Redis password above, there is no ordering hazard here: no
+          other workload has to roll in step with a provider key.
+        */}}
+        secret.reloader.stakater.com/reload: "gibson-workloads-db-secrets,gibson-platform-postgres-credentials,gibson-native-login-oidc,{{ include "gibson.llmSecrets.name" . }}"
+        {{- /*
+          The daemon pins GIBSON_AUTHZ_FGA_MODEL_ID from gibson-fga-config at
+          start. When the fga-init Job writes a new model (an evolved
+          model.fga), the ConfigMap changes and the daemon must roll to check
+          against it; ext-authz already reloads on the same ConfigMap.
+        */}}
+        configmap.reloader.stakater.com/reload: "gibson-fga-config"
+    spec:
+      serviceAccountName: {{ include "gibson.serviceAccountName" . }}
+      {{- include "gibson.imagePullSecrets" . | nindent 6 }}
+      {{- /*
+        Spec tier-2-host-aliases-cluster-dns originally deleted the
+        hostAliases block on the daemon and routed OIDC discovery
+        through cluster DNS to envoy. That works for the *discovery
+        doc fetch*, but Zitadel emits absolute URLs in the response
+        keyed on its ExternalDomain — so the `token_endpoint`,
+        `jwks_uri`, etc. that the daemon then dials all point at
+        `https://app.<global.domain>:<port>` (the `auth.` subdomain is
+        retired). Without a hostAlias the
+        daemon can't resolve that hostname and falls over on the
+        client_credentials grant.
+
+        Restored via the gibson-common library helper (deploy#179),
+        gated on `envoy.service.clusterIP` being explicitly pinned (the
+        chart's envoy/service.yaml exposes that knob). Pinning makes the
+        ClusterIP-rotation concern that motivated the original cut a
+        non-issue: an operator who wants the cluster-DNS path leaves
+        clusterIP empty and the alias is omitted.
+      */}}
+      {{- include "gibson.hostAliases" . | nindent 6 }}
+      # Gibson binary respects HOME via os.UserHomeDir(); HOME is set
+      # explicitly in the container env below.
+      # Spec 3 R3 — daemon runs as non-root (uid 65532, distroless nonroot).
+      securityContext:
+        fsGroup: 65532
+        runAsUser: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        {{- /* deploy#201: SPIRE is REQUIRED infrastructure - block pod start
+               until the agent socket is reachable. Renders unconditionally
+               (the daemon's SPIFFE-mTLS listeners depend on it). */}}
+        {{- include "gibson.waitForSpireSocket" . | nindent 8 }}
+        # Wait for ESO to materialise the daemon's IdP-admin Secret.
+        #
+        # ESO is required infrastructure (one-code-path #203). The Secret
+        # is owned by the ExternalSecret at
+        # templates/gibson/idp-admin-externalsecret.yaml, which
+        # materialises asynchronously from the bootstrap-secrets-backend.
+        # The daemon container's `secretKeyRef` lookups would
+        # CreateContainerConfigError if the Secret didn't exist yet, so
+        # we block here until it does.
+        #
+        # Spec: .spec-workflow/specs/deploy-simplification (Phase 3.1).
+        - name: wait-for-idp-admin-secret
+          # kubectl image (bitnamilegacy mirror) ships kubectl + bash —
+          # the only two things this step needs. Pinned to the chart-wide
+          # kubectl version used by other hooks.
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          command: ['/bin/bash', '-c']
+          args:
+            - |
+              set -eu
+              name={{ .Values.idp.adminCredentialsSecret | quote }}
+              ns={{ .Release.Namespace | quote }}
+              echo "[wait-for-idp-admin-secret] waiting for Secret ${ns}/${name} (ESO-managed)..."
+              # 5 min budget. Backend mint + ESO refreshInterval (60s) covers
+              # the common case well under this; surface obvious failures fast.
+              for i in $(seq 1 150); do
+                if kubectl get secret -n "${ns}" "${name}" \
+                    -o jsonpath='{.data.client_id}' 2>/dev/null \
+                    | base64 -d 2>/dev/null | grep -q .; then
+                  echo "[wait-for-idp-admin-secret] ok (client_id present)"
+                  exit 0
+                fi
+                sleep 2
+              done
+              echo "[wait-for-idp-admin-secret] timed out after 5 min; the bootstrap-secrets Job may not have completed or ESO may not be syncing — check kubectl get externalsecret -n ${ns}" >&2
+              exit 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+        # Setup config directory with correct config file location.
+        # Spec 3 R3 — directories are now under /var/lib/gibson because the
+        # nonroot user has no $HOME; HOME=/var/lib/gibson is exported in the
+        # daemon container env.
+        - name: setup-config
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          command: ['sh', '-c']
+          args:
+            - |
+              mkdir -p /var/lib/gibson/.gibson
+              cp /etc/gibson/gibson.yaml /var/lib/gibson/.gibson/config.yaml
+              echo "Config file copied to /var/lib/gibson/.gibson/config.yaml"
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            runAsNonRoot: false
+          volumeMounts:
+            - name: config
+              mountPath: /etc/gibson
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/gibson/.gibson
+        # Wait for the tenant-operator Pod to be Ready. This replaces the
+        # render-time `lookup` preflight that lived in
+        # templates/preconditions.yaml (deploy#202): the operator's Pod
+        # cannot become Ready without the gibson-operators chart having
+        # been applied AND the CRDs it watches being Established, so a
+        # single Ready check transitively covers both the "CRDs installed"
+        # and "operator installed" preconditions that lookup attempted to
+        # verify against Helm Release Secrets.
+        #
+        # The daemon ServiceAccount already has pods/get,list,watch via
+        # templates/gibson/role.yaml -- no additional RBAC needed.
+        #
+        # Fails fast (exit 1, structured log) after the 5-min budget so a
+        # missing prerequisite surfaces as `kubectl describe pod` output,
+        # not a silent boot with degraded behavior.
+        - name: wait-for-prerequisites
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          command: ['/bin/bash', '-c']
+          args:
+            - |
+              set -eu
+              ns={{ .Release.Namespace | quote }}
+              echo "[wait-for-prerequisites] waiting for tenant-operator Pod Ready in ${ns}..."
+              # 5 min budget. The tenant-operator's own probes settle
+              # quickly once the operator binary starts up; this gives
+              # plenty of headroom for cluster-wide cold-starts and Argo
+              # sync waves.
+              for i in $(seq 1 150); do
+                phase=$(kubectl get pods -n "${ns}" \
+                  -l app.kubernetes.io/name=gibson-tenant-operator \
+                  -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' \
+                  2>/dev/null || true)
+                if [ "${phase}" = "True" ]; then
+                  echo "[wait-for-prerequisites] ok (tenant-operator Pod Ready)"
+                  exit 0
+                fi
+                if [ $((i % 5)) -eq 0 ]; then
+                  echo "[wait-for-prerequisites] tenant-operator not Ready yet (status=${phase:-<absent>}); retrying..."
+                fi
+                sleep 2
+              done
+              echo "[wait-for-prerequisites] timed out after 5 min -- the gibson-operators chart may not be applied, or the tenant-operator Pod is unhealthy. Check: kubectl get pods -n ${ns} -l app.kubernetes.io/name=gibson-tenant-operator" >&2
+              exit 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+        # Wait for Redis
+        - name: wait-for-redis
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          command: ['sh', '-c']
+          args:
+            - |
+              until nc -z {{ include "gibson.redis.host" . }} 6379; do
+                echo "Waiting for Redis..."
+                sleep 2
+              done
+              echo "Redis is ready!"
+        {{- if or .Values.secrets.llm.openaiApiKey .Values.secrets.llm.existingSecret }}
+        # one-code-path #203: wait-for-llm-secret blocks pod start until
+        # the LLM-keys Secret is materialised. The OPENAI_API_KEY env
+        # entry was flipped from `optional: true` to required (and
+        # ANTHROPIC_API_KEY/GOOGLE_API_KEY rely on the same Secret).
+        # The daemon ServiceAccount has secrets get/list via the
+        # gibson cluster role.
+        - name: wait-for-llm-secret
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          command: ['/bin/bash', '-c']
+          args:
+            - |
+              set -eu
+              name={{ .Values.secrets.llm.existingSecret | default (include "gibson.llmSecrets.name" .) | quote }}
+              ns={{ .Release.Namespace | quote }}
+              echo "[wait-for-llm-secret] waiting for Secret ${ns}/${name}..."
+              for i in $(seq 1 30); do
+                if kubectl get secret -n "${ns}" "${name}" >/dev/null 2>&1; then
+                  echo "[wait-for-llm-secret] ok"
+                  exit 0
+                fi
+                sleep 2
+              done
+              echo "[wait-for-llm-secret] timed out after 60s -- the LLM-keys Secret was not materialised. Check: kubectl get externalsecret,secret -n ${ns}" >&2
+              exit 1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+        {{- end }}
+      containers:
+        - name: gibson
+          image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.gibson.image.repository "tag" .Values.gibson.image.tag "digest" .Values.gibson.image.digest "appVersion" .Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ .Values.gibson.image.pullPolicy }}
+          ports:
+            - name: callback
+              containerPort: 50001
+              protocol: TCP
+            - name: grpc
+              containerPort: {{ include "gibson.grpc.port" . }}
+              protocol: TCP
+            - name: registration
+              containerPort: 50100
+              protocol: TCP
+            - name: health
+              containerPort: 8080
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+            # gibson#623 — unauthenticated native-login bootstrap listener
+            # (GET /.well-known/gibson-login). Envoy publishes it on a public,
+            # ext_authz-disabled route (gibson_native_login cluster).
+            - name: native-login
+              containerPort: 8085
+              protocol: TCP
+            # deploy#852: mTLS authz-registry endpoint ext-authz fetches from.
+            - name: authz-registry
+              containerPort: {{ .Values.gibson.service.authzRegistry.port | default 8086 }}
+              protocol: TCP
+          env:
+            # the daemon reads FGA store_id + model_id from env
+            # vars instead of calling the Kubernetes API to GET the
+            # gibson-fga-config ConfigMap. The gibson-fga-init Job writes
+            # the ConfigMap keys `store_id` and `model_id`; we map them
+            # explicitly here to the env-var names the daemon's
+            # internal/authz/config_resolver.go reads
+            # (GIBSON_AUTHZ_FGA_STORE_ID + GIBSON_AUTHZ_FGA_MODEL_ID).
+            # Marked optional so the daemon boots even when the Job has
+            # not yet completed — ResolveWithRetry waits for both vars
+            # to populate before the FGA authorizer initialises.
+            - name: GIBSON_AUTHZ_FGA_STORE_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: gibson-fga-config
+                  key: store_id
+                  optional: true
+            - name: GIBSON_AUTHZ_FGA_MODEL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: gibson-fga-config
+                  key: model_id
+                  optional: true
+            - name: HOME
+              value: /var/lib/gibson
+            # The Dockerfile bakes GIBSON_HOME=/root/.gibson which the daemon
+            # main.go reads with higher precedence than HOME via os.Getenv
+            # ("GIBSON_HOME") in cmd/gibson/main.go. Override here so the
+            # config-loader resolves under the writable HOME path mounted
+            # from the StatefulSet's data volume.
+            - name: GIBSON_HOME
+              value: /var/lib/gibson/.gibson
+            - name: GIBSON_CONFIG
+              value: /etc/gibson/gibson.yaml
+            # GIBSON_PUBLIC_URL — the public Envoy URL the daemon stamps into
+            # the CreateAgentIdentity response (gibson_url + the copy-pasteable
+            # `gibson component register` enroll command). server.go reads this
+            # via os.Getenv; without it the daemon returns an empty gibson_url
+            # and a <gibson-url> placeholder, breaking agent registration.
+            # Mirrors the dashboard's GIBSON_PUBLIC_URL byte-for-byte so both
+            # surfaces advertise the identical public URL (same override key,
+            # same global.domain default). deploy#662.
+            - name: GIBSON_PUBLIC_URL
+              value: {{ .Values.dashboard.gibsonPlatformPublicUrl | default (include "gibson.apiOrigin" .) | quote }}
+            # GIBSON_LOKI_URL — the daemon's LogsService queries Loki
+            # server-side and serves mission/daemon logs to the dashboard over
+            # Envoy + ext-authz (dashboard#811). The dashboard no longer dials
+            # Loki itself, so this is the ONLY consumer that matters.
+            #
+            # Unset means logs_service.go reports the backend unavailable and
+            # every mission's Logs tab renders empty — silently, which reads as
+            # "the mission produced no output" rather than "the log backend was
+            # never wired" (deploy#1223). Only set when there is a Loki to
+            # query; an overlay pointing elsewhere sets gibson.lokiUrl.
+            #
+            # deploy#1199(b): this used to key off `.Values.loki.enabled`, a
+            # separate boolean from the enum that actually decides whether an
+            # in-chart Loki exists. The two disagreed on the prod overlay —
+            # `loki.enabled: false` suppressed GIBSON_LOKI_URL while
+            # `observability.provider` (unset, so `in-chart`) still deployed
+            # Loki. Prod therefore ran a log store the daemon was configured
+            # never to query. One condition now decides both: the URL points at
+            # the in-chart Loki exactly when the chart deploys one, and an
+            # external-provider overlay supplies its own gibson.lokiUrl.
+            {{- /* The chart ships no Loki. Set gibson.lokiUrl to the address of the
+                   one the cluster already runs; empty disables log query. */ -}}
+            {{- $lokiUrl := (((.Values.gibson).lokiUrl)) | default "" }}
+            {{- if $lokiUrl }}
+            - name: GIBSON_LOKI_URL
+              value: {{ $lokiUrl | quote }}
+            {{- end }}
+            # GIBSON_APP_URL — the PRODUCT-surface origin (app.<domain>) used to
+            # build user-facing links, above all the self-serve signup email
+            # verification link (gibson#1228 companion, deploy
+            # signup-email-delivery). Deliberately distinct from
+            # GIBSON_PUBLIC_URL above: that is the API-plane origin
+            # (api.<domain>), and it serves no product routes — a verification
+            # link built from it resolves to nothing. The fallback
+            # (gibson.externalOrigin) is unconditional, so this always resolves.
+            - name: GIBSON_APP_URL
+              value: {{ .Values.gibson.appUrl | default (include "gibson.externalOrigin" .) | quote }}
+            # gibson#632 — invitation accept-link email transport; ALSO, as of
+            # gibson#1228, the ONLY transport the self-serve signup email
+            # verification flow may use. Defaults to the "log" provider, which
+            # the daemon's mailer package treats as a NON-DELIVERING development
+            # stub (internal/platform/mailer.LogMailer.Delivers() == false) — it
+            # drops the message. That is fine for invitations (best-effort) but
+            # not for signup verification.
+            #
+            # A missing transport does NOT stop the daemon booting: mail
+            # misconfiguration must never take down every other RPC on the
+            # platform. resolveSignupMailer warns once at startup and leaves
+            # the signup mailer unwired; RequestEmailVerification then refuses
+            # each call with FailedPrecondition, creating no state. So a
+            # profile with gibson.signupSelfServe left at its default (true)
+            # still boots, but self-serve signup is inert until provider=smtp
+            # is set here (kind: mailpit dev sink, values-kind.yaml;
+            # staging/prod: SES SMTP, values-aws-prod.yaml).
+            #
+            # The accept/verification links are built from GIBSON_PUBLIC_URL and
+            # GIBSON_APP_URL respectively, above.
+            {{- /* First-party plugin SVID enrollment binding. A
+                   first-party plugin presents a SPIFFE JWT-SVID; the daemon maps
+                   it to this install's tenant to provision the agent identity,
+                   and resolves the tenant OWNER dynamically from FGA at enrol
+                   time (gibson#1533) — so only the tenant slug is configured, and
+                   there is no owner sub to pre-seed (the owner does not exist
+                   until first-admin runs). Unset = SVID enrollment disabled, a
+                   safe no-op. */}}
+            {{- with (.Values.gibson).platformTenant }}
+            - name: GIBSON_PLATFORM_TENANT
+              value: {{ . | quote }}
+            {{- end }}
+            - name: GIBSON_EMAIL_PROVIDER
+              value: {{ (((.Values.gibson).email).provider) | default "log" | quote }}
+            - name: GIBSON_EMAIL_FROM
+              value: {{ (((.Values.gibson).email).from) | default "no-reply@gibson.local" | quote }}
+            {{- if eq ((((.Values.gibson).email).provider) | default "log") "smtp" }}
+            - name: GIBSON_SMTP_HOST
+              value: {{ required "gibson.email.smtp.host is required when gibson.email.provider=smtp" .Values.gibson.email.smtp.host | quote }}
+            - name: GIBSON_SMTP_PORT
+              value: {{ (.Values.gibson.email.smtp.port | default 587) | quote }}
+            {{- if .Values.gibson.email.smtp.configurationSet }}
+            # SES (and most managed relays) route bounce/complaint events by this
+            # header (X-SES-CONFIGURATION-SET). Optional — leave unset for
+            # providers that don't use a configuration set.
+            - name: GIBSON_SMTP_CONFIGURATION_SET
+              value: {{ .Values.gibson.email.smtp.configurationSet | quote }}
+            {{- end }}
+            {{- if .Values.gibson.email.smtp.externalSecret.enabled }}
+            # Credentials path B: BOTH username and password come from the
+            # ExternalSecret-synced Secret (templates/secrets/email-smtp-secret.yaml),
+            # which reads gibson.email.smtp.externalSecret.remoteKey (default
+            # "ses-smtp-credentials" — the AWS Secrets Manager secret module.ses
+            # populates post-apply; see secret-contract.yaml). Not SES-specific —
+            # any delivering provider whose credentials are seeded as one backend
+            # secret with a username + password property fits this path.
+            - name: GIBSON_SMTP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  # Local Secret key — always "username", normalised by the
+                  # ExternalSecret's target template regardless of what
+                  # property name the backend secret uses (that mapping is
+                  # externalSecret.usernameProperty, consumed only by
+                  # templates/secrets/email-smtp-secret.yaml).
+                  name: {{ include "gibson.emailSmtpSecret.name" . | quote }}
+                  key: "username"
+            - name: GIBSON_SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.emailSmtpSecret.name" . | quote }}
+                  key: "password"
+            {{- else if .Values.gibson.email.smtp.username }}
+            # Credentials path A: inline plain-value username + a Secret holding
+            # just the password (e.g. mailpit needs neither — no auth in kind).
+            - name: GIBSON_SMTP_USERNAME
+              value: {{ .Values.gibson.email.smtp.username | quote }}
+            - name: GIBSON_SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "gibson.email.smtp.passwordSecretName is required when smtp.username is set" .Values.gibson.email.smtp.passwordSecretName | quote }}
+                  key: {{ .Values.gibson.email.smtp.passwordSecretKey | default "password" | quote }}
+            {{- end }}
+            {{- end }}
+            # LLM API Keys
+            {{- if or .Values.secrets.llm.anthropicApiKey .Values.secrets.llm.existingSecret }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.llm.existingSecret | default (include "gibson.llmSecrets.name" .) }}
+                  key: ANTHROPIC_API_KEY
+            {{- end }}
+            {{- if or .Values.secrets.llm.openaiApiKey .Values.secrets.llm.existingSecret }}
+            # one-code-path #203: was `optional: true`. The block is
+            # gated on `.Values.secrets.llm.openaiApiKey` /
+            # `existingSecret` — if the operator wired the value in
+            # values, the Secret MUST be present. The wait-for-llm-secret
+            # init container above blocks pod start until kubelet
+            # observes the Secret.
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.llm.existingSecret | default (include "gibson.llmSecrets.name" .) }}
+                  key: OPENAI_API_KEY
+            {{- end }}
+            {{- /* Optional override for the FGA RPC registry — see spec 21 */}}
+            {{- with .Values.gibson.authz.rpcRegistry }}
+            {{- if .override }}
+            - name: GIBSON_AUTHZ_RPC_REGISTRY_PATH
+              value: /etc/gibson/authz/rpc_registry.yaml
+            {{- end }}
+            {{- end }}
+            # Provider catalogue hot-reload path (spec: gibson#296).
+            # When set, the daemon reads the operator-mounted YAML instead of
+            # the embedded copy and hot-reloads it every 5 minutes.
+            - name: GIBSON_PROVIDERS_CATALOGUE_PATH
+              value: {{ ((.Values.gibson.providers).cataloguePath) | default "/etc/gibson-providers/provider-catalogue.yaml" | quote }}
+            {{- /* HMAC env var removed — Spec 3 R14 dead-mount cleanup. The
+                   identity-header signing path is now SPIFFE-mTLS, not HMAC;
+                   the daemon's interceptor verifies peer cert URI SAN against
+                   GIBSON_SPIFFE_ENVOY_ID and trusts the upstream identity
+                   headers without re-keying.
+                   Coordinated with daemon Go agent's removal of the HMAC
+                   verifier in core/gibson/internal/identity/. */}}
+            # Impersonation token signing key (gibson#103). Daemon refuses
+            # to start without it; there is no in-process random fallback.
+            # Delivered via the `impersonation-key` volume mount below at
+            # /etc/gibson/impersonation/GIBSON_IMPERSONATION_KEY[_PREVIOUS]
+            # (kubelet Secret projection — NUL-byte-safe). The daemon reads
+            # the files directly (gibson#162); the previous env-var bindings
+            # were removed in deploy#315.
+            {{- /*
+              Capability-Grant JWT signing key directory (GHSA-3957,
+              gibson#1288). Points at the cg-signing-key volume mount below.
+
+              The daemon defaults to this same path when the env var is unset,
+              so this is not strictly required — it is set anyway so the mount
+              path and the path the daemon reads are ONE value in the chart
+              (gibson.cgSigningKey.mountPath) and cannot drift apart in an
+              overlay that moves the mount.
+
+              No mount ⇒ the Minter falls back to deriving the signing key from
+              the master KEK and warns. That fallback is the vulnerability, not
+              the feature: a KEK-derived CG key cannot be rotated without
+              re-keying every tenant secret in the platform, so in practice one
+              key signs every Capability-Grant JWT for the life of the install.
+            */}}
+            - name: GIBSON_CGJWT_SIGNING_KEY_DIR
+              value: {{ ((.Values.gibson).cgSigningKey).mountPath | default "/etc/gibson/cg-signing-key" | quote }}
+            # Spec 3 R11 — Redis password sourced from chart-managed Secret
+            # (or external ESO Secret when redis.auth.passwordSecret is set).
+            # Redis auth is always on (one-code-path epic / deploy#199);
+            # `redis.auth.enabled` was deleted as a configuration toggle.
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.redisPasswordSecretName" . }}
+                  key: {{ include "gibson.redisPasswordSecretKey" . }}
+            # Dashboard / platform PostgreSQL password — for tenant_provisioning
+            # table access and gibson_platform schema. Sourced via the
+            # gibson.platformPostgres.passwordSecret{Name,Key} helpers so
+            # prod overlays can point at an externally-managed RDS secret.
+            # Spec helm-eks-readiness-and-pg-split Phase 2.
+            {{- if .Values.dashboard.postgres.enabled }}
+            - name: DASHBOARD_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.platformPostgres.passwordSecretName" . }}
+                  key: {{ include "gibson.platformPostgres.passwordSecretKey" . }}
+            {{- end }}
+            # Per-tenant admin PostgreSQL password — for tenant data-plane bootstrap.
+            # Populated when either an external dataPlane.postgres.host is set OR
+            # the in-chart tenant-postgresql subchart is enabled (Task 25).
+            # Sourced from dataPlane.postgres.admin_password_secret_ref (name +
+            # key pair) so the plaintext password never appears in the ConfigMap.
+            # The default secret is the chart-managed gibson-db-secrets, key
+            # TENANT_POSTGRES_ADMIN_PASSWORD, populated by templates/secrets/
+            # db-secrets.yaml under the same key the tenant-postgresql Bitnami
+            # subchart uses for its userPasswordKey.
+            # Spec: per-tenant-data-plane-completion Req 6.3, D1; Tasks 24, 25.
+            {{- if include "gibson.tenant.dbHost" . }}
+            - name: TENANT_POSTGRES_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dataPlane.postgres.admin_password_secret_ref.name | default (include "gibson.dbSecrets.name" .) }}
+                  key: {{ .Values.dataPlane.postgres.admin_password_secret_ref.key | default "TENANT_POSTGRES_ADMIN_PASSWORD" }}
+            {{- end }}
+            # ---------------------------------------------------------------
+            # IdP admin credentials (spec: agent-service-credentials task 13).
+            # The daemon's TenantAdminService uses these to call the IdP's
+            # management API. `provider` is read from values; the rest are
+            # pulled from the K8s Secret named by
+            # .Values.idp.adminCredentialsSecret — either chart-materialized
+            # (templates/secrets/idp-admin-credentials.yaml) or owned by
+            # external-secrets-operator when idp.createSecret=false.
+            # ---------------------------------------------------------------
+            - name: GIBSON_IDP_PROVIDER
+              value: {{ .Values.idp.provider | quote }}
+            {{- /* Two-plane addressing contract (deploy#630 / S2 #632):
+                   the daemon's IdP admin issuer is an EXTERNAL-IDENTITY
+                   value — Zitadel routes the Management API by the request
+                   Host, so this MUST be the instance's external issuer
+                   (e.g. https://app.zeroroot.ai:30443), reached in-cluster
+                   via the hostAliases pin. It is NOT a connection address
+                   and is NOT a credential, so it comes from config
+                   (idp.zitadel.issuer), NOT from the admin-credentials
+                   secret. The secret previously carried an in-cluster
+                   `issuer` (gibson-zitadel:8080) seeded by the OIDCClient
+                   operator; reading it there sent Management API calls to
+                   the wrong instance, so user lookups 404'd and the
+                   Members/roster fell back to raw user UUIDs. Sourcing from
+                   idp.zitadel.issuer (already equal to discoveryURL) keeps
+                   discovery, token, and Management API on one consistent
+                   Host. */}}
+            - name: GIBSON_IDP_ADMIN_ISSUER
+              value: {{ (((.Values.idp).zitadel).issuer) | default (include "gibson.oidcIssuer" .) | quote }}
+            {{- /* Spec tier-2-host-aliases-cluster-dns: optional in-cluster
+                   discovery URL. When idp.zitadel.discoveryURL is empty the
+                   daemon falls back to GIBSON_IDP_ADMIN_ISSUER for OIDC
+                   discovery (cluster DNS, no /etc/hosts override). When
+                   set, the daemon dials this URL for the discovery doc +
+                   JWKS instead — gating it on the chart value being non-
+                   empty keeps the env-var off the pod when not in use. */}}
+            - name: GIBSON_IDP_ADMIN_DISCOVERY_URL
+              value: {{ (((.Values.idp).zitadel).discoveryURL) | default (include "gibson.externalOrigin" .) | quote }}
+            - name: GIBSON_IDP_ADMIN_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.idp.adminCredentialsSecret | quote }}
+                  key: client_id
+            - name: GIBSON_IDP_ADMIN_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.idp.adminCredentialsSecret | quote }}
+                  key: client_secret
+            - name: GIBSON_IDP_ZITADEL_ORG_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.idp.adminCredentialsSecret | quote }}
+                  key: org_id
+            - name: GIBSON_IDP_ZITADEL_PROJECT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.idp.adminCredentialsSecret | quote }}
+                  key: project_id
+            # gibson#623 — public client id for the native-login device-grant
+            # app, served by the daemon's unauthenticated /.well-known/gibson-login
+            # bootstrap endpoint. Minted into the gibson-native-login-oidc Secret
+            # by the gibson-native-login OIDCClient CR (platform-operator#80,
+            # gibson-operators values idp.oidcClients[gibson-native-login]).
+            - name: GIBSON_NATIVE_LOGIN_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-native-login-oidc
+                  key: client_id
+                  # optional: the native-login bootstrap endpoint
+                  # (/.well-known/gibson-login) is a CLI-login convenience that
+                  # 503s gracefully when this is empty (gibson#623). It MUST NOT
+                  # gate daemon liveness — a not-yet-provisioned gibson-native-login
+                  # OIDCClient secret previously crashlooped the daemon
+                  # (CreateContainerConfigError → sign-in outage). Stakater
+                  # Reloader rolls the pod once the secret lands.
+                  # TODO(deploy#203): optional retained intentionally per
+                  # gibson#623 (graceful 503 until the native-login OIDCClient
+                  # secret is provisioned); revisit under one-code-path.
+                  optional: true
+            # Envoy SPIFFE ID the daemon's identity interceptor pins peer
+            # cert URI SAN against. REQUIRED — chart fails to render if
+            # .Values.spiffe.envoyID is empty.
+            - name: GIBSON_SPIFFE_ENVOY_ID
+              value: {{ required "spiffe.envoyID is required (no default — set in your environment overlay)" .Values.spiffe.envoyID | quote }}
+            # Peer SPIFFE IDs for the harness callback listener allowlist.
+            # REQUIRED when SPIFFE is configured — the daemon fails to start
+            # otherwise (fail-closed per critical-tls-no-fallbacks Req 1.5).
+            # Comma-separated list rendered from .Values.spiffe.callbackPeerSVIDs.
+            {{- if .Values.spiffe.callbackPeerSVIDs }}
+            - name: GIBSON_CALLBACK_PEER_SVIDS
+              value: {{ join "," .Values.spiffe.callbackPeerSVIDs | quote }}
+            {{- end }}
+            # Additional inbound mTLS allow-list for the daemon's main gRPC
+            # listener (— zeroroot-ai/docs adr/0002-operator-to-
+            # daemon-transport.md). Envoy is always accepted via
+            # GIBSON_SPIFFE_ENVOY_ID; the entries here are direct control-
+            # plane callers (today: the tenant-operator). Comma-separated.
+            {{- if .Values.spiffe.allowedPeerIDs }}
+            - name: GIBSON_SPIFFE_ALLOWED_PEER_IDS
+              value: {{ join "," .Values.spiffe.allowedPeerIDs | quote }}
+            {{- end }}
+            # deploy#852: the daemon serves its compiled-in authz registry to
+            # ext-authz over mTLS (single source of truth — no version-pinned
+            # OCI artifact to drift). Pin the listener port + the reader
+            # allow-list (the SVIDs permitted to fetch it — the ext-authz SVID).
+            # REQUIRED when SPIFFE is configured: the daemon fails closed on an
+            # empty reader list (never serves the enforcement policy openly).
+            {{- if .Values.spiffe.authzRegistryReaderSVIDs }}
+            - name: GIBSON_AUTHZ_REGISTRY_PORT
+              value: {{ .Values.gibson.service.authzRegistry.port | default 8086 | quote }}
+            - name: GIBSON_AUTHZ_REGISTRY_READER_SVIDS
+              value: {{ join "," .Values.spiffe.authzRegistryReaderSVIDs | quote }}
+            {{- end }}
+            # gRPC reflection on the daemon listeners. OFF by default;
+            # set .Values.spiffe.grpcReflection to "1" in dev overlays only.
+            # Spec: critical-tls-no-fallbacks Component 3 / Requirement 4.
+            {{- if .Values.spiffe.grpcReflection }}
+            - name: GIBSON_GRPC_REFLECTION
+              value: {{ .Values.spiffe.grpcReflection | quote }}
+            {{- end }}
+            # Identity-header freshness window in seconds. Headers older
+            # than this are rejected by the daemon's identity interceptor.
+            - name: GIBSON_IDENTITY_FRESHNESS_SKEW_SEC
+              value: {{ .Values.auth.identityFreshnessSkewSeconds | int | quote }}
+            # SPIRE→Vault audience contract (gibson#167 / deploy#360).
+            # The daemon's broker init calls SPIRE Workload API
+            # source.Token(ctx, audience) for every per-tenant Vault
+            # auth refresh; the per-tenant Vault role's bound_audiences
+            # MUST contain this exact value (the tenant-operator writes
+            # the same value via GIBSON_VAULT_JWT_BOUND_AUDIENCE per
+            # tenant-operator#148). openbao.jwtAuth.audience is the single
+            # chart source of truth — plumbed to both env vars by the
+            # owning templates. REQUIRED — chart fails render LOUDLY
+            # when empty, same pattern as openbao.jwtAuth.spireOidcIssuer.
+            - name: GIBSON_DAEMON_VAULT_JWT_AUDIENCE
+              value: {{ required "openbao.jwtAuth.audience is REQUIRED (gibson#167, deploy#360 amendment docs#34). The daemon and tenant-operator BOTH consume this value to negotiate the SPIRE→OpenBao `aud` claim contract: SPIRE mints a JWT-SVID with this `aud`, OpenBao's per-tenant role's bound_audiences must contain this exact string, or every per-tenant AuthMethodJWT login fails up front and signed-up tenants see 412/500 on data-bearing endpoints. Set values-kind.yaml: `gibson-saas` (matches the tenant-operator broker-config-write default). Production overlays set per-environment." ((.Values.openbao).jwtAuth).audience | quote }}
+            {{- /* Go's crypto/x509 reads SSL_CERT_DIR as a colon-separated
+                  list and skips missing entries; /etc/ssl/certs keeps the
+                  system bundle.
+                  - envoy-ca dir: trust Envoy's edge cert when its CA is
+                    NOT in the system bundle (kind selfsigned-ca /
+                    openbao-issuer; letsencrypt / awspca edge certs chain
+                    to system roots — deploy#126). The daemon's IdP admin
+                    client does OIDC discovery through the edge.
+                  - fga-ca dir: the in-cluster CA signing OpenFGA's
+                    HTTP-listener cert (deploy#1382) — the daemon dials
+                    FGA over https now (gibson.authz.fga.endpoint), and
+                    the component-cert issuer (awspca/vault/selfsigned)
+                    is a PRIVATE CA in every profile. Env is now
+                    unconditional: the fga-ca entry is always needed.
+                  Template comment on purpose — the rendered-comment
+                  literal would trip envoy-edge-ca-required-helper.bats'
+                  zero-mount-paths assertion on letsencrypt profiles. */}}
+            - name: SSL_CERT_DIR
+            {{- if eq (include "gibson.envoyEdge.caRequired" .) "true" }}
+              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
+            {{- else }}
+              value: "/etc/ssl/certs:/etc/ssl/fga-ca"
+            {{- end }}
+            {{- /*
+              The tool-runner's Zitadel service-account credentials
+              (ZITADEL_TOOL_RUNNER_CLIENT_ID/SECRET + ZITADEL_ISSUER) were
+              removed with the client_credentials runtime model (
+              sdk#306). The sandboxed gibson-runner returns tool output via
+              stdout and never dials the daemon, so its internal/auth package
+              (the only consumer) was dead code and has been deleted. No
+              credential is injected into the microVM env here.
+            */}}
+            # ----------------------------------------------------------------
+            # Signup seam knob (/ deploy#1055, gibson#1094).
+            # SIGNUP_SELF_SERVE=true (default) → daemon serves public signup.
+            # Absent/false → PolicyAdminOnly (signup denied for all callers).
+            #
+            # Default: true (self-hosted OSS default — no-card open signup).
+            # Override to false for a closed front-door install.
+            {{- if .Values.gibson.signupSelfServe }}
+            - name: SIGNUP_SELF_SERVE
+              value: "true"
+            {{- end }}
+            # ----------------------------------------------------------------
+            # Entitlements provider seam knob (/ deploy#1032).
+            # ENTITLEMENTS_ENDPOINT set → daemon dials a remote
+            # EntitlementsService over SPIFFE mTLS.
+            # Unset (default) → OSS embedded ConfigProvider (no-op, unlimited).
+            #
+            # The seam knob: .Values.gibson.entitlementsEndpoint (string, empty
+            # by default). The SaaS overlay (helm/saas-overlay/entitlements-svc)
+            # deploys the actual Service and sets this knob via the gitops
+            # overlay composition. Self-hosted installs leave this unset.
+            #
+            # The core umbrella carries ZERO closed/SaaS image references.
+            # The closed billing image lives exclusively in the SaaS overlay.
+            {{- if .Values.gibson.entitlementsEndpoint }}
+            - name: ENTITLEMENTS_ENDPOINT
+              value: {{ .Values.gibson.entitlementsEndpoint | quote }}
+            # The grpcProvider opens a SPIRE X509Source for daemon→entitlements
+            # mTLS. Its WorkloadAPISocket option is empty, so go-spiffe reads
+            # the socket from SPIFFE_ENDPOINT_SOCKET (the daemon's other mTLS
+            # uses GIBSON_SPIFFE_* config, not this env). Without it the
+            # provider construction fails and falls back to ConfigProvider.
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: "unix:///run/spire/sockets/api.sock"
+            {{- end }}
+            # ----------------------------------------------------------------
+            # Entitlements-required fail-closed guard (/ deploy#1055,
+            # gibson#1097+#1098). SaaS profile ONLY.
+            # When true, the daemon refuses boot if the entitlements seam fails
+            # to wire — it fails closed instead of silently serving unlimited.
+            # NEVER set on self-hosted installs; the OSS fail-open is correct.
+            # Invariant: if ENTITLEMENTS_ENDPOINT is set, this MUST also be set.
+            # Enforced at RENDER time by validateEntitlementsCoherence below,
+            # not only by the umbrella's signup-seam.bats CI fixtures — the
+            # dangerous overlay is the one this repo never sees (GHSA-455w).
+            {{- include "gibson.validateEntitlementsCoherence" . }}
+            {{- if .Values.gibson.entitlementsRequired }}
+            - name: GIBSON_ENTITLEMENTS_REQUIRED
+              value: "true"
+            {{- end }}
+            # ----------------------------------------------------------------
+            # Billing-webhook shared secret (gibson#1230 / gibson#1270,
+            # deploy#1314). Authenticates TenantProvisioningService.
+            # SetTenantBillingActive — the ONLY writer of tenant_status.
+            # billing_active. The daemon fails CLOSED when this is empty
+            # (billing_webhook_auth.go), so paid signups queue at
+            # status='pending' and never provision until BOTH this daemon end
+            # AND the caller end (dashboard#1016) hold the same value.
+            #
+            # Gated on entitlementsRequired — the ONE condition under which the
+            # withhold bites (ListPendingTenantProvisioning only holds a paid
+            # pending row while billing_active is false when the deployment
+            # enforces entitlements). That keeps this a SaaS-profile-only hard
+            # dependency: self-hosted / OSS renders never reference the Secret,
+            # so their daemon boots with no billing backend. Where it IS
+            # rendered the ref is REQUIRED (no optional: true — one-code-path /
+            # deploy#203): the daemon waits for the ESO-delivered Secret rather
+            # than booting with an empty secret that silently refuses callers.
+            # The value is delivered, never baked.
+            {{- if .Values.gibson.entitlementsRequired }}
+            - name: GIBSON_BILLING_WEBHOOK_SECRET  # allowlist-nul-byte-hazard: terraform/kind mint it as base62 (random_password special=false) — NUL-free by construction; daemon reads it raw via os.Getenv (deploy#1314)
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.billingWebhookSecret.name" . }}
+                  key: GIBSON_BILLING_WEBHOOK_SECRET
+            {{- end }}
+            # ----------------------------------------------------------------
+            # Setec sandbox wiring.
+            #
+            # There is exactly ONE env var here, and it is a metrics label.
+            # The daemon learns Setec's address, tenant and mTLS material from
+            # its CONFIG FILE, not from the environment: templates/gibson/
+            # configmap.yaml renders the `sandbox:` block that the daemon
+            # unmarshals into config.SandboxConfig (gibson
+            # internal/infra/config/sandbox.go).
+            #
+            # SETEC_FRONTEND_ADDRESS and SETEC_MTLS_SPIFFE_ID used to be set
+            # here and are gone (deploy#1106). No gibson code ever read
+            # either one — grep the daemon for the names and you get this
+            # chart and nothing else. SETEC_MTLS_SPIFFE_ID in particular
+            # advertised a trust model the platform does not implement: it
+            # described the daemon presenting its SPIRE workload SVID and
+            # pinning the frontend's SPIFFE peer SAN, while the frontend
+            # serves a cert-manager cert with no SPIFFE URI SAN and the
+            # daemon's adapter only ever built a file-based
+            # component.TLSConfig (cert_file/key_file/ca_file/server_name).
+            # Two configuration surfaces describing incompatible trust roots,
+            # one of them dead, is how deploy#1106 got filed against a
+            # mismatch that did not exist in the running code.
+            #
+            # GIBSON_SETEC_TIER feeds the gibson_setec_tier{tier} Prometheus
+            # gauge (pkg/gibsond reads it; internal/engine/sandbox/health).
+            # ----------------------------------------------------------------
+            {{- if .Values.setec.enabled }}
+            - name: GIBSON_SETEC_TIER
+              value: {{ .Values.setec.tier | default "production" | quote }}
+            {{- end }}
+            # ----------------------------------------------------------------
+            # Dispatch policy / quota / health gating REMOVED 2026-05-10
+            # (operator decision: unlimited usage). The daemon previously
+            # accepted GIBSON_DISPATCH_POLICY_*, GIBSON_SETEC_MAX_CONCURRENT_*,
+            # and GIBSON_SETEC_KVM_REQUIRED env vars; those code paths and
+            # the env vars themselves were dropped. SANDBOXED tools still
+            # route through Setec; PLUGIN/AGENT tools dispatch unchanged.
+            # ----------------------------------------------------------------
+            # Belief-field pgmpy sidecar (gibson#750, deploy#936).
+            # The daemon's brain.PgmpyBeliefProvider POSTs host evidence to the
+            # sidecar's /score endpoint (2nd container in this pod, reached over
+            # pod loopback) and records the returned model version on each host
+            # so replay reproduces. The sidecar runs exact, read-only Bayesian
+            # inference over versioned model artifacts baked into its image.
+            # GIBSON_BELIEF_MODEL_VERSION pins the artifact version the mission
+            # runs under; base-v1 is the OSS minimal base model shipped in the
+            # sidecar image's models/ directory.
+            - name: GIBSON_BELIEF_SIDECAR_URL
+              value: {{ printf "http://127.0.0.1:%d/score" (int (.Values.gibson.belief.port | default 8087)) | quote }}
+            - name: GIBSON_BELIEF_MODEL_VERSION
+              value: {{ .Values.gibson.belief.modelVersion | default "base-v1" | quote }}
+          resources:
+            {{- toYaml .Values.gibson.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/gibson
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/gibson/.gibson
+            # Spec 3 R4 — readOnlyRootFilesystem requires writable /tmp.
+            - name: tmp
+              mountPath: /tmp
+            # — reserved-names denylist via file-mount (no K8s API).
+            # The daemon's internal/reservednames provider reads
+            # /etc/gibson/reserved-names/{exact,prefix} and watches for
+            # kubelet's in-place symlink-swap updates with fsnotify.
+            - name: reserved-names
+              mountPath: /etc/gibson/reserved-names
+              readOnly: true
+            # — master KEK via file-mount (no K8s API).
+            # The daemon's internal/crypto file KeyProvider reads the
+            # 32-byte master KEK from /etc/gibson-kek/master-key.
+            #
+            # IMPORTANT: this mount is at /etc/gibson-kek/ — NOT a
+            # subpath of /etc/gibson/. kubelet rejects subPath-style
+            # mounts that target a path already-occupied by another
+            # volume (the `config` ConfigMap at /etc/gibson). Mounting
+            # at a sibling path with the Secret's keys projected as
+            # files (the default behavior, no subPath) sidesteps the
+            # collision and keeps the file mode at 0o400.
+            - name: master-kek
+              mountPath: /etc/gibson-kek
+              readOnly: true
+            {{- /* deploy#1106 — Setec client mTLS material.
+
+                   config.SandboxConfig.Validate() os.Stat()s cert_file,
+                   key_file and ca_file at daemon startup and refuses to
+                   boot when any is missing, so the mount is what makes
+                   `sandbox.enabled: true` bootable at all. Nothing was
+                   mounted before this: the chart carried the config seam
+                   (deploy#1175) and the SPIFFE env vars, and neither
+                   produced a file on disk.
+
+                   The Secret is the release-namespace mirror of the
+                   setec-namespace daemon client cert — see
+                   templates/setec/daemon-client-secret.yaml. */}}
+            {{- if .Values.gibson.sandbox.enabled }}
+            - name: setec-client-tls
+              mountPath: {{ include "gibson.setecMtlsMountPath" . | quote }}
+              readOnly: true
+            {{- end }}
+            {{- /* deploy#201: SPIRE is REQUIRED — agent socket mount is
+                   unconditional. */}}
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+            {{- with .Values.gibson.authz.rpcRegistry }}
+            {{- if .override }}
+            - name: rpc-registry
+              mountPath: /etc/gibson/authz
+              readOnly: true
+            {{- end }}
+            {{- end }}
+            {{- /* identity-hmac volumeMount removed — Spec 3 R14. SPIFFE-mTLS replaces HMAC. */}}
+            # Spec: canonical-service-identity Req 8.2 — sa-identity-map
+            # projected one-file-per-key for the log-enrichment resolver
+            # (numeric sub → readable SA name). The ConfigMap is
+            # `optional: true` so the pod schedules before the post-install
+            # Job populates it; the resolver returns ("", false) for
+            # unknown subs.
+            - name: sa-identity-map
+              mountPath: /etc/gibson/sa-identity-map
+              readOnly: true
+            # Impersonation signing keys — volume-mounted so the daemon
+            # can read NUL-byte-safe (file: length-based; env var:
+            # C-string truncated at first NUL). The daemon reads each
+            # file directly (gibson#162). Cross-chart-check class 16
+            # (deploy#182 / PR #316) blocks regressions to env-var
+            # delivery.
+            - name: impersonation-key
+              mountPath: /etc/gibson/impersonation
+              readOnly: true
+            {{- /* Capability-Grant JWT signing key (GHSA-3957, gibson#1288).
+                   Same projection idiom as impersonation-key: kubelet writes
+                   one file per Secret key, the daemon reads them directly.
+                   Unconditional mount, optional volume — see the volume below
+                   and templates/secrets/cg-signing-key.yaml. */}}
+            - name: cg-signing-key
+              mountPath: {{ ((.Values.gibson).cgSigningKey).mountPath | default "/etc/gibson/cg-signing-key" | quote }}
+              readOnly: true
+            {{- /* Spec security-hardening R20 — metrics TLS Secret mounted
+                   at /etc/gibson/tls/metrics/. The daemon's :9090 listener
+                   reads tls.crt / tls.key / ca.crt fail-closed at startup.
+                   deploy#201: cert-manager is REQUIRED — mount unconditionally. */}}
+            - name: metrics-tls
+              mountPath: /etc/gibson/tls/metrics
+              readOnly: true
+            {{- if eq (include "gibson.envoyEdge.caRequired" .) "true" }}
+            - name: envoy-ca
+              mountPath: /etc/ssl/envoy-ca
+              readOnly: true
+            {{- end }}
+            # CA for the OpenFGA HTTP-listener cert (deploy#1382); picked
+            # up via SSL_CERT_DIR above.
+            - name: fga-http-ca
+              mountPath: /etc/ssl/fga-ca
+              readOnly: true
+            # Provider catalogue hot-reload mount (spec: gibson#296).
+            # The daemon reads GIBSON_PROVIDERS_CATALOGUE_PATH and polls
+            # this file every 5 minutes; mtime changes trigger an in-process
+            # catalogue swap without a restart.  See
+            # templates/gibson/provider-catalogue-cm.yaml.
+            # NOTE: mounted at /etc/gibson-providers/ (not inside /etc/gibson/)
+            # because subPath file mounts inside an already-mounted directory
+            # cause ENOTDIR in runc — the config volume occupies /etc/gibson.
+            - name: provider-catalogue
+              mountPath: /etc/gibson-providers/provider-catalogue.yaml
+              subPath: provider-catalogue.yaml
+              readOnly: true
+            {{- with .Values.gibson.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: {{ ((.Values.gibson.livenessProbe).initialDelaySeconds) | default 30 }}
+            periodSeconds: {{ ((.Values.gibson.livenessProbe).periodSeconds) | default 10 }}
+            timeoutSeconds: 5
+            failureThreshold: {{ ((.Values.gibson.livenessProbe).failureThreshold) | default 6 }}
+          readinessProbe:
+            # Spec 2 R16: switch readiness to /readyz so kubelet only routes
+            # traffic once dependent stores (Postgres, Neo4j, Redis, FGA, KMS)
+            # are reachable. Liveness stays on /healthz (process-up only).
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            # Spec 3 R4 — readOnlyRootFilesystem hardens against arbitrary
+            # writes if the daemon is compromised. /tmp is the only writable
+            # path (emptyDir) and the data volume is RW under /var/lib/gibson.
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop:
+                - ALL
+        # ----------------------------------------------------------------
+        # Belief-field pgmpy sidecar (gibson#750, deploy#936).
+        #
+        # The daemon never does probability math itself; its
+        # brain.PgmpyBeliefProvider POSTs host evidence to this sidecar's
+        # /score endpoint on evidence change and records the returned model
+        # version on each host so replay reproduces. The sidecar
+        # runs exact, read-only Bayesian inference (pgmpy VariableElimination)
+        # over versioned model artifacts BAKED INTO ITS IMAGE — the OSS image
+        # ships base-v1; the commercial layer drops additional models/*.json
+        # into its own image build. Baking the artifacts (not mounting/
+        # fetching them) is what makes a given image tag deterministic and
+        # replay-reproducible.
+        #
+        # Runs as a 2nd container in the daemon pod so the daemon reaches it
+        # over pod loopback (127.0.0.1) with no NetworkPolicy hop. The
+        # GIBSON_BELIEF_SIDECAR_URL env on the daemon container (above) points
+        # here; GIBSON_BELIEF_MODEL_VERSION pins the artifact version the
+        # mission runs under.
+        - name: belief-sidecar
+          image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.gibson.belief.image.repository "tag" .Values.gibson.belief.image.tag "digest" .Values.gibson.belief.image.digest "appVersion" .Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ .Values.gibson.belief.image.pullPolicy }}
+          ports:
+            - name: belief
+              containerPort: {{ .Values.gibson.belief.port | default 8087 }}
+              protocol: TCP
+          env:
+            - name: BELIEF_HOST
+              value: "0.0.0.0"
+            - name: BELIEF_PORT
+              value: {{ .Values.gibson.belief.port | default 8087 | quote }}
+            - name: BELIEF_MODELS_DIR
+              value: /app/models
+          startupProbe:
+            # Loading the pgmpy model can exceed the liveness window on a cold or
+            # loaded kind node; gate liveness+readiness behind startup so the
+            # model has up to ~5min to load before kubelet SIGKILLs it. The tight
+            # liveness (5 + 3*10 = 35s) was killing it mid-load, looping it out of
+            # the daemon Service endpoints (deploy#971-adjacent).
+            httpGet:
+              path: /healthz
+              port: belief
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: belief
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            # /healthz returns 200 only once a model artifact is loaded, so it
+            # doubles as readiness (the daemon should not POST /score before a
+            # model is available).
+            httpGet:
+              path: /healthz
+              port: belief
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.gibson.belief.resources | nindent 12 }}
+          securityContext:
+            # The image bakes its models read-only; nothing writes to disk at
+            # runtime, so the root FS is read-only like the daemon container.
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop:
+                - ALL
+      {{- /* Spec 2 R18: priorityClassName via shared helper. */}}
+      {{- $pcn := include "gibson.priorityClassName" (dict "component" "gibson") }}
+      {{- if $pcn }}
+      priorityClassName: {{ $pcn }}
+      {{- end }}
+      {{- /* Spec 3 §3 R8 — HA topology spread + anti-affinity. */}}
+      {{- include "gibson.spread" (dict "ctx" . "component" "gibson") | nindent 6 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "gibson.fullname" . }}-config
+        # Spec 3 R4 — writable /tmp for binaries that need a scratch dir.
+        - name: tmp
+          emptyDir: {}
+        # Spec: canonical-service-identity Req 8.2 — kubelet projects each
+        # ConfigMap key as a file under the mount path. The Go resolver
+        # at internal/auth/identityresolver reads the directory and treats
+        # filenames as readable SA names, contents as the numeric sub.
+        # Impersonation signing keys — Secret mounted at
+        # /etc/gibson/impersonation/. Kubelet projects each key in the
+        # Secret as a file named after the key. The daemon reads from
+        # this mount (file path NUL-transparent, env var truncates).
+        # Spec: deploy#315 / cross-chart-check class 16 (deploy#182).
+        - name: impersonation-key
+          secret:
+            secretName: {{ include "gibson.impersonationSecret.name" . }}
+            defaultMode: 0o400
+        {{- /*
+          Capability-Grant JWT signing key (GHSA-3957, gibson#1288).
+
+          optional: true is LOAD-BEARING, not a hedge. The daemon's fallback is
+          deliberately non-fatal: with no current.kid at the mount point the
+          Minter gets ErrSigningKeyNotProvisioned, derives from the master KEK
+          as it always did, and logs a warning naming
+          GIBSON_CGJWT_SIGNING_KEY_DIR. A cluster that takes this chart before
+          its secrets backend has the entry keeps working. Drop `optional` and
+          that same cluster wedges every daemon Pod in ContainerCreating.
+
+          VOLUME-level optional, never env-level (one-code-path #203).
+        */}}
+        - name: cg-signing-key
+          secret:
+            secretName: {{ include "gibson.cgSigningKeySecret.name" . }}
+            defaultMode: 0o400
+            optional: true
+        - name: sa-identity-map
+          configMap:
+            name: gibson-sa-identity-map
+            # allowlist (one-code-path #203): VOLUME-level optional, not
+            # env-level. Slice #203 scope is env `valueFrom.*Ref` only;
+            # this ConfigMap is populated by the post-install Zitadel
+            # bootstrap Job and the identity-resolver returns ("", false)
+            # for unknown subs, so a missing-at-startup mount is the
+            # documented graceful path (Spec canonical-service-identity
+            # Req 8.2).
+            optional: true
+            defaultMode: 0444
+        # the daemon reads the reserved-names denylist from
+        # /etc/gibson/reserved-names/ rather than calling the K8s API.
+        # kubelet projects each ConfigMap key as a file; the provider
+        # watches the directory with fsnotify so kubelet's in-place
+        # symlink-swap update reloads the denylist without a daemon
+        # restart. The ConfigMap is rendered at
+        # templates/gibson/reserved-names-configmap.yaml.
+        - name: reserved-names
+          configMap:
+            name: gibson-reserved-names
+            optional: true
+            defaultMode: 0444
+        # the daemon reads the master KEK from a file mounted
+        # from the gibson-master-key Secret. The Secret is provisioned
+        # by the platform-operator's KEK-init flow; values overlays may
+        # point at a different Secret name (set gibson.config.security
+        # .key_provider.file.path + override this volume in an overlay).
+        # The file KeyProvider validates that the file is exactly 32
+        # bytes; defaultMode 0400 keeps it readable only by the pod UID.
+        - name: master-kek
+          secret:
+            secretName: gibson-master-key
+            defaultMode: 0o400
+        {{- /* deploy#1106 — Setec client mTLS keypair + the CA that signed
+               the frontend's server cert. Materialised in this namespace by
+               templates/setec/daemon-client-secret.yaml (cert-manager mints
+               it next to the frontend; ESO mirrors it here). NOT optional:
+               a daemon that boots without it fails config validation, which
+               is the correct direction — SANDBOXED dispatch silently
+               falling back to in-process execution is the outcome
+               exists to prevent. */}}
+        {{- if .Values.gibson.sandbox.enabled }}
+        - name: setec-client-tls
+          secret:
+            secretName: {{ include "gibson.setecClientSecretName" . | quote }}
+            defaultMode: 0o400
+        {{- end }}
+        {{- /* Spec security-hardening R20 — `gibson-daemon-metrics-tls`
+               Secret backs the daemon's :9090 mTLS metrics listener. The
+               Certificate is rendered in templates/cert-manager/component-
+               certificates.yaml. deploy#201: cert-manager is REQUIRED. */}}
+        - name: metrics-tls
+          secret:
+            secretName: gibson-daemon-metrics-tls
+            defaultMode: 0440
+        {{- if not .Values.gibson.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+        {{- /* deploy#201: SPIRE is REQUIRED — CSI socket volume is unconditional. */}}
+        # SPIRE Workload API socket via csi.spiffe.io CSI driver — see spec
+        # kind-dashboard-bringup-e2e (D2).
+        - name: spire-agent-socket
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        {{- with .Values.gibson.authz.rpcRegistry }}
+        {{- if .override }}
+        - name: rpc-registry
+          configMap:
+            name: {{ include "gibson.fullname" $ }}-authz-rpc-registry
+            defaultMode: 0444
+        {{- end }}
+        {{- end }}
+        # Provider catalogue ConfigMap (spec: gibson#296).
+        # Mounted at /etc/gibson-providers/provider-catalogue.yaml (outside /etc/gibson)
+        # so the daemon can hot-reload the model list via GIBSON_PROVIDERS_CATALOGUE_PATH.
+        - name: provider-catalogue
+          configMap:
+            name: {{ include "gibson.fullname" . }}-provider-catalogue
+            defaultMode: 0444
+        {{- /* identity-hmac volume removed — Spec 3 R14. SPIFFE-mTLS replaces HMAC. */}}
+        {{- if eq (include "gibson.envoyEdge.caRequired" .) "true" }}
+        - name: envoy-ca
+          secret:
+            secretName: {{ required "envoy.tls.secretName is REQUIRED — names the Secret consumers mount to trust the Envoy edge CA. The cert-manager Certificate `gibson-envoy-tls` provisions this Secret; never empty. See deploy#200." .Values.envoy.tls.secretName }}
+            defaultMode: 0444
+        {{- end }}
+        # CA that signs the OpenFGA HTTP-listener cert (deploy#1382). Only
+        # ca.crt is projected — the daemon must never hold the listener's
+        # private key.
+        - name: fga-http-ca
+          secret:
+            secretName: gibson-openfga-http-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 0444
+        {{- with .Values.gibson.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+  volumeClaimTemplates:
+    {{- if .Values.gibson.persistence.enabled }}
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.gibson.persistence.storageClass }}
+        storageClassName: {{ .Values.gibson.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.gibson.persistence.size }}
+    {{- end }}
+{{/*
+  ClusterSPIFFEID for the daemon (spiffe://<td>/platform/daemon) is rendered
+  centrally in templates/spire-server/clusterspiffeids.yaml (Phase H/8.1).
+*/}}

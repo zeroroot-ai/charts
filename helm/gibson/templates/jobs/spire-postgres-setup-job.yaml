@@ -1,0 +1,67 @@
+{{- /* CNPG-exec setup/migration Job. Renders on every profile: the umbrella's own Cluster is the platform Postgres everywhere (deploy#1730). */ -}}
+{{/* deploy#788: bringup Jobs + RBAC folded from gitops apps/manifests. Jobs self-wait for readiness (CNPG primary + ESO credential Secret). */}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spire-postgres-setup
+  namespace: gibson
+  annotations:
+    # gitops#297: this role-creating job MUST run BEFORE anything that logs in
+    # with those roles — notably the zitadel-init Sync hook at wave -4 and every
+    # DB-consuming service. As a post-install/PostSync hook it deadlocked:
+    # consumers (Sync) waited for roles this job had not yet created, so the Sync
+    # phase never completed and the PostSync phase (this job) never ran. Run it
+    # as a Sync hook at wave -6 instead — after the ESO credential Secrets
+    # (Sync-phase, wave -8; PreSync would deadlock waiting on a Secret its own
+    # phase hasn't created yet) and before zitadel-init (-4).
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "-6"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    # Helm-native (non-Argo) installs keep an early hook so role creation still
+    # precedes the consumers; ArgoCD honours the argocd.* annotations above.
+    # post-install, NOT pre-install (deploy#1627). This Job blocks on two
+    # MAIN-PHASE resources: Cluster.status.currentPrimary for platform-postgres,
+    # and the ESO-materialised credentials Secret. Helm runs pre-install hooks
+    # to completion BEFORE it applies any main-phase manifest, so as a
+    # pre-install hook this waited for resources the same release had not
+    # created yet and hung until --timeout, reporting only "failed pre-install:
+    # timed out waiting for the condition".
+    #
+    # Argo is unaffected: the argocd.argoproj.io/hook annotation above is what
+    # Argo honours, and sync-waves order hooks and ordinary resources on one
+    # axis, which is why this was only ever wrong on the Helm-native path.
+    # The hook-weight is unchanged, so the order among these Jobs is preserved.
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '-6'
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        # deploy#1365: pod-template label so the bringup-jobs
+        # NetworkPolicy can select this Job's pods under the
+        # gibson namespace default-deny (unlabelled = severed).
+        app.kubernetes.io/component: postgres-exec
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: postgres-exec
+      containers:
+      - name: setup
+        image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+        env:
+        - name: ROLE
+          value: spire
+        - name: DB
+          value: spire
+        - name: ROLE_OPTS
+          value: LOGIN
+        - name: SECRET_NAME
+          value: spire-postgres-credentials
+        command:
+        - sh
+        - -ec
+        args:
+        - "echo \"[$ROLE] waiting for platform-postgres primary...\"\n# Source the primary instance name from CNPG's authoritative\n# Cluster.status.currentPrimary field instead of pod labels.\n# The `role=primary` label is applied by CNPG AFTER promotion,\n# which races this hook at sync-wave -5. Cluster status is set\n# by CNPG the moment the primary is elected. deploy#322\n# finding 9.\nPOD=\"\"\nfor i in $(seq 1 90); do\n  P=$(kubectl -n gibson get cluster.postgresql.cnpg.io platform-postgres \\\n      -o jsonpath='{.status.currentPrimary}' 2>/dev/null || true)\n  if [ -n \"$P\" ] && \\\n     kubectl -n gibson get pod \"$P\" \\\n      -o jsonpath='{.status.phase}' 2>/dev/null | grep -q Running; then\n    POD=$P\n    break\n  fi\n  sleep 2\ndone\nif [ -z \"$POD\" ]; then\n  echo \"ERROR: platform-postgres has no Running currentPrimary after 180s \u2014 Argo will retry\"\n  exit 1\nfi\necho \"[$ROLE] primary pod: $POD\"\n\necho \"[$ROLE] waiting for Secret $SECRET_NAME...\"\nuntil PW=$(kubectl -n gibson get secret \"$SECRET_NAME\" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d) && [ -n \"$PW\" ]; do sleep 2; done\n\nEXEC=\"kubectl exec -n gibson $POD -c postgres --\"\nEXEC_I=\"kubectl exec -i -n gibson $POD -c postgres --\"\n\ncat <<SQL | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1\nDO \\$\\$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '$ROLE') THEN\n    EXECUTE 'CREATE ROLE \"' || '$ROLE' || '\" WITH $ROLE_OPTS';\n  END IF;\nEND\n\\$\\$;\nSQL\n\nif ! $EXEC psql -U postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='$DB'\" | grep -q '^1$'; then\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"CREATE DATABASE \\\"$DB\\\" OWNER \\\"$ROLE\\\";\"\nelse\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"ALTER DATABASE \\\"$DB\\\" OWNER TO \\\"$ROLE\\\";\"\nfi\n\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"GRANT ALL PRIVILEGES ON DATABASE \\\"$DB\\\" TO \\\"$ROLE\\\";\"\nprintf \"%s\\n\" \"ALTER ROLE \\\"$ROLE\\\" WITH PASSWORD '$PW';\" | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1 -d postgres\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d \"$DB\" -c \"ALTER SCHEMA public OWNER TO \\\"$ROLE\\\"; GRANT ALL ON SCHEMA public TO \\\"$ROLE\\\";\"\n\necho \"[$ROLE] setup complete\"\n"
+

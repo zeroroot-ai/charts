@@ -1,0 +1,88 @@
+{{- /*
+  tenant-operator is structural infrastructure (one-code-path /
+  deploy#188). The previous outer `.Values.tenantOperator.enabled`
+  gate has been deleted; the inner `metrics.enabled` sub-feature flag
+  is preserved (legitimate sub-feature toggle).
+*/}}
+{{- if and .Values.tenantOperator.metrics.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-tenant-operator-rules
+  namespace: {{ .Values.tenantOperator.namespace | default .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: tenant-operator
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: tenant-operator
+spec:
+  groups:
+    - name: tenant-operator.orphan-gc
+      rules:
+        - alert: TenantOperatorOrphansAccumulating
+          expr: increase(gibson_tenant_operator_orphan_finalizers_stripped_total[1h]) > 5
+          for: 10m
+          labels:
+            severity: warning
+            component: tenant-operator
+          annotations:
+            summary: "Orphan CR finalizer-strip rate elevated on tenant-operator"
+            description: |
+              The orphan-reaper is stripping more than 5 finalizers/hour. A
+              single strip is expected after test teardown or an operator
+              restart mid-saga; a sustained rate indicates an upstream
+              problem (saga-path failures, or clients creating child CRs
+              without owner references and deleting parents quickly).
+              Runbook: docs/runbooks/stuck-terminating-namespaces.md
+        - alert: TenantOperatorStuckTerminatingNamespaces
+          expr: gibson_tenant_operator_stuck_terminating_namespaces > 0
+          for: 15m
+          labels:
+            severity: warning
+            component: tenant-operator
+          annotations:
+            summary: "Tenant namespace(s) stuck in Terminating past reaper grace period"
+            description: |
+              At least one tenant-* namespace has been Terminating longer
+              than the reaper grace period. The reaper should be clearing
+              orphan finalizers; if this alert fires, either the reaper is
+              disabled or the stuck resources have unknown finalizers that
+              require operator intervention.
+              Runbook: docs/runbooks/stuck-terminating-namespaces.md
+    - name: tenant-operator.daemon-calls
+      rules:
+        - alert: TenantOperatorDaemonCallsFailing
+          expr: increase(gibson_tenant_operator_daemon_call_errors_total[10m]) > 3
+          for: 5m
+          labels:
+            severity: critical
+            component: tenant-operator
+          annotations:
+            summary: "tenant-operator -> daemon gRPC calls failing repeatedly"
+            description: |
+              The tenant-operator's daemon client (SPIFFE-mTLS gRPC,
+              gibson.daemon.operator.v1.DaemonOperatorService) has returned
+              errors repeatedly over the last 10m. The admin-ops drain calls
+              the daemon every ~15s, so a sustained failure means tenant
+              admin CRUD / pending-provisioning is stalled and new signups
+              can hang in the "no access to workspace" loop.
+              Check the {method,outcome} labels: outcome="permission_denied"
+              or "unauthenticated" is an authz/SPIFFE-allowlist regression
+              (the gibson#1043 class); outcome="unavailable" /
+              "deadline_exceeded" is a daemon reachability problem.
+        - alert: TenantOperatorDaemonCallsDenied
+          expr: increase(gibson_tenant_operator_daemon_call_errors_total{outcome=~"permission_denied|unauthenticated"}[10m]) > 0
+          for: 5m
+          labels:
+            severity: critical
+            component: tenant-operator
+          annotations:
+            summary: "daemon is DENYING tenant-operator calls (authz/SPIFFE regression)"
+            description: |
+              The daemon returned permission_denied/unauthenticated to the
+              tenant-operator. This is the gibson#1043 signature: a
+              SPIFFE-allowlist or FGA-tuple omission silently blocking the
+              operator->daemon path. It will not self-heal — the deny is
+              deterministic. Inspect the daemon's spiffePlatformBypass
+              allow-list and the platform_operator FGA tuples for the
+              operator service account.
+{{- end }}

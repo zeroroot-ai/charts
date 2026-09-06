@@ -1,0 +1,24 @@
+{{- /*
+ratelimit Service (deploy#1657). ClusterIP only: the edge Envoy's
+ratelimit_grpc cluster dials gibson-ratelimit:<grpc> over SPIFFE mTLS, which
+the pod's Envoy sidecar terminates. Never exposed beyond the namespace.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: gibson-ratelimit
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ratelimit
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "gibson.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: ratelimit
+  ports:
+    - name: grpc
+      port: {{ .Values.ratelimit.ports.grpc | default 8081 }}
+      targetPort: grpc
+      protocol: TCP
+      appProtocol: grpc

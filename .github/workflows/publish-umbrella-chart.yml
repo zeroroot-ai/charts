@@ -1,0 +1,191 @@
+# Publish the Gibson umbrella chart as a versioned OCI Helm artifact (ADR-0004,
+# deploy#804). A chart version IS the deployable: gitops envs/<env> overlays pin
+# a chartVersion and promote by bumping it.
+#
+# Fires on a release (the release-please tag) and on manual dispatch. The chart
+# version tracks the repo release version.
+#
+# Digest-pinning of first-party images happens AT PACKAGE TIME (deploy#1402,
+# the second half of ADR-0004). The "resolve first-party image digests" step
+# below re-resolves every first-party pin against GHCR immediately before
+# `helm package`, and fails the publish if any of them cannot be resolved, so
+# a chart version is an exact deployable rather than one that was exact
+# whenever a human last re-ran `gh api .../versions` by hand.
+#
+# This matters most for the pins that name a MUTABLE ref (`main@sha256:…`,
+# `latest@sha256:…`): the committed digest and what the tag means today drift
+# apart silently. When this step landed, 7 of the 18 first-party pins were
+# already stale on main. Eliminating those mutable refs is deploy#1403.
+#
+# Chart signing (deploy#1194): the chart itself was published unsigned on a
+# mutable OCI tag, which defeats every first-party image digest pin it
+# carries — anyone who can write to the registry can replace the chart and
+# the pinning underneath buys nothing. Every publish is now cosign-signed
+# keyless (GitHub Actions OIDC identity, no key to rotate/store) against the
+# chart's content digest, and the digest is verified in-job immediately
+# after signing. See docs/security/chart-signing.md for the consumption-side
+# gap this does NOT close on its own.
+name: publish-umbrella-chart
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Chart version to publish (e.g. 0.105.0)"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write  # OIDC — cosign keyless signing (sigstore/cosign-installer)
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5
+        with:
+          version: v3.16.2
+
+      - name: Resolve chart version
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "release" ]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v="${{ github.event.inputs.version }}"
+          fi
+          [ -n "$v" ] || { echo "::error::empty version"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Publishing umbrella chart version $v"
+
+      - name: helm registry login (ghcr)
+        # GHCR_PUBLISH_PAT, not GITHUB_TOKEN. The charts/* packages were first
+        # published from the deploy repo, so they are owned by it; a repo-scoped
+        # GITHUB_TOKEN from THIS repo gets 403 Forbidden on the blob upload.
+        # An org-scoped write:packages token can push, which is also what
+        # re-anchors the package to this repository.
+        run: echo "${{ secrets.GHCR_PUBLISH_PAT }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac  # v3
+        with:
+          cosign-release: "v2.4.1"
+
+      - name: cosign login (ghcr)
+        # `helm registry login` writes to helm's own credential store
+        # ($HELM_REGISTRY_CONFIG), not the go-containerregistry keychain
+        # cosign reads (~/.docker/config.json). Without this, `cosign sign`
+        # below fails to auth against ghcr.io even though the helm push
+        # above succeeded — the two tools do not share credentials.
+        run: echo "${{ secrets.GHCR_PUBLISH_PAT }}" | cosign login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build subchart dependencies (leaf charts first, then umbrella)
+        # `helm dependency update` always rebuilds file:// deps from source.
+        # `helm dependency build` only re-uses cached .tgz — it silently ships
+        # stale subchart code if a committed/cached .tgz matches the version
+        # constraint (deploy#1001). update guarantees freshness.
+        run: |
+          helm dependency update helm/gibson-crds
+          helm dependency update helm/gibson-operators
+          helm dependency update helm/gibson-workloads
+          helm dependency update helm/gibson
+          helm dependency update helm/gibson-velero
+
+      - name: Resolve first-party image digests (ADR-0004, deploy#1402)
+        # Runs AFTER dependency build (so the subchart values that ship are the
+        # ones rewritten) and BEFORE package. Writes into the checkout only —
+        # nothing is pushed back to main, so this cannot smuggle an unreviewed
+        # image bump into the repo; it only decides what THIS chart version
+        # contains.
+        #
+        # --require fails the publish when a first-party image cannot be
+        # resolved, rather than packaging a chart around a stale digest and
+        # calling it exact.
+        #
+        # GHCR_RO_PAT, not GITHUB_TOKEN: the pins name packages owned by
+        # OTHER repos (gibson, dashboard, billing, both operators, …).
+        # GITHUB_TOKEN is repo-scoped — it reads only packages that grant
+        # this repo access — so the v0.113.0 release run 403'd on every
+        # cross-repo manifest HEAD and failed the publish (the #1435
+        # verification ran with a personal PAT, which masked this).
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_RO_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GHCR_TOKEN}" ]; then
+            echo "::error::GHCR_RO_PAT is not set on this repository — the resolver needs an org-wide read:packages token (GITHUB_TOKEN cannot read other repos' packages)."
+            exit 1
+          fi
+          python3 scripts/bump-image-digest.py --selftest
+          python3 scripts/bump-image-digest.py --resolve-all --require | tee /tmp/resolve.log
+          {
+            echo "### First-party image digests resolved at package time"
+            echo
+            echo '```'
+            cat /tmp/resolve.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Package, push, sign and verify every published chart
+        # The platform is THREE releases, not one (deploy#1777). gibson-crds is
+        # a sibling release because Helm cannot install a CRD and its CR in one
+        # release (CONTEXT.md § Umbrella chart); gibson-velero is a second
+        # release in its own namespace (docs/bringup.md § The stages). Neither
+        # is a dependency of the umbrella, so neither arrives with it — and a
+        # cluster off the checkout could install none of them.
+        #
+        # One loop, not three copies of the same block (ADR-0027). Every chart
+        # is packaged at the same version, pushed, signed by the digest that
+        # push reported, signature-verified in-job, then pulled back and
+        # rendered. Any failure fails the publish for all three: a partial
+        # publish is what left two charts missing in the first place.
+        run: |
+          set -euo pipefail
+          ver="${{ steps.ver.outputs.version }}"
+          for chart in gibson gibson-crds gibson-velero; do
+            echo "::group::$chart"
+            helm package "helm/$chart" --version "$ver" --app-version "$ver"
+
+            helm push "$chart-$ver.tgz" oci://ghcr.io/zeroroot-ai/charts 2>&1 | tee /tmp/helm-push.log
+            # `helm push` prints `Digest: sha256:<64 hex>` for the manifest it
+            # just wrote. That digest — not the mutable `<chart>:<version>` tag
+            # — is what gets signed, so the signature covers exactly the bytes
+            # that were pushed.
+            digest="$(grep -oE 'sha256:[0-9a-f]{64}' /tmp/helm-push.log | tail -1)"
+            [ -n "$digest" ] || { echo "::error::could not parse chart digest from helm push output for $chart"; exit 1; }
+
+            cosign sign --yes "ghcr.io/zeroroot-ai/charts/$chart@$digest"
+
+            # Proves the signature was written and is checkable with the
+            # workflow's own OIDC identity. It does NOT prove a consumer will
+            # ever check it — see docs/security/chart-signing.md: ArgoCD has no
+            # native cosign verification for Helm OCI sources today.
+            cosign verify \
+              --certificate-identity-regexp "^https://github\.com/${{ github.repository }}/\.github/workflows/publish-umbrella-chart\.yml@" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              "ghcr.io/zeroroot-ai/charts/$chart@$digest"
+
+            mkdir -p /tmp/pulled
+            helm pull "oci://ghcr.io/zeroroot-ai/charts/$chart" --version "$ver" --destination /tmp/pulled
+            echo "✓ $chart:$ver @ $digest — pushed, signed, verified, pulls clean"
+            echo "::endgroup::"
+          done
+
+          # Only the umbrella takes values; the other two render standalone.
+          # values-vanilla is the SUPPORTED self-hosted profile and the right
+          # thing to prove a published artifact against. ci/values-staging was
+          # a SaaS profile and lives in the hosted repo now.
+          #
+          # The comment goes ABOVE the command: a comment between a trailing \
+          # and its argument breaks the continuation, and helm then runs with no
+          # values file at all.
+          helm template gibson "/tmp/pulled/gibson-$ver.tgz" \
+            -f helm/gibson/values-vanilla.yaml >/dev/null
+          helm template gibson-crds "/tmp/pulled/gibson-crds-$ver.tgz" >/dev/null
+          helm template gibson-velero "/tmp/pulled/gibson-velero-$ver.tgz" >/dev/null
+          echo "✓ all three published charts pull and render clean"
