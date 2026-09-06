@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.122.2](https://github.com/zeroroot-ai/charts/compare/v0.122.1...v0.122.2) (2026-09-06)
+
+
+### Bug Fixes
+
+* **images:** re-pin every first-party image to a build that exists ([#6](https://github.com/zeroroot-ai/charts/issues/6)) ([db6341b](https://github.com/zeroroot-ai/charts/commit/db6341b91a9ac23aa90dabf1bae35b696d8d8f39))
+
 ## [0.122.1](https://github.com/zeroroot-ai/charts/compare/v0.122.0...v0.122.1) (2026-09-06)
 
 
