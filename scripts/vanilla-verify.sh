@@ -57,8 +57,9 @@ done
 # Secrets backend, reached through one ClusterSecretStore. A store the chart
 # renders but the cluster refuses reports InvalidProviderConfig and every read
 # under it fails, so assert the store before the reads that depend on it.
+wait_store() {  # the one backend store is Ready, within WAIT_STORE_SECS
 log "asserting exactly one secret-backend ClusterSecretStore, Valid"
-store_deadline=$(( $(date +%s) + 300 ))
+store_deadline=$(( $(date +%s) + ${WAIT_STORE_SECS:-300} ))
 while :; do
   backends="$(kubectl get clustersecretstore -o \
     jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.provider.vault.server}{"\n"}{end}' \
@@ -79,6 +80,8 @@ while :; do
   fi
   sleep 5
 done
+}
+wait_store
 
 # --- 3. Every ExternalSecret resolves, in EVERY namespace -----------------
 # This is the assertion that catches the whole class of "the chart assumes a
@@ -88,12 +91,14 @@ done
 # Every namespace, not just the release namespace: the chart puts
 # ExternalSecrets in the release namespace, in gibson, and beside the setec
 # frontend, and a spot check of one namespace passes while another waits.
-log "waiting for every ExternalSecret in every namespace to sync"
 es_state() {  # NAMESPACE NAME READY, one line each
   kubectl get externalsecrets --all-namespaces -o \
     'jsonpath={range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{" "}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' \
     2>/dev/null
 }
+wait_external_secrets() {  # every ExternalSecret Ready, within WAIT_SECS of now
+log "waiting for every ExternalSecret in every namespace to sync"
+deadline=$(( $(date +%s) + WAIT_SECS ))
 while :; do
   state="$(es_state)"
   total="$(printf '%s\n' "$state" | grep -c . || true)"
@@ -115,6 +120,8 @@ while :; do
   fi
   sleep 10
 done
+}
+wait_external_secrets
 
 # --- 4. The store survives a restart ---------------------------------------
 # The point of the static seal: a killed OpenBao must come back
@@ -140,6 +147,16 @@ while :; do
   fi
   sleep 5
 done
+# An unsealed store is not yet a serving store. External Secrets validates
+# the ClusterSecretStore on its own loop and marks it NotReady while the pod
+# was gone, and every ExternalSecret under it goes NotReady until the next
+# refresh. Measured on hosted run 34138861613: 66 s after the last restart
+# the store still read Ready=False and 22/22 ExternalSecrets False, then
+# recovered within the following minute. The proof this script prints at
+# the end ("N ExternalSecrets synced") must be re-measured AFTER the
+# disruption, not carried over from before it.
+wait_store
+wait_external_secrets
 
 # --- 5. KEYRING DRILL: without the keyring the store cannot be opened -----
 # "Proven, not assumed" (deploy#1731). The seal key is a member of
@@ -194,6 +211,10 @@ if [ -n "${KEYRING_FILE:-}" ] && [ "${SKIP_RESTORE_DRILL:-}" != "1" ]; then
     exit 1
   fi
   log "the keyring opened the sealed store"
+  # Same re-convergence as after the restart drill: two more pod deletions
+  # happened here, and the summary line below claims a synced store.
+  wait_store
+  wait_external_secrets
 fi
 
 if [ -n "${KEYRING_FILE:-}" ] && [ "${SKIP_RESTORE_DRILL:-}" != "1" ]; then
