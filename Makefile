@@ -9,7 +9,7 @@
 GREEN := \033[0;32m
 NC    := \033[0m
 
-.PHONY: help chart-deps golden golden-update render-diff vanilla-up vanilla-verify \
+.PHONY: help chart-deps golden golden-update render-diff vanilla-up vanilla-verify postgres-archive-names \
         check attribution vendor-operators cloud-free
 
 help: ## Show available targets
@@ -45,6 +45,9 @@ attribution: ## Every verbatim redistribution carries its attribution
 cloud-free: ## The vanilla profile assumes no cloud
 	@./scripts/check-vanilla-is-cloud-free.sh
 
+postgres-archive-names: ## A recovered Postgres reads the old archive and writes a new one, never the same
+	@./scripts/check-postgres-archive-names.sh
+
 subchart-overrides: ## Every hand-overridden subchart image tag is a declared version link (charts#14)
 	@python3 scripts/check-subchart-overrides-declared.py --selftest >/dev/null
 	@python3 scripts/check-subchart-overrides-declared.py
@@ -60,7 +63,7 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free subchart-overrides zitadel-lockstep tool-image ## Everything that runs without a cluster
+check: golden attribution cloud-free subchart-overrides zitadel-lockstep tool-image postgres-archive-names ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 vanilla-up: ## Install onto the current kube context
