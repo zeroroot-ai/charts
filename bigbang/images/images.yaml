@@ -49,7 +49,7 @@ chart:
 
 # The gibson commit whose component catalog the dispatchTime group is
 # derived from (bigbang/images/gibson-catalog.ref).
-gibsonCatalogRef: 90608f9f87b296466de7722f66661d85c7ecb016
+gibsonCatalogRef: 4a6a39418a233d608a70bc659161fb2daa343b6c
 
 # First-party platform images (private; ELv2 + the closed billing seam).
 firstParty:
@@ -97,9 +97,6 @@ firstParty:
 # Upstream sources live in zeroroot-ai/.github :: mirror-list.yaml — mirror
 # from there when standing up a fresh pull-through mirror.
 mirrored:
-  - ref: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
-    digest: ""
-    role: "kubectl/curl/jq job + init tooling"
   - ref: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0
     digest: ""
     role: "kubectl/curl/jq job + init tooling"
@@ -223,16 +220,16 @@ dispatchTime:
     digest: ""
     role: "OSV MCP server (connector: osv)"
     hardening: "MUTABLE TAG `:latest (no tag given)` — a federal build MUST pin a digest"
-  - ref: ghcr.io/zeroroot-ai/cve-triage@sha256:42a624868aa641cd612e0c7b1e6c51275f2051a362cfc2c79d0224e504695bf6
+  - ref: ghcr.io/zeroroot-ai/cve-triage@sha256:b04345271a4abdacad1a42e517f6edfc59a8d7244420b88d0d33257d71d455f2
     digest: ""
     role: "CVE triage agent"
-  - ref: ghcr.io/zeroroot-ai/gibson-executor@sha256:1c923f35d43e63d11300b4c86e79dfe6ee572304124fa8c175bfee32cc1a5cb8
+  - ref: ghcr.io/zeroroot-ai/gibson-executor@sha256:f7885d19cb602d44ca0f62c8a7744e0d0529a2f811c2bd361c2996153e0ae470
     digest: ""
     role: "tool runner: one image hosting every CLI parser (nmap, nuclei, trivy, ...)"
-  - ref: ghcr.io/zeroroot-ai/zerocool-agent@sha256:b2c9b32f0d755b2d05ac753674903c86c86925fc6dcea4891fcd1a1eedd77eff
+  - ref: ghcr.io/zeroroot-ai/zerocool-agent@sha256:dda4e0e6a5cf05dc405703ec206d8a5cdbb2be04a97317ba92511be66aacd808
     digest: ""
     role: "zerocool sandbox agent (opencode)"
-  - ref: ghcr.io/zeroroot-ai/zerocool-claude-agent@sha256:0db3d0bea674c9697baa79b7f1082f1f515c4b0a714073130a9fec35bf9b0824
+  - ref: ghcr.io/zeroroot-ai/zerocool-claude-agent@sha256:eaeff5e38d011f3249eca714cbf6c19be09d75ae12bea15788ebfd04f7a5cf45
     digest: ""
     role: "zerocool sandbox agent (Claude Code)"
     hardening: "needs api.anthropic.com or a claude.ai login at run time; no in-perimeter option"

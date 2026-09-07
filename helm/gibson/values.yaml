@@ -68,6 +68,16 @@ global:
   # Host every first-party image resolves against, unless its own
   # `repository` names one. The pull credential follows this by default.
   registry: ghcr.io
+  # The one alpine-k8s tool image (kubectl + sh) every first-party Job, init
+  # container and gate runs, rendered by the `gibson.toolImage` helper. This
+  # is the source of the `alpine-k8s` version link in zeroroot-ai/.github
+  # version-links.yaml; the zitadel subchart's own tool image follows it
+  # through the fan-out, every first-party template reads it. The tag tracks the
+  # cluster's Kubernetes minor, not the newest release. Add a new tag to the
+  # org mirror list before moving it.
+  toolImage:
+    repository: ghcr.io/zeroroot-ai/mirror/alpine-k8s
+    tag: "1.33.0"
   domain: zeroroot.ai
   # (deploy#1733): OpenBao is the one External Secrets backend on
   # every substrate, so there is no backend selector and no key prefix.

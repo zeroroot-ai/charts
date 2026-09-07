@@ -74,9 +74,11 @@ gibson-workloads.tests.kubectlImage — kubectl-bearing image for K8s-API probes
 {{- define "gibson-workloads.tests.kubectlImage" -}}
 {{- $img := .Values.tests | default dict -}}
 {{- $imgImg := $img.kubectlImage | default dict -}}
-{{- $repo := $imgImg.repository | default "ghcr.io/zeroroot-ai/mirror/alpine-k8s" -}}
-{{- $tag := $imgImg.tag | default "1.31.0" -}}
-{{- printf "%s:%s" $repo $tag -}}
+{{- if and $imgImg.repository $imgImg.tag -}}
+{{- printf "%s:%s" ($imgImg.repository | toString) ($imgImg.tag | toString) -}}
+{{- else -}}
+{{- include "gibson.toolImage" . -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

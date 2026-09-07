@@ -131,7 +131,7 @@ spec:
       automountServiceAccountToken: false
       containers:
       - name: gate
-        image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+        image: {{ include "gibson.toolImage" . | quote }}
         # busybox ash: no `set -o pipefail` (deploy#603-605). `set -e` only.
         command:
         - sh
