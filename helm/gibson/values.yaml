@@ -832,14 +832,14 @@ zitadel:
   ingress:
     enabled: false
 
-  # Pin ZITADEL to v4.14.0. The chart's appVersion is v4.13.1; we run
-  # one app-minor ahead (forward-compatible, migrations auto-apply on
+  # Pin ZITADEL to v4.17.3. The chart's appVersion is v4.13.1; we run
+  # app-minors ahead (forward-compatible, migrations auto-apply on
   # start — verified on kind). The full chart bump to 10.x (which ships
   # v4.14.0 natively) is deferred: chart 10.0.0 replaces the login
   # client's PAT auth with X.509 cert auth (breaking, needs migration).
   # Both core and the Login-V2 container must move together.
   image:
-    tag: "v4.14.0"
+    tag: "v4.17.3"
 
   # ---- Hook-lifecycle correction (deploy#820, observed live 2026-06-11) ----
   # The zitadel chart defaults its ConfigMaps / ServiceAccounts (+ the RBAC
@@ -931,15 +931,13 @@ zitadel:
       #
       # Digest-pinned (deploy#789 digest-pin-check): zitadel-login is a
       # first-party ghcr.io/zeroroot-ai image, so the staging/prod surface
-      # requires this immutable `<tag>@sha256:<digest>` pin. On every Zitadel
-      # bump, resolve the fresh digest via
-      #   gh api /orgs/zeroroot-ai/packages/container/zitadel-login/versions
-      # AFTER the fork's image build publishes the new tag (see the
-      # zitadel-login README per-bump checklist — the NEXT_PUBLIC_LANDING_URL
-      # Actions variable must be set on that repo or the build silently
-      # produces an unbranded image).
+      # requires this immutable `v<upstream>@sha256:<digest>` pin. The fork
+      # publishes `v<upstream>` on every push to its main, and `make check`
+      # (scripts/check-zitadel-lockstep.py) fails when the tag here and
+      # zitadel.image.tag name different releases (charts#13). The digest is
+      # re-resolved from the tag at chart publish (bump-image-digest.py).
       repository: "ghcr.io/zeroroot-ai/zitadel-login"
-      tag: "sha-f41ce75@sha256:2d4b40abe36128e00ce0652d9a665b59eda1487c89bb9d6d87c3c8f06be41ecf"
+      tag: "v4.17.3@sha256:d3f69a02611878c769c26f58ebed6177181104164f0eb562a944ec172e0fef83"
     # deploy#943: declarative, Reloader-driven cache-bust. The login UI caches
     # the Zitadel label policy in process memory, so a rebrand needs a pod
     # restart. Instead of the old imperative `kubectl patch deployment` poked
