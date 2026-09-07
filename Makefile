@@ -45,10 +45,14 @@ attribution: ## Every verbatim redistribution carries its attribution
 cloud-free: ## The vanilla profile assumes no cloud
 	@./scripts/check-vanilla-is-cloud-free.sh
 
+subchart-overrides: ## Every hand-overridden subchart image tag is a declared version link (charts#14)
+	@python3 scripts/check-subchart-overrides-declared.py --selftest >/dev/null
+	@python3 scripts/check-subchart-overrides-declared.py
+
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free ## Everything that runs without a cluster
+check: golden attribution cloud-free subchart-overrides ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 vanilla-up: ## Install onto the current kube context
