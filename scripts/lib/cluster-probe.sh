@@ -236,6 +236,17 @@ edge_status() {
 # ---------------------------------------------------------------------------
 # edge_body <edge> <host> <path>  — the response body, for content assertions.
 # ---------------------------------------------------------------------------
+# edge_redirect <edge> <host> <path> — the Location a redirect points at, or
+# empty when the response is not a redirect or the transport failed.
+edge_redirect() {
+  local edge="$1" host="$2" path="$3" port="${1##*:}"
+  local -a extra=()
+  mapfile -t extra < <(_edge_curl_args "$edge" "$host")
+  curl -sk -o /dev/null -w '%{redirect_url}' --max-time 20 \
+    "${extra[@]}" \
+    "https://${host}:${port}${path}" 2>/dev/null || true
+}
+
 edge_body() {
   local edge="$1" host="$2" path="$3" port="${1##*:}"
   local -a extra=()
