@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.123.8](https://github.com/zeroroot-ai/charts/compare/v0.123.7...v0.123.8) (2026-09-07)
+
+
+### Bug Fixes
+
+* **tools:** one value for the alpine-k8s tool image across every job and init container ([#30](https://github.com/zeroroot-ai/charts/issues/30)) ([37dc01a](https://github.com/zeroroot-ai/charts/commit/37dc01a0b7cd8f1498bc9606e098e94423c3f23f))
+
 ## [0.123.7](https://github.com/zeroroot-ai/charts/compare/v0.123.6...v0.123.7) (2026-09-07)
 
 
