@@ -102,12 +102,12 @@ jobs:
           BRANCH: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- bigbang/images/images.txt bigbang/images/images.yaml; then
+          if git diff --quiet -- bigbang/images/images.txt bigbang/images/images.yaml bigbang/images/gibson-catalog.ref; then
             echo "air-gap manifest already matches this release — nothing to commit"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bigbang/images/images.txt bigbang/images/images.yaml
+          git add bigbang/images/images.txt bigbang/images/images.yaml bigbang/images/gibson-catalog.ref
           git commit -m "chore(bigbang): regenerate air-gap image manifest for this release"
           git push origin "HEAD:${BRANCH}"
