@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.123.1](https://github.com/zeroroot-ai/charts/compare/v0.123.0...v0.123.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **ci:** commit gibson-catalog.ref with the regenerated air-gap manifest ([#12](https://github.com/zeroroot-ai/charts/issues/12)) ([59aaa9e](https://github.com/zeroroot-ai/charts/commit/59aaa9eaf2faa5c0f8834053094f9fada2691c03))
+* **ci:** drop the vanilla-install exit test that cannot run here; it lives in hosted ([#10](https://github.com/zeroroot-ai/charts/issues/10)) ([d92a2a4](https://github.com/zeroroot-ai/charts/commit/d92a2a4e01c9cc378d60fdea85b2870d74d50c8a))
+
 ## [0.123.0](https://github.com/zeroroot-ai/charts/compare/v0.122.2...v0.123.0) (2026-09-06)
 
 
