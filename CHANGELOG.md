@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.123.6](https://github.com/zeroroot-ai/charts/compare/v0.123.5...v0.123.6) (2026-09-07)
+
+
+### Bug Fixes
+
+* **deps:** bump openfga to v1.19.0, wait4x to v3.7.1 and the wait-for-system-key image to alpine-k8s 1.33.0 ([#25](https://github.com/zeroroot-ai/charts/issues/25)) ([9b56623](https://github.com/zeroroot-ai/charts/commit/9b5662370549b6c154d28c76ec4de0413fd3947e))
+* **netpol:** the exit-test runner gets an isolation policy ([#27](https://github.com/zeroroot-ai/charts/issues/27)) ([ce8dfc9](https://github.com/zeroroot-ai/charts/commit/ce8dfc9baa195f07b95e8b41416af4a941ca85ef))
+
 ## [0.123.5](https://github.com/zeroroot-ai/charts/compare/v0.123.4...v0.123.5) (2026-09-07)
 
 
