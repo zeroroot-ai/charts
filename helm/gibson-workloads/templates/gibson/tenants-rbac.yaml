@@ -1,0 +1,50 @@
+{{- /*
+  Tenant read access for the gibson daemon.
+
+  The daemon's bank reconciler (the always-on agent fleet, gibson#1706,
+  owner call 2026-08-30) lists every Tenant every 30 seconds to keep the
+  right bank members running for each tenant. Tenant is a cluster-scoped
+  custom resource, so a namespaced Role cannot grant it: without this
+  ClusterRole every install logs, every 30 seconds,
+
+    bank reconcile: list tenants failed: tenants.gibson.zeroroot.ai is
+    forbidden: User "system:serviceaccount:gibson:gibson" cannot list
+    resource "tenants" in API group "gibson.zeroroot.ai" at the cluster scope
+
+  and the fleet never reconciles. Measured on a fresh kind install from
+  charts 0.123.0 on 2026-09-07 and on the runner exit test the same day.
+
+  Read-only, one resource. The daemon never writes a Tenant: the tenant
+  operator owns the saga, and the daemon only needs to know which tenants
+  exist and what phase they are in.
+*/}}
+{{- if .Values.gibson.serviceAccount.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "gibson.fullname" . }}-tenants-read
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["tenants"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["tenants/status"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "gibson.fullname" . }}-tenants-read
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "gibson.fullname" . }}-tenants-read
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gibson.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
