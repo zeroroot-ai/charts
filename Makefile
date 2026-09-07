@@ -49,10 +49,14 @@ subchart-overrides: ## Every hand-overridden subchart image tag is a declared ve
 	@python3 scripts/check-subchart-overrides-declared.py --selftest >/dev/null
 	@python3 scripts/check-subchart-overrides-declared.py
 
+zitadel-lockstep: ## The ZITADEL server tag and the login fork pin name the same release
+	@python3 scripts/check-zitadel-lockstep.py --selftest
+	@python3 scripts/check-zitadel-lockstep.py
+
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free subchart-overrides ## Everything that runs without a cluster
+check: golden attribution cloud-free subchart-overrides zitadel-lockstep ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 vanilla-up: ## Install onto the current kube context
