@@ -9134,6 +9134,7 @@ spec:
       annotations:
         kubectl.kubernetes.io/default-container: spire-agent
         checksum/config: "28aa29846f84788fee6403060720ae661a5669fea528b98f4833fc34ca4da934"
+        backup.velero.io/backup-volumes-excludes: spire-agent-admin-socket-dir,spire-agent-persistence
       labels:
         app.kubernetes.io/name: "agent"
         app.kubernetes.io/instance: "gibson"
@@ -9256,6 +9257,15 @@ spec:
         app.kubernetes.io/part-of: gibson
         app.kubernetes.io/component: connector-operator
       annotations:
+        # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
+        # snapshots every pod volume it is not told to skip. These hold a
+        # socket, a scratch dir or an init-rendered file: nothing to keep,
+        # and on restore each one becomes a PodVolumeRestore that can only
+        # finish once this pod is running. Measured 2026-09-07: 9 of 22
+        # PodVolumeRestores in a preserve backup were volumes like these.
+        # scripts/check-velero-volume-excludes.sh keeps this list equal to
+        # the pod's emptyDir and CSI-ephemeral volumes.
+        backup.velero.io/backup-volumes-excludes: "spire-agent-socket"
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
     spec:
@@ -9402,6 +9412,15 @@ spec:
         app.kubernetes.io/part-of: gibson
         app.kubernetes.io/component: platform-operator
       annotations:
+        # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
+        # snapshots every pod volume it is not told to skip. These hold a
+        # socket, a scratch dir or an init-rendered file: nothing to keep,
+        # and on restore each one becomes a PodVolumeRestore that can only
+        # finish once this pod is running. Measured 2026-09-07: 9 of 22
+        # PodVolumeRestores in a preserve backup were volumes like these.
+        # scripts/check-velero-volume-excludes.sh keeps this list equal to
+        # the pod's emptyDir and CSI-ephemeral volumes.
+        backup.velero.io/backup-volumes-excludes: "spire-agent-socket"
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
     spec:
@@ -9702,6 +9721,15 @@ spec:
         app.kubernetes.io/part-of: gibson
         app.kubernetes.io/component: tenant-operator
       annotations:
+        # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
+        # snapshots every pod volume it is not told to skip. These hold a
+        # socket, a scratch dir or an init-rendered file: nothing to keep,
+        # and on restore each one becomes a PodVolumeRestore that can only
+        # finish once this pod is running. Measured 2026-09-07: 9 of 22
+        # PodVolumeRestores in a preserve backup were volumes like these.
+        # scripts/check-velero-volume-excludes.sh keeps this list equal to
+        # the pod's emptyDir and CSI-ephemeral volumes.
+        backup.velero.io/backup-volumes-excludes: "spire-agent-socket"
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
         secret.reloader.stakater.com/reload: "gibson-stripe-credentials"
@@ -10660,6 +10688,15 @@ spec:
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: dashboard
       annotations:
+        # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
+        # snapshots every pod volume it is not told to skip. These hold a
+        # socket, a scratch dir or an init-rendered file: nothing to keep,
+        # and on restore each one becomes a PodVolumeRestore that can only
+        # finish once this pod is running. Measured 2026-09-07: 9 of 22
+        # PodVolumeRestores in a preserve backup were volumes like these.
+        # scripts/check-velero-volume-excludes.sh keeps this list equal to
+        # the pod's emptyDir and CSI-ephemeral volumes.
+        backup.velero.io/backup-volumes-excludes: "spire-agent-socket,shared-identity"
         checksum/config: 2a738ee64f3217c6773fadeb18bc0f2e84e5ae625ce562e16150150e2705a9f8
         checksum/secret: 9aa4ae9ff147fd15f4a8d9698f06375f15e4ee930a87e6f53a7351edf90b2e4a
         # Pod-roll-on-Secret-change is delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). The prior pattern
@@ -11540,6 +11577,16 @@ spec:
       app.kubernetes.io/instance: gibson
   template:
     metadata:
+      annotations:
+        # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
+        # snapshots every pod volume it is not told to skip. These hold a
+        # socket, a scratch dir or an init-rendered file: nothing to keep,
+        # and on restore each one becomes a PodVolumeRestore that can only
+        # finish once this pod is running. Measured 2026-09-07: 9 of 22
+        # PodVolumeRestores in a preserve backup were volumes like these.
+        # scripts/check-velero-volume-excludes.sh keeps this list equal to
+        # the pod's emptyDir and CSI-ephemeral volumes.
+        backup.velero.io/backup-volumes-excludes: "nginx-cache,nginx-run"
       labels:
         app.kubernetes.io/name: docs-svc
         app.kubernetes.io/instance: gibson
@@ -11656,6 +11703,15 @@ spec:
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: envoy
       annotations:
+        # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
+        # snapshots every pod volume it is not told to skip. These hold a
+        # socket, a scratch dir or an init-rendered file: nothing to keep,
+        # and on restore each one becomes a PodVolumeRestore that can only
+        # finish once this pod is running. Measured 2026-09-07: 9 of 22
+        # PodVolumeRestores in a preserve backup were volumes like these.
+        # scripts/check-velero-volume-excludes.sh keeps this list equal to
+        # the pod's emptyDir and CSI-ephemeral volumes.
+        backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
         checksum/config: 59c7267e896558291b76b258fa904ca3a5d0b07b152d2519fc73ba7fcfd69fee
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
@@ -12016,6 +12072,15 @@ spec:
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: ext-authz
       annotations:
+        # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
+        # snapshots every pod volume it is not told to skip. These hold a
+        # socket, a scratch dir or an init-rendered file: nothing to keep,
+        # and on restore each one becomes a PodVolumeRestore that can only
+        # finish once this pod is running. Measured 2026-09-07: 9 of 22
+        # PodVolumeRestores in a preserve backup were volumes like these.
+        # scripts/check-velero-volume-excludes.sh keeps this list equal to
+        # the pod's emptyDir and CSI-ephemeral volumes.
+        backup.velero.io/backup-volumes-excludes: "spire-agent-socket,tmp"
         checksum/registry: 07eb277806f305ecb287bd16a5f4cdd71c254a626973d8d2161b3dd645b3b322
         checksum/daemon-registry: ac050ffab1c4c09487c7897e9799ff8e7bd2023cf40e9c2613b1d23dd636179a
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
@@ -12419,6 +12484,15 @@ spec:
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: ratelimit
       annotations:
+        # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
+        # snapshots every pod volume it is not told to skip. These hold a
+        # socket, a scratch dir or an init-rendered file: nothing to keep,
+        # and on restore each one becomes a PodVolumeRestore that can only
+        # finish once this pod is running. Measured 2026-09-07: 9 of 22
+        # PodVolumeRestores in a preserve backup were volumes like these.
+        # scripts/check-velero-volume-excludes.sh keeps this list equal to
+        # the pod's emptyDir and CSI-ephemeral volumes.
+        backup.velero.io/backup-volumes-excludes: "spire-agent-socket,tmp"
         # A quota change is a ConfigMap change; roll the pod so ratelimit
         # re-reads it (RUNTIME_WATCH_ROOT is off: watching a projected
         # ConfigMap is racy across the kubelet's symlink swap).
@@ -12822,6 +12896,7 @@ spec:
     metadata:
       annotations:
         checksum/config: d43907d00492a1ff490d809a542ee80716850474da24ff5af9e35fb3a185214a
+        backup.velero.io/backup-volumes-excludes: certdir,nginx-tmp,spiffe-workload-api,spire-oidc-sockets
       labels:
         app.kubernetes.io/name: spiffe-oidc-discovery-provider
         app.kubernetes.io/instance: gibson
@@ -14397,6 +14472,9 @@ spec:
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: redis
       annotations:
+        # Velero fs-backup skips the ACL file an init container renders; the
+        # data claim stays in the backup. scripts/check-velero-volume-excludes.sh.
+        backup.velero.io/backup-volumes-excludes: "redis-acl"
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). The redis-stack
         # image bakes the REQUIREPASS value from $REDIS_PASSWORD into its
         # internal ACL at startup and does NOT re-read the env var when the
@@ -14562,6 +14640,15 @@ spec:
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: daemon
       annotations:
+        # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
+        # snapshots every pod volume it is not told to skip. These hold a
+        # socket, a scratch dir or an init-rendered file: nothing to keep,
+        # and on restore each one becomes a PodVolumeRestore that can only
+        # finish once this pod is running. Measured 2026-09-07: 9 of 22
+        # PodVolumeRestores in a preserve backup were volumes like these.
+        # scripts/check-velero-volume-excludes.sh keeps this list equal to
+        # the pod's emptyDir and CSI-ephemeral volumes.
+        backup.velero.io/backup-volumes-excludes: "tmp,spire-agent-socket"
         checksum/config: f5458e7f7ab4601f2fab4ea74c693b4d3b751daa8af38eab792cccd95da2d4b8
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). Consumer envFrom
         # resolution is frozen for the pod's lifetime; Reloader watches the
@@ -15516,6 +15603,7 @@ spec:
       annotations:
         "checksum/gibson-config": 851be89e2cc4ed9cd255750f1f1b0fa1efc0b30267908610b39b2ceb8388a78f
         "checksum/gibson-env": 932cad2ae59867fdde4e2aa44b726da7c5b1178ca9c1faa67b5a4919155a34cf        
+        "backup.velero.io/backup-volumes-excludes": "neo4j-plugins"
     spec:      
       affinity:
           podAntiAffinity:
@@ -15711,6 +15799,7 @@ spec:
         checksum/config2: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         checksum/config3: 967569fd565458246292b70c701e9d3834656c8ce3bfc35a15cab1d2d6ded536
         checksum/configTornjak: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+        backup.velero.io/backup-volumes-excludes: server-tmp,spire-server-socket,spire-controller-manager-tmp
       labels:
         app.kubernetes.io/name: server
         app.kubernetes.io/instance: gibson

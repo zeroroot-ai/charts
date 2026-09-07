@@ -70,6 +70,9 @@ spec:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: redis
       annotations:
+        # Velero fs-backup skips the ACL file an init container renders; the
+        # data claim stays in the backup. scripts/check-velero-volume-excludes.sh.
+        backup.velero.io/backup-volumes-excludes: "redis-acl"
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). The redis-stack
         # image bakes the REQUIREPASS value from $REDIS_PASSWORD into its
         # internal ACL at startup and does NOT re-read the env var when the
