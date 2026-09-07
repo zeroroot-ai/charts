@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.123.4](https://github.com/zeroroot-ai/charts/compare/v0.123.3...v0.123.4) (2026-09-07)
+
+
+### Bug Fixes
+
+* **verify:** re-prove the store and every ExternalSecret after the restart and keyring drills ([#22](https://github.com/zeroroot-ai/charts/issues/22)) ([4dabfea](https://github.com/zeroroot-ai/charts/commit/4dabfead6a00cd77e4b737ce8cde21439b9b0caf))
+
 ## [0.123.3](https://github.com/zeroroot-ai/charts/compare/v0.123.2...v0.123.3) (2026-09-07)
 
 
