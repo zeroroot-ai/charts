@@ -160,7 +160,12 @@ spec:
             - name: wasm
               mountPath: /wasm
         - name: render-envoy-config
-          image: "{{ .Values.envoy.initImage.repository | default "ghcr.io/zeroroot-ai/mirror/alpine-k8s" }}:{{ .Values.envoy.initImage.tag | default "1.31.0" }}"
+          {{- $init := .Values.envoy.initImage | default dict }}
+          {{- if and $init.repository $init.tag }}
+          image: {{ printf "%s:%s" ($init.repository | toString) ($init.tag | toString) | quote }}
+          {{- else }}
+          image: {{ include "gibson.toolImage" . | quote }}
+          {{- end }}
           imagePullPolicy: {{ .Values.envoy.initImage.pullPolicy | default "IfNotPresent" }}
           command: ["/bin/sh", "-c"]
           args:

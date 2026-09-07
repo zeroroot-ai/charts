@@ -160,7 +160,7 @@ spec:
         # for air-gapped operators with a different mirror. deploy#322
         # finding 4 (previous mirror image 404ed on first install).
         - name: fga-init
-          image: {{ ((((.Values.gibson).config).security).fgaInit).image | default "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0" | quote }}
+          image: {{ ((((.Values.gibson).config).security).fgaInit).image | default (include "gibson.toolImage" .) | quote }}
           imagePullPolicy: IfNotPresent
           command: ['sh', '-c']
           args:

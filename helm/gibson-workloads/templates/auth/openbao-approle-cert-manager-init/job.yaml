@@ -121,7 +121,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: wait-for-vault
-          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+          image: {{ include "gibson.toolImage" . | quote }}
           command: ['sh', '-c']
           args:
             - |
@@ -147,7 +147,7 @@ spec:
               drop: ["ALL"]
       containers:
         - name: approle-cert-manager-init
-          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+          image: {{ include "gibson.toolImage" . | quote }}
           command: ['sh', '-c']
           args:
             - |

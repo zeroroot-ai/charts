@@ -347,7 +347,7 @@ spec:
         # use. It ships curl, jq and a sane CA bundle so the K8s apiserver
         # TLS handshake works for the gibson-platform-operator-vault write.
         - name: openbao-auto-init
-          image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0"
+          image: {{ include "gibson.toolImage" . | quote }}
           imagePullPolicy: IfNotPresent
           command:
             - sh

@@ -1035,3 +1035,19 @@ tolerations:
     - protocol: TCP
       port: 53
 {{- end -}}
+
+{{/*
+gibson.toolImage — the ONE alpine-k8s tool image (kubectl + sh) that every
+first-party Job, init container and gate runs. It used to be a literal in
+thirteen templates, ten of them two minors behind the values-level pins
+(zeroroot-ai/.github#20, the alpine-k8s version link). The source of truth
+is the umbrella's `global.toolImage` (helm/gibson/values.yaml); the copy in
+helm/gibson-workloads/values.yaml is the standalone-render default and a
+declared consumer of that link, so the drift detector and the fan-out keep
+the two equal. `make check` (tool-image) fails any template that carries the
+literal again.
+*/}}
+{{- define "gibson.toolImage" -}}
+{{- $t := required "global.toolImage is required: the alpine-k8s tool image every first-party Job runs" ((.Values.global).toolImage) -}}
+{{- printf "%s:%s" (required "global.toolImage.repository is required" $t.repository) (required "global.toolImage.tag is required" ($t.tag | toString)) -}}
+{{- end -}}

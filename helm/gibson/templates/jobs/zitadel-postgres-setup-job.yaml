@@ -49,7 +49,7 @@ spec:
       serviceAccountName: postgres-exec
       containers:
       - name: setup
-        image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+        image: {{ include "gibson.toolImage" . | quote }}
         env:
         - name: ROLE
           value: zitadel

@@ -16,6 +16,9 @@
 # Global Configuration
 # -----------------------------------------------------------------------------
 global:
+  # `global.toolImage` (the alpine-k8s tool image) comes from the umbrella,
+  # helm/gibson/values.yaml, and has no copy here on purpose: a standalone
+  # render of this chart must set it.
   # (deploy#1733): OpenBao is the one External Secrets backend, so
   # `secretBackend` and `secretPrefix` are DELETED. Setting either fails the
   # render (gibson.assertSecretKnobsDeleted).
@@ -2296,9 +2299,9 @@ envoy:
   # `sh` and `sed` are required — alpine/k8s is reused here because the
   # chart already pulls it for kubectl-bearing probes (see
   # tests.kubectlImage). Override in air-gapped overlays.
+  # Unset repository/tag mean the shared tool image (`global.toolImage`,
+  # helm/gibson/values.yaml); set both to override in an air-gapped overlay.
   initImage:
-    repository: "ghcr.io/zeroroot-ai/mirror/alpine-k8s"
-    tag: "1.31.0"
     pullPolicy: IfNotPresent
   replicas: 2
   logLevel: info
@@ -4963,9 +4966,9 @@ tests:
   # kubectl-bearing image for Secret / ConfigMap inspection probes. The
   # alpine/k8s image ships curl + jq + openssl + kubectl in a single
   # image, so we reuse it for the FGA/Zitadel/Envoy/bootstrap-secret pods.
-  kubectlImage:
-    repository: "ghcr.io/zeroroot-ai/mirror/alpine-k8s"
-    tag: "1.31.0"
+  # Unset repository/tag mean the shared tool image (`global.toolImage`,
+  # helm/gibson/values.yaml); set both to override in an air-gapped overlay.
+  kubectlImage: {}
 
   # Bootstrap-Secret / ConfigMap names that the helm-test pods assert
   # exist + are non-empty. Defaults match the gibson-operators chart's
