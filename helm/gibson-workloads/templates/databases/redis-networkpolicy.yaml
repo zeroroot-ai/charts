@@ -65,6 +65,12 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: redis-backup
+        {{- if (.Values.gibson.e2eRunner).enabled }}
+        # exit-test runner (TEST PROFILES ONLY, same flag as e2e-runner/*)
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: e2e-runner
+        {{- end }}
       ports:
         - protocol: TCP
           port: 6379
