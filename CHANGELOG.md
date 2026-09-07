@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.123.3](https://github.com/zeroroot-ai/charts/compare/v0.123.2...v0.123.3) (2026-09-07)
+
+
+### Bug Fixes
+
+* **verify:** the seam suite asserts the edge reset for www and probes signup through the dashboard ([#18](https://github.com/zeroroot-ai/charts/issues/18)) ([f6d1724](https://github.com/zeroroot-ai/charts/commit/f6d172477da86a4471a31adb638a17e31b6cd296))
+
 ## [0.123.2](https://github.com/zeroroot-ai/charts/compare/v0.123.1...v0.123.2) (2026-09-07)
 
 
