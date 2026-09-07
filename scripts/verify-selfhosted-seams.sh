@@ -37,8 +37,6 @@
 #   EDGE_ADDR      override derived edge <ip>:<port> (default: from the Envoy Service)
 #   FIRST_TENANT       operator-seeded first tenant slug   (default: the one seeded Tenant CR)
 #   FIRST_ADMIN_SECRET first-admin credential Secret name  (default: gibson-first-admin)
-#   GRPCURL_IMAGE  (default: fullstorydev/grpcurl:v1.9.1-alpine)
-#
 # Exit: 0 all assertions passed · 1 an assertion failed · 2 preflight failed
 #
 # Preflight failure is exit 2 and is NOT a pass.
@@ -73,7 +71,6 @@ if [ -z "${FIRST_TENANT:-}" ]; then
 fi
 [ -n "${FIRST_TENANT:-}" ] || FIRST_TENANT="default"
 FIRST_ADMIN_SECRET="${FIRST_ADMIN_SECRET:-gibson-first-admin}"
-GRPCURL_IMAGE="${GRPCURL_IMAGE:-fullstorydev/grpcurl:v1.9.1-alpine}"
 
 WWW_HOST="www.${DOMAIN}"
 DOCS_HOST="docs.${DOMAIN}"
@@ -136,78 +133,94 @@ done
 step "www is not served by this cluster"
 # ---------------------------------------------------------------------------
 # The marketing site is an off-cluster surface (deploy ADR-0009): no chart
-# deploys it in either audience, and the www virtual_host has been removed from
-# the edge entirely.
+# deploys it in either audience, and the edge has no filter chain for the www
+# host at all. The listener matches by SNI (files/envoy/envoy.yaml: api., then
+# app./apex/docs. as one public chain) and there is no default chain, so a
+# handshake for www.<domain> matches nothing and Envoy closes the connection.
+# curl reports that as 000.
 #
-# The assertion therefore INVERTED. It used to be 503 — vhost present, no
-# endpoints. A 503 now would mean the vhost came back, which is the regression
-# this guards: a cluster claiming www.<domain> takes the hostname from the CDN
-# and black-holes the public marketing site. With no vhost, the edge matches no
-# virtual_host and answers 404.
+# The assertion is therefore the RESET, and it is meaningful only when the app
+# host on the same edge answered a moment ago (ROOT_CODE above): then 000 on
+# www is the SNI refusal, not an unreachable edge. Any HTTP status on www
+# means a chain has started claiming the host — 404 from a catch-all, 503 from
+# a vhost with no endpoints, 200 from a marketing surface — and every one of
+# them is the regression this guards: a cluster that terminates TLS for
+# www.<domain> takes the hostname from the CDN (owner call 2026-09-07).
 WWW_CODE="$(edge_status "$EDGE" "$WWW_HOST" "/")"
-case "$WWW_CODE" in
-  404)
-    pass "GET https://${WWW_HOST}/ -> 404 (no www vhost — the marketing site is off-cluster)"
+case "$ROOT_CODE:$WWW_CODE" in
+  000:*)
+    fail "GET https://${WWW_HOST}/ cannot be judged: the app host answered 000 too, so the edge itself is unreachable"
     ;;
-  503)
-    fail "GET https://${WWW_HOST}/ -> 503 — a www vhost has returned to the edge. Remove it: this cluster must not claim www.<domain> (ADR-0009)."
+  *:000)
+    pass "GET https://${WWW_HOST}/ -> connection closed (no www filter chain on the edge; the marketing site is off-cluster)"
     ;;
-  200)
+  *:200)
     fail "GET https://${WWW_HOST}/ -> 200 — this cluster is serving a marketing surface it must not own"
     ;;
+  *:503)
+    fail "GET https://${WWW_HOST}/ -> 503 — a www vhost has returned to the edge. Remove it: this cluster must not claim www.<domain> (ADR-0009)."
+    ;;
   *)
-    fail "GET https://${WWW_HOST}/ -> ${WWW_CODE} (expected 404; 000 means the edge itself is unreachable, which is a different defect)"
+    fail "GET https://${WWW_HOST}/ -> ${WWW_CODE} — the edge terminates TLS for www.<domain>; it must have no chain for that host (ADR-0009)"
     ;;
 esac
 
 # ---------------------------------------------------------------------------
 step "Signup seam coherence"
 # ---------------------------------------------------------------------------
-SELF_SERVE="$(kubectl -n "$NAMESPACE" get statefulset,deploy -o json 2>/dev/null \
-  | grep -o '"name":"SIGNUP_SELF_SERVE","value":"[^"]*"' \
-  | head -1 | sed 's/.*"value":"\([^"]*\)"/\1/' || true)"
+# The deployed value, read with jsonpath. The first version grepped the JSON
+# for "name":"SIGNUP_SELF_SERVE","value":"…" and kubectl pretty-prints with
+# spaces, so it never matched, read "absent", and asserted the wrong branch
+# on every install (measured 2026-09-07 on a cluster that carried
+# SIGNUP_SELF_SERVE=true on the dashboard).
+SELF_SERVE="$(kubectl -n "$NAMESPACE" get deploy gibson-dashboard \
+  -o jsonpath='{.spec.template.spec.containers[*].env[?(@.name=="SIGNUP_SELF_SERVE")].value}' 2>/dev/null | awk '{print $1}')"
 
 if [ -z "$SELF_SERVE" ]; then
   SELF_SERVE="false"
-  info "SIGNUP_SELF_SERVE is absent from every workload -> the seam's fail-safe (admin-only) is active"
+  info "SIGNUP_SELF_SERVE is absent from the dashboard -> the seam's fail-safe (closed registration) is active"
 else
-  info "SIGNUP_SELF_SERVE=${SELF_SERVE} on the deployed workloads"
+  info "SIGNUP_SELF_SERVE=${SELF_SERVE} on the dashboard"
 fi
 
-# The probe pod runs IN the cluster, so it dials the Envoy edge Service by
-# DNS — never $EDGE, which is where the OPERATOR reaches the edge from
-# outside (with EDGE_ADDR=127.0.0.1:443 the pod would dial its own loopback
-# and read the refusal as a product failure — deploy#1766, run 33609089563).
-IN_CLUSTER_EDGE="gibson-envoy.${NAMESPACE}.svc.cluster.local:443"
-API_HOST_PORT="api.${DOMAIN} at ${IN_CLUSTER_EDGE}"
-# NOTE: this script runs under `set -uo pipefail` WITHOUT -e, deliberately, so a
-# failing probe increments the counter instead of aborting the suite (the
-# verify-profile.sh convention). Do not add a `set -e` around these probes —
-# cutover-smoke.sh needs the `set +e`/`set -e` dance only because it runs with
-# errexit on. Here errexit is already off and `set -e` would silently change the
-# failure semantics of everything after this point.
-SIGNUP_OUT="$(kubectl -n "$NAMESPACE" run "signup-seam-probe-$$" \
-  --rm -i --restart=Never --quiet --timeout=90s \
-  --image="$GRPCURL_IMAGE" --command -- \
-  /bin/grpcurl -insecure -d '{"email":"seam-probe@invalid.test","tenant_slug":"seam-probe"}' \
-  -authority "api.${DOMAIN}" \
-  "$IN_CLUSTER_EDGE" gibson.signup.v1.SignupService/Signup 2>&1)"
-SIGNUP_RC=$?
-
-if [ "$SIGNUP_RC" -eq 0 ] && printf '%s' "$SIGNUP_OUT" | grep -qi 'unable to\|could not\|no such host\|connection refused'; then
-  fail "SignupService probe could not reach the daemon (${API_HOST_PORT}): ${SIGNUP_OUT}"
-elif printf '%s' "$SIGNUP_OUT" | grep -qi 'permissiondenied\|permission denied'; then
-  if [ "$SELF_SERVE" = "true" ]; then
-    fail "SignupService returned PermissionDenied while SIGNUP_SELF_SERVE=true — the seam and the deployed config disagree"
-  else
-    pass "SignupService returns PermissionDenied with self-serve off (admin-only fail-safe active)"
-  fi
+# The seam is asserted through the product surface, not the RPC. The daemon's
+# gRPC reflection is off in production images and the edge's JWT filter has
+# no exemption for it, so a grpcurl probe answers "Unauthenticated: Jwt is
+# missing" before it can ask anything — that is the edge working, not the
+# seam failing (owner call 2026-09-07). What a person sees is the contract:
+# with self-serve on, GET /signup renders the signup page; with it off, the
+# dashboard redirects /signup to /login (app/(public)/signup/page.tsx, deploy
+# ADR-0006 §4 as amended). The redirect target is part of the assertion: a
+# redirect elsewhere is a different surface, not the front door.
+SIGNUP_CODE="$(edge_status "$EDGE" "$APP_HOST" "/signup")"
+SIGNUP_REDIRECT="$(edge_redirect "$EDGE" "$APP_HOST" "/signup")"
+if [ "$SELF_SERVE" = "true" ]; then
+  case "$SIGNUP_CODE" in
+    200)
+      pass "GET https://${APP_HOST}/signup -> 200 with SIGNUP_SELF_SERVE=true (seam coherent; the shipped open default per ADR-0006 §4 as amended)"
+      ;;
+    30[1278])
+      fail "GET https://${APP_HOST}/signup -> ${SIGNUP_CODE} to ${SIGNUP_REDIRECT:-?} while SIGNUP_SELF_SERVE=true — the seam and the deployed config disagree"
+      ;;
+    *)
+      fail "GET https://${APP_HOST}/signup -> ${SIGNUP_CODE} with SIGNUP_SELF_SERVE=true (expected 200)"
+      ;;
+  esac
 else
-  if [ "$SELF_SERVE" = "true" ]; then
-    pass "SignupService does not deny with SIGNUP_SELF_SERVE=true (seam coherent; the shipped open default per ADR-0006 §4 as amended, deploy#1039)"
-  else
-    fail "SignupService did NOT return PermissionDenied with self-serve off — the admin-only fail-safe is not enforced. Response: ${SIGNUP_OUT}"
-  fi
+  case "$SIGNUP_CODE" in
+    30[1278])
+      case "$SIGNUP_REDIRECT" in
+        *"/login"*) pass "GET https://${APP_HOST}/signup -> ${SIGNUP_CODE} to /login with self-serve off (closed registration enforced at the front door)" ;;
+        *) fail "GET https://${APP_HOST}/signup -> ${SIGNUP_CODE} to ${SIGNUP_REDIRECT:-?} with self-serve off — expected the login front door" ;;
+      esac
+      ;;
+    200)
+      fail "GET https://${APP_HOST}/signup -> 200 with self-serve off — the closed-registration fail-safe is not enforced"
+      ;;
+    *)
+      fail "GET https://${APP_HOST}/signup -> ${SIGNUP_CODE} with self-serve off (expected a redirect to /login)"
+      ;;
+  esac
 fi
 
 # ---------------------------------------------------------------------------
