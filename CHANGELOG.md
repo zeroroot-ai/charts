@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.123.2](https://github.com/zeroroot-ai/charts/compare/v0.123.1...v0.123.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* **rbac:** let the daemon read Tenant objects across the cluster ([#15](https://github.com/zeroroot-ai/charts/issues/15)) ([3154a6b](https://github.com/zeroroot-ai/charts/commit/3154a6be50b4d92745117f17ffaed043b40a8338))
+
 ## [0.123.1](https://github.com/zeroroot-ai/charts/compare/v0.123.0...v0.123.1) (2026-09-07)
 
 
