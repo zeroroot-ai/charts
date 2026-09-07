@@ -222,10 +222,51 @@ spec:
      (helm/gibson/templates/networkpolicy-platform-operators.yaml) with the
      other cluster operators the umbrella owns (deploy#1728). */}}
 {{/* ---------------------------------------------------------------------
+     CNPG bootstrap Jobs (platform-postgres): initdb, full-recovery, join,
+     pgbasebackup. The operator creates them at RUNTIME with the labels
+     cnpg.io/cluster, cnpg.io/instanceName and cnpg.io/jobRole, and NOT
+     cnpg.io/podRole, so the instances policy below never selected them and
+     the default-deny did. initdb needs nothing from the network, which is
+     why this went unseen; full-recovery downloads the base backup and every
+     WAL segment from the durable bucket, and join/pgbasebackup stream from
+     the primary. Measured 2026-09-07 on a restore recreate: the
+     full-recovery Job died six times in 41 minutes on
+       Barman cloud WAL archive check exception: Connect timeout on
+       endpoint URL: "http://172.18.255.250:9000/gibson-kind"
+     while the previous cluster's instance pods had archived to that same
+     endpoint. Postgres never came up, SPIRE (datastore: postgres) crash-
+     looped, the SPIFFE CSI driver had no agent socket, and every pod that
+     mounts one sat in Init: the whole platform, held by one missing
+     selector. Egress allow-all, like every first-party policy here; no
+     ingress, a bootstrap Job serves nothing. The guard is
+     scripts/check-cnpg-netpol-covers-jobs.sh.
+--------------------------------------------------------------------- */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-cnpg-jobs
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: cnpg-jobs-isolation
+spec:
+  podSelector:
+    matchExpressions:
+      - key: cnpg.io/jobRole
+        operator: Exists
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - {}
+---
+{{/* ---------------------------------------------------------------------
      CNPG-managed Postgres instances (platform-postgres). These pods are
      created at RUNTIME by the CNPG operator from a Cluster CR, so they
      never appear in a chart render — this policy is written against the
      labels CNPG stamps on every instance pod (cnpg.io/podRole: instance).
+     The bootstrap Jobs carry cnpg.io/jobRole instead and have their own
+     policy above.
      The Cluster renders on every profile, so this policy is
      live everywhere. :5432 callers: every platform component with
      a database, the CNPG operator itself, and instance-to-instance

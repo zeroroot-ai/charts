@@ -1153,6 +1153,30 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  name: gibson-cnpg-jobs
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.132.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: cnpg-jobs-isolation
+spec:
+  podSelector:
+    matchExpressions:
+      - key: cnpg.io/jobRole
+        operator: Exists
+  policyTypes:
+    - Ingress
+    - Egress
+  egress:
+    - {}
+---
+# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/subchart-workloads.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
   name: gibson-cnpg-instances
   namespace: gibson
   labels:
