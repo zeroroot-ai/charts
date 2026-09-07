@@ -461,6 +461,10 @@ neo4j:
   # any initContainer without an `image` to the neo4j image), so the jar
   # version is locked to the server version and needs no network.
   podSpec:
+    # The plugins volume is re-populated by the init container on every
+    # start. Velero fs-backup skips it; data stays in the backup.
+    annotations:
+      backup.velero.io/backup-volumes-excludes: "neo4j-plugins"
     initContainers:
       - name: install-apoc-core
         command:
@@ -1039,6 +1043,10 @@ spire:
     deleteHooks:
       enabled: false
   spire-server:
+    # Velero fs-backup skips these: sockets and scratch. spire-data (the
+    # datastore volume) stays in the backup. scripts/check-velero-volume-excludes.sh.
+    podAnnotations:
+      backup.velero.io/backup-volumes-excludes: "server-tmp,spire-server-socket,spire-controller-manager-tmp"
     # Datastore: shared platform-postgres-rw, role spire, database spire.
     dataStore:
       sql:
@@ -1088,6 +1096,15 @@ spire:
 # ExternalSecret and Issuer land before Mutating/ValidatingWebhookConfiguration
 # and are never refused by a webhook whose pod is not up yet.
 # =============================================================================
+  spire-agent:
+    # The agent's SVID cache: it re-attests on start, a restored copy is
+    # stale. Velero fs-backup skips it.
+    podAnnotations:
+      backup.velero.io/backup-volumes-excludes: "spire-agent-admin-socket-dir,spire-agent-persistence"
+  spiffe-oidc-discovery-provider:
+    # Sockets and a cert scratch dir. Velero fs-backup skips them.
+    podAnnotations:
+      backup.velero.io/backup-volumes-excludes: "certdir,nginx-tmp,spiffe-workload-api,spire-oidc-sockets"
 
 cert-manager:
   # Canonical names (cert-manager, cert-manager-webhook, cert-manager-cainjector)
@@ -1262,7 +1279,10 @@ cnpg:
 # turns off. A probe with no `component` is unconditional.
 #
 # `namespace` defaults to the release namespace.
-# =============================================================================
+# =============================================================================  # The operator's scratch volume. Velero fs-backup skips it.
+  podAnnotations:
+    backup.velero.io/backup-volumes-excludes: "scratch-data"
+
 webhookGate:
   # One shared deadline for every probe. Long enough for cert-manager to issue
   # the webhook serving certificates on a cold kind node, short enough that a

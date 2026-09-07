@@ -26,6 +26,15 @@ spec:
         app.kubernetes.io/part-of: gibson
         app.kubernetes.io/component: tenant-operator
       annotations:
+        # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
+        # snapshots every pod volume it is not told to skip. These hold a
+        # socket, a scratch dir or an init-rendered file: nothing to keep,
+        # and on restore each one becomes a PodVolumeRestore that can only
+        # finish once this pod is running. Measured 2026-09-07: 9 of 22
+        # PodVolumeRestores in a preserve backup were volumes like these.
+        # scripts/check-velero-volume-excludes.sh keeps this list equal to
+        # the pod's emptyDir and CSI-ephemeral volumes.
+        backup.velero.io/backup-volumes-excludes: "spire-agent-socket"
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
         {{- /*
