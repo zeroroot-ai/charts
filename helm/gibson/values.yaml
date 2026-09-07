@@ -482,7 +482,7 @@ openfga:
   # gibson-workloads' `openfga:` block carries service ports only.
   image:
     repository: ghcr.io/zeroroot-ai/mirror/openfga
-    tag: "v1.15.1"
+    tag: "v1.19.0"
   # The SA is a plain main-sync resource on purpose. It was briefly a PreSync
   # hook (deploy#825) to outrun the migrate Job, but the SA is STANDING
   # infrastructure used by the running Deployment's pods — hook lifecycle
@@ -617,7 +617,7 @@ zitadel:
     wait4x:
       image:
         repository: zeroroot-ai/mirror/wait4x
-        tag: "3.6"
+        tag: "3.7.1"
 
   zitadel:
     # deploy#1348 — the masterkey is ESO-materialised, never a literal.
@@ -750,7 +750,7 @@ zitadel:
   # until the key is on disk and non-empty.
   initContainers:
     - name: wait-for-system-key
-      image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.31.0
+      image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0
       command:
         - sh
         - -c

@@ -12669,7 +12669,7 @@ spec:
         - name: openfga
           securityContext:
             {}
-          image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.15.1"
+          image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.19.0"
           imagePullPolicy: Always
           args: ["run"]
           ports:
@@ -13003,7 +13003,7 @@ spec:
         # OK status. The `--insecure-skip-tls-verify` flag is included to support
         # environments that use self-signed certificates for internal TLS.
         - name: wait-for-zitadel
-          image: ghcr.io/zeroroot-ai/mirror/wait4x:3.6
+          image: ghcr.io/zeroroot-ai/mirror/wait4x:3.7.1
           imagePullPolicy: 'IfNotPresent'
           command:
             - wait4x
@@ -22167,7 +22167,7 @@ metadata:
 spec:
   containers:
     - name: grpc-health-probe
-      image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.15.1"
+      image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.19.0"
       imagePullPolicy: Always
       command: ["grpc_health_probe", '-addr=gibson-openfga:8081']
   restartPolicy: Never
@@ -22471,7 +22471,7 @@ spec:
         - name: migrate-database
           securityContext:
             {}
-          image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.15.1"
+          image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.19.0"
           args: ["migrate"]
           env:
             - name: OPENFGA_DATASTORE_ENGINE
