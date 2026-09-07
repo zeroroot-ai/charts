@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.123.5](https://github.com/zeroroot-ai/charts/compare/v0.123.4...v0.123.5) (2026-09-07)
+
+
+### Bug Fixes
+
+* **zitadel:** lockstep guard for server and login versions, and the coordinated bump to v4.17.3 ([#20](https://github.com/zeroroot-ai/charts/issues/20)) ([be0827a](https://github.com/zeroroot-ai/charts/commit/be0827a06add5ca94938f6e69066dfddad862a54))
+
 ## [0.123.4](https://github.com/zeroroot-ai/charts/compare/v0.123.3...v0.123.4) (2026-09-07)
 
 
