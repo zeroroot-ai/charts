@@ -149,7 +149,15 @@ spec:
        Absence is MEANINGFUL: no backup named means bootstrap empty
 , not a misconfiguration. */ -}}
 {{- $recoveryID := ($pg.recovery).backupID }}
+{{- /* The archive this cluster writes: <destinationPath>/<serverName>/. Empty
+       renders nothing and CNPG uses the Cluster name, which only a first
+       bootstrap into an empty archive can afford (see values.yaml). */ -}}
+{{- $archiveName := $backup.serverName | default "platform-postgres" }}
 {{- if $recoveryID }}
+{{- $sourceName := required "platformPostgres.recovery.serverName is REQUIRED with recovery.backupID: the archive the named backup was written under (make recreate reads it from the CNPG Backup record's status.serverName)." ($pg.recovery).serverName }}
+{{- if eq $sourceName $archiveName }}
+{{- fail (printf "platformPostgres.recovery.serverName %q is also this cluster's backup.serverName: a cluster cannot recover from the archive it is about to write into. barman-cloud-check-wal-archive refuses a non-empty archive, so archiving would fail on the first segment and the recovered environment would have no backup. Stamp a new backup.serverName." $sourceName) }}
+{{- end }}
   # RESTORE-ON-BRINGUP (deploy#1739). `make recreate
   # RESTORE_FROM=<name>` read this base backup id OUT of the named Velero
   # backup, so the database recovers from the backup that was NAMED. With no
@@ -166,16 +174,18 @@ spec:
       source: platform-postgres-archive
       recoveryTarget:
         backupID: {{ $recoveryID | quote }}
-  # The archive to read, which is the archive this cluster also writes. The
-  # server name is stated because the external cluster is named differently:
-  # barman reads <destinationPath>/<serverName>/, and the writer was a
-  # cluster called platform-postgres. Recovery promotes onto a new timeline,
-  # so the cluster's own archiving continues into the same prefix with no
-  # collision.
+  # The archive to read. barman reads <destinationPath>/<serverName>/, and
+  # the writer was the cluster the named backup came from, under the name
+  # recovery.serverName carries. This cluster writes under backup.serverName,
+  # a DIFFERENT name: recovery promotes onto a new timeline, but the archive
+  # check runs per directory and refuses one that already holds WAL, so the
+  # recovered cluster must archive into its own. (The previous comment here
+  # said "continues into the same prefix with no collision"; measured
+  # 2026-09-07, it does not.)
   externalClusters:
     - name: platform-postgres-archive
       barmanObjectStore:
-        serverName: platform-postgres
+        serverName: {{ $sourceName | quote }}
         destinationPath: {{ $dest | quote }}
         {{- with $backup.endpointURL }}
         endpointURL: {{ . | quote }}
@@ -216,6 +226,11 @@ spec:
     target: {{ $backup.target | quote }}
     barmanObjectStore:
       destinationPath: {{ $dest | quote }}
+      {{- with $backup.serverName }}
+      # The archive directory under destinationPath. Unique per bootstrap;
+      # the bringup verb stamps it (values.yaml, backup.serverName).
+      serverName: {{ . | quote }}
+      {{- end }}
       {{- with $backup.endpointURL }}
       # An S3-compatible store that is not AWS (MinIO on kind). Empty means
       # the AWS endpoint for the bucket's region.

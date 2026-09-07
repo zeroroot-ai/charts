@@ -186,6 +186,13 @@ platformPostgres:
   # bringup that asked for an empty database.
   recovery:
     backupID: ""
+    # The archive the named backup was written under: <destinationPath>/
+    # <serverName>/. REQUIRED with backupID. `make recreate RESTORE_FROM=`
+    # reads it out of the same CNPG Backup record as the id
+    # (status.serverName) and passes both. It must differ from
+    # backup.serverName below: a cluster cannot recover from the archive it
+    # is about to write into, and the render refuses the pair.
+    serverName: ""
 
   # Continuous backup to the DURABLE BUCKET (deploy#1730), on every
   # profile. The bucket is a substrate input: stage 0 creates it (MinIO on
@@ -221,6 +228,20 @@ platformPostgres:
     # primary on its own at instances: 1 (kind), so one value is correct for
     # every profile.
     target: prefer-standby
+
+    # The name this cluster archives under: <destinationPath>/<serverName>/.
+    # Empty means the Cluster's own name, CNPG's default, which is right for
+    # the FIRST bootstrap into an empty archive and wrong for every later
+    # one. The durable bucket outlives the cluster by design (ADR-0015), and
+    # barman-cloud-check-wal-archive refuses a fresh cluster whose archive
+    # directory already holds WAL: measured 2026-09-07 on a workstation
+    # whose bucket held 38 segments from earlier bringups, ContinuousArchiving
+    # went False on the first archive_command and every base backup sat in
+    # walArchivingFailing. `make recreate` stamps a unique name on every
+    # bringup (platform-postgres-<UTC stamp>); an operator installing by hand
+    # into a used bucket must do the same. It never changes on an upgrade:
+    # the name is the archive, and renaming it orphans the WAL.
+    serverName: ""
 
     # The bucket credential: the BUCKET_ACCESS_KEY and BUCKET_SECRET_KEY
     # members of the bringup keyring, written by the bringup as the
