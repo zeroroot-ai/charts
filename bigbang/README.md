@@ -10,7 +10,7 @@ It is the **third** install path, deliberately separate from the other two:
 
 | Path | Consumer | Entry point |
 |---|---|---|
-| Hosted fleet (us) | ArgoCD App-of-Apps | `enterprise/gitops/` |
+| Hosted fleet (us) | ArgoCD App-of-Apps | `gitops/` in the private `zeroroot-ai/hosted` repo |
 | Customer self-host | `helm install gibson` / customer Argo | `helm/gibson/` |
 | **Federal / Big Bang (this dir)** | **DoD Platform One Flux** | **`bigbang/`** |
 
@@ -45,7 +45,7 @@ bigbang/
     helmrelease.yaml           # Flux HelmRelease -> chartRef the OCIRepository
     kustomization.yaml         # kustomize bundle: `kustomize build bigbang/package`
   flux/                        # GitOps bootstrap (how Big Bang consumes the package)
-    gitrepository.yaml         # GitRepository -> this deploy repo
+    gitrepository.yaml         # GitRepository -> this charts repo
     flux-kustomization.yaml    # Flux Kustomization -> path ./bigbang/package
     kustomization.yaml         # kustomize bundle: `kustomize build bigbang/flux`
   images/
