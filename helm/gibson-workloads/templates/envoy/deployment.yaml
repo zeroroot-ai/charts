@@ -22,10 +22,10 @@ chain was retired in the single-host consolidation).
 
 Edge TLS material (Secret `gibson-envoy-tls`) is produced exclusively by a
 cert-manager Certificate (templates/cert-manager/certificate.yaml). The
-chart no longer mints cert material — see zeroroot-ai/deploy#123 for the
-unification rationale. envoy.tls.selfSigned=true is a render-time error.
+chart no longer mints cert material. envoy.tls.selfSigned=true is a
+render-time error.
 
-Envoy is required infrastructure (deploy#200); this Deployment renders
+Envoy is required infrastructure; this Deployment renders
 unconditionally — there is no `envoy.enabled` opt-out.
 */}}
 {{- include "gibson.validateEnvoyTlsNotSelfSigned" . }}
@@ -117,8 +117,8 @@ spec:
         # mints a fresh numeric id on every reset, and the chart-time
         # value drifts STALE — Envoy's jwt_authn rejects every dashboard
         # JWT with `Audiences in Jwt are not allowed`. Argo's repo-server
-        # cannot `lookup` cluster Secrets at chart-render time
-        # (zeroroot-ai/deploy#130), so resolution moved to pod startup.
+        # cannot `lookup` cluster Secrets at chart-render time, so
+        # resolution moved to pod startup.
         #
         # The render uses `sed` (no template engine, no envsubst dependency)
         # against an alpine/k8s base — same image the chart already uses

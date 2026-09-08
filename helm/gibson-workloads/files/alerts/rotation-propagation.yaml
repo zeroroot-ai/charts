@@ -5,7 +5,7 @@
 # the dashboard) to plugin observation (cache invalidated) MUST meet a
 # 5-second p95 over a 10-minute rolling window.
 #
-# Companion script: enterprise/deploy/tests/plugin/rotation-monitor.sh
+# Companion script: tests/plugin/rotation-monitor.sh in zeroroot-ai/hosted
 # emits gibson_plugin_rotation_propagation_seconds samples on a CronJob
 # cadence; this rule alerts on p95 budget burn.
 apiVersion: monitoring.coreos.com/v1
@@ -78,7 +78,7 @@ spec:
                   (gibson_plugin_state{plugin="{{ $labels.plugin }}"}).
 
               Synthetic monitor:
-                enterprise/deploy/tests/plugin/rotation-monitor.sh
+                tests/plugin/rotation-monitor.sh in zeroroot-ai/hosted
               emits one sample per CronJob run; correlate with that
               monitor's logs for the failing rotation tag.
 

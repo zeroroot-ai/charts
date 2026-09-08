@@ -14,7 +14,7 @@
 #
 # Firing the dispatch (from gibson CI):
 #
-#   gh api repos/zeroroot-ai/deploy/dispatches \
+#   gh api repos/zeroroot-ai/charts/dispatches \
 #     --method POST \
 #     --field event_type=crd-updated \
 #     --field client_payload='{"source_repo":"zeroroot-ai/gibson","source_ref":"main"}'
@@ -22,8 +22,8 @@
 # Required secret in this repo:
 #   CRD_SYNC_TOKEN  — a PAT or App installation token with:
 #     - repo: read   on zeroroot-ai/gibson
-#     - repo: write  on zeroroot-ai/deploy  (to push the sync branch)
-#     - pull-requests: write  on zeroroot-ai/deploy
+#     - repo: write  on zeroroot-ai/charts  (to push the sync branch)
+#     - pull-requests: write  on zeroroot-ai/charts
 #
 # Note: if CRD_SYNC_TOKEN is absent the job fails loudly — do not use
 # GITHUB_TOKEN here because it cannot read cross-repo and cannot trigger
@@ -49,7 +49,7 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: checkout deploy repo
+      - name: checkout charts repo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           # Fetch full history so we can diff against main.
@@ -152,7 +152,7 @@ jobs:
           git push origin "${BRANCH}"
 
           gh pr create \
-            --repo zeroroot-ai/deploy \
+            --repo zeroroot-ai/charts \
             --base main \
             --head "${BRANCH}" \
             --title "chore(crds): sync CRDs from operator repos" \

@@ -2837,8 +2837,9 @@ data:
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/plans-configmap.yaml
 # gibson-tenant-operator-plans — canonical plan registry mounted into the
-# operator pod. Sourced from enterprise/platform/tenant-operator/plans/plans.yaml
-# at chart render time via `.Files.Get`. Changing pricing is a PR to that file
+# operator pod. Rendered from the chart-local files/plans.yaml at chart
+# render time via `.Files.Get`. That file mirrors plans/plans.yaml in
+# zeroroot-ai/billing. Changing pricing is a PR to the plan registry
 # followed by a helm upgrade; no operator image rebuild is required.
 apiVersion: v1
 kind: ConfigMap
@@ -4323,7 +4324,7 @@ data:
                                 # `gibson-dashboard-oidc` (key `client_id`,
                                 # owned by platform-operator) at pod startup.
                                 # Stakater Reloader rolls Envoy when the Secret
-                                # changes. zeroroot-ai/deploy#130.
+                                # changes.
                                 - "${DASHBOARD_CLIENT_ID}"
                                 # gibson#693 — native-login (gibson login) client_id.
                                 # `gibson login` runs a device-grant against this
@@ -7379,7 +7380,7 @@ rules:
   # policy governs pods and workloads, not ClusterSPIFFEIDs.
   #
   # It was also dead. `grep -rn "spire.spiffe.io\|ClusterSPIFFEID"` over
-  # enterprise/platform/gibson returns nothing in Go or YAML: every
+  # zeroroot-ai/gibson returns nothing in Go or YAML: every
   # ClusterSPIFFEID in this platform is rendered by
   # gibson-workloads/templates/spire-server/clusterspiffeids.yaml, by
   # Helm, not by the operator. controller-gen agrees — the generated
@@ -15264,7 +15265,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 59c7267e896558291b76b258fa904ca3a5d0b07b152d2519fc73ba7fcfd69fee
+        checksum/config: a00197c51796bdcaa2b373a42b22c7d750fe74261d037741116c615298da3e09
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -15329,8 +15330,8 @@ spec:
         # mints a fresh numeric id on every reset, and the chart-time
         # value drifts STALE — Envoy's jwt_authn rejects every dashboard
         # JWT with `Audiences in Jwt are not allowed`. Argo's repo-server
-        # cannot `lookup` cluster Secrets at chart-render time
-        # (zeroroot-ai/deploy#130), so resolution moved to pod startup.
+        # cannot `lookup` cluster Secrets at chart-render time, so
+        # resolution moved to pod startup.
         #
         # The render uses `sed` (no template engine, no envsubst dependency)
         # against an alpine/k8s base — same image the chart already uses
@@ -18664,8 +18665,7 @@ spec:
             - name: GIBSON_CALLBACK_PEER_SVIDS
               value: "spiffe://zeroroot.ai/platform/dashboard,spiffe://zeroroot.ai/platform/envoy,spiffe://zeroroot.ai/platform/daemon"
             # Additional inbound mTLS allow-list for the daemon's main gRPC
-            # listener (— zeroroot-ai/docs adr/0002-operator-to-
-            # daemon-transport.md). Envoy is always accepted via
+            # listener. Envoy is always accepted via
             # GIBSON_SPIFFE_ENVOY_ID; the entries here are direct control-
             # plane callers (today: the tenant-operator). Comma-separated.
             - name: GIBSON_SPIFFE_ALLOWED_PEER_IDS
@@ -20278,8 +20278,8 @@ spec:
 #
 # Deletes shell-user rows created by the tenant-operator's shell-user
 # auto-create path that were never claimed within `olderThanDays`. See
-# enterprise/platform/dashboard/src/lib/jobs/unclaimed-shell-gc.ts for the
-# authoritative selection query.
+# scripts/shell-gc.mjs in zeroroot-ai/dashboard for the authoritative
+# selection query.
 #
 # Gate: dashboard.jobs.shellGC.enabled (default true). Flip to false in
 # environments that prefer manual cleanup (e.g. long-form enterprise trials).
