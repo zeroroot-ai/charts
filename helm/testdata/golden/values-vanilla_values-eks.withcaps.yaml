@@ -21932,8 +21932,8 @@ metadata:
   name: iam-admin-pat
   namespace: gibson
   annotations:
-    # After the wave-0 hooks; see the header.
-    argocd.argoproj.io/sync-wave: "1"
+    # After the escrow hook (-2), before wave 0; see the header.
+    argocd.argoproj.io/sync-wave: "-1"
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
@@ -24648,7 +24648,7 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-wave: "-2"
 ---
 # Source: gibson/templates/jobs/gibson-workloads-signup-bot-pat-minter.yaml
 apiVersion: v1
@@ -25007,7 +25007,7 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-wave: "-2"
 rules:
 - apiGroups: ['']
   resources: [secrets]
@@ -25213,7 +25213,7 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-wave: "-2"
 subjects:
 - kind: ServiceAccount
   name: iam-admin-pat-escrow
@@ -27408,7 +27408,7 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-wave: "-2"
 spec:
   backoffLimit: 10
   ttlSecondsAfterFinished: 600
