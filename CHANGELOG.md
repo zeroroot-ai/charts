@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.123.12](https://github.com/zeroroot-ai/charts/compare/v0.123.11...v0.123.12) (2026-09-08)
+
+
+### Bug Fixes
+
+* **priority:** apply the three PriorityClasses at sync wave -20 ([#44](https://github.com/zeroroot-ai/charts/issues/44)) ([b669ec2](https://github.com/zeroroot-ai/charts/commit/b669ec2379e706a9f15c4ff2992ef4789d288cb1))
+
 ## [0.123.11](https://github.com/zeroroot-ai/charts/compare/v0.123.10...v0.123.11) (2026-09-08)
 
 
