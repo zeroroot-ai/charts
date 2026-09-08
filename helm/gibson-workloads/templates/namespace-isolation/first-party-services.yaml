@@ -49,6 +49,14 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: openbao-jwt-auth-init
+        # The Zitadel IAM_OWNER PAT escrow (umbrella, templates/jobs/): writes
+        # secret/gibson-zitadel-iam-admin-pat with the vault admin token so a
+        # restore can bring the PAT back. Measured 2026-09-08 (blocker 3 loop
+        # #7): without this line the Job sat on "Could not connect to server"
+        # for 130 s per try and the sync waited on it for an hour.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: iam-admin-pat-escrow
         # The external-secrets controller is an umbrella subchart in this
         # namespace (deploy#1728): it logs in to OpenBao with its own
         # ServiceAccount to read every ExternalSecret. Selected by the
