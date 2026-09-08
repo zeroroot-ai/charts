@@ -44,6 +44,14 @@ def check(docs):
             return int(w) if w is not None else 0
         if setup and escrow:
             sw, jw = wave_of(setup[0]), wave_of(escrow[0])
+            # What the escrow hook mounts must exist at its wave: the
+            # VAULT_ADMIN_TOKEN Secret comes from the gibson-openbao-keys
+            # ExternalSecret. Run 34258967223: that ExternalSecret at wave 0
+            # and the hook at -2 left the hook in CreateContainerConfigError
+            # for 20 minutes and the fresh bringup never reached wave 0.
+            keys = [d for d in docs if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "gibson-openbao-keys"]
+            if keys and not (wave_of(keys[0]) < jw):
+                bad.append(f"the gibson-openbao-keys ExternalSecret (wave {wave_of(keys[0])}) must be applied BEFORE the escrow hook (wave {jw}) that mounts it: at the same or a later wave the hook pod cannot start")
             if not (sw < jw < es_wave < 0):
                 bad.append(f"the PAT must be minted, escrowed and read back BEFORE wave 0, in that order: zitadel-setup wave {sw}, escrow Job wave {jw}, ExternalSecret wave {es_wave}. Any ExternalSecret wave >= 0 deadlocks a restore (the platform-operator at wave 0 waits for the PAT, and Argo waits for wave 0 before applying it); any wave at or before the escrow is Degraded on a fresh bootstrap")
     jobs = [d for d in docs if d.get("kind") == "Job" and d["spec"]["template"]["metadata"].get("labels", {}).get("app.kubernetes.io/component") == "iam-admin-pat-escrow"]
@@ -85,10 +93,17 @@ for d in late:
         d["metadata"].setdefault("annotations", {})["argocd.argoproj.io/sync-wave"] = "1"
 if not any("BEFORE wave 0" in b for b in check(late)):
     sys.exit("self-test broken: the ExternalSecret at wave 1 (the restore deadlock) was not detected")
+# The stall of run 34258967223, planted: gibson-openbao-keys at wave 0.
+keys0 = copy.deepcopy(docs)
+for d in keys0:
+    if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "gibson-openbao-keys":
+        d["metadata"].setdefault("annotations", {})["argocd.argoproj.io/sync-wave"] = "0"
+if not any("gibson-openbao-keys" in b for b in check(keys0)):
+    sys.exit("self-test broken: gibson-openbao-keys at wave 0 (the hook that cannot start) was not detected")
 bad = check(docs)
 if bad:
     print("✗ check-iam-admin-pat-escrow:", file=sys.stderr)
     for b in bad: print("   " + b, file=sys.stderr)
     sys.exit(1)
-print("✅ self-test: a removed ExternalSecret and a wave-1 ExternalSecret are detected; iam-admin-pat is escrowed to OpenBao by a covered Job and read back by an Orphan ExternalSecret")
+print("✅ self-test: a removed ExternalSecret, a wave-1 ExternalSecret and a wave-0 gibson-openbao-keys are detected; iam-admin-pat is escrowed to OpenBao by a covered Job and read back by an Orphan ExternalSecret")
 PY
