@@ -18,14 +18,12 @@ description: |
     gibson-workloads  (daemon, dashboard, ext-authz, Envoy, SPIFFE,
                        PlatformBootstrap CR; after operators)
 
-  This is slice #785 (deploy#784): it establishes the umbrella *shape* so
-  every consumer — `helm install gibson`, Argo, Flux, a Big Bang package —
-  installs one artifact. The currently-gitops-only ExternalSecrets, bringup
-  Jobs, and CNPG cluster are folded in by later slices (#787, #788); until
-  then they are applied alongside from gitops.
+  The umbrella is the whole deployable. The ExternalSecrets, the bringup
+  Jobs and the CNPG cluster render here too. Every consumer installs the
+  one artifact: `helm install gibson`, Argo, Flux, or a Big Bang package.
 
   The umbrella is controller-agnostic: no Argo/Flux/Istio dependency is
-  assumed. See enterprise/deploy/docs/adr/0003-big-bang-compatible-umbrella-chart.md.
+  assumed.
 type: application
 # NOTE: both `version` and `appVersion` below are PLACEHOLDERS. The real
 # release version is release-please-managed (.release-please-manifest.json +
