@@ -9,7 +9,7 @@
 GREEN := \033[0;32m
 NC    := \033[0m
 
-.PHONY: help chart-deps golden golden-update render-diff vanilla-up vanilla-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes \
+.PHONY: help chart-deps golden golden-update render-diff vanilla-up vanilla-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow \
         check attribution vendor-operators cloud-free
 
 help: ## Show available targets
@@ -54,6 +54,9 @@ cnpg-netpol-covers-jobs: ## Every pod CNPG creates, bootstrap Jobs included, has
 velero-volume-excludes: ## Every pod tells Velero which of its volumes are sockets and scratch, never a claim
 	@./scripts/check-velero-volume-excludes.sh
 
+iam-admin-pat-escrow: ## The Zitadel IAM_OWNER PAT is escrowed to OpenBao and read back by an ExternalSecret, so a restore can bring it back
+	@./scripts/check-iam-admin-pat-escrow.sh
+
 subchart-overrides: ## Every hand-overridden subchart image tag is a declared version link (charts#14)
 	@python3 scripts/check-subchart-overrides-declared.py --selftest >/dev/null
 	@python3 scripts/check-subchart-overrides-declared.py
@@ -69,7 +72,7 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free subchart-overrides zitadel-lockstep tool-image postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes ## Everything that runs without a cluster
+check: golden attribution cloud-free subchart-overrides zitadel-lockstep tool-image postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 vanilla-up: ## Install onto the current kube context
