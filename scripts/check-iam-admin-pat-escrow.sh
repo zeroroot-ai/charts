@@ -20,18 +20,29 @@ helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-vanilla.yaml" --namespac
 python3 - "$RENDER" <<'PY'
 import sys, yaml, copy
 KEY = "gibson-zitadel-iam-admin-pat"
+# Every Secret the Zitadel setup Job mints, and the store key each rides in.
+MINTED = {
+    "iam-admin-pat": ("pat", "gibson-zitadel-iam-admin-pat"),
+    "iam-admin": ("iam-admin.json", "gibson-zitadel-iam-admin-machinekey"),
+    "login-client": ("pat", "gibson-zitadel-login-client-pat"),
+}
 def check(docs):
     bad = []
     es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin-pat"]
-    if not es:
-        bad.append("no ExternalSecret targets the Secret iam-admin-pat: a restore cannot bring the PAT back")
-    else:
+    for secret, (data_key, store_key) in MINTED.items():
+        got = [d for d in docs if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == secret]
+        if not got:
+            bad.append(f"no ExternalSecret targets the Secret {secret}: a restore cannot bring it back (the Zitadel setup Job mints it once and never again)")
+            continue
+        g = got[0]
+        if g["spec"]["target"].get("creationPolicy") != "Orphan":
+            bad.append(f"the {secret} ExternalSecret must use creationPolicy Orphan: the setup Job creates that Secret first on a fresh bootstrap and Owner refuses it")
+        if store_key not in [x["remoteRef"]["key"] for x in g["spec"].get("data", [])]:
+            bad.append(f"the {secret} ExternalSecret does not read {store_key}")
+        if data_key not in ((g["spec"]["target"].get("template") or {}).get("data") or {}):
+            bad.append(f"the {secret} ExternalSecret does not write data key {data_key!r}, the key its consumer reads")
+    if es:
         e = es[0]
-        if e["spec"]["target"].get("creationPolicy") != "Orphan":
-            bad.append("the iam-admin-pat ExternalSecret must use creationPolicy Orphan: the setup Job creates that Secret first on a fresh bootstrap and Owner refuses it")
-        keys = [x["remoteRef"]["key"] for x in e["spec"].get("data", [])]
-        if KEY not in keys:
-            bad.append(f"the iam-admin-pat ExternalSecret does not read {KEY}")
         wave = (e["metadata"].get("annotations") or {}).get("argocd.argoproj.io/sync-wave")
         es_wave = int(wave) if wave is not None else 0
         # The order that works on BOTH paths: the setup Job mints the PAT,
@@ -59,8 +70,9 @@ def check(docs):
         bad.append("no Job carries app.kubernetes.io/component=iam-admin-pat-escrow: nothing writes the minted PAT to OpenBao")
     else:
         script = " ".join(c.get("args", [""])[0] for c in jobs[0]["spec"]["template"]["spec"]["containers"])
-        if KEY not in script:
-            bad.append(f"the escrow Job does not write {KEY}")
+        for secret, (data_key, store_key) in MINTED.items():
+            if f"{secret}:{data_key}:{store_key}:" not in script:
+                bad.append(f"the escrow Job does not copy Secret {secret}/{data_key} to secret/{store_key}")
         if "restore path" not in script:
             bad.append("the escrow Job must consult the store BEFORE waiting for the Secret: on a restore the Secret is materialised at wave 1, after this hook, and waiting for it deadlocks the sync")
     pols = [d for d in docs if d.get("kind") == "NetworkPolicy"]
@@ -83,9 +95,10 @@ def check(docs):
         bad.append("the openbao NetworkPolicy does not admit app.kubernetes.io/component=iam-admin-pat-escrow on 8200: the escrow Job cannot reach the store")
     return bad
 docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
-mut = [d for d in copy.deepcopy(docs) if not (d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin-pat")]
-if not check(mut):
-    sys.exit("self-test broken: removing the ExternalSecret was not detected")
+for planted in MINTED:
+    mut = [d for d in copy.deepcopy(docs) if not (d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == planted)]
+    if not any(planted in b for b in check(mut)):
+        sys.exit(f"self-test broken: removing the {planted} ExternalSecret was not detected")
 # The deadlock of 2026-09-08, planted: the ExternalSecret at wave 1.
 late = copy.deepcopy(docs)
 for d in late:
@@ -105,5 +118,5 @@ if bad:
     print("✗ check-iam-admin-pat-escrow:", file=sys.stderr)
     for b in bad: print("   " + b, file=sys.stderr)
     sys.exit(1)
-print("✅ self-test: a removed ExternalSecret, a wave-1 ExternalSecret and a wave-0 gibson-openbao-keys are detected; iam-admin-pat is escrowed to OpenBao by a covered Job and read back by an Orphan ExternalSecret")
+print("✅ self-test: each of the three removed ExternalSecrets, a wave-1 ExternalSecret and a wave-0 gibson-openbao-keys are detected; iam-admin, iam-admin-pat and login-client are escrowed to OpenBao by a covered Job and read back by Orphan ExternalSecrets")
 PY
