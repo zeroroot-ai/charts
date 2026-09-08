@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.123.9](https://github.com/zeroroot-ai/charts/compare/v0.123.8...v0.123.9) (2026-09-08)
+
+
+### Bug Fixes
+
+* **backup:** every pod tells Velero which of its volumes are sockets and scratch ([#35](https://github.com/zeroroot-ai/charts/issues/35)) ([ebb6fe5](https://github.com/zeroroot-ai/charts/commit/ebb6fe531478f5e45ba5ea87ecba83c1b971d4db))
+* **netpol:** CNPG's bootstrap Jobs get an egress policy, so a restore can reach the bucket ([#34](https://github.com/zeroroot-ai/charts/issues/34)) ([f978dec](https://github.com/zeroroot-ai/charts/commit/f978dec28000b170654458bf64119488ecca9e3e))
+* **postgres:** archive under a per-bootstrap server name, and recover from the named old one ([#32](https://github.com/zeroroot-ai/charts/issues/32)) ([974b702](https://github.com/zeroroot-ai/charts/commit/974b70297e5bf2ee17971573c049af869215e2ba))
+* **rework:** the PAT escrow ExternalSecret applies after the hooks, and the escrow Job asks the store first ([#37](https://github.com/zeroroot-ai/charts/issues/37)) ([027f1d0](https://github.com/zeroroot-ai/charts/commit/027f1d01e58466cbc03d949713c8db319b09df7a))
+* **rework:** the store's NetworkPolicy admits the PAT escrow Job on 8200 ([#38](https://github.com/zeroroot-ai/charts/issues/38)) ([1655d6b](https://github.com/zeroroot-ai/charts/commit/1655d6bd8248305aebce822711e90c4a04dcfbc4))
+* **zitadel:** escrow the IAM_OWNER PAT to OpenBao, so a restore brings the platform back ([#36](https://github.com/zeroroot-ai/charts/issues/36)) ([6a90327](https://github.com/zeroroot-ai/charts/commit/6a90327d2b7a9ac59a11ccd6064b3c0a0364c0ca))
+
 ## [0.123.8](https://github.com/zeroroot-ai/charts/compare/v0.123.7...v0.123.8) (2026-09-07)
 
 
