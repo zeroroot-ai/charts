@@ -21635,7 +21635,8 @@ metadata:
   name: iam-admin-pat
   namespace: gibson
   annotations:
-    argocd.argoproj.io/sync-wave: "-8"
+    # After the wave-0 hooks; see the header.
+    argocd.argoproj.io/sync-wave: "1"
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
@@ -26599,15 +26600,11 @@ spec:
           set -euo pipefail
           NS=gibson
           KEY=gibson-zitadel-iam-admin-pat
-          # The minted Secret (fresh bootstrap: the Zitadel setup Job writes it,
-          # up to ~9 min into a cold bringup; restore: the ExternalSecret writes
-          # it from the restored store). 180 x 5 s, the minter's window.
-          for i in $(seq 1 180); do
-            if kubectl -n "$NS" get secret iam-admin-pat >/dev/null 2>&1; then break; fi
-            echo "  waiting for iam-admin-pat ($i/180)"; sleep 5
-          done
-          PAT=$(kubectl -n "$NS" get secret iam-admin-pat -o jsonpath='{.data.pat}' | base64 -d | tr -d '\r\n')
-          [ -n "$PAT" ] || { echo "ERROR: iam-admin-pat never appeared or is empty"; exit 1; }
+          # The store first. On a restore the store already holds the PAT and
+          # the Secret does not exist yet (the ExternalSecret that writes it
+          # applies at wave 1, after this hook), so waiting for the Secret here
+          # would deadlock the sync. A key in the store and no Secret is the
+          # restore path: nothing to do.
           code=$(curl -sS -o /tmp/kv.json -w '%{http_code}' \
             -H "X-Vault-Token: $VAULT_ADMIN_TOKEN" "$BAO_ADDR/v1/secret/data/$KEY")
           case "$code" in
@@ -26615,6 +26612,18 @@ spec:
             404) have="" ;;
             *) echo "ERROR: read secret/$KEY returned HTTP $code: $(cat /tmp/kv.json)"; exit 1 ;;
           esac
+          if [ -n "$have" ] && ! kubectl -n "$NS" get secret iam-admin-pat >/dev/null 2>&1; then
+            echo "IAM_ADMIN_PAT_ESCROWED already: secret/$KEY is in the store and the Secret is not yet materialised (restore path)"
+            exit 0
+          fi
+          # The minted Secret (fresh bootstrap: the Zitadel setup Job writes it,
+          # up to ~9 min into a cold bringup). 180 x 5 s, the minter's window.
+          for i in $(seq 1 180); do
+            if kubectl -n "$NS" get secret iam-admin-pat >/dev/null 2>&1; then break; fi
+            echo "  waiting for iam-admin-pat ($i/180)"; sleep 5
+          done
+          PAT=$(kubectl -n "$NS" get secret iam-admin-pat -o jsonpath='{.data.pat}' | base64 -d | tr -d '\r\n')
+          [ -n "$PAT" ] || { echo "ERROR: iam-admin-pat never appeared or is empty"; exit 1; }
           if [ "$have" = "$PAT" ]; then
             echo "IAM_ADMIN_PAT_ESCROWED already: secret/$KEY matches the Secret"
             exit 0

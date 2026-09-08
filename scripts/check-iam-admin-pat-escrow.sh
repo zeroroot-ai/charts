@@ -32,6 +32,9 @@ def check(docs):
         keys = [x["remoteRef"]["key"] for x in e["spec"].get("data", [])]
         if KEY not in keys:
             bad.append(f"the iam-admin-pat ExternalSecret does not read {KEY}")
+        wave = (e["metadata"].get("annotations") or {}).get("argocd.argoproj.io/sync-wave")
+        if wave is None or int(wave) <= 0:
+            bad.append(f"the iam-admin-pat ExternalSecret must apply AFTER the wave-0 escrow hook (sync-wave > 0), got {wave!r}: at an earlier wave it is Degraded until the escrow runs and Argo never reaches the escrow")
     jobs = [d for d in docs if d.get("kind") == "Job" and d["spec"]["template"]["metadata"].get("labels", {}).get("app.kubernetes.io/component") == "iam-admin-pat-escrow"]
     if not jobs:
         bad.append("no Job carries app.kubernetes.io/component=iam-admin-pat-escrow: nothing writes the minted PAT to OpenBao")
@@ -39,6 +42,8 @@ def check(docs):
         script = " ".join(c.get("args", [""])[0] for c in jobs[0]["spec"]["template"]["spec"]["containers"])
         if KEY not in script:
             bad.append(f"the escrow Job does not write {KEY}")
+        if "restore path" not in script:
+            bad.append("the escrow Job must consult the store BEFORE waiting for the Secret: on a restore the Secret is materialised at wave 1, after this hook, and waiting for it deadlocks the sync")
     pols = [d for d in docs if d.get("kind") == "NetworkPolicy"]
     covered = any("iam-admin-pat-escrow" in (e.get("values") or []) for p in pols for e in (p["spec"].get("podSelector", {}).get("matchExpressions") or []))
     if not covered:
