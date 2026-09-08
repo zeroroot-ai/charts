@@ -73,6 +73,18 @@ def check(docs):
         for secret, (data_key, store_key) in MINTED.items():
             if f"{secret}:{data_key}:{store_key}:" not in script:
                 bad.append(f"the escrow Job does not copy Secret {secret}/{data_key} to secret/{store_key}")
+        # And the Role behind the Job's ServiceAccount must let it read each
+        # one: a name missing from resourceNames reads as "not there yet".
+        sa = jobs[0]["spec"]["template"]["spec"].get("serviceAccountName")
+        roles = [d for d in docs if d.get("kind") == "Role" and d["metadata"]["name"] == sa]
+        readable = set()
+        for r in roles:
+            for rule in r.get("rules", []):
+                if "secrets" in (rule.get("resources") or []) and "get" in (rule.get("verbs") or []):
+                    readable.update(rule.get("resourceNames") or ["*"])
+        for secret in MINTED:
+            if secret not in readable and "*" not in readable:
+                bad.append(f"the Role {sa!r} does not let the escrow Job get Secret {secret}: it would wait its whole window on a Secret that is there")
         if "restore path" not in script:
             bad.append("the escrow Job must consult the store BEFORE waiting for the Secret: on a restore the Secret is materialised at wave 1, after this hook, and waiting for it deadlocks the sync")
     pols = [d for d in docs if d.get("kind") == "NetworkPolicy"]
@@ -106,6 +118,15 @@ for d in late:
         d["metadata"].setdefault("annotations", {})["argocd.argoproj.io/sync-wave"] = "1"
 if not any("BEFORE wave 0" in b for b in check(late)):
     sys.exit("self-test broken: the ExternalSecret at wave 1 (the restore deadlock) was not detected")
+# The stall of run 34271811189, planted: the Role naming the PAT alone.
+narrow = copy.deepcopy(docs)
+for d in narrow:
+    if d.get("kind") == "Role" and d["metadata"]["name"] == "iam-admin-pat-escrow":
+        for rule in d.get("rules", []):
+            if "secrets" in (rule.get("resources") or []):
+                rule["resourceNames"] = ["iam-admin-pat"]
+if not any("does not let the escrow Job get Secret" in b for b in check(narrow)):
+    sys.exit("self-test broken: a Role naming the PAT alone was not detected")
 # The stall of run 34258967223, planted: gibson-openbao-keys at wave 0.
 keys0 = copy.deepcopy(docs)
 for d in keys0:
@@ -118,5 +139,5 @@ if bad:
     print("✗ check-iam-admin-pat-escrow:", file=sys.stderr)
     for b in bad: print("   " + b, file=sys.stderr)
     sys.exit(1)
-print("✅ self-test: each of the three removed ExternalSecrets, a wave-1 ExternalSecret and a wave-0 gibson-openbao-keys are detected; iam-admin, iam-admin-pat and login-client are escrowed to OpenBao by a covered Job and read back by Orphan ExternalSecrets")
+print("✅ self-test: each of the three removed ExternalSecrets, a Role naming the PAT alone, a wave-1 ExternalSecret and a wave-0 gibson-openbao-keys are detected; iam-admin, iam-admin-pat and login-client are escrowed to OpenBao by a covered Job and read back by Orphan ExternalSecrets")
 PY
