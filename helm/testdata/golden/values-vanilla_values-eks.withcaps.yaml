@@ -4,6 +4,8 @@ apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
   name: gibson-platform-critical
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
   labels:
     helm.sh/chart: gibson-operators-0.3.0
     app.kubernetes.io/name: gibson-operators
@@ -23,6 +25,8 @@ apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
   name: gibson-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
   labels:
     helm.sh/chart: gibson-operators-0.3.0
     app.kubernetes.io/name: gibson-operators
@@ -49,6 +53,11 @@ apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
   name: tenant-neo4j
+  # Wave -20 for the same reason as gibson-operators/templates/priority-classes.yaml:
+  # a named recreate restores the tenant Neo4j pods with Velero before wave 0,
+  # and a pod naming a class that does not exist yet is refused at admission.
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
