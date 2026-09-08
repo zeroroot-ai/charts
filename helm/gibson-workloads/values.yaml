@@ -568,7 +568,6 @@ gibson:
       requireEnvoy: false
 
   # Authentication and authorization configuration
-  # See: enterprise/docs/auth/ for detailed configuration guides
   auth:
     # Authentication mode: dev | enterprise | saas
     # - dev: Static tokens for local testing (not for production)
@@ -656,7 +655,6 @@ gibson:
     # OF the embedded default. Empty (the default) means "use the embedded
     # registry shipped with the binary". A missing or invalid override file
     # fails the daemon Pod boot loudly — there is no silent fallback.
-    # See enterprise/docs/AUTH.md §4.5 and core/gibson/internal/auth/rpc_registry.yaml.
     rpcRegistry:
       override: ""
 
@@ -3774,12 +3772,12 @@ tenantOperator:
   # preserved across upgrades via `lookup` — cert-manager is NOT required.
   webhook:
     enabled: true
-  # Canonical plan registry — sourced from
-  # enterprise/platform/tenant-operator/plans/plans.yaml at chart render time
-  # (via `.Files.Get`). The Makefile's `sync-plans` target copies that file to
-  # the chart-local `files/plans.yaml` before helm upgrade because Helm can
-  # only read files within the chart directory. Runtime: the operator mounts
-  # this ConfigMap at /etc/gibson/plans and reads plans.yaml at startup.
+  # Canonical plan registry — sourced from the chart-local
+  # `files/plans.yaml` at chart render time (via `.Files.Get`). Helm can
+  # only read files within the chart directory, so the chart carries its
+  # own copy; it mirrors plans/plans.yaml in zeroroot-ai/billing. Runtime:
+  # the operator mounts this ConfigMap at /etc/gibson/plans and reads
+  # plans.yaml at startup.
   plans:
     configMapName: gibson-tenant-operator-plans
     sourcePath: files/plans.yaml
@@ -4133,7 +4131,7 @@ reservedNames:
 #      runtimeAgent DaemonSet (tolerates every taint, runs cluster-wide) once
 #      it probes KVM/Kata capability on a node.
 #   2. A cluster administrator's SandboxClass CR (api/v1alpha1 in
-#      opensource/setec) sets `spec.nodeSelector` to additionally require
+#      zeroroot-ai/setec) sets `spec.nodeSelector` to additionally require
 #      `setec.zeroroot.ai/sandbox-host=true` on Sandboxes in that class — this
 #      chart does not render a default SandboxClass (setec.defaultClass.enabled
 #      is false); an operator provisions one out of band or via a future task.

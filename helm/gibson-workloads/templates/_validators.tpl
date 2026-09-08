@@ -617,7 +617,7 @@ Real Sandbox-Pod placement onto sandbox-host nodes is NOT this chart's
 concern: it is driven by the runtimeAgent DaemonSet's node-capability
 labels (consumed by each RuntimeClass's own `scheduling.nodeSelector`) and,
 per-class, a SandboxClass CR's `spec.nodeSelector`
-(opensource/setec api/v1alpha1). Neither of those has a matching
+(zeroroot-ai/setec api/v1alpha1). Neither of those has a matching
 Tolerations mechanism today — tracked as a known gap in
 zeroroot-ai/setec.
 

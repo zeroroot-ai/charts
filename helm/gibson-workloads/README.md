@@ -5,8 +5,8 @@ wiring, observability, and the PlatformBootstrap CR. Must be installed AFTER
 `gibson-crds` AND `gibson-operators`.
 
 This README is scoped to operational concerns specific to this chart. Architectural
-context lives in `enterprise/docs/ARCHITECTURE.md`; org-level conventions live in
-`zeroroot-ai/.github` → `AGENTS.md`.
+context lives in the repository root `README.md` and `CONTEXT.md`; org-level
+conventions live in `zeroroot-ai/.github` → `AGENTS.md`.
 
 ## Layout
 
@@ -131,7 +131,5 @@ names, postgres host, Zitadel issuer, ...).
 
 ## Related
 
-- Slice 5.10 of production-readiness epic: deploy#355.
-- Runbook: `docs/runbooks/RUNBOOK-helm-test.md`.
 - Org workflow rules: `zeroroot-ai/.github` → `AGENTS.md`.
-- Architectural overview: `enterprise/docs/ARCHITECTURE.md`.
+- Architectural overview: the repository root `README.md` and `CONTEXT.md`.
