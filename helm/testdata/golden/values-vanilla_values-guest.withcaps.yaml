@@ -1358,6 +1358,10 @@ spec:
           # including setec-webhook in setec-system, so it needs egress and
           # CoreDNS like the rest of this list.
           - webhook-gate
+          # The Zitadel IAM_OWNER PAT escrow (templates/jobs/): reads the minted
+          # Secret through the API server and writes it to OpenBao, so a
+          # restore can bring the PAT back (2026-09-07, blocker 3 loop).
+          - iam-admin-pat-escrow
   policyTypes:
     - Ingress
     - Egress
@@ -18183,6 +18187,42 @@ spec:
     - secretKey: previous_kid
       remoteRef: { key: gibson-extauthz-grant-previous, property: kid }
 ---
+# Source: gibson/charts/gibson-workloads/templates/external-secrets/iam-admin-pat-externalsecret.yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: iam-admin-pat
+  namespace: gibson
+  annotations:
+    argocd.argoproj.io/sync-wave: "-8"
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.132.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: zitadel
+spec:
+  refreshInterval: 60s
+  secretStoreRef:
+    name: "gibson-secrets"
+    kind: ClusterSecretStore
+  target:
+    name: iam-admin-pat
+    creationPolicy: Orphan
+    template:
+      engineVersion: v2
+      type: Opaque
+      metadata:
+        labels:
+          app.kubernetes.io/managed-by: external-secrets
+          app.kubernetes.io/component: zitadel
+      data:
+        pat: '{{ .pat }}'
+  data:
+    - secretKey: pat
+      remoteRef: { key: gibson-zitadel-iam-admin-pat, property: pat }
+---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/missing-secrets.yaml
 # ext-authz API keys DB DSN. ExtAuthz reads dashboard's api_keys table to
 # resolve gibson API keys → tenant context. Same Postgres cluster as
@@ -20464,6 +20504,20 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     argocd.argoproj.io/sync-wave: "0"
 ---
+# Source: gibson/templates/jobs/gibson-workloads-iam-admin-pat-escrow.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: iam-admin-pat-escrow
+  namespace: gibson
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '3'
+    helm.sh/hook-delete-policy: before-hook-creation
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+---
 # Source: gibson/templates/jobs/gibson-workloads-signup-bot-pat-minter.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -20809,6 +20863,25 @@ rules:
     resources: ["secrets"]
     verbs: ["create"]
 ---
+# Source: gibson/templates/jobs/gibson-workloads-iam-admin-pat-escrow.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: iam-admin-pat-escrow
+  namespace: gibson
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '3'
+    helm.sh/hook-delete-policy: before-hook-creation
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+rules:
+- apiGroups: ['']
+  resources: [secrets]
+  verbs: [get]
+  resourceNames: [iam-admin-pat]
+---
 # Source: gibson/templates/jobs/gibson-workloads-signup-bot-pat-minter.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -20995,6 +21068,28 @@ subjects:
   - kind: ServiceAccount
     name: gibson-gibson-workloads-first-admin
     namespace: gibson
+---
+# Source: gibson/templates/jobs/gibson-workloads-iam-admin-pat-escrow.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: iam-admin-pat-escrow
+  namespace: gibson
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '3'
+    helm.sh/hook-delete-policy: before-hook-creation
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+subjects:
+- kind: ServiceAccount
+  name: iam-admin-pat-escrow
+  namespace: gibson
+roleRef:
+  kind: Role
+  name: iam-admin-pat-escrow
+  apiGroup: rbac.authorization.k8s.io
 ---
 # Source: gibson/templates/jobs/gibson-workloads-signup-bot-pat-minter.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -23168,6 +23263,76 @@ spec:
               - key: ca.crt
                 path: ca.crt
             defaultMode: 0o444
+---
+# Source: gibson/templates/jobs/gibson-workloads-iam-admin-pat-escrow.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: iam-admin-pat-escrow
+  namespace: gibson
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: '3'
+    helm.sh/hook-delete-policy: before-hook-creation
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        # networkpolicy-bringup-jobs.yaml selects this label; without it the
+        # namespace default-deny severs the pod from CoreDNS and OpenBao.
+        app.kubernetes.io/component: iam-admin-pat-escrow
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: iam-admin-pat-escrow
+      containers:
+      - name: escrow
+        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+        env:
+        - name: BAO_ADDR
+          value: "http://gibson-openbao:8200"
+        - name: VAULT_ADMIN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: gibson-openbao-keys
+              key: VAULT_ADMIN_TOKEN
+        command: [bash, -ec]
+        args:
+        - |
+          set -euo pipefail
+          NS=gibson
+          KEY=gibson-zitadel-iam-admin-pat
+          # The minted Secret (fresh bootstrap: the Zitadel setup Job writes it,
+          # up to ~9 min into a cold bringup; restore: the ExternalSecret writes
+          # it from the restored store). 180 x 5 s, the minter's window.
+          for i in $(seq 1 180); do
+            if kubectl -n "$NS" get secret iam-admin-pat >/dev/null 2>&1; then break; fi
+            echo "  waiting for iam-admin-pat ($i/180)"; sleep 5
+          done
+          PAT=$(kubectl -n "$NS" get secret iam-admin-pat -o jsonpath='{.data.pat}' | base64 -d | tr -d '\r\n')
+          [ -n "$PAT" ] || { echo "ERROR: iam-admin-pat never appeared or is empty"; exit 1; }
+          code=$(curl -sS -o /tmp/kv.json -w '%{http_code}' \
+            -H "X-Vault-Token: $VAULT_ADMIN_TOKEN" "$BAO_ADDR/v1/secret/data/$KEY")
+          case "$code" in
+            200) have=$(jq -r '.data.data.pat // empty' /tmp/kv.json) ;;
+            404) have="" ;;
+            *) echo "ERROR: read secret/$KEY returned HTTP $code: $(cat /tmp/kv.json)"; exit 1 ;;
+          esac
+          if [ "$have" = "$PAT" ]; then
+            echo "IAM_ADMIN_PAT_ESCROWED already: secret/$KEY matches the Secret"
+            exit 0
+          fi
+          code=$(curl -sS -o /tmp/kv.json -w '%{http_code}' -X POST \
+            -H "X-Vault-Token: $VAULT_ADMIN_TOKEN" -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg p "$PAT" '{data: {pat: $p}}')" "$BAO_ADDR/v1/secret/data/$KEY")
+          case "$code" in
+            200|204) echo "IAM_ADMIN_PAT_ESCROWED: wrote secret/$KEY (pat_len=${#PAT})" ;;
+            *) echo "ERROR: write secret/$KEY returned HTTP $code: $(cat /tmp/kv.json)"; exit 1 ;;
+          esac
 ---
 # Source: gibson/templates/jobs/gibson-workloads-postgres-setup-job.yaml
 apiVersion: batch/v1

@@ -45,6 +45,10 @@ spec:
           # including setec-webhook in setec-system, so it needs egress and
           # CoreDNS like the rest of this list.
           - webhook-gate
+          # The Zitadel IAM_OWNER PAT escrow (templates/jobs/): reads the minted
+          # Secret through the API server and writes it to OpenBao, so a
+          # restore can bring the PAT back (2026-09-07, blocker 3 loop).
+          - iam-admin-pat-escrow
   policyTypes:
     - Ingress
     - Egress
