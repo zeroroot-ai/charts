@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.123.14](https://github.com/zeroroot-ai/charts/compare/v0.123.13...v0.123.14) (2026-09-08)
+
+
+### Bug Fixes
+
+* **restore:** escrow all three Secrets the Zitadel setup Job mints, not the PAT alone ([#49](https://github.com/zeroroot-ai/charts/issues/49)) ([de452bf](https://github.com/zeroroot-ai/charts/commit/de452bf907276a8a8d1c3e7b097ae6069a17bb80))
+* **rework:** let the escrow Job read all three Secrets it copies ([#51](https://github.com/zeroroot-ai/charts/issues/51)) ([a76e233](https://github.com/zeroroot-ai/charts/commit/a76e233f4cf9c8164997c47f159dcc710f716c20))
+
 ## [0.123.13](https://github.com/zeroroot-ai/charts/compare/v0.123.12...v0.123.13) (2026-09-08)
 
 
