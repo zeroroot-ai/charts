@@ -48,6 +48,20 @@ def check(docs):
     covered = any("iam-admin-pat-escrow" in (e.get("values") or []) for p in pols for e in (p["spec"].get("podSelector", {}).get("matchExpressions") or []))
     if not covered:
         bad.append("no NetworkPolicy selects app.kubernetes.io/component=iam-admin-pat-escrow: the namespace default-deny severs the escrow Job")
+    # And the other end: the store's own policy must admit the Job on 8200.
+    # Measured 2026-09-08 (loop #7): egress allowed, ingress not, 130 s
+    # connect timeouts, the sync waiting on the hook for an hour.
+    admitted = False
+    for p in pols:
+        if (p["spec"].get("podSelector", {}).get("matchLabels") or {}).get("app.kubernetes.io/component") != "openbao":
+            continue
+        for rule in p["spec"].get("ingress") or []:
+            ports = [x.get("port") for x in (rule.get("ports") or [])]
+            froms = [((f.get("podSelector") or {}).get("matchLabels") or {}).get("app.kubernetes.io/component") for f in (rule.get("from") or [])]
+            if 8200 in ports and "iam-admin-pat-escrow" in froms:
+                admitted = True
+    if not admitted:
+        bad.append("the openbao NetworkPolicy does not admit app.kubernetes.io/component=iam-admin-pat-escrow on 8200: the escrow Job cannot reach the store")
     return bad
 docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
 mut = [d for d in copy.deepcopy(docs) if not (d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin-pat")]
