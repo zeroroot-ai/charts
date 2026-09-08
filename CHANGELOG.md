@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.123.13](https://github.com/zeroroot-ai/charts/compare/v0.123.12...v0.123.13) (2026-09-08)
+
+
+### Bug Fixes
+
+* **restore:** escrow the Zitadel PAT at wave -2 and read it back at -1, before wave 0 ([#46](https://github.com/zeroroot-ai/charts/issues/46)) ([8f244c9](https://github.com/zeroroot-ai/charts/commit/8f244c9b7b671094e22bc61f124e18def1cb3276))
+* **rework:** apply the gibson-openbao-keys ExternalSecret at wave -8, before the escrow hook that mounts it ([#48](https://github.com/zeroroot-ai/charts/issues/48)) ([2959d6a](https://github.com/zeroroot-ai/charts/commit/2959d6a5df9d21de83421f50774631749a3a97de))
+
 ## [0.123.12](https://github.com/zeroroot-ai/charts/compare/v0.123.11...v0.123.12) (2026-09-08)
 
 
