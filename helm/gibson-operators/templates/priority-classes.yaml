@@ -15,11 +15,25 @@ correctly):
 Both PCs are rendered unconditionally (cluster-scoped) so the kind quota
 scoping in operations/tenant-neo4j-resource-quota.yaml (which references
 tenant-neo4j) keeps working without coupling the two specs.
+
+Sync wave -20, with the operators: a PriorityClass has no dependency of its
+own, and a pod that names one that does not exist yet is refused at
+admission ("no PriorityClass with name gibson-platform-critical was found").
+A named recreate (hosted, ADR-0014) restores the platform's pods with Velero
+while Argo is still on the negative waves, before any StatefulSet of wave 0
+can create an empty volume, and those restored pods name these classes. At
+wave 0 the classes arrived after the restore and seven pods, the daemon and
+Redis among them, never came back with their data (blocker 3 loop #9,
+2026-09-08). Velero must not create them instead: they are chart-owned, the
+value is immutable, and a class restored from an old backup would block
+Argo's next apply.
 */}}
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
   name: gibson-platform-critical
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
   labels:
     {{- include "gibson.labels" . | nindent 4 }}
     app.kubernetes.io/component: priority-class
@@ -34,6 +48,8 @@ apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
   name: gibson-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
   labels:
     {{- include "gibson.labels" . | nindent 4 }}
     app.kubernetes.io/component: priority-class
