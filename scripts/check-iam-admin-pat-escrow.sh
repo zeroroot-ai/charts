@@ -33,8 +33,19 @@ def check(docs):
         if KEY not in keys:
             bad.append(f"the iam-admin-pat ExternalSecret does not read {KEY}")
         wave = (e["metadata"].get("annotations") or {}).get("argocd.argoproj.io/sync-wave")
-        if wave is None or int(wave) <= 0:
-            bad.append(f"the iam-admin-pat ExternalSecret must apply AFTER the wave-0 escrow hook (sync-wave > 0), got {wave!r}: at an earlier wave it is Degraded until the escrow runs and Argo never reaches the escrow")
+        es_wave = int(wave) if wave is not None else 0
+        # The order that works on BOTH paths: the setup Job mints the PAT,
+        # the escrow copies it to the store, this reads it back, and all of
+        # that before wave 0, where the platform-operator waits for it.
+        setup = [d for d in docs if d.get("kind") == "Job" and d["metadata"]["name"].endswith("zitadel-setup")]
+        escrow = [d for d in docs if d.get("kind") == "Job" and d["spec"]["template"]["metadata"].get("labels", {}).get("app.kubernetes.io/component") == "iam-admin-pat-escrow"]
+        def wave_of(d):
+            w = (d["metadata"].get("annotations") or {}).get("argocd.argoproj.io/sync-wave")
+            return int(w) if w is not None else 0
+        if setup and escrow:
+            sw, jw = wave_of(setup[0]), wave_of(escrow[0])
+            if not (sw < jw < es_wave < 0):
+                bad.append(f"the PAT must be minted, escrowed and read back BEFORE wave 0, in that order: zitadel-setup wave {sw}, escrow Job wave {jw}, ExternalSecret wave {es_wave}. Any ExternalSecret wave >= 0 deadlocks a restore (the platform-operator at wave 0 waits for the PAT, and Argo waits for wave 0 before applying it); any wave at or before the escrow is Degraded on a fresh bootstrap")
     jobs = [d for d in docs if d.get("kind") == "Job" and d["spec"]["template"]["metadata"].get("labels", {}).get("app.kubernetes.io/component") == "iam-admin-pat-escrow"]
     if not jobs:
         bad.append("no Job carries app.kubernetes.io/component=iam-admin-pat-escrow: nothing writes the minted PAT to OpenBao")
@@ -67,10 +78,17 @@ docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
 mut = [d for d in copy.deepcopy(docs) if not (d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin-pat")]
 if not check(mut):
     sys.exit("self-test broken: removing the ExternalSecret was not detected")
+# The deadlock of 2026-09-08, planted: the ExternalSecret at wave 1.
+late = copy.deepcopy(docs)
+for d in late:
+    if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin-pat":
+        d["metadata"].setdefault("annotations", {})["argocd.argoproj.io/sync-wave"] = "1"
+if not any("BEFORE wave 0" in b for b in check(late)):
+    sys.exit("self-test broken: the ExternalSecret at wave 1 (the restore deadlock) was not detected")
 bad = check(docs)
 if bad:
     print("✗ check-iam-admin-pat-escrow:", file=sys.stderr)
     for b in bad: print("   " + b, file=sys.stderr)
     sys.exit(1)
-print("✅ self-test: a removed ExternalSecret is detected; iam-admin-pat is escrowed to OpenBao by a covered Job and read back by an Orphan ExternalSecret")
+print("✅ self-test: a removed ExternalSecret and a wave-1 ExternalSecret are detected; iam-admin-pat is escrowed to OpenBao by a covered Job and read back by an Orphan ExternalSecret")
 PY

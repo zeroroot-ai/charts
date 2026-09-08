@@ -11,8 +11,22 @@ back. On a restore the ExternalSecret creates the Secret from the restored
 store first, and this Job finds the two equal and exits.
 
 Same hook shape as signup-bot-pat-minter: post-install/post-upgrade, Argo
-Sync hook, wave 0, weight 3, self-waiting. See the ExternalSecret's header
-for the measurement (2026-09-07, blocker 3 loop).
+Sync hook, weight 3, self-waiting. See the ExternalSecret's header for the
+measurement (2026-09-07, blocker 3 loop).
+
+Sync wave -2, not 0. The setup Job that mints the PAT is wave -3, and the
+store this Job writes to is readable from wave -8 (every other
+ExternalSecret syncs there). Nothing this Job needs arrives later than -3.
+It has to be BEFORE wave 0 because the ExternalSecret that reads the PAT
+back must be too: the platform-operator, a wave-0 workload, waits for the
+PAT to mint gibson-master-key, and until then the daemon and the
+gibson-workloads StatefulSet cannot mount their key volumes. With the escrow
+at 0 and the ExternalSecret at 1, a restore deadlocked: Argo waited for
+wave 0 to be Healthy before applying the ExternalSecret, and wave 0 could
+not be Healthy without it (hosted run 34249427078 and blocker 3 loop #13,
+2026-09-08: the built-ins Restore sat InProgress for 40 minutes on the
+gibson-workloads-0 volume, its pod at Init:0/6 on "secret gibson-master-key
+not found").
 */}}
 {{- $baoAddr := printf "http://%s-openbao:%v" .Release.Name ((index .Values "gibson-workloads" "openbao" "service").port | default 8200) }}
 apiVersion: v1
@@ -26,7 +40,7 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-wave: "-2"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -39,7 +53,7 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-wave: "-2"
 rules:
 - apiGroups: ['']
   resources: [secrets]
@@ -57,7 +71,7 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-wave: "-2"
 subjects:
 - kind: ServiceAccount
   name: iam-admin-pat-escrow
@@ -78,7 +92,7 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-wave: "-2"
 spec:
   backoffLimit: 10
   ttlSecondsAfterFinished: 600
