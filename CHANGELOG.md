@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.123.10](https://github.com/zeroroot-ai/charts/compare/v0.123.9...v0.123.10) (2026-09-08)
+
+
+### Bug Fixes
+
+* **links:** sweep the dead deploy, gitops and docs references ([#39](https://github.com/zeroroot-ai/charts/issues/39)) ([239138d](https://github.com/zeroroot-ai/charts/commit/239138d6c2d6bee6e32e89ed4e7d7f8b72c88a8b))
+
 ## [0.123.9](https://github.com/zeroroot-ai/charts/compare/v0.123.8...v0.123.9) (2026-09-08)
 
 
