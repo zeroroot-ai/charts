@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.123.11](https://github.com/zeroroot-ai/charts/compare/v0.123.10...v0.123.11) (2026-09-08)
+
+
+### Bug Fixes
+
+* **images:** re-pin gibson, ext-authz and the three operators to v0.134.8 ([#43](https://github.com/zeroroot-ai/charts/issues/43)) ([a41a634](https://github.com/zeroroot-ai/charts/commit/a41a634f0635e08f877ace295b1e8599c8a61ae4))
+* **zitadel:** bump to v4.17.3 ([#41](https://github.com/zeroroot-ai/charts/issues/41)) ([12103cb](https://github.com/zeroroot-ai/charts/commit/12103cb92ac4547248d3399b5c22251ae99a13dd))
+
 ## [0.123.10](https://github.com/zeroroot-ai/charts/compare/v0.123.9...v0.123.10) (2026-09-08)
 
 
