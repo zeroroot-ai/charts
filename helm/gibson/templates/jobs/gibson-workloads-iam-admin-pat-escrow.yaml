@@ -60,7 +60,12 @@ rules:
 - apiGroups: ['']
   resources: [secrets]
   verbs: [get]
-  resourceNames: [iam-admin-pat]
+  # Every Secret the escrow loop reads (ENTRIES in the Job below). A name
+  # missing here reads as "not there yet" to kubectl and the loop waits its
+  # whole window: hosted run 34271811189 (2026-09-08) sat 20 minutes on
+  # "waiting for iam-admin" with the Secret present and this list naming
+  # the PAT alone. The Job now refuses to wait on a Secret it may not read.
+  resourceNames: [iam-admin-pat, iam-admin, login-client]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -153,6 +158,11 @@ spec:
             if [ -n "$have" ] && ! kubectl -n "$NS" get secret "$SECRET" >/dev/null 2>&1; then
               echo "ESCROWED already: secret/$KEY is in the store and Secret $SECRET is not yet materialised (restore path)"
               continue
+            fi
+            # A Secret this ServiceAccount may not read looks exactly like one
+            # that is not there yet. Refuse to wait on it.
+            if [ "$(kubectl -n "$NS" auth can-i get "secret/$SECRET")" != yes ]; then
+              echo "ERROR: the escrow ServiceAccount may not get secret/$SECRET: add it to the Role's resourceNames"; exit 1
             fi
             # The minted Secret (fresh bootstrap: the Zitadel setup Job writes it,
             # up to ~9 min into a cold bringup). 180 x 5 s, the minter's window.
