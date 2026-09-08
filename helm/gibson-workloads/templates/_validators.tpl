@@ -619,7 +619,7 @@ labels (consumed by each RuntimeClass's own `scheduling.nodeSelector`) and,
 per-class, a SandboxClass CR's `spec.nodeSelector`
 (opensource/setec api/v1alpha1). Neither of those has a matching
 Tolerations mechanism today — tracked as a known gap in
-zeroroot-ai/setec, filed alongside deploy#1080.
+zeroroot-ai/setec.
 
 Run by templates/gibson/statefulset.yaml's validation chain (alongside
 the other gibson.validate* validators).
@@ -801,7 +801,7 @@ Spec: deploy#123 (envoy-cert-unify) / deploy#125.
 {{- define "gibson.validateEnvoyTlsNotSelfSigned" -}}
 {{- $tls := (.Values.envoy).tls | default dict -}}
 {{- if $tls.selfSigned -}}
-{{- fail "validateEnvoyTlsNotSelfSigned: envoy.tls.selfSigned=true is forbidden (deploy#125 / parent deploy#123). The Envoy edge TLS Secret gibson-envoy-tls is owned EXCLUSIVELY by the cert-manager Certificate in templates/cert-manager/certificate.yaml. The old in-chart inline-mint path was deleted in deploy#124 — under Argo's offline render it produced fresh cert material on every reconcile, breaking every consumer that had cached the prior cert. To migrate: set envoy.tls.selfSigned=false AND certManager.envoyEdge.enabled=true AND certManager.envoyEdge.issuer to one of: letsencrypt-prod | letsencrypt-staging | selfsigned-ca (kind). See zeroroot-ai/deploy#123 for the unification rationale." -}}
+{{- fail "validateEnvoyTlsNotSelfSigned: envoy.tls.selfSigned=true is forbidden. The Envoy edge TLS Secret gibson-envoy-tls is owned EXCLUSIVELY by the cert-manager Certificate in templates/cert-manager/certificate.yaml. The old in-chart inline-mint path was deleted — under Argo's offline render it produced fresh cert material on every reconcile, breaking every consumer that had cached the prior cert. To migrate: set envoy.tls.selfSigned=false AND certManager.envoyEdge.enabled=true AND certManager.envoyEdge.issuer to one of: letsencrypt-prod | letsencrypt-staging | selfsigned-ca (kind)." -}}
 {{- end -}}
 {{- end -}}
 

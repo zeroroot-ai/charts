@@ -98,7 +98,6 @@ secrets:
     # substitution choice between "render an ExternalSecret pulling the LLM
     # keys from `gibson-llm-keys` in the one ClusterSecretStore" (default)
     # and "render an inline Secret from the values below".
-    # Spec: zeroroot-ai/gitops#93 follow-up.
     externalSecret:
       enabled: true
 
@@ -2638,8 +2637,8 @@ envoy:
     # Reloader rolls the Envoy Deployment when the Secret changes so the
     # live config tracks the live Zitadel state.
     #
-    # zeroroot-ai/deploy#130 established the chart-time history: Argo's
-    # repo-server cannot `lookup` cluster Secrets at render time, so the
+    # The chart-time history: Argo's repo-server cannot
+    # `lookup` cluster Secrets at render time, so the
     # value had to be hardcoded in env overlays and refreshed by hand
     # after every Zitadel reset. The runtime-resolution follow-up moved
     # that resolution to the pod, eliminating the staleness class
@@ -4139,7 +4138,7 @@ reservedNames:
 #      chart does not render a default SandboxClass (setec.defaultClass.enabled
 #      is false); an operator provisions one out of band or via a future task.
 #
-# KNOWN GAP (zeroroot-ai/setec#TBD, filed alongside deploy#1080): neither
+# KNOWN GAP (tracked in zeroroot-ai/setec): neither
 # mechanism above adds a Pod-level `tolerations` entry, and SandboxClassSpec
 # has no Tolerations field at all — so today NO Sandbox Pod can actually
 # schedule onto a tainted node group (the sandbox-host taint blocks it

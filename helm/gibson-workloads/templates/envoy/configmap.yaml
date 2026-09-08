@@ -35,11 +35,10 @@ unconditionally — there is no `envoy.enabled` opt-out.
   This value is resolved at POD STARTUP from the Secret
   `gibson-dashboard-oidc` (key `client_id`), which platform-operator
   maintains as the runtime source of truth — it is rewritten on every
-  Zitadel reset / re-mint of the OIDC app. See zeroroot-ai/deploy#130
-  for the chart-render-time history (Argo's repo-server has no cluster
-  read access, so chart-time `lookup` cannot see this Secret); and the
-  follow-up that moved resolution to runtime to stop env overlays from
-  drifting on every Zitadel reset.
+  Zitadel reset / re-mint of the OIDC app. The chart-render-time
+  history: Argo's repo-server has no cluster read access, so a
+  chart-time `lookup` cannot see this Secret. Resolution moved to the
+  pod, so env overlays no longer drift on every Zitadel reset.
 
   The template below emits the literal placeholder `${DASHBOARD_CLIENT_ID}`
   into the ConfigMap; the Envoy pod's `render-envoy-config` initContainer

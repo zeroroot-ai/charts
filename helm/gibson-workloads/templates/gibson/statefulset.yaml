@@ -752,8 +752,7 @@ spec:
               value: {{ join "," .Values.spiffe.callbackPeerSVIDs | quote }}
             {{- end }}
             # Additional inbound mTLS allow-list for the daemon's main gRPC
-            # listener (— zeroroot-ai/docs adr/0002-operator-to-
-            # daemon-transport.md). Envoy is always accepted via
+            # listener. Envoy is always accepted via
             # GIBSON_SPIFFE_ENVOY_ID; the entries here are direct control-
             # plane callers (today: the tenant-operator). Comma-separated.
             {{- if .Values.spiffe.allowedPeerIDs }}
