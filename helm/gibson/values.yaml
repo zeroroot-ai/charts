@@ -46,15 +46,34 @@
 # moves the images moves the credential with them.
 # =============================================================================
 imageCredentials:
+  # Credential source, one per install (never two paths at once).
+  #   "secretStore" (default): read a static credential from the
+  #     ClusterSecretStore. A customer mirroring the images into their own
+  #     registry sets registry/username/remoteKey to match.
+  #   "generator": read a refreshed token from any ESO generator the operator
+  #     supplies (generatorRef below). The chart names no provider — the concrete
+  #     generator object lives with the operator's estate. The referenced
+  #     generator must yield a `token` key, used as the registry password.
+  source: "secretStore"
   # Host the credential is scoped to. Defaults to global.registry.
   registry: ""
   # Username presented at that registry. ghcr.io accepts any non-empty value
-  # alongside a PAT; a registry that wants a real login sets it here.
+  # alongside a token; a registry that wants a real login sets it here.
   username: "x-access-token"
-  # Where the credential lands, and where it is read from in the secret store.
+  # Where the credential lands, and (for secretStore) where it is read from.
   secretName: "ghcr-credentials"
   remoteKey: "ghcr-pull-secret"
   remoteProperty: "pat"
+  # Used only when source == "generator". Points at an ESO generator the
+  # operator defines elsewhere; the chart references it and stays provider-
+  # neutral. kind and name are required when source == "generator".
+  generatorRef:
+    apiVersion: "generators.external-secrets.io/v1alpha1"
+    kind: ""
+    name: ""
+  # Minutes between refreshes for the generator path. Keep below the token
+  # lifetime of the referenced generator so the pull secret never goes stale.
+  refreshMinutes: 45
 
 
 certManager:
