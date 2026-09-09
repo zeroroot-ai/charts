@@ -21,7 +21,9 @@
 #   RELEASE        helm release name                    (default: gibson)
 #   CHART_DIR      chart root                           (default: helm)
 #   VALUES         profile values file                  (default: helm/gibson/values-vanilla.yaml)
-#   SUBSTRATE_ENV  stage 0 output, read for the bucket  (default: ${SUBSTRATE_DIR:-/bulk/substrate}/kind/substrate.env)
+#   SUBSTRATE_DIR  where stage 0 keeps its state per environment
+#                  (default: ${XDG_STATE_HOME:-$HOME/.local/state}/zeroroot/substrate)
+#   SUBSTRATE_ENV  stage 0 output, read for the bucket  (default: $SUBSTRATE_DIR/kind/substrate.env)
 #   TIMEOUT        per-step helm timeout                (default: 10m)
 set -euo pipefail
 
@@ -211,7 +213,8 @@ fi
 # whose archive_command points at nothing fills its WAL volume and stops
 # accepting writes.
 # ---------------------------------------------------------------------------
-SUBSTRATE_ENV="${SUBSTRATE_ENV:-${SUBSTRATE_DIR:-/bulk/substrate}/kind/substrate.env}"
+SUBSTRATE_DIR="${SUBSTRATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/zeroroot/substrate}"
+SUBSTRATE_ENV="${SUBSTRATE_ENV:-${SUBSTRATE_DIR}/kind/substrate.env}"
 if [ ! -s "$SUBSTRATE_ENV" ]; then
   cat >&2 <<MSG
 FATAL: no substrate.env at ${SUBSTRATE_ENV}.

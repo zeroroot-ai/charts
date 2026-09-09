@@ -23465,7 +23465,6 @@ spec:
               fresh microVM; sustained breach usually means Setec's
               snapshot pre-warm pool is exhausted or the bare-metal
               sandbox-host node is at CPU saturation.
-            runbook_url: "https://github.com/zeroroot-ai/zeroroot.ai/blob/main/enterprise/docs/runbooks/setec-degradation.md"
 
         # NFR-P2: warm-start p95 = 100ms.
         - alert: SandboxWarmStartLatencyHigh
@@ -23484,7 +23483,6 @@ spec:
               pool) has been above 100ms for 10 minutes. Likely causes:
               snapshot-pool starvation, KVM contention, or a Setec
               frontend slowdown.
-            runbook_url: "https://github.com/zeroroot-ai/zeroroot.ai/blob/main/enterprise/docs/runbooks/setec-degradation.md"
 
         # R10.3: 99% of SANDBOXED dispatches < 10s.
         - alert: SandboxDispatchSLOBreach
@@ -23502,7 +23500,6 @@ spec:
               10 seconds end-to-end. This is the hard user-facing SLO;
               a sustained breach blocks UNTRUSTED-content missions for
               users.
-            runbook_url: "https://github.com/zeroroot-ai/zeroroot.ai/blob/main/enterprise/docs/runbooks/setec-degradation.md"
 
         # R5.3: sandbox unavailable for >5m.
         - alert: SandboxUnavailable
@@ -23521,7 +23518,6 @@ spec:
               `sandbox_unavailable`; trusted-content missions continue.
               The R3.4 OverrideDispatchPolicy RPC is the documented
               escape hatch (1-hour TTL, audit-logged).
-            runbook_url: "https://github.com/zeroroot-ai/zeroroot.ai/blob/main/enterprise/docs/runbooks/setec-degradation.md"
 
         # NFR-R1 + Scenario 4: spot-eviction storm signal.
         # health=degraded for >5m means the eviction handler in
@@ -23548,7 +23544,6 @@ spec:
               wait for ArgoCD sync (≤5 min); revert once the spot pool
               recovers. Escalate to the EKS sister-spec owner if
               sustained >24h.
-            runbook_url: "https://github.com/zeroroot-ai/zeroroot.ai/blob/main/enterprise/docs/runbooks/setec-eviction-storm.md"
 
         # R4.4: per-tenant quota-exceeded rate elevated.
         # The alert uses the sum across tenants intentionally — a
@@ -23571,7 +23566,6 @@ spec:
               Likely a single tenant driving traffic past the per-tenant
               cap; check the Sandbox Health dashboard's "quota-exceeded
               by tenant" panel and follow setec-cost-spike.md.
-            runbook_url: "https://github.com/zeroroot-ai/zeroroot.ai/blob/main/enterprise/docs/runbooks/setec-cost-spike.md"
 ---
 # Source: gibson/charts/gibson-workloads/templates/ratelimit/alertrule.yaml
 apiVersion: monitoring.coreos.com/v1

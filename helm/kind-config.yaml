@@ -3,7 +3,16 @@
 # =============================================================================
 # This configuration creates a Kind cluster optimized for running Gibson.
 #
-# Usage: kind create cluster --config kind-config.yaml --name gibson
+# The file carries one placeholder, __KIND_PV_DIR__, because kind expands
+# neither an environment variable nor a tilde inside its own configuration.
+# The caller substitutes an absolute host directory before it creates the
+# cluster.
+#
+# Usage:
+#   KIND_PV_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/zeroroot/kind-pv"
+#   mkdir -p "$KIND_PV_DIR"
+#   sed "s|__KIND_PV_DIR__|$KIND_PV_DIR|" kind-config.yaml \
+#     | kind create cluster --name gibson --config -
 # =============================================================================
 
 kind: Cluster
@@ -99,9 +108,10 @@ nodes:
       # local-path-provisioner PV (postgres pgdata, OpenFGA tuples, Zitadel
       # state, etc.) across host reboots.
       #
-      # __KIND_PV_DIR__ is substituted by the Makefile from KIND_PV_DIR
-      # (default /bulk/pvc). kind itself does not expand env vars in this
-      # file — the Makefile sed-renders it before `kind create cluster`.
+      # __KIND_PV_DIR__ is a placeholder. The caller substitutes an absolute
+      # host directory before `kind create cluster`; read the usage note at
+      # the top of this file. Pick a directory that survives a host reboot,
+      # never one under /tmp.
       - hostPath: __KIND_PV_DIR__
         containerPath: /var/local-path-provisioner
 

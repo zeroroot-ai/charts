@@ -1,7 +1,6 @@
 # Charts
 
-SEED for `zeroroot-ai/charts/CONTEXT.md`. Move it with `git mv` when the repo
-exists. This context owns the Gibson platform as a **thing a stranger can
+This context owns the Gibson platform as a **thing a stranger can
 install**: the umbrella chart, its sub-charts, the profiles, and the guards
 that keep customer-facing config free of ZeroRoot's own estate. The hosted
 SaaS lives in `zeroroot-ai/hosted` and is one consumer of this context, not
