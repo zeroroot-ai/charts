@@ -13,6 +13,12 @@
 #   rand           32 random bytes, URL-safe base64, no padding (43 chars)
 #   randb64        32 random bytes, standard base64 (44 chars)
 #   rand8          8 random bytes, URL-safe base64, no padding (11 chars)
+#   pw             43 random letters and digits (256 bits): a PASSWORD, the
+#                  kind for every value a program may receive as an argument.
+#                  rand starts with '-' one draw in 64, and `neo4j-admin dbms
+#                  set-initial-password -Xyz` reads that as an option (exit
+#                  64, blocker 3 loops #16/#18). scripts/check-seed-passwords.sh
+#                  refuses password:rand.
 #   ecpem:<name>   the private key of transit key <name> (ecdsa-p256), PEM
 #   rsapem:<name>  the private key of transit key <name> (rsa-2048), PEM
 #   rsapub:<name>  the public key of transit key <name> (rsa-2048), PEM
@@ -29,19 +35,19 @@
 # differs from the stored one is written), and `svctoken` follows the token
 # in the gibson-platform-operator-vault Secret. Everything else is generated
 # once and kept, so an upgrade never rotates a credential under a workload.
-gibson-gibson-platform-postgres-password password:rand
-gibson-dashboard-postgres-password password:rand
-gibson-tenant-admin-postgres-password password:rand
-gibson-zitadel-postgres-password password:rand
-gibson-openfga-postgres-password password:rand
-gibson-spire-postgres-password password:rand
-gibson-neo4j-password password:rand
-gibson-redis-password password:rand
+gibson-gibson-platform-postgres-password password:pw
+gibson-dashboard-postgres-password password:pw
+gibson-tenant-admin-postgres-password password:pw
+gibson-zitadel-postgres-password password:pw
+gibson-openfga-postgres-password password:pw
+gibson-spire-postgres-password password:pw
+gibson-neo4j-password password:pw
+gibson-redis-password password:pw
 gibson-impersonation-key value:rand
 gibson-impersonation-key-previous value:rand
 zitadel-masterkey value:rand
 gibson-billing-webhook-secret secret:rand
-grafana-admin-password value:rand
+grafana-admin-password value:pw
 gibson-dashboard-session-secrets auth_secret:rand server_actions_key:randb64
 gibson-cg-signing-key key:rand kid:rand8
 gibson-extauthz-grant-current pem:ecpem:extauthz-grant-current kid:rand8

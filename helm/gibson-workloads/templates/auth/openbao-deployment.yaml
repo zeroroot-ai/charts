@@ -779,6 +779,21 @@ spec:
                 head -c "${1:-32}" /dev/urandom | base64 | tr -d '\n=' | tr '+/' '-_'
               }
 
+              # A password that may be handed to a program as an ARGUMENT:
+              # letters and digits only, never a leading '-'. gen_rand is
+              # URL-safe base64, and one draw in 64 starts with '-'; the
+              # Neo4j image then runs `neo4j-admin dbms set-initial-password
+              # -Xyz...`, picocli reads the password as an option, exits 64,
+              # and the pod crashloops until someone rotates the key (blocker
+              # 3 loops #16 and #18, hosted run 34345134204, 2026-09-09).
+              # 43 alphanumerics carry 256 bits, the same as gen_rand 32.
+              # cut, not head, closes the pipe: every stage drains its input
+              # before it exits, so nothing upstream dies of SIGPIPE under
+              # pipefail. 512 random bytes give ~660 letters and digits.
+              gen_pw() {
+                head -c 512 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-"${1:-43}"
+              }
+
               gen_rand_b64() {
                 head -c "${1:-32}" /dev/urandom | base64 | tr -d '\n'
               }
@@ -868,6 +883,7 @@ spec:
                   rand)    gen_rand 32 ;;
                   randb64) gen_rand_b64 32 ;;
                   rand8)   gen_rand 8 ;;
+                  pw)      gen_pw 43 ;;
                   ecpem)   transit_private_pem "$1" "$3" ecdsa-p256 ;;
                   rsapem)  transit_private_pem "$1" "$3" rsa-2048 ;;
                   rsapub)  transit_public_pem "$1" "$3" rsa-2048 ;;
