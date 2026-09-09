@@ -90,9 +90,18 @@ rules:
   # the pre-accept the member sits Invited forever, the reconciler never
   # seeds the FGA active_session tuples, and the owner can log in but every
   # tenant-scoped RPC is denied by the session gate.
+  # create as well as patch: bootstrap-tenant-owner documents its own
+  # fallback (cmd/bootstrap-tenant-owner/member_preaccept.go): when the
+  # pending-provisioning reconcile has not created the founding member
+  # yet, the Job creates it already accepted, and whichever of the two
+  # loses the race takes an idempotent no-op. Without create the fallback
+  # was a forbidden call: blocker 3 loop #19 (2026-09-09) restored a
+  # Tenant whose status was already Ready, the operator created nothing,
+  # and the hook crashlooped on "create founding TenantMember ...:
+  # forbidden" while the platform read Healthy.
   - apiGroups: ["gibson.zeroroot.ai"]
     resources: ["tenantmembers"]
-    verbs: ["get", "list", "patch"]
+    verbs: ["get", "list", "patch", "create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
