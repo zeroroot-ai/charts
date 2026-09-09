@@ -13266,6 +13266,12 @@ spec:
               #   rand           32 random bytes, URL-safe base64, no padding (43 chars)
               #   randb64        32 random bytes, standard base64 (44 chars)
               #   rand8          8 random bytes, URL-safe base64, no padding (11 chars)
+              #   pw             43 random letters and digits (256 bits): a PASSWORD, the
+              #                  kind for every value a program may receive as an argument.
+              #                  rand starts with '-' one draw in 64, and `neo4j-admin dbms
+              #                  set-initial-password -Xyz` reads that as an option (exit
+              #                  64, blocker 3 loops #16/#18). scripts/check-seed-passwords.sh
+              #                  refuses password:rand.
               #   ecpem:<name>   the private key of transit key <name> (ecdsa-p256), PEM
               #   rsapem:<name>  the private key of transit key <name> (rsa-2048), PEM
               #   rsapub:<name>  the public key of transit key <name> (rsa-2048), PEM
@@ -13282,19 +13288,19 @@ spec:
               # differs from the stored one is written), and `svctoken` follows the token
               # in the gibson-platform-operator-vault Secret. Everything else is generated
               # once and kept, so an upgrade never rotates a credential under a workload.
-              gibson-gibson-platform-postgres-password password:rand
-              gibson-dashboard-postgres-password password:rand
-              gibson-tenant-admin-postgres-password password:rand
-              gibson-zitadel-postgres-password password:rand
-              gibson-openfga-postgres-password password:rand
-              gibson-spire-postgres-password password:rand
-              gibson-neo4j-password password:rand
-              gibson-redis-password password:rand
+              gibson-gibson-platform-postgres-password password:pw
+              gibson-dashboard-postgres-password password:pw
+              gibson-tenant-admin-postgres-password password:pw
+              gibson-zitadel-postgres-password password:pw
+              gibson-openfga-postgres-password password:pw
+              gibson-spire-postgres-password password:pw
+              gibson-neo4j-password password:pw
+              gibson-redis-password password:pw
               gibson-impersonation-key value:rand
               gibson-impersonation-key-previous value:rand
               zitadel-masterkey value:rand
               gibson-billing-webhook-secret secret:rand
-              grafana-admin-password value:rand
+              grafana-admin-password value:pw
               gibson-dashboard-session-secrets auth_secret:rand server_actions_key:randb64
               gibson-cg-signing-key key:rand kid:rand8
               gibson-extauthz-grant-current pem:ecpem:extauthz-grant-current kid:rand8
@@ -13695,6 +13701,21 @@ spec:
                 head -c "${1:-32}" /dev/urandom | base64 | tr -d '\n=' | tr '+/' '-_'
               }
 
+              # A password that may be handed to a program as an ARGUMENT:
+              # letters and digits only, never a leading '-'. gen_rand is
+              # URL-safe base64, and one draw in 64 starts with '-'; the
+              # Neo4j image then runs `neo4j-admin dbms set-initial-password
+              # -Xyz...`, picocli reads the password as an option, exits 64,
+              # and the pod crashloops until someone rotates the key (blocker
+              # 3 loops #16 and #18, hosted run 34345134204, 2026-09-09).
+              # 43 alphanumerics carry 256 bits, the same as gen_rand 32.
+              # cut, not head, closes the pipe: every stage drains its input
+              # before it exits, so nothing upstream dies of SIGPIPE under
+              # pipefail. 512 random bytes give ~660 letters and digits.
+              gen_pw() {
+                head -c 512 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | cut -c1-"${1:-43}"
+              }
+
               gen_rand_b64() {
                 head -c "${1:-32}" /dev/urandom | base64 | tr -d '\n'
               }
@@ -13784,6 +13805,7 @@ spec:
                   rand)    gen_rand 32 ;;
                   randb64) gen_rand_b64 32 ;;
                   rand8)   gen_rand 8 ;;
+                  pw)      gen_pw 43 ;;
                   ecpem)   transit_private_pem "$1" "$3" ecdsa-p256 ;;
                   rsapem)  transit_private_pem "$1" "$3" rsa-2048 ;;
                   rsapub)  transit_public_pem "$1" "$3" rsa-2048 ;;
