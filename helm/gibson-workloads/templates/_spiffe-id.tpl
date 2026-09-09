@@ -12,10 +12,9 @@ Parameters:
 Generates a ClusterSPIFFEID with:
   - SPIFFE ID: spiffe://<trustDomain>/<kind>/<name>
               where trustDomain comes from .Values.gibson.auth.spiffe.trustDomain
-              (defaults to "zeroroot.ai" — the canonical SPIFFE trust domain
-              memorialised in memory feedback_zero_day_ai_domain.md). Spec
-              zero-trust-hardening Req 12 purged the legacy "gibson.io"
-              hard-code from this helper.
+              (defaults to "zeroroot.ai", the canonical SPIFFE trust domain).
+              The trust domain is a product invariant. A customer changes the
+              serving domain, global.domain, and never this value.
   - Pod selector: app.kubernetes.io/component: <kind>-<name> (or just <name> for platform)
   - Namespace selector: release namespace
 

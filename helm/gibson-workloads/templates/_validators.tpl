@@ -220,7 +220,7 @@ historical reasons; the OCI artifact it pins is a github.com/zeroroot-ai/gibson
 tag, not an SDK release — see helm/gibson-workloads/values.yaml.)
 
 The Phase H/8.6 init-container pull pattern stamps the ConfigMap with
-annotation `gibson.zero-day.ai/sdk-version: <ver>` taken from
+annotation `gibson.zeroroot.ai/sdk-version: <ver>` taken from
 .Values.sdk.version. We can't introspect another template's output from
 inside the helper engine, so we approximate by checking the values that
 drive the stamp:
