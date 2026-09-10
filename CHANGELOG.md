@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.124.1](https://github.com/zeroroot-ai/charts/compare/v0.124.0...v0.124.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* **images:** re-pin gibson, ext-authz and the three operators to v0.135.1 ([#60](https://github.com/zeroroot-ai/charts/issues/60)) ([9d82545](https://github.com/zeroroot-ai/charts/commit/9d8254544799a587b42850d490f2b3245cef769d))
+* **rbac:** let the first-admin Job create the founding TenantMember it documents creating ([#58](https://github.com/zeroroot-ai/charts/issues/58)) ([ada2d5c](https://github.com/zeroroot-ai/charts/commit/ada2d5c64f4a72bcaf6ba963e27e6ca46d5f283e))
+* **seed:** mint passwords from letters and digits, never a leading dash ([#57](https://github.com/zeroroot-ai/charts/issues/57)) ([97a16f0](https://github.com/zeroroot-ai/charts/commit/97a16f0275f41f061aa05dc4eb54bb8b467cca64))
+
 ## [0.124.0](https://github.com/zeroroot-ai/charts/compare/v0.123.15...v0.124.0) (2026-09-09)
 
 
