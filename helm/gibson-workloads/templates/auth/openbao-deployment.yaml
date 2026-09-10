@@ -62,11 +62,13 @@ projected ServiceAccount token and mints a replacement. That login is the
 standing path back into the store on every profile: no stored credential,
 no recovery key, no manual recovery (closes the deploy#1731 gap).
 
-The two seed inputs that are not self-generated randoms, the GHCR pull
-token and the LLM keys, arrive through the bringup keyring (members
-GHCR_PULL_TOKEN and LLM_KEYS_JSON, scripts/keyring.sh). The bringup writes
-them into the keyring Secret as `ghcr-pull-token` and `llm-keys-json`, the
-chart projects those two keys, and only those two, into the sidecar.
+The seed inputs that are not self-generated randoms arrive through the
+bringup keyring Secret: the GHCR pull token and the LLM keys (members
+GHCR_PULL_TOKEN and LLM_KEYS_JSON, scripts/keyring.sh) as `ghcr-pull-token`
+and `llm-keys-json`, and the SMTP relay credential (SMTP_USER from
+substrate.env, SMTP_PASSWORD from the keyring) as `smtp-username` and
+`smtp-password`. The chart projects those four keys, and only those four,
+into the sidecar; the seed table names which OpenBao property each fills.
 */}}
 {{- $openbaoRepo := .Values.openbao.image.repository | required "openbao.image.repository is REQUIRED (OpenBao is structural — see deploy#223). Set it in values.yaml or the env's gitops Application's helm.values block." }}
 {{- $openbaoTag := .Values.openbao.image.tag | required "openbao.image.tag is REQUIRED (OpenBao is structural — see deploy#223). Pin to a specific OpenBao version (e.g. \"2.5.3\")." }}
@@ -1301,6 +1303,10 @@ spec:
                 path: ghcr-pull-token
               - key: llm-keys-json
                 path: llm-keys-json
+              - key: smtp-username
+                path: smtp-username
+              - key: smtp-password
+                path: smtp-password
   volumeClaimTemplates:
     {{- if .Values.openbao.persistence.enabled }}
     - metadata:
