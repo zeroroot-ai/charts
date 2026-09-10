@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.125.1](https://github.com/zeroroot-ai/charts/compare/v0.125.0...v0.125.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* **daemon:** always hand the LLM-keys Secret to the daemon ([#67](https://github.com/zeroroot-ai/charts/issues/67)) ([3efd616](https://github.com/zeroroot-ai/charts/commit/3efd616319998466748f22342dad737dd0e369cc))
+
 ## [0.125.0](https://github.com/zeroroot-ai/charts/compare/v0.124.2...v0.125.0) (2026-09-10)
 
 
