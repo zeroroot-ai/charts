@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.125.0](https://github.com/zeroroot-ai/charts/compare/v0.124.2...v0.125.0) (2026-09-10)
+
+
+### Features
+
+* **seams:** one Route53 credential Secret for cert-manager and external-dns, one SMTP relay credential for the platform ([#65](https://github.com/zeroroot-ai/charts/issues/65)) ([0e605d8](https://github.com/zeroroot-ai/charts/commit/0e605d8570b6029916600c723ec57e3defa86183))
+
 ## [0.124.2](https://github.com/zeroroot-ai/charts/compare/v0.124.1...v0.124.2) (2026-09-10)
 
 
