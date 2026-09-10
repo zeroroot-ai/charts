@@ -1034,7 +1034,11 @@ auth does a TokenReview on every login: with that dropped, every login took
 the 30 s API timeout and answered "permission denied", the seeder could not
 renew its own token, and every ExternalSecret went NotReady (staging bringup
 2026-09-10, the first from fresh). An estate names the CIDRs its API server
-answers from (the VPC CIDR on EKS); the shipped default is empty.
+answers from; the shipped default is empty. On EKS that is two entries: the
+VPC CIDR for the control-plane ENIs, and the `kubernetes` Service ClusterIP,
+because the VPC CNI agent judges egress against the destination before
+kube-proxy rewrites it (measured 2026-09-10: the ENIs answered, the ClusterIP
+timed out).
 */}}
 {{- define "gibson.netpolEgressAPIServer" -}}
 {{- $cidrs := list -}}
