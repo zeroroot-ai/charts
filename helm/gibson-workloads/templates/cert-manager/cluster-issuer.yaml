@@ -20,11 +20,25 @@ Each issuer is gated independently:
     ingress:
       class: {{ $le.ingressClass | default "nginx" | quote }}
 {{- else if eq $s "dns01-route53" }}
+{{- $cred := $le.dns01Route53.credentialsSecret | default dict }}
 - dns01:
     route53:
       region: {{ $le.dns01Route53.region | quote }}
       {{- if $le.dns01Route53.hostedZoneID }}
       hostedZoneID: {{ $le.dns01Route53.hostedZoneID | quote }}
+      {{- end }}
+      {{- /* The Route53 credential is a Secret in the cert-manager
+             namespace (its cluster-resource namespace). Without a name here
+             cert-manager falls back to the SDK chain, which on EKS is the
+             node's instance profile and on every other cluster nothing:
+             stage 1 mints no IRSA role (deploy#1744). */}}
+      {{- if $cred.name }}
+      accessKeyIDSecretRef:
+        name: {{ $cred.name | quote }}
+        key: {{ $cred.accessKeyIDKey | default "access-key-id" | quote }}
+      secretAccessKeySecretRef:
+        name: {{ $cred.name | quote }}
+        key: {{ $cred.secretAccessKeyKey | default "secret-access-key" | quote }}
       {{- end }}
 {{- end -}}
 {{- end -}}

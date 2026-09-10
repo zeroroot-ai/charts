@@ -10721,7 +10721,7 @@ spec:
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,shared-identity"
         checksum/config: 2a738ee64f3217c6773fadeb18bc0f2e84e5ae625ce562e16150150e2705a9f8
-        checksum/secret: 9aa4ae9ff147fd15f4a8d9698f06375f15e4ee930a87e6f53a7351edf90b2e4a
+        checksum/secret: 8dc598095de50f086f966eb476439b7a93811c8dd14bda6d663539ea596fa2ab
         # Pod-roll-on-Secret-change is delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). The prior pattern
         # (a checksum annotation computing sha256sum over a lookup-loaded
         # Secret) was broken under Argo's offline `helm template` render —
@@ -11439,7 +11439,10 @@ spec:
             - name: DASHBOARD_EMAIL_SMTP_PORT
               value: "587"
             - name: DASHBOARD_EMAIL_SMTP_USER
-              value: "" 
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-gibson-workloads-dashboard-secrets
+                  key: email-smtp-user
             - name: DASHBOARD_EMAIL_SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -13565,9 +13568,9 @@ spec:
               gibson-zitadel-system-bot-key private_key:rsapem:zitadel-system-bot public_key:rsapub:zitadel-system-bot
               ghcr-pull-secret pat:input:ghcr-pull-token
               gibson-llm-keys anthropic_api_key:inputjson:llm-keys-json google_api_key:inputjson:llm-keys-json openai_api_key:inputjson:llm-keys-json
-              gibson-dashboard-auth-hardening captcha_secret_key:empty email_resend_api_key:empty email_smtp_password:empty
+              gibson-dashboard-auth-hardening captcha_secret_key:empty email_resend_api_key:empty
               gibson-stripe-credentials publishable_key:literal:pk_test_placeholder secret_key:literal:sk_test_placeholder webhook_secret:literal:whsec_placeholder
-              ses-smtp-credentials username:empty password:empty
+              ses-smtp-credentials username:input:smtp-username password:input:smtp-password
               gibson-vault-admin-token token:svctoken
               
               '
@@ -14480,6 +14483,10 @@ spec:
                 path: ghcr-pull-token
               - key: llm-keys-json
                 path: llm-keys-json
+              - key: smtp-username
+                path: smtp-username
+              - key: smtp-password
+                path: smtp-password
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -18176,6 +18183,7 @@ spec:
         next-server-actions-encryption-key: "{{ .server_actions_key }}"
         captcha-secret-key: "{{ .captcha_secret_key }}"
         email-resend-api-key: "{{ .email_resend_api_key }}"
+        email-smtp-user: "{{ .email_smtp_user }}"
         email-smtp-password: "{{ .email_smtp_password }}"
   data:
     - secretKey: auth_secret
@@ -18186,8 +18194,10 @@ spec:
       remoteRef: { key: gibson-dashboard-auth-hardening, property: captcha_secret_key }
     - secretKey: email_resend_api_key
       remoteRef: { key: gibson-dashboard-auth-hardening, property: email_resend_api_key }
+    - secretKey: email_smtp_user
+      remoteRef: { key: ses-smtp-credentials, property: username }
     - secretKey: email_smtp_password
-      remoteRef: { key: gibson-dashboard-auth-hardening, property: email_smtp_password }
+      remoteRef: { key: ses-smtp-credentials, property: password }
 ---
 # Source: gibson/charts/gibson-workloads/templates/ext-authz/secret.yaml
 apiVersion: external-secrets.io/v1

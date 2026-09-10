@@ -19,6 +19,8 @@
 #   SMTP_PASSWORD=<at least 20 chars, no whitespace>
 #   GHCR_PULL_TOKEN=<a GitHub token with read:packages, or empty>
 #   LLM_KEYS_JSON=<one-line JSON object, or empty>
+#   DNS_ACCESS_KEY=<the access key id of the DNS credential, or empty>
+#   DNS_SECRET_KEY=<its secret access key, or empty>
 #
 # The first three are always generated here. The next three are the shape
 # of an AWS access key pair and of a relay password: on kind `generate`
@@ -28,8 +30,9 @@
 # SMTP password is opaque because the relay issues it (an SES SMTP password
 # is 44 characters, Mailpit takes anything), so only a floor is checked.
 #
-# The last two are INPUT members (deploy#1732): the two seed values the
-# platform cannot generate. The bringup writes them into the keyring Secret
+# The last four are INPUT members: values the keyring cannot generate.
+# GHCR_PULL_TOKEN and LLM_KEYS_JSON (deploy#1732) are the two seed values
+# the platform consumes. The bringup writes them into the keyring Secret
 # as `ghcr-pull-token` and `llm-keys-json`, and the openbao-auto-init
 # sidecar copies them into OpenBao (`ghcr-pull-secret`, property `pat`, and
 # `gibson-llm-keys`, properties anthropic_api_key, google_api_key,
@@ -38,6 +41,12 @@
 # allowed and means "not supplied": the sidecar seeds the key empty, and an
 # operator fills it later with scripts/vanilla-set-secret.sh. An input
 # member may be absent from an older keyring file; that reads as empty.
+# DNS_ACCESS_KEY and DNS_SECRET_KEY are the Route53 credential cert-manager
+# (DNS-01) and external-dns use: an access key pair scoped to the
+# environment's zone. On AWS stage 0 mints it and `set`s it; on kind there
+# is no zone and both stay empty. The bringup writes them into the Secret
+# `route53-credential` (keys access-key-id, secret-access-key) when set,
+# never into OpenBao.
 # `set` writes an input member into an existing keyring; the other members
 # never change after `generate`. LLM_KEYS_JSON is one line of JSON, no
 # whitespace, for example {"anthropic_api_key":"sk-ant-...","google_api_key":"","openai_api_key":""}.
@@ -60,7 +69,8 @@
 #   keyring.sh verify <keyring-file> <substrate.env>   presence, length, fingerprint, one line per miss
 #   keyring.sh get <keyring-file> <MEMBER>             print one member's value
 #   keyring.sh set <keyring-file> <MEMBER> <value>     write an INPUT member (GHCR_PULL_TOKEN,
-#                                                      LLM_KEYS_JSON) into an existing keyring
+#                                                      LLM_KEYS_JSON, DNS_ACCESS_KEY,
+#                                                      DNS_SECRET_KEY) into an existing keyring
 #
 # Exit codes: 0 ok, 1 the keyring fails a check, 2 the command could not run.
 
@@ -81,6 +91,8 @@ MEMBERS=(
   SMTP_PASSWORD:opaque:20
   GHCR_PULL_TOKEN:input:0
   LLM_KEYS_JSON:input:0
+  DNS_ACCESS_KEY:input:0
+  DNS_SECRET_KEY:input:0
 )
 
 die() { printf 'keyring: %s\n' "$*" >&2; exit 2; }
@@ -345,7 +357,7 @@ cmd_set() {
   local name="${2:?usage: keyring.sh set <keyring-file> <MEMBER> <value>}"
   local value="${3-}"
   [ -r "$file" ] || die "cannot read $file"
-  is_input "$name" || die "$name is not an input member; only GHCR_PULL_TOKEN and LLM_KEYS_JSON may be set after generate. Rotation is a new keyring: see docs/runbooks/substrate-kind.md"
+  is_input "$name" || die "$name is not an input member; only GHCR_PULL_TOKEN, LLM_KEYS_JSON, DNS_ACCESS_KEY and DNS_SECRET_KEY may be set after generate. Rotation is a new keyring: see docs/runbooks/substrate-kind.md"
   local spec err
   spec="$(member_spec "$name")"
   err="$(shape_error "$spec" "$value")"

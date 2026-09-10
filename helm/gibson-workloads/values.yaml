@@ -418,11 +418,13 @@ gibson:
   # provider=smtp here (or the daemon will not boot):
   #   - kind: wired to the in-cluster mailpit dev sink (mailpit.enabled +
   #     values-kind.yaml) — no SMTP account needed, dev-only.
-  #   - staging/prod: wired to Amazon SES's SMTP endpoint using the
-  #     `ses-smtp-credentials` AWS Secrets Manager secret the platform
-  #     already seeds (see smtp.externalSecret below and
-  #     eks/<workspace>/modules/ses) — but ANY delivering SMTP relay works, the chart
-  #     does not hardcode SES anywhere.
+  #   - staging/prod: wired to the SES SMTP relay stage 0 mints. The
+  #     bringup writes the relay credential into the keyring Secret as
+  #     `smtp-username` and `smtp-password`, and the openbao-auto-init
+  #     sidecar seeds `ses-smtp-credentials` from those two inputs (see
+  #     smtp.externalSecret below and files/openbao-seed-keys.txt) — but
+  #     ANY delivering SMTP relay works, the chart does not hardcode SES
+  #     anywhere. The dashboard reads the same key.
   email:
     provider: "log"                 # GIBSON_EMAIL_PROVIDER: log | smtp — MUST be
                                      # "smtp" wherever gibson.signupSelfServe is true.
@@ -1193,35 +1195,28 @@ dashboard:
     # exactly one block here (deploy#854 removed the dead `billingEmail`
     # duplicate).
     #
-    # provider: resend | smtp | ses | log
+    # provider: resend | smtp | log
     # "log" prints email bodies to stdout — useful for kind clusters, but
     # users will never actually receive their verification links.
-    # "ses" sends via Amazon SES using IRSA credentials on the dashboard
-    # ServiceAccount (no key env vars; the role needs ses:SendEmail —
-    # deploy#855). Requires `from` to be an address under a verified SES
-    # identity and `aws.region` to be set; both are enforced at render time.
+    # "smtp" is the relay the daemon uses too: host and port here, the
+    # username and password from the one OpenBao key `ses-smtp-credentials`
+    # (gibson.email.smtp.externalSecret names the same key). The `ses`
+    # provider is gone: it sent through IRSA on the dashboard
+    # ServiceAccount, and stage 1 mints no workload role (deploy#1744).
     email:
       provider: "log"        # DASHBOARD_EMAIL_PROVIDER
-      from: "no-reply@zeroroot.ai"   # DASHBOARD_EMAIL_FROM; also SES_FROM_ADDRESS when provider=ses
+      from: "no-reply@zeroroot.ai"   # DASHBOARD_EMAIL_FROM
       # Destination inbox for contact-sales form submissions. This is OUR
       # inbox (a lead notification), not customer-facing mail.
       contactSalesInbox: "sales@zeroroot.ai"   # CONTACT_SALES_INBOX
-      # SESv2 configuration set stamped on every transactional send
-      # (SES_CONFIGURATION_SET). REQUIRED when provider=ses — render fails
-      # if blank. Env-scoped (gibson-transactional-<env>) because staging
-      # and prod share one AWS account; the set itself is IaC-owned in
-      # eks/<workspace>/modules/ses (deploy#880). The dashboard previously
-      # derived the name from NODE_ENV, which is "production" in EVERY
-      # prod-mode build including staging — that misdial was half of the
-      # 2026-06-12 staging email outage.
-      sesConfigurationSet: ""
       resend:
         apiKey: ""           # DASHBOARD_EMAIL_RESEND_API_KEY (Secret ref)
       smtp:
         host: ""             # DASHBOARD_EMAIL_SMTP_HOST
         port: 587
-        user: ""             # DASHBOARD_EMAIL_SMTP_USER
-        password: ""         # DASHBOARD_EMAIL_SMTP_PASSWORD (Secret ref)
+        # DASHBOARD_EMAIL_SMTP_USER and DASHBOARD_EMAIL_SMTP_PASSWORD come
+        # from the dashboard Secret, which the ExternalSecret fills from
+        # OpenBao key ses-smtp-credentials (username, password).
 
     # Post-logout redirect URI(s) — RP-initiated OIDC logout
     # (`/oidc/v1/end_session`). The dashboard's federated-signout route
@@ -3025,13 +3020,27 @@ certManager:
       # only when solver=http01.
       ingressClass: "nginx"
       # DNS-01 Route53 solver config. Used only when solver=dns01-route53.
-      # cert-manager-controller (running with the IRSA role configured by
-      # the EKS bootstrap addons) calls route53:ChangeResourceRecordSets
-      # directly. hostedZoneID can be left empty for cert-manager to
-      # auto-detect from the Certificate's dnsNames.
+      # cert-manager publishes the ACME challenge record with the credential
+      # in credentialsSecret: an access key pair scoped to the environment's
+      # zone (stage 0 mints it as the `dns` IAM user and the bringup writes
+      # it into the Secret; a self-hosted operator supplies the same Secret).
+      # No IRSA: stage 1 mints no workload role (deploy#1744), and without a
+      # named Secret cert-manager falls back to the SDK chain, which on EKS
+      # is the node's instance profile — measured on staging 2026-09-10 as
+      # "no EC2 IMDS role found", every challenge pending for good.
+      # hostedZoneID can be left empty for cert-manager to auto-detect from
+      # the Certificate's dnsNames (route53:ListHostedZonesByName).
       dns01Route53:
         region: ""        # e.g. us-east-1 (REQUIRED when solver=dns01-route53)
         hostedZoneID: ""  # optional; empty means auto-detect
+        # The Secret holding the Route53 credential, in the release namespace
+        # (cert-manager's cluster-resource namespace). Empty means no
+        # credential: the solver renders none and cert-manager uses the SDK
+        # default chain.
+        credentialsSecret:
+          name: ""
+          accessKeyIDKey: "access-key-id"
+          secretAccessKeyKey: "secret-access-key"
     selfsigned:
       # Render the self-signed root + signing CA pair. Used for on-prem /
       # Kind dev clusters with no public DNS. Default false.

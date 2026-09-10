@@ -835,21 +835,6 @@ spec:
             # Destination inbox for contact-sales form leads (deploy#854).
             - name: CONTACT_SALES_INBOX
               value: {{ .email.contactSalesInbox | default "sales@zeroroot.ai" | quote }}
-            {{- if eq (.email.provider | default "log") "ses" }}
-            # SES provider boots from exactly three envs; credentials come
-            # from IRSA on the dashboard ServiceAccount (deploy#855), never
-            # key env vars. All are hard requirements — an empty value ships
-            # a dashboard that crashes on first send, so fail the render.
-            - name: SES_FROM_ADDRESS
-              value: {{ required "dashboard.auth.email.provider=ses requires dashboard.auth.email.from — an address under a verified SES domain identity (deploy#854)" .email.from | quote }}
-            - name: AWS_REGION
-              value: {{ required "dashboard.auth.email.provider=ses requires aws.region — the SES endpoint region (deploy#854)" ($.Values.aws).region | quote }}
-            # Env-scoped configuration set, IaC-owned (deploy#880). Never
-            # derived from NODE_ENV — that is a build-mode flag, not a
-            # deployment environment.
-            - name: SES_CONFIGURATION_SET
-              value: {{ required "dashboard.auth.email.provider=ses requires dashboard.auth.email.sesConfigurationSet — the env-scoped SESv2 configuration set created by eks/<workspace>/modules/ses (deploy#880)" .email.sesConfigurationSet | quote }}
-            {{- end }}
             - name: DASHBOARD_EMAIL_RESEND_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -860,7 +845,10 @@ spec:
             - name: DASHBOARD_EMAIL_SMTP_PORT
               value: {{ .email.smtp.port | default 587 | quote }}
             - name: DASHBOARD_EMAIL_SMTP_USER
-              value: {{ .email.smtp.user | default "" | quote }} {{/* allowlist-silent-default: empty when email.provider=log/resend (dev). */}}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.dashboardSecrets.name" $ }}
+                  key: email-smtp-user
             - name: DASHBOARD_EMAIL_SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:

@@ -12,7 +12,13 @@
 #
 #   Secret <NS>/bringup-keyring          bucket-access-key, bucket-secret-key,
 #                                        openbao-seal-key, velero-repo-password,
-#                                        ghcr-pull-token, llm-keys-json
+#                                        ghcr-pull-token, llm-keys-json,
+#                                        smtp-username, smtp-password
+#   Secret <NS>/route53-credential       access-key-id, secret-access-key: the
+#                                        Route53 credential cert-manager (DNS-01)
+#                                        and external-dns read (keyring members
+#                                        DNS_ACCESS_KEY, DNS_SECRET_KEY; empty
+#                                        on kind)
 #   Secret velero/velero-repo-credentials    key repository-password. The name
 #                                        and the key are fixed by Velero
 #                                        (pkg/repository/keys/keys.go).
@@ -124,6 +130,54 @@ data:
   llm-keys-json: "$(printf '%s' "$LLM_KEYS_JSON_VALUE" | base64 -w0)"
 YAML
 GHCR_PULL_TOKEN_VALUE=""; LLM_KEYS_JSON_VALUE=""
+
+# The SMTP relay credential: the user from substrate.env, the password from
+# the keyring. Two more seed inputs, so the openbao-auto-init sidecar seeds
+# `ses-smtp-credentials` (username, password) and the daemon and the
+# dashboard read one relay credential through their ExternalSecrets.
+SMTP_USER_VALUE="$(substrate_get SMTP_USER || true)"
+SMTP_PASSWORD_VALUE="$(keyring_get SMTP_PASSWORD)"
+if [ -n "$SMTP_USER_VALUE" ] && [ -n "$SMTP_PASSWORD_VALUE" ]; then
+  log "SMTP relay credential (user ${SMTP_USER_VALUE}) -> Secret ${NS}/bringup-keyring keys smtp-username, smtp-password"
+else
+  log "substrate.env names no SMTP_USER or the keyring has no SMTP_PASSWORD; ses-smtp-credentials is seeded empty and no mail leaves the platform"
+fi
+kubectl apply --server-side --field-manager=bringup-smtp-inputs -f - >/dev/null <<YAML
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bringup-keyring
+  namespace: ${NS}
+data:
+  smtp-username: "$(printf '%s' "$SMTP_USER_VALUE" | base64 -w0)"
+  smtp-password: "$(printf '%s' "$SMTP_PASSWORD_VALUE" | base64 -w0)"
+YAML
+SMTP_USER_VALUE=""; SMTP_PASSWORD_VALUE=""
+
+# The Route53 credential for cert-manager (DNS-01) and external-dns: ONE
+# Secret in the release namespace, never a member of bringup-keyring, because
+# both operators read it by this name (helm/gibson/values-eks.yaml). Empty
+# members mean no credential (kind has no zone): the Secret is still written,
+# with empty keys, so a pod that mounts it starts and the render never
+# depends on whether stage 0 minted one.
+DNS_ACCESS_KEY_VALUE="$(keyring_get DNS_ACCESS_KEY)"
+DNS_SECRET_KEY_VALUE="$(keyring_get DNS_SECRET_KEY)"
+if [ -n "$DNS_ACCESS_KEY_VALUE" ] && [ -n "$DNS_SECRET_KEY_VALUE" ]; then
+  log "Route53 credential (key ${DNS_ACCESS_KEY_VALUE}) -> Secret ${NS}/route53-credential"
+else
+  log "keyring members DNS_ACCESS_KEY / DNS_SECRET_KEY are empty; ${NS}/route53-credential is written empty (no DNS-01 and no published records)"
+fi
+kubectl apply --server-side --field-manager=bringup-route53-credential -f - >/dev/null <<YAML
+apiVersion: v1
+kind: Secret
+metadata:
+  name: route53-credential
+  namespace: ${NS}
+data:
+  access-key-id: "$(printf '%s' "$DNS_ACCESS_KEY_VALUE" | base64 -w0)"
+  secret-access-key: "$(printf '%s' "$DNS_SECRET_KEY_VALUE" | base64 -w0)"
+YAML
+DNS_ACCESS_KEY_VALUE=""; DNS_SECRET_KEY_VALUE=""
 
 # The Velero member in the release namespace, so one Secret carries the whole
 # keyring, and its two consumers in Velero's own namespace. The velero
