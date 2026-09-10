@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.124.2](https://github.com/zeroroot-ai/charts/compare/v0.124.1...v0.124.2) (2026-09-10)
+
+
+### Bug Fixes
+
+* **netpol:** let OpenBao reach the kube-apiserver where egress to it is policed ([#62](https://github.com/zeroroot-ai/charts/issues/62)) ([249e0f8](https://github.com/zeroroot-ai/charts/commit/249e0f8a74ec417e4f75ab2a77728be4c4921e30))
+
 ## [0.124.1](https://github.com/zeroroot-ai/charts/compare/v0.124.0...v0.124.1) (2026-09-10)
 
 
