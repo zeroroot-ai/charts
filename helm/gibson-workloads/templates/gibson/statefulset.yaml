@@ -322,7 +322,15 @@ spec:
                 sleep 2
               done
               echo "Redis is ready!"
-        {{- if or .Values.secrets.llm.openaiApiKey .Values.secrets.llm.existingSecret }}
+        # one-code-path #203: the LLM-keys Secret is structural on every
+        # profile — the ExternalSecret materialises it from OpenBao key
+        # gibson-llm-keys (seeded from the keyring member LLM_KEYS_JSON), or
+        # the operator names their own with secrets.llm.existingSecret — so
+        # the daemon always waits for it and always reads its three keys.
+        # Before charts 0.125.1 both were gated on inline *ApiKey values no
+        # template consumed, and no profile set: the Secret was filled and
+        # the daemon started with no LLM env at all (staging 2026-09-10,
+        # "no LLM providers registered").
         # one-code-path #203: wait-for-llm-secret blocks pod start until
         # the LLM-keys Secret is materialised. The OPENAI_API_KEY env
         # entry was flipped from `optional: true` to required (and
@@ -361,7 +369,6 @@ spec:
             limits:
               cpu: 100m
               memory: 64Mi
-        {{- end }}
       containers:
         - name: gibson
           image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.gibson.image.repository "tag" .Values.gibson.image.tag "digest" .Values.gibson.image.digest "appVersion" .Chart.AppVersion) | quote }}
@@ -556,27 +563,27 @@ spec:
                   key: {{ .Values.gibson.email.smtp.passwordSecretKey | default "password" | quote }}
             {{- end }}
             {{- end }}
-            # LLM API Keys
-            {{- if or .Values.secrets.llm.anthropicApiKey .Values.secrets.llm.existingSecret }}
+            # LLM API keys — always from the LLM-keys Secret (see the
+            # wait-for-llm-secret init container). An empty key means "no
+            # provider": the seeder writes the keyring member's absent
+            # entries as empty strings and the daemon registers nothing for
+            # them. Never `optional: true` (one-code-path #203): the Secret
+            # is structural and the init container proves it exists.
             - name: ANTHROPIC_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.llm.existingSecret | default (include "gibson.llmSecrets.name" .) }}
                   key: ANTHROPIC_API_KEY
-            {{- end }}
-            {{- if or .Values.secrets.llm.openaiApiKey .Values.secrets.llm.existingSecret }}
-            # one-code-path #203: was `optional: true`. The block is
-            # gated on `.Values.secrets.llm.openaiApiKey` /
-            # `existingSecret` — if the operator wired the value in
-            # values, the Secret MUST be present. The wait-for-llm-secret
-            # init container above blocks pod start until kubelet
-            # observes the Secret.
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.secrets.llm.existingSecret | default (include "gibson.llmSecrets.name" .) }}
                   key: OPENAI_API_KEY
-            {{- end }}
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.llm.existingSecret | default (include "gibson.llmSecrets.name" .) }}
+                  key: GOOGLE_API_KEY
             {{- /* Optional override for the FGA RPC registry — see spec 21 */}}
             {{- with .Values.gibson.authz.rpcRegistry }}
             {{- if .override }}
