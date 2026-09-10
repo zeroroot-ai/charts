@@ -1021,6 +1021,36 @@ tolerations:
      sets TC and the resolver retries over TCP. Allowing only UDP works
      until a record grows, which is the worst possible failure mode.
 --------------------------------------------------------------------- */}}
+{{/*
+gibson.netpolEgressAPIServer — one egress rule per CIDR in
+global.networkPolicy.apiServerCIDRs, ports 443 and 6443, and nothing at all
+when the list is empty.
+
+A pod whose policy narrows egress can still reach the kube-apiserver on
+kind, whose policy engine leaves node-bound traffic alone; on EKS the AWS VPC
+CNI network policy agent enforces egress toward the control-plane ENIs like
+any other destination, and the same policy drops it. OpenBao's Kubernetes
+auth does a TokenReview on every login: with that dropped, every login took
+the 30 s API timeout and answered "permission denied", the seeder could not
+renew its own token, and every ExternalSecret went NotReady (staging bringup
+2026-09-10, the first from fresh). An estate names the CIDRs its API server
+answers from (the VPC CIDR on EKS); the shipped default is empty.
+*/}}
+{{- define "gibson.netpolEgressAPIServer" -}}
+{{- $cidrs := list -}}
+{{- with .Values.global -}}{{- with .networkPolicy -}}{{- $cidrs = .apiServerCIDRs | default list -}}{{- end -}}{{- end -}}
+{{- range $cidr := $cidrs }}
+- to:
+    - ipBlock:
+        cidr: {{ $cidr | quote }}
+  ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 6443
+{{- end }}
+{{- end -}}
+
 {{- define "gibson.netpolEgressDNS" -}}
 - to:
     - namespaceSelector:
