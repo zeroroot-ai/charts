@@ -98,6 +98,13 @@ global:
     repository: ghcr.io/zeroroot-ai/mirror/alpine-k8s
     tag: "1.33.0"
   domain: zeroroot.ai
+  networkPolicy:
+    # CIDRs the kube-apiserver answers from, for the few policies that
+    # narrow egress (OpenBao). Empty means no rule: kind does not police
+    # node-bound traffic. An EKS estate sets its VPC CIDR here, because the
+    # AWS VPC CNI enforces egress toward the control-plane ENIs and OpenBao's
+    # Kubernetes-auth TokenReview dies without it (staging, 2026-09-10).
+    apiServerCIDRs: []
   # (deploy#1733): OpenBao is the one External Secrets backend on
   # every substrate, so there is no backend selector and no key prefix.
   # `global.secretBackend` and `global.secretPrefix` are DELETED. A values

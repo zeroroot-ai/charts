@@ -24,11 +24,15 @@ only escape hatch is `dev.networkPolicy.disabled`, which exists ONLY for
 Kind clusters whose CNI does not implement NetworkPolicies and is
 already documented as forbidden in production overlays.
 
-The kube-apiserver, kubelet probes and node-local health checks are not
-affected: admission webhooks receive ingress via the per-component
-policies' any-source webhook-port rules, and the AWS VPC CNI network
-policy agent always permits kubelet health-check traffic from the node's
-primary IP (deploy#1430 — NETWORK_POLICY_ENFORCING_MODE=standard).
+Kubelet probes and node-local health checks are not affected: admission
+webhooks receive ingress via the per-component policies' any-source
+webhook-port rules, and the AWS VPC CNI network policy agent always
+permits kubelet health-check traffic from the node's primary IP
+(deploy#1430 — NETWORK_POLICY_ENFORCING_MODE=standard). Egress TO the
+kube-apiserver IS policed on EKS: a policy that narrows egress must name
+the API CIDRs through gibson.netpolEgressAPIServer
+(global.networkPolicy.apiServerCIDRs); OpenBao's TokenReview logins were
+the first to find out (staging, 2026-09-10).
 */}}
 {{- $devDisabled := false -}}
 {{- with .Values.dev -}}{{- with .networkPolicy -}}{{- $devDisabled = .disabled -}}{{- end -}}{{- end -}}

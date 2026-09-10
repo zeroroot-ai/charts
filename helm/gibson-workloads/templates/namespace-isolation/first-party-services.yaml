@@ -83,6 +83,14 @@ spec:
          and STS is gone with the kms seal. */}}
   egress:
     {{- include "gibson.netpolEgressDNS" . | nindent 4 }}
+    {{- /* And one call OUT of the cluster network: the Kubernetes auth
+           method's TokenReview against the kube-apiserver on every login,
+           plus the auto-init sidecar's own API calls. On kind that traffic
+           is not policed; on EKS it is, and without this rule every login
+           answered "permission denied" after the 30 s API timeout (staging,
+           2026-09-10). Rendered only when the estate names its API CIDRs
+           (global.networkPolicy.apiServerCIDRs). */}}
+    {{- include "gibson.netpolEgressAPIServer" . | nindent 4 }}
     {{- /* OpenBao DOES originate one in-namespace call the narrowing above
            missed: the JWT-auth backend fetches the SPIRE OIDC provider's JWKS
            at auth/jwt/config write time (root Job + per-tenant operator). The
