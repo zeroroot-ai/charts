@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.126.0](https://github.com/zeroroot-ai/charts/compare/v0.125.1...v0.126.0) (2026-09-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **seams:** secrets.llm.existingSecret is gone; an operator wires LLM providers per tenant, never on the platform.
+
+### Features
+
+* **seams:** no platform LLM credential ([#69](https://github.com/zeroroot-ai/charts/issues/69)) ([9190641](https://github.com/zeroroot-ai/charts/commit/91906415d7b28de05227a3e2e2e7855fbf9bf399))
+
 ## [0.125.1](https://github.com/zeroroot-ai/charts/compare/v0.125.0...v0.125.1) (2026-09-10)
 
 
