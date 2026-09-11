@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.126.1](https://github.com/zeroroot-ai/charts/compare/v0.126.0...v0.126.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **images:** re-pin gibson, ext-authz and the three operators to v0.136.0 ([#71](https://github.com/zeroroot-ai/charts/issues/71)) ([1b1fc4d](https://github.com/zeroroot-ai/charts/commit/1b1fc4d9fa83275e860ec25380533cb242d24891))
+
 ## [0.126.0](https://github.com/zeroroot-ai/charts/compare/v0.125.1...v0.126.0) (2026-09-11)
 
 
