@@ -16846,9 +16846,11 @@ spec:
               #
               # A property that is PRESENT is never overwritten, with two exceptions:
               # `input` and `inputjson` follow the keyring (a non-empty keyring value that
-              # differs from the stored one is written), and `svctoken` follows the token
-              # in the gibson-platform-operator-vault Secret. Everything else is generated
-              # once and kept, so an upgrade never rotates a credential under a workload.
+              # differs from the stored one is written, at sidecar start and on every
+              # five-minute pass after it, so a member set after the bringup lands without
+              # a pod restart), and `svctoken` follows the token in the
+              # gibson-platform-operator-vault Secret. Everything else is generated once
+              # and kept, so an upgrade never rotates a credential under a workload.
               gibson-gibson-platform-postgres-password password:pw
               gibson-dashboard-postgres-password password:pw
               gibson-tenant-admin-postgres-password password:pw
@@ -17573,6 +17575,26 @@ spec:
                 return 1
               }
 
+              # The keyring inputs (ghcr-pull-token, smtp-username,
+              # smtp-password) follow the keyring: a member set AFTER the
+              # bringup reaches the Secret through keyring-to-cluster.sh and the
+              # kubelet, and this pass writes it into OpenBao without a pod
+              # restart. seed_one writes an input only when the mounted value
+              # is non-empty and differs from the stored one, and never touches
+              # a generated property that is present, so the pass is a no-op
+              # when nothing changed. Measured on staging 2026-09-11: the pull
+              # token set after bringup stayed empty in ghcr-pull-secret until
+              # the pod was restarted, and every image pull ran on an empty
+              # password meanwhile.
+              vault_follow_keyring_inputs() {
+                seeder=$(bao_login_seeder) || return 1
+                rc=0
+                vault_seed_platform_secrets "$seeder" >/dev/null || rc=1
+                vault_revoke_self "$seeder"
+                seeder=""
+                return $rc
+              }
+
               vault_steady_reconcile() {
                 # Every pod start: the same pass the init ran, with a seeder
                 # login token instead of root, and a no-op when nothing
@@ -17715,6 +17737,7 @@ spec:
                 steady_tick=$((${steady_tick:-0} + 1))
                 if [ "$steady_tick" -ge 30 ]; then
                   vault_ensure_service_token || echo "[openbao-auto-init] WARN: service token refresh failed"
+                  vault_follow_keyring_inputs || echo "[openbao-auto-init] WARN: keyring input pass did not complete; it runs again in five minutes"
                   steady_tick=0
                 fi
                 sleep 10
