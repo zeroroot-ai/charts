@@ -32,9 +32,11 @@
 #
 # A property that is PRESENT is never overwritten, with two exceptions:
 # `input` and `inputjson` follow the keyring (a non-empty keyring value that
-# differs from the stored one is written), and `svctoken` follows the token
-# in the gibson-platform-operator-vault Secret. Everything else is generated
-# once and kept, so an upgrade never rotates a credential under a workload.
+# differs from the stored one is written, at sidecar start and on every
+# five-minute pass after it, so a member set after the bringup lands without
+# a pod restart), and `svctoken` follows the token in the
+# gibson-platform-operator-vault Secret. Everything else is generated once
+# and kept, so an upgrade never rotates a credential under a workload.
 gibson-gibson-platform-postgres-password password:pw
 gibson-dashboard-postgres-password password:pw
 gibson-tenant-admin-postgres-password password:pw
