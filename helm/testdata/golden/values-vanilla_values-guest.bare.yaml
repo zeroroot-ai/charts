@@ -7380,7 +7380,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
 rules:
   # secrets get/list/watch — used by daemon Pod init containers
-  # (wait-for-idp-admin-secret, wait-for-llm-secret) to poll for
+  # (wait-for-idp-admin-secret) to poll for
   # ESO-materialised Secrets before the daemon container starts.
   # NOT used by daemon Go code — forbids daemon-side K8s API.
   - apiGroups: [""]
@@ -13311,7 +13311,6 @@ spec:
               gibson-extauthz-grant-previous pem:ecpem:extauthz-grant-previous kid:rand8
               gibson-zitadel-system-bot-key private_key:rsapem:zitadel-system-bot public_key:rsapub:zitadel-system-bot
               ghcr-pull-secret pat:input:ghcr-pull-token
-              gibson-llm-keys anthropic_api_key:inputjson:llm-keys-json google_api_key:inputjson:llm-keys-json openai_api_key:inputjson:llm-keys-json
               gibson-dashboard-auth-hardening captcha_secret_key:empty email_resend_api_key:empty
               gibson-stripe-credentials publishable_key:literal:pk_test_placeholder secret_key:literal:sk_test_placeholder webhook_secret:literal:whsec_placeholder
               ses-smtp-credentials username:input:smtp-username password:input:smtp-password
@@ -14164,12 +14163,13 @@ spec:
                 sleep 10
               done
           volumeMounts:
-            # The two keyring INPUTS the bringup may supply (deploy#1732): the GHCR pull token and the LLM keys JSON. Projected
-            # from the same bringup keyring Secret as the seal key, but as a
-            # SEPARATE volume that never lists the seal key, so the sidecar
-            # cannot read it (tests/lib/check_static_seal.py asserts this).
-            # `optional: true`: a bringup that supplies neither input still
-            # comes up, with the two keys seeded empty.
+            # The keyring INPUTS the bringup may supply (deploy#1732): the GHCR
+            # pull token and the SMTP relay credential. Projected from the same
+            # bringup keyring Secret as the seal key, but as a SEPARATE volume
+            # that never lists the seal key, so the sidecar cannot read it
+            # (tests/lib/check_static_seal.py asserts this). `optional: true`:
+            # a bringup that supplies no input still comes up, with the keys
+            # seeded empty.
             - name: bringup-inputs
               mountPath: /etc/openbao/inputs
               readOnly: true
@@ -14215,8 +14215,9 @@ spec:
         # The two keyring INPUTS for the sidecar (deploy#1732): the same
         # bringup keyring Secret, a different volume, and NEVER the seal key.
         # Item names follow scripts/keyring.sh: member GHCR_PULL_TOKEN is the
-        # Secret key ghcr-pull-token, LLM_KEYS_JSON is llm-keys-json. optional
-        # so a keyring that carries neither still starts the pod.
+        # Secret key ghcr-pull-token; the relay credential is smtp-username
+        # and smtp-password. optional so a keyring that carries none still
+        # starts the pod.
         - name: bringup-inputs
           secret:
             secretName: "bringup-keyring"
@@ -14225,8 +14226,6 @@ spec:
             items:
               - key: ghcr-pull-token
                 path: ghcr-pull-token
-              - key: llm-keys-json
-                path: llm-keys-json
               - key: smtp-username
                 path: smtp-username
               - key: smtp-password
@@ -14456,7 +14455,7 @@ spec:
         # (deploy#517) enforces that order. Listing this Secret in Reloader
         # would race-restart the daemon simultaneously with redis-stack,
         # causing WRONGPASS. See docs/runbooks/redis-password-rotation.md.
-        secret.reloader.stakater.com/reload: "gibson-workloads-db-secrets,gibson-platform-postgres-credentials,gibson-native-login-oidc,gibson-gibson-workloads-llm-secrets"
+        secret.reloader.stakater.com/reload: "gibson-workloads-db-secrets,gibson-platform-postgres-credentials,gibson-native-login-oidc"
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
     spec:
       serviceAccountName: gibson
@@ -14660,53 +14659,6 @@ spec:
                 sleep 2
               done
               echo "Redis is ready!"
-        # one-code-path #203: the LLM-keys Secret is structural on every
-        # profile — the ExternalSecret materialises it from OpenBao key
-        # gibson-llm-keys (seeded from the keyring member LLM_KEYS_JSON), or
-        # the operator names their own with secrets.llm.existingSecret — so
-        # the daemon always waits for it and always reads its three keys.
-        # Before charts 0.125.1 both were gated on inline *ApiKey values no
-        # template consumed, and no profile set: the Secret was filled and
-        # the daemon started with no LLM env at all (staging 2026-09-10,
-        # "no LLM providers registered").
-        # one-code-path #203: wait-for-llm-secret blocks pod start until
-        # the LLM-keys Secret is materialised. The OPENAI_API_KEY env
-        # entry was flipped from `optional: true` to required (and
-        # ANTHROPIC_API_KEY/GOOGLE_API_KEY rely on the same Secret).
-        # The daemon ServiceAccount has secrets get/list via the
-        # gibson cluster role.
-        - name: wait-for-llm-secret
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
-          command: ['/bin/bash', '-c']
-          args:
-            - |
-              set -eu
-              name="gibson-gibson-workloads-llm-secrets"
-              ns="gibson"
-              echo "[wait-for-llm-secret] waiting for Secret ${ns}/${name}..."
-              for i in $(seq 1 30); do
-                if kubectl get secret -n "${ns}" "${name}" >/dev/null 2>&1; then
-                  echo "[wait-for-llm-secret] ok"
-                  exit 0
-                fi
-                sleep 2
-              done
-              echo "[wait-for-llm-secret] timed out after 60s -- the LLM-keys Secret was not materialised. Check: kubectl get externalsecret,secret -n ${ns}" >&2
-              exit 1
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65532
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
       containers:
         - name: gibson
           image: "ghcr.io/zeroroot-ai/gibson:v0.135.1@sha256:e9d5982cbd25adcc0151618aa8ec4f0454527b879913511c18d9d129a4031ea2"
@@ -14837,27 +14789,6 @@ spec:
               value: "log"
             - name: GIBSON_EMAIL_FROM
               value: "no-reply@selfhosted.example.com"
-            # LLM API keys — always from the LLM-keys Secret (see the
-            # wait-for-llm-secret init container). An empty key means "no
-            # provider": the seeder writes the keyring member's absent
-            # entries as empty strings and the daemon registers nothing for
-            # them. Never `optional: true` (one-code-path #203): the Secret
-            # is structural and the init container proves it exists.
-            - name: ANTHROPIC_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: gibson-gibson-workloads-llm-secrets
-                  key: ANTHROPIC_API_KEY
-            - name: OPENAI_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: gibson-gibson-workloads-llm-secrets
-                  key: OPENAI_API_KEY
-            - name: GOOGLE_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: gibson-gibson-workloads-llm-secrets
-                  key: GOOGLE_API_KEY
             # Provider catalogue hot-reload path (spec: gibson#296).
             # When set, the daemon reads the operator-mounted YAML instead of
             # the embedded copy and hot-reloads it every 5 minutes.
@@ -18486,41 +18417,6 @@ spec:
       remoteRef: { key: gibson-impersonation-key, property: value }
     - secretKey: impersonation_key_previous
       remoteRef: { key: gibson-impersonation-key-previous, property: value }
----
-# Source: gibson/charts/gibson-workloads/templates/secrets/llm-secrets.yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: gibson-gibson-workloads-llm-secrets
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.132.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: secrets
-spec:
-  refreshInterval: 60s
-  secretStoreRef:
-    name: "gibson-secrets"
-    kind: ClusterSecretStore
-  target:
-    name: gibson-gibson-workloads-llm-secrets
-    creationPolicy: Owner
-    template:
-      type: Opaque
-      data:
-        ANTHROPIC_API_KEY: "{{ .anthropic_api_key }}"
-        OPENAI_API_KEY: "{{ .openai_api_key }}"
-        GOOGLE_API_KEY: "{{ .google_api_key }}"
-  data:
-    - secretKey: anthropic_api_key
-      remoteRef: { key: gibson-llm-keys, property: anthropic_api_key }
-    - secretKey: openai_api_key
-      remoteRef: { key: gibson-llm-keys, property: openai_api_key }
-    - secretKey: google_api_key
-      remoteRef: { key: gibson-llm-keys, property: google_api_key }
 ---
 # Source: gibson/charts/gibson-workloads/templates/secrets/openbao-keys.yaml
 apiVersion: external-secrets.io/v1

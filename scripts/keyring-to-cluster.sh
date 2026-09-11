@@ -12,8 +12,8 @@
 #
 #   Secret <NS>/bringup-keyring          bucket-access-key, bucket-secret-key,
 #                                        openbao-seal-key, velero-repo-password,
-#                                        ghcr-pull-token, llm-keys-json,
-#                                        smtp-username, smtp-password
+#                                        ghcr-pull-token, smtp-username,
+#                                        smtp-password
 #   Secret <NS>/route53-credential       access-key-id, secret-access-key: the
 #                                        Route53 credential cert-manager (DNS-01)
 #                                        and external-dns read (keyring members
@@ -36,7 +36,7 @@
 # server refuses that outright — `unknown object type "nil" in
 # Secret.data.<key>` — so the documented "not supplied" value was the one
 # value this script could not write (measured live on staging, deploy#1746:
-# the staging keyring carries an empty GHCR_PULL_TOKEN and LLM_KEYS_JSON).
+# the staging keyring carries an empty GHCR_PULL_TOKEN).
 # A new member added here must be quoted too, and
 # tests/harness/keyring-to-cluster.bats fails when one is not.
 #
@@ -108,16 +108,10 @@ YAML
 
 # The two seed inputs (deploy#1732), each value allowed to be empty.
 GHCR_PULL_TOKEN_VALUE="$(keyring_get GHCR_PULL_TOKEN)"
-LLM_KEYS_JSON_VALUE="$(keyring_get LLM_KEYS_JSON)"
 if [ -n "$GHCR_PULL_TOKEN_VALUE" ]; then
   log "GHCR pull token -> Secret ${NS}/bringup-keyring key ghcr-pull-token (sha256:$(printf '%s' "$GHCR_PULL_TOKEN_VALUE" | sha256sum | cut -c1-16))"
 else
   log "keyring member GHCR_PULL_TOKEN is empty; first-party images will not pull until scripts/vanilla-set-secret.sh ghcr-pull-secret pat <token>"
-fi
-if [ -n "$LLM_KEYS_JSON_VALUE" ]; then
-  log "LLM keys -> Secret ${NS}/bringup-keyring key llm-keys-json (sha256:$(printf '%s' "$LLM_KEYS_JSON_VALUE" | sha256sum | cut -c1-16))"
-else
-  log "keyring member LLM_KEYS_JSON is empty; gibson-llm-keys is seeded empty"
 fi
 kubectl apply --server-side --field-manager=bringup-seed-inputs -f - >/dev/null <<YAML
 apiVersion: v1
@@ -127,9 +121,8 @@ metadata:
   namespace: ${NS}
 data:
   ghcr-pull-token: "$(printf '%s' "$GHCR_PULL_TOKEN_VALUE" | base64 -w0)"
-  llm-keys-json: "$(printf '%s' "$LLM_KEYS_JSON_VALUE" | base64 -w0)"
 YAML
-GHCR_PULL_TOKEN_VALUE=""; LLM_KEYS_JSON_VALUE=""
+GHCR_PULL_TOKEN_VALUE=""
 
 # The SMTP relay credential: the user from substrate.env, the password from
 # the keyring. Two more seed inputs, so the openbao-auto-init sidecar seeds

@@ -63,12 +63,14 @@ standing path back into the store on every profile: no stored credential,
 no recovery key, no manual recovery (closes the deploy#1731 gap).
 
 The seed inputs that are not self-generated randoms arrive through the
-bringup keyring Secret: the GHCR pull token and the LLM keys (members
-GHCR_PULL_TOKEN and LLM_KEYS_JSON, scripts/keyring.sh) as `ghcr-pull-token`
-and `llm-keys-json`, and the SMTP relay credential (SMTP_USER from
-substrate.env, SMTP_PASSWORD from the keyring) as `smtp-username` and
-`smtp-password`. The chart projects those four keys, and only those four,
-into the sidecar; the seed table names which OpenBao property each fills.
+bringup keyring Secret: the GHCR pull token (member GHCR_PULL_TOKEN,
+scripts/keyring.sh) as `ghcr-pull-token`, and the SMTP relay credential
+(SMTP_USER from substrate.env, SMTP_PASSWORD from the keyring) as
+`smtp-username` and `smtp-password`. The chart projects those three keys,
+and only those three, into the sidecar; the seed table names which OpenBao
+property each fills. There is no platform LLM credential: a tenant's LLM
+providers and their keys live in that tenant's provider configuration and
+reach the daemon through the secrets broker.
 */}}
 {{- $openbaoRepo := .Values.openbao.image.repository | required "openbao.image.repository is REQUIRED (OpenBao is structural — see deploy#223). Set it in values.yaml or the env's gitops Application's helm.values block." }}
 {{- $openbaoTag := .Values.openbao.image.tag | required "openbao.image.tag is REQUIRED (OpenBao is structural — see deploy#223). Pin to a specific OpenBao version (e.g. \"2.5.3\")." }}
@@ -1240,12 +1242,13 @@ spec:
                 sleep 10
               done
           volumeMounts:
-            # The two keyring INPUTS the bringup may supply (deploy#1732): the GHCR pull token and the LLM keys JSON. Projected
-            # from the same bringup keyring Secret as the seal key, but as a
-            # SEPARATE volume that never lists the seal key, so the sidecar
-            # cannot read it (tests/lib/check_static_seal.py asserts this).
-            # `optional: true`: a bringup that supplies neither input still
-            # comes up, with the two keys seeded empty.
+            # The keyring INPUTS the bringup may supply (deploy#1732): the GHCR
+            # pull token and the SMTP relay credential. Projected from the same
+            # bringup keyring Secret as the seal key, but as a SEPARATE volume
+            # that never lists the seal key, so the sidecar cannot read it
+            # (tests/lib/check_static_seal.py asserts this). `optional: true`:
+            # a bringup that supplies no input still comes up, with the keys
+            # seeded empty.
             - name: bringup-inputs
               mountPath: /etc/openbao/inputs
               readOnly: true
@@ -1291,8 +1294,9 @@ spec:
         # The two keyring INPUTS for the sidecar (deploy#1732): the same
         # bringup keyring Secret, a different volume, and NEVER the seal key.
         # Item names follow scripts/keyring.sh: member GHCR_PULL_TOKEN is the
-        # Secret key ghcr-pull-token, LLM_KEYS_JSON is llm-keys-json. optional
-        # so a keyring that carries neither still starts the pod.
+        # Secret key ghcr-pull-token; the relay credential is smtp-username
+        # and smtp-password. optional so a keyring that carries none still
+        # starts the pod.
         - name: bringup-inputs
           secret:
             secretName: {{ $keyringSecretName | quote }}
@@ -1301,8 +1305,6 @@ spec:
             items:
               - key: ghcr-pull-token
                 path: ghcr-pull-token
-              - key: llm-keys-json
-                path: llm-keys-json
               - key: smtp-username
                 path: smtp-username
               - key: smtp-password

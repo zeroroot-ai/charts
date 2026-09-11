@@ -14,7 +14,7 @@
 # Usage:
 #   scripts/vanilla-set-secret.sh <key> <property> <value>
 #   scripts/vanilla-set-secret.sh ghcr-pull-secret pat "$GHCR_TOKEN"
-#   scripts/vanilla-set-secret.sh gibson-llm-keys anthropic_api_key "sk-ant-..."
+#   scripts/vanilla-set-secret.sh ses-smtp-credentials password "$SMTP_PASSWORD"
 #
 # Env: NS (default gibson), RELEASE (default gibson)
 set -euo pipefail
@@ -39,7 +39,7 @@ if [ -z "$TOKEN" ]; then
 fi
 
 # Read-modify-write: a KV v2 write REPLACES the whole object, so writing one
-# property naively would silently drop the others (gibson-llm-keys holds three).
+# property naively would silently drop the others (ses-smtp-credentials holds two).
 code="$(kubectl -n "$NS" exec -i "$POD" -c openbao-auto-init -- sh -s <<EOF
 set -eu
 export T='${TOKEN}'
