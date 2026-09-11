@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.126.2](https://github.com/zeroroot-ai/charts/compare/v0.126.1...v0.126.2) (2026-09-11)
+
+
+### Bug Fixes
+
+* **openbao:** keyring inputs follow the keyring without a pod restart ([#73](https://github.com/zeroroot-ai/charts/issues/73)) ([c4f2838](https://github.com/zeroroot-ai/charts/commit/c4f28383608ca5630cfa7df34b15ed7839e1befa))
+
 ## [0.126.1](https://github.com/zeroroot-ai/charts/compare/v0.126.0...v0.126.1) (2026-09-11)
 
 
