@@ -88,19 +88,6 @@ serviceAccounts:
 # -----------------------------------------------------------------------------
 # These can be provided via .env file or directly in values
 secrets:
-  # LLM API keys. ONE shape: the daemon reads ANTHROPIC_API_KEY,
-  # OPENAI_API_KEY and GOOGLE_API_KEY from the LLM-keys Secret on every
-  # profile. By default the chart renders an ExternalSecret that fills it
-  # from OpenBao key gibson-llm-keys, which the openbao-auto-init sidecar
-  # seeds from the bringup keyring member LLM_KEYS_JSON (an absent provider
-  # is an empty key, and the daemon registers no provider for it). An
-  # operator who brings their own Secret names it here and the chart renders
-  # no ExternalSecret. The inline *ApiKey values and the externalSecret
-  # toggle are gone: no template rendered an inline Secret, and the env
-  # gates that read them left the daemon with no LLM env on every profile.
-  llm:
-    existingSecret: ""
-
   # Stripe credentials (STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET).
   # Surfaced as the `gibson-stripe-credentials` Secret in the gibson namespace
   # via templates/secrets/stripe-credentials.yaml.

@@ -18,7 +18,6 @@
 #   BUCKET_SECRET_KEY=<base64 of 30 random bytes, 40 chars>
 #   SMTP_PASSWORD=<at least 20 chars, no whitespace>
 #   GHCR_PULL_TOKEN=<a GitHub token with read:packages, or empty>
-#   LLM_KEYS_JSON=<one-line JSON object, or empty>
 #   DNS_ACCESS_KEY=<the access key id of the DNS credential, or empty>
 #   DNS_SECRET_KEY=<its secret access key, or empty>
 #
@@ -30,17 +29,17 @@
 # SMTP password is opaque because the relay issues it (an SES SMTP password
 # is 44 characters, Mailpit takes anything), so only a floor is checked.
 #
-# The last four are INPUT members: values the keyring cannot generate.
-# GHCR_PULL_TOKEN and LLM_KEYS_JSON (deploy#1732) are the two seed values
-# the platform consumes. The bringup writes them into the keyring Secret
-# as `ghcr-pull-token` and `llm-keys-json`, and the openbao-auto-init
-# sidecar copies them into OpenBao (`ghcr-pull-secret`, property `pat`, and
-# `gibson-llm-keys`, properties anthropic_api_key, google_api_key,
-# openai_api_key). They are the ONE exception to "never in OpenBao": they
-# are inputs the platform consumes, not keys that open the bucket. Empty is
-# allowed and means "not supplied": the sidecar seeds the key empty, and an
-# operator fills it later with scripts/vanilla-set-secret.sh. An input
-# member may be absent from an older keyring file; that reads as empty.
+# The last three are INPUT members: values the keyring cannot generate.
+# GHCR_PULL_TOKEN (deploy#1732) is the one seed value the platform consumes.
+# The bringup writes it into the keyring Secret as `ghcr-pull-token`, and
+# the openbao-auto-init sidecar copies it into OpenBao (`ghcr-pull-secret`,
+# property `pat`). It is the ONE exception to "never in OpenBao": an input
+# the platform consumes, not a key that opens the bucket. Empty is allowed
+# and means "not supplied": the sidecar seeds the key empty, and an operator
+# fills it later with scripts/vanilla-set-secret.sh. An input member may be
+# absent from an older keyring file; that reads as empty. There is no LLM
+# key member: the platform holds no LLM credential of its own. A tenant's
+# providers and their keys live in that tenant's provider configuration.
 # DNS_ACCESS_KEY and DNS_SECRET_KEY are the Route53 credential cert-manager
 # (DNS-01) and external-dns use: an access key pair scoped to the
 # environment's zone. On AWS stage 0 mints it and `set`s it; on kind there
@@ -48,8 +47,7 @@
 # `route53-credential` (keys access-key-id, secret-access-key) when set,
 # never into OpenBao.
 # `set` writes an input member into an existing keyring; the other members
-# never change after `generate`. LLM_KEYS_JSON is one line of JSON, no
-# whitespace, for example {"anthropic_api_key":"sk-ant-...","google_api_key":"","openai_api_key":""}.
+# never change after `generate`.
 #
 # Comment lines start with `#`. The file is never sourced: a secret file
 # that can run shell is a hazard, so it is read line by line.
@@ -69,8 +67,8 @@
 #   keyring.sh verify <keyring-file> <substrate.env>   presence, length, fingerprint, one line per miss
 #   keyring.sh get <keyring-file> <MEMBER>             print one member's value
 #   keyring.sh set <keyring-file> <MEMBER> <value>     write an INPUT member (GHCR_PULL_TOKEN,
-#                                                      LLM_KEYS_JSON, DNS_ACCESS_KEY,
-#                                                      DNS_SECRET_KEY) into an existing keyring
+#                                                      DNS_ACCESS_KEY, DNS_SECRET_KEY) into an
+#                                                      existing keyring
 #
 # Exit codes: 0 ok, 1 the keyring fails a check, 2 the command could not run.
 
@@ -90,7 +88,6 @@ MEMBERS=(
   BUCKET_SECRET_KEY:b64:30
   SMTP_PASSWORD:opaque:20
   GHCR_PULL_TOKEN:input:0
-  LLM_KEYS_JSON:input:0
   DNS_ACCESS_KEY:input:0
   DNS_SECRET_KEY:input:0
 )
@@ -147,12 +144,6 @@ shape_error() {
   if [ "$(member_kind "$spec")" = input ]; then
     if [[ "$value" =~ [[:space:]] ]]; then
       printf 'contains whitespace'; return
-    fi
-    if [ "$(member_name "$spec")" = LLM_KEYS_JSON ] && [ -n "$value" ]; then
-      case "$value" in
-        \{*\}) ;;
-        *) printf 'is not a one-line JSON object' ;;
-      esac
     fi
     return
   fi
@@ -357,7 +348,7 @@ cmd_set() {
   local name="${2:?usage: keyring.sh set <keyring-file> <MEMBER> <value>}"
   local value="${3-}"
   [ -r "$file" ] || die "cannot read $file"
-  is_input "$name" || die "$name is not an input member; only GHCR_PULL_TOKEN, LLM_KEYS_JSON, DNS_ACCESS_KEY and DNS_SECRET_KEY may be set after generate. Rotation is a new keyring: see docs/runbooks/substrate-kind.md"
+  is_input "$name" || die "$name is not an input member; only GHCR_PULL_TOKEN, DNS_ACCESS_KEY and DNS_SECRET_KEY may be set after generate. Rotation is a new keyring: see docs/runbooks/substrate-kind.md"
   local spec err
   spec="$(member_spec "$name")"
   err="$(shape_error "$spec" "$value")"

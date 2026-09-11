@@ -125,18 +125,7 @@ spec:
         # (deploy#517) enforces that order. Listing this Secret in Reloader
         # would race-restart the daemon simultaneously with redis-stack,
         # causing WRONGPASS. See docs/runbooks/redis-password-rotation.md.
-        {{- /*
-          The LLM secret is in this list because the daemon reads
-          ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY into env, captured
-          at pod start. Seeding or rotating a provider key otherwise changes
-          nothing until someone happens to restart the daemon, and the symptom
-          is every completion failing against the OLD key — including "no key
-          configured" long after one was seeded (deploy#1147).
-
-          Unlike the Redis password above, there is no ordering hazard here: no
-          other workload has to roll in step with a provider key.
-        */}}
-        secret.reloader.stakater.com/reload: "gibson-workloads-db-secrets,gibson-platform-postgres-credentials,gibson-native-login-oidc,{{ include "gibson.llmSecrets.name" . }}"
+        secret.reloader.stakater.com/reload: "gibson-workloads-db-secrets,gibson-platform-postgres-credentials,gibson-native-login-oidc"
         {{- /*
           The daemon pins GIBSON_AUTHZ_FGA_MODEL_ID from gibson-fga-config at
           start. When the fga-init Job writes a new model (an evolved
@@ -322,53 +311,6 @@ spec:
                 sleep 2
               done
               echo "Redis is ready!"
-        # one-code-path #203: the LLM-keys Secret is structural on every
-        # profile — the ExternalSecret materialises it from OpenBao key
-        # gibson-llm-keys (seeded from the keyring member LLM_KEYS_JSON), or
-        # the operator names their own with secrets.llm.existingSecret — so
-        # the daemon always waits for it and always reads its three keys.
-        # Before charts 0.125.1 both were gated on inline *ApiKey values no
-        # template consumed, and no profile set: the Secret was filled and
-        # the daemon started with no LLM env at all (staging 2026-09-10,
-        # "no LLM providers registered").
-        # one-code-path #203: wait-for-llm-secret blocks pod start until
-        # the LLM-keys Secret is materialised. The OPENAI_API_KEY env
-        # entry was flipped from `optional: true` to required (and
-        # ANTHROPIC_API_KEY/GOOGLE_API_KEY rely on the same Secret).
-        # The daemon ServiceAccount has secrets get/list via the
-        # gibson cluster role.
-        - name: wait-for-llm-secret
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
-          command: ['/bin/bash', '-c']
-          args:
-            - |
-              set -eu
-              name={{ .Values.secrets.llm.existingSecret | default (include "gibson.llmSecrets.name" .) | quote }}
-              ns={{ .Release.Namespace | quote }}
-              echo "[wait-for-llm-secret] waiting for Secret ${ns}/${name}..."
-              for i in $(seq 1 30); do
-                if kubectl get secret -n "${ns}" "${name}" >/dev/null 2>&1; then
-                  echo "[wait-for-llm-secret] ok"
-                  exit 0
-                fi
-                sleep 2
-              done
-              echo "[wait-for-llm-secret] timed out after 60s -- the LLM-keys Secret was not materialised. Check: kubectl get externalsecret,secret -n ${ns}" >&2
-              exit 1
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65532
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
       containers:
         - name: gibson
           image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.gibson.image.repository "tag" .Values.gibson.image.tag "digest" .Values.gibson.image.digest "appVersion" .Chart.AppVersion) | quote }}
@@ -563,27 +505,6 @@ spec:
                   key: {{ .Values.gibson.email.smtp.passwordSecretKey | default "password" | quote }}
             {{- end }}
             {{- end }}
-            # LLM API keys — always from the LLM-keys Secret (see the
-            # wait-for-llm-secret init container). An empty key means "no
-            # provider": the seeder writes the keyring member's absent
-            # entries as empty strings and the daemon registers nothing for
-            # them. Never `optional: true` (one-code-path #203): the Secret
-            # is structural and the init container proves it exists.
-            - name: ANTHROPIC_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.llm.existingSecret | default (include "gibson.llmSecrets.name" .) }}
-                  key: ANTHROPIC_API_KEY
-            - name: OPENAI_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.llm.existingSecret | default (include "gibson.llmSecrets.name" .) }}
-                  key: OPENAI_API_KEY
-            - name: GOOGLE_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.llm.existingSecret | default (include "gibson.llmSecrets.name" .) }}
-                  key: GOOGLE_API_KEY
             {{- /* Optional override for the FGA RPC registry — see spec 21 */}}
             {{- with .Values.gibson.authz.rpcRegistry }}
             {{- if .override }}

@@ -432,10 +432,6 @@ app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
-{{- define "gibson.llmSecrets.name" -}}
-{{- printf "%s-llm-secrets" (include "gibson.fullname" .) }}
-{{- end }}
-
 {{- define "gibson.loki.host" -}}
 {{- printf "%s-loki" .Release.Name }}
 {{- end }}

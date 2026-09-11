@@ -180,12 +180,11 @@ for crd in platformbootstraps.gibson.zeroroot.ai \
 done
 
 # ---------------------------------------------------------------------------
-# Operator-supplied seed inputs (deploy#1732). The registry pull token and the
-# LLM keys are members of the bringup keyring (GHCR_PULL_TOKEN,
-# LLM_KEYS_JSON, scripts/keyring.sh). scripts/keyring-to-cluster.sh writes
-# them into the `bringup-keyring` Secret below, next to the bucket and seal
-# members, and the openbao-auto-init sidecar copies them into OpenBao before
-# any workload starts. There is no background loop and no second path: the old GHCR_TOKEN
+# Operator-supplied seed inputs (deploy#1732). The registry pull token is a
+# member of the bringup keyring (GHCR_PULL_TOKEN, scripts/keyring.sh).
+# scripts/keyring-to-cluster.sh writes it into the `bringup-keyring` Secret
+# below, next to the bucket and seal members, and the openbao-auto-init
+# sidecar copies it into OpenBao before any workload starts. There is no background loop and no second path: the old GHCR_TOKEN
 # environment variable is refused so a caller cannot rely on it.
 # ---------------------------------------------------------------------------
 if [ -n "${GHCR_TOKEN:-}" ]; then
