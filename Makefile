@@ -26,7 +26,7 @@ help: ## Show available targets
 
 chart-deps: ## Vendor sub-chart tarballs
 	@./scripts/helm-dep-update.sh 2>/dev/null || { \
-	  for c in helm/gibson-crds helm/gibson-operators helm/gibson-workloads helm/gibson-velero helm/gibson; do \
+	  for c in helm/gibson-operator-crds helm/gibson-crds helm/gibson-operators helm/gibson-workloads helm/gibson-velero helm/gibson; do \
 	    helm dependency update $$c >/dev/null || exit 1; done; }
 	@printf "$(GREEN)  ✓$(NC) chart-deps: vendored sub-charts are current\n"
 
