@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.127.0](https://github.com/zeroroot-ai/charts/compare/v0.126.2...v0.127.0) (2026-09-14)
+
+
+### Features
+
+* **netpol:** a label seam for platform-postgres clients, so no overlay writes a policy on our pods ([#75](https://github.com/zeroroot-ai/charts/issues/75)) ([c56f464](https://github.com/zeroroot-ai/charts/commit/c56f4648085c0bb7384ada1ed9451b519f96c981))
+
 ## [0.126.2](https://github.com/zeroroot-ai/charts/compare/v0.126.1...v0.126.2) (2026-09-11)
 
 
