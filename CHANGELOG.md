@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.127.1](https://github.com/zeroroot-ai/charts/compare/v0.127.0...v0.127.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* **branding:** the login page serves the acid-concrete brand, and a rebrand reaches a branded instance ([#81](https://github.com/zeroroot-ai/charts/issues/81)) ([4ab1291](https://github.com/zeroroot-ai/charts/commit/4ab12918a80b59bd8f8051374578eaba5394d55b))
+* **netpol:** the CNPG operator's Jobs may reach the primary, so replicas join ([#77](https://github.com/zeroroot-ai/charts/issues/77)) ([6d427d3](https://github.com/zeroroot-ai/charts/commit/6d427d3c34c8a0c59a4f033466586d03f90c0f3d))
+
 ## [0.127.0](https://github.com/zeroroot-ai/charts/compare/v0.126.2...v0.127.0) (2026-09-14)
 
 
