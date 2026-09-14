@@ -352,6 +352,25 @@ spec:
         - podSelector:
             matchLabels:
               cnpg.io/podRole: instance
+        # The operator's OWN Jobs, which are not instances and never carry
+        # cnpg.io/podRole. A `join` Job is how every replica after the first
+        # is built: it connects to platform-postgres-rw as streaming_replica
+        # and runs pg_basebackup. Without this the Job's packets are dropped
+        # and it retries for ever on "dial error: timeout", the Cluster sits
+        # in "Creating a new replica" at N-1 of N, and NOTHING reports it —
+        # CNPG calls the Cluster healthy enough and Argo calls the
+        # Application Healthy, so the bringup declares success over a
+        # database that is one replica short and will stay that way.
+        # Measured on staging 2026-09-14: instance 2 joined in 79 seconds
+        # because its Job ran before this policy was programmed; instance 3
+        # started after and was still retrying 28 minutes later.
+        #
+        # `Exists` covers every jobRole the operator has — join, initdb,
+        # pgbasebackup, import — so a future one is not a fourth outage.
+        - podSelector:
+            matchExpressions:
+              - key: cnpg.io/jobRole
+                operator: Exists
       ports:
         - protocol: TCP
           port: 5432
