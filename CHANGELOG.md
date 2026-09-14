@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.127.2](https://github.com/zeroroot-ai/charts/compare/v0.127.1...v0.127.2) (2026-09-14)
+
+
+### Bug Fixes
+
+* **crds:** helm install of gibson-crds blew the 1 MiB release-record cap ([#83](https://github.com/zeroroot-ai/charts/issues/83)) ([06adad1](https://github.com/zeroroot-ai/charts/commit/06adad188be982dcf04b9d4964740883f44980e6))
+
 ## [0.127.1](https://github.com/zeroroot-ai/charts/compare/v0.127.0...v0.127.1) (2026-09-14)
 
 
