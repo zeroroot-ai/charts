@@ -27,7 +27,7 @@ CAPS="monitoring.coreos.com/v1"
 # gibson-crds and gibson-velero are SEPARATE releases, not umbrella
 # dependencies, so rendering only helm/gibson never touched them. A YAML break
 # inside a CRD description reached a live cluster with every snapshot green.
-STANDALONE="gibson-crds gibson-velero"
+STANDALONE="gibson-crds gibson-operator-crds gibson-velero"
 
 # The umbrella vendors first-party sub-charts as packaged tarballs, and
 # .charts.stamp tracks dependency SOURCES, not those charts' templates. Edit a

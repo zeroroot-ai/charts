@@ -163,6 +163,14 @@ wait_crd_established mcpservers.toolhive.stacklok.dev
 
 log "phase 1 — CRDs"
 kubectl get namespace "$NS" >/dev/null 2>&1 || kubectl create namespace "$NS"
+# The operator CRDs are their OWN release, not a dependency of gibson-crds.
+# A Helm release record is one Secret with a 1 MiB cap, and the two together
+# rendered to 1131 KB of it: `helm install gibson-crds` failed outright on
+# every cluster until they were split (charts#82). Apart they are 611 KB and
+# 519 KB. A cluster that already runs cert-manager, External Secrets or
+# CloudNativePG skips this release and keeps its own CRDs.
+helm upgrade --install gibson-operator-crds "${CHART_DIR}/gibson-operator-crds" \
+  --namespace "$NS" --wait --timeout 5m
 helm upgrade --install gibson-crds "${CHART_DIR}/gibson-crds" \
   --namespace "$NS" --wait --timeout 5m
 # Established, not merely created: a CRD the API server has not accepted yet is

@@ -26,7 +26,7 @@ help: ## Show available targets
 
 chart-deps: ## Vendor sub-chart tarballs
 	@./scripts/helm-dep-update.sh 2>/dev/null || { \
-	  for c in helm/gibson-crds helm/gibson-operators helm/gibson-workloads helm/gibson-velero helm/gibson; do \
+	  for c in helm/gibson-operator-crds helm/gibson-crds helm/gibson-operators helm/gibson-workloads helm/gibson-velero helm/gibson; do \
 	    helm dependency update $$c >/dev/null || exit 1; done; }
 	@printf "$(GREEN)  ✓$(NC) chart-deps: vendored sub-charts are current\n"
 
@@ -54,6 +54,14 @@ seed-passwords: ## Every password the OpenBao seeder mints is argument-safe (let
 cnpg-netpol-covers-jobs: ## Every pod CNPG creates, bootstrap Jobs included, has an egress-allowing NetworkPolicy
 	@./scripts/check-cnpg-netpol-covers-jobs.sh
 
+.PHONY: values-no-duplicate-keys
+values-no-duplicate-keys: ## No values file declares a key twice (YAML keeps the last and drops the first, silently)
+	@./scripts/check-values-no-duplicate-keys.sh
+
+.PHONY: helm-record-size
+helm-record-size: ## Every published chart fits in a Helm release record (one Secret, 1 MiB cap)
+	@./scripts/check-helm-record-size.sh
+
 velero-volume-excludes: ## Every pod tells Velero which of its volumes are sockets and scratch, never a claim
 	@./scripts/check-velero-volume-excludes.sh
 
@@ -79,7 +87,7 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords ## Everything that runs without a cluster
+check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords helm-record-size values-no-duplicate-keys ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 vanilla-up: ## Install onto the current kube context

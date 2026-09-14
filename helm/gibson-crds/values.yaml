@@ -11,6 +11,11 @@
 # not services and no code path reads them. A cluster that runs the
 # Prometheus Operator brings its own full set.
 prometheus-operator-crds:
+  # Both the seam and the per-CRD trim live in THIS block. A second
+  # `prometheus-operator-crds:` key anywhere in this file silently deletes
+  # whichever copy comes first; scripts/check-values-no-duplicate-keys.sh
+  # fails the build when one appears.
+  enabled: true
   crds:
     alertmanagerconfigs:
       enabled: false
@@ -39,8 +44,17 @@ prometheus-operator-crds:
 # matching key false and keeps its own CRDs — a CRD is cluster-scoped, so
 # shipping one to a cluster that has it replaces the customer's copy underneath
 # their running controller.
-gibson-operator-crds:
-  enabled: true
-
-prometheus-operator-crds:
-  enabled: true
+# gibson-operator-crds has no toggle here any more: it is a separate release,
+# not a dependency (charts#82). A cluster that already owns cert-manager,
+# External Secrets or CloudNativePG simply does not install that release.
+#
+# prometheus-operator-crds has no SECOND block here either, and that is the
+# point. It used to: this file declared `prometheus-operator-crds:` twice, the
+# per-CRD toggles above and a bare `enabled: true` down here. YAML keeps the
+# last duplicate key and discards the first, so the toggles were thrown away
+# on every render since they were written, and all eight unused CRDs shipped
+# anyway — 3.8 MB of schema the platform never instantiates, and most of the
+# reason the release record blew its 1 MiB cap (charts#82). The comment above
+# described behaviour the file did not have.
+#
+# `enabled` now lives with the toggles, in the one block.

@@ -68,15 +68,27 @@ dependencies:
     version: "31.0.1"
     repository: "https://prometheus-community.github.io/helm-charts"
     condition: prometheus-operator-crds.enabled
-  # OPERATOR-SUBSTITUTION SEAM, matching the umbrella's four toggles. A CRD is
-  # CLUSTER-scoped: shipping certificates.cert-manager.io to a cluster that
-  # already runs cert-manager REPLACES the customer's copy underneath their
-  # running controller. Default true for a greenfield install; a guest cluster
-  # that owns the operators sets it false and keeps its own CRDs.
-  - name: gibson-operator-crds
-    version: "0.1.0"
-    repository: "file://../gibson-operator-crds"
-    condition: gibson-operator-crds.enabled
+  # gibson-operator-crds IS NOT A DEPENDENCY. It is its own release, and the
+  # reason is a hard limit rather than taste.
+  #
+  # A Helm release record is ONE Secret and the API server caps a Secret at
+  # 1048576 bytes. The record holds the rendered manifest as JSON, gzipped,
+  # base64-encoded. With the three vendored operator CRD sets inside this
+  # chart the manifest is 8385 KB raw, 848 KB gzipped, 1131 KB base64 — ten
+  # percent OVER the cap. `helm install gibson-crds` then fails outright, on
+  # every cluster, from the checkout and from the published artifact alike.
+  # Measured 2026-09-14 (charts#82).
+  #
+  # Nothing caught it because nothing installs this chart with Helm: Argo
+  # renders and applies server-side and writes no record, and the publish
+  # workflow's smoke test is `helm template`, which writes none either. It was
+  # 851 KB on 2026-09-01 with a note to watch the number. Splitting the
+  # release puts each half comfortably under: 612 KB here, 520 KB there.
+  #
+  # Deleted rather than defaulted off, so there is no shape where an operator
+  # installs this chart and silently gets no operator CRDs.
+  # scripts/check-helm-record-size.sh fails the build before the next growth
+  # reaches the cap.
 
 annotations:
   org.opencontainers.image.source: https://github.com/zeroroot-ai/charts

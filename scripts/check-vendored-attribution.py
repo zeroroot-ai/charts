@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Guard: every verbatim third-party redistribution carries its attribution.
 
-helm/gibson-operator-crds/files/crds/*.yaml are CustomResourceDefinitions
+helm/gibson-operator-crd-files/files/crds/*.yaml are CustomResourceDefinitions
 copied verbatim out of cert-manager, External Secrets and CloudNativePG. All
 three are Apache-2.0, and section 4 requires the license and the attribution
 notices to travel with a redistribution. Before the charts repo is public that
@@ -34,7 +34,7 @@ import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-CRDS = ROOT / "helm" / "gibson-operator-crds" / "files" / "crds"
+CRDS = ROOT / "helm" / "gibson-operator-crd-files" / "files" / "crds"
 LICENSES = ROOT / "LICENSES"
 NOTICE = ROOT / "NOTICE"
 
