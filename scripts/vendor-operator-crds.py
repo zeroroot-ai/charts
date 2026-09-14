@@ -8,7 +8,7 @@ refuses a CRD and a CR of that CRD in one release (deploy#1627), so the
 subcharts render with their CRDs OFF and this script copies those CRDs, from
 the exact chart version helm/gibson/Chart.yaml pins, into
 
-    helm/gibson-operator-crds/files/crds/<chart>.yaml
+    helm/gibson-operator-crd-files/files/crds/<chart>.yaml
 
 a first-party chart that gibson-crds carries as a file:// dependency and whose
 templates/crds.yaml includes them verbatim through .Files.Get (the CRD
@@ -24,7 +24,7 @@ helm/gibson/charts/. Bump the version and --check fails until you rerun this
 script; there is no second pin to forget.
 
 Modes:
-    (default)    regenerate helm/gibson-operator-crds/files/crds/*.yaml
+    (default)    regenerate helm/gibson-operator-crd-files/files/crds/*.yaml
     --check      exit 1 when a committed file differs from a fresh render
                  (compared as parsed YAML, so a PyYAML formatting difference
                  between two machines is not drift)
@@ -45,7 +45,7 @@ import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 UMBRELLA = ROOT / "helm" / "gibson"
-DEST = ROOT / "helm" / "gibson-operator-crds" / "files" / "crds"
+DEST = ROOT / "helm" / "gibson-operator-crd-files" / "files" / "crds"
 
 # chart name -> the values that make the upstream chart render its CRDs.
 OPERATORS: dict[str, list[str]] = {
@@ -169,7 +169,7 @@ def main(argv: list[str]) -> int:
             print("❌ vendored operator CRDs are stale:")
             for p in problems:
                 print(f"   {p}")
-            print("   Run `make vendor-operators` and commit helm/gibson-operator-crds/files/crds/.")
+            print("   Run `make vendor-operators` and commit helm/gibson-operator-crd-files/files/crds/.")
             return 1
         print("✅ vendored operator CRDs match the pinned subcharts")
         return 0
