@@ -273,6 +273,27 @@ spec:
      replication. :8000 is the operator's instance-status probe;
      :9187 metrics. The postgres-setup bringup Jobs are NOT listed — they
      reach the primary via `kubectl exec`, not the network.
+
+     THE SEAM FOR EVERYTHING THIS CHART DOES NOT SHIP. A SaaS overlay
+     (ADR-0006) is a separate Argo Application that this chart knows nothing
+     about, and its pods may legitimately need :5432. The wrong answer is for
+     the overlay to write its own NetworkPolicy against these pods: the
+     moment any policy selects a pod, that pod's ingress is deny-by-default
+     and only the UNION of selecting policies is allowed — so on a cold
+     start, where the overlay Application syncs before this one, the overlay
+     policy is the only one there and it fences the CNPG operator out of
+     :8000. The operator then cannot read the instance status, the Cluster
+     never reports ready, and the umbrella sync deadlocks on the wave that
+     waits for it. Measured on the 2026-09-14 from-zero staging bringup:
+     "Cannot extract Pod status ... dial tcp 10.40.140.223:8000: i/o
+     timeout", 106 of 420 resources applied, the sync terminated by Argo's
+     30-minute cap three times over.
+
+     So the contract is a LABEL, declared here and opted into there: a pod
+     carrying gibson.zeroroot.ai/platform-postgres-client=true may reach
+     :5432. Overlays label their own pods and write no policy on ours, which
+     leaves this chart the single owner of these pods' ingress and removes
+     the ordering dependency between two independent Applications.
 --------------------------------------------------------------------- */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -291,6 +312,11 @@ spec:
     - Egress
   ingress:
     - from:
+        # The opt-in seam: see THE SEAM above. Any pod, in this namespace,
+        # that declares itself a platform-postgres client.
+        - podSelector:
+            matchLabels:
+              gibson.zeroroot.ai/platform-postgres-client: "true"
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: daemon

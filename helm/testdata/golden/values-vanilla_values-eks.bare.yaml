@@ -1213,6 +1213,11 @@ spec:
     - Egress
   ingress:
     - from:
+        # The opt-in seam: see THE SEAM above. Any pod, in this namespace,
+        # that declares itself a platform-postgres client.
+        - podSelector:
+            matchLabels:
+              gibson.zeroroot.ai/platform-postgres-client: "true"
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: daemon
