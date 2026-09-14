@@ -121,11 +121,37 @@ overlay_only = [{"spec": {"podSelector": {"matchLabels": {"cnpg.io/cluster": "pl
 if ingress_allowed(overlay_only, SHAPES["instance"], OPERATOR, 8000):
     sys.exit("self-test broken: an overlay policy that allows only :5432 from its own pods must NOT admit the operator on :8000")
 
+# Self-test: an instances policy whose :5432 from-list names only pods and
+# instances — the shape this file shipped until 2026-09-14 — must be rejected
+# for the operator's Jobs.
+no_jobs = [{"spec": {"podSelector": {"matchLabels": {"cnpg.io/podRole": "instance"}},
+                     "policyTypes": ["Ingress"],
+                     "ingress": [{"from": [{"podSelector": {"matchLabels": {"cnpg.io/podRole": "instance"}}},
+                                           {"podSelector": {"matchLabels": OPERATOR}}],
+                                  "ports": [{"protocol": "TCP", "port": 5432}]}]}}]
+if ingress_allowed(no_jobs, SHAPES["instance"], SHAPES["join"], 5432):
+    sys.exit("self-test broken: an instances policy with no jobRole selector must NOT admit a join Job on :5432")
+
+# The operator's OWN Jobs must reach the primary on :5432. A `join` Job is how
+# every replica after the first is built: it connects to <cluster>-rw as
+# streaming_replica and runs pg_basebackup. Denied, it retries for ever on
+# "dial error: timeout", the Cluster sits in "Creating a new replica" at N-1
+# of N, and NOTHING reports it — CNPG calls the Cluster healthy enough and
+# Argo calls the Application Healthy, so a bringup declares success over a
+# database that is one replica short and stays that way. Measured on staging
+# 2026-09-14, at 2 of 3 instances, 28 minutes after the bringup said complete.
+JOB_ROLES = [k for k in SHAPES if k != "instance"]
+for role in JOB_ROLES:
+    if not ingress_allowed(policies, SHAPES["instance"], SHAPES[role], 5432):
+        print("✗ check-cnpg-netpol-covers-jobs: no NetworkPolicy admits the operator's %s Job to a platform-postgres instance on :5432" % role, file=sys.stderr)
+        print("  every replica after the first is built by a Job, and a denied Job never reports a failure: it retries until somebody looks", file=sys.stderr)
+        sys.exit(1)
+
 for who, labels, port in (("the CNPG operator", OPERATOR, 8000), ("a platform-postgres-client pod", CLIENT, 5432)):
     if not ingress_allowed(policies, SHAPES["instance"], labels, port):
         print("✗ check-cnpg-netpol-covers-jobs: no NetworkPolicy admits %s to a platform-postgres instance on :%d" % (who, port), file=sys.stderr)
         print("  the operator path is how the Cluster reports ready; the client label is the seam overlays opt into", file=sys.stderr)
         sys.exit(1)
 
-print("✅ self-test: the podRole-only policy shape is rejected for the Jobs; %d policies rendered, every CNPG pod shape (%s) has an egress-allowing policy" % (len(policies), ", ".join(SHAPES)))
+print("✅ self-tests: the podRole-only egress shape and the jobRole-less ingress shape are both rejected; %d policies rendered, every CNPG pod shape (%s) has egress, and the operator, its %d Job roles and a client-labelled pod all reach an instance" % (len(policies), ", ".join(SHAPES), len(JOB_ROLES)))
 PY
