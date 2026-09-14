@@ -9,7 +9,7 @@
 GREEN := \033[0;32m
 NC    := \033[0m
 
-.PHONY: help chart-deps golden golden-update render-diff vanilla-up vanilla-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords \
+.PHONY: help chart-deps golden golden-update render-diff vanilla-up vanilla-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords login-brand \
         check attribution vendor-operators cloud-free
 
 help: ## Show available targets
@@ -64,6 +64,10 @@ subchart-overrides: ## Every hand-overridden subchart image tag is a declared ve
 	@python3 scripts/check-subchart-overrides-declared.py --selftest >/dev/null
 	@python3 scripts/check-subchart-overrides-declared.py
 
+login-brand: ## The login-branding Job applies the declared brand and re-applies a changed one (ADR-0064)
+	@python3 scripts/check-login-brand.py --selftest
+	@python3 scripts/check-login-brand.py
+
 zitadel-lockstep: ## The ZITADEL server tag and the login fork pin name the same release
 	@python3 scripts/check-zitadel-lockstep.py --selftest
 	@python3 scripts/check-zitadel-lockstep.py
@@ -75,7 +79,7 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free subchart-overrides zitadel-lockstep tool-image postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords ## Everything that runs without a cluster
+check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 vanilla-up: ## Install onto the current kube context
