@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.128.0](https://github.com/zeroroot-ai/charts/compare/v0.127.2...v0.128.0) (2026-09-15)
+
+
+### Features
+
+* **vanilla-up:** install the PUBLISHED charts, not only a checkout ([#85](https://github.com/zeroroot-ai/charts/issues/85)) ([075200c](https://github.com/zeroroot-ai/charts/commit/075200ccfefacd35662ced807c04757d6ec0b4ab)), closes [#79](https://github.com/zeroroot-ai/charts/issues/79)
+
+
+### Bug Fixes
+
+* **images:** pin the dashboard to a release tag, not a moving main ([#89](https://github.com/zeroroot-ai/charts/issues/89)) ([ee72ad1](https://github.com/zeroroot-ai/charts/commit/ee72ad14a778c9ca859662d66cc6d6207d7cc438))
+* **netpol:** OpenBao needs apiserver egress, on every CNI that enforces policy ([#87](https://github.com/zeroroot-ai/charts/issues/87)) ([675de0c](https://github.com/zeroroot-ai/charts/commit/675de0c446d84025271779ab8841c715c328f382)), closes [#80](https://github.com/zeroroot-ai/charts/issues/80)
+
 ## [0.127.2](https://github.com/zeroroot-ai/charts/compare/v0.127.1...v0.127.2) (2026-09-14)
 
 
