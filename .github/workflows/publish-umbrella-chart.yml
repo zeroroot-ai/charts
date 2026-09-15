@@ -148,7 +148,13 @@ jobs:
         run: |
           set -euo pipefail
           ver="${{ steps.ver.outputs.version }}"
-          for chart in gibson gibson-crds gibson-operator-crds gibson-velero; do
+          # THE PUBLISH SET, named once. The anonymous-pull check below reads
+          # this same list, so a chart added here is covered there without
+          # anyone remembering to edit a second list. A chart that only half
+          # the steps know about is how gibson-operator-crds shipped private.
+          CHARTS="gibson gibson-crds gibson-operator-crds gibson-velero"
+          echo "CHARTS=$CHARTS" >> "$GITHUB_ENV"
+          for chart in $CHARTS; do
             echo "::group::$chart"
             helm package "helm/$chart" --version "$ver" --app-version "$ver"
 
@@ -191,3 +197,13 @@ jobs:
           helm template gibson-operator-crds "/tmp/pulled/gibson-operator-crds-$ver.tgz" >/dev/null
           helm template gibson-velero "/tmp/pulled/gibson-velero-$ver.tgz" >/dev/null
           echo "✓ all four published charts pull and render clean"
+
+      # THE PULL ABOVE CARRIES THIS WORKFLOW'S TOKEN, so it cannot answer the
+      # question a stranger asks. A package is PRIVATE on its first publish,
+      # and gibson-operator-crds shipped that way at 0.127.2: the staging Argo
+      # Application sat in ComparisonError and every stranger install broke,
+      # while this workflow stayed green because its own pull was authorized.
+      #
+      # This step pulls each chart again with no credential and no cache.
+      - name: EXIT TEST — every published chart pulls with NO credential
+        run: scripts/check-anonymous-pull.sh "${{ steps.ver.outputs.version }}" $CHARTS
