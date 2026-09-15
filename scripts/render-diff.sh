@@ -18,7 +18,7 @@
 set -euo pipefail
 
 BASE_REF="${1:-origin/main}"
-PROFILES="${PROFILES:-values-vanilla.yaml values-eks.yaml values-gke.yaml values-aks.yaml values-guest.yaml}"
+PROFILES="${PROFILES:-values-baseline.yaml values-eks.yaml values-gke.yaml values-aks.yaml values-guest.yaml}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
@@ -43,8 +43,8 @@ echo "▶ vendoring working tree"
 repack "$ROOT" || { echo "working-tree chart-deps FAILED"; exit 1; }
 
 render() { # $1=root $2=profile $3=out
-  # Every file but values-vanilla.yaml is an overlay and renders on top of it.
-  base=(); [ "$2" = values-vanilla.yaml ] || base=(-f "$1/helm/gibson/values-vanilla.yaml")
+  # Every file but values-baseline.yaml is an overlay and renders on top of it.
+  base=(); [ "$2" = values-baseline.yaml ] || base=(-f "$1/helm/gibson/values-baseline.yaml")
   helm template gibson "$1/helm/gibson" "${base[@]}" -f "$1/helm/gibson/$2" --namespace gibson >"$3" 2>"$3.err"
 }
 

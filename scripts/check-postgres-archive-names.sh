@@ -19,7 +19,7 @@
 set -euo pipefail
 
 CHART_DIR="${CHART_DIR:-helm/gibson}"
-VALUES="$CHART_DIR/values-vanilla.yaml"
+VALUES="$CHART_DIR/values-baseline.yaml"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -39,7 +39,7 @@ PY
 fail() { printf '\033[0;31m✗ check-postgres-archive-names: %s\033[0m\n' "$*" >&2; exit 1; }
 
 # 1. A nameless bootstrap renders initdb and no recovery source.
-render plain || fail "the plain vanilla render failed: $(tail -n1 "$WORK/plain.err")"
+render plain || fail "the plain baseline render failed: $(tail -n1 "$WORK/plain.err")"
 [ "$(cluster_field plain '"initdb" in d["spec"]["bootstrap"]')" = True ] \
   || fail "the plain render does not bootstrap with initdb"
 [ "$(cluster_field plain '"externalClusters" in d["spec"]')" = False ] \

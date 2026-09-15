@@ -40,7 +40,7 @@ metadata:
 spec:
   type: {{ .Values.envoy.service.type | default "NodePort" }}
   # Client-IP contract. Local stops kube-proxy from SNATing the
-  # client address on the NodePort / passthrough-LB path (kind, vanilla, GKE,
+  # client address on the NodePort / passthrough-LB path (kind, a plain cluster, GKE,
   # AKS), so Envoy's socket peer is the client. On AWS with nlb-target-type=ip
   # the controller dials pod IPs directly and ignores this field; there the
   # contract is met by preserve_client_ip.enabled=true on the target group.

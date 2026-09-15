@@ -178,7 +178,7 @@ jobs:
           done
 
           # Only the umbrella takes values; the other two render standalone.
-          # values-vanilla is the SUPPORTED self-hosted profile and the right
+          # values-baseline is the SUPPORTED self-hosted profile and the right
           # thing to prove a published artifact against. ci/values-staging was
           # a SaaS profile and lives in the hosted repo now.
           #
@@ -186,7 +186,7 @@ jobs:
           # and its argument breaks the continuation, and helm then runs with no
           # values file at all.
           helm template gibson "/tmp/pulled/gibson-$ver.tgz" \
-            -f helm/gibson/values-vanilla.yaml >/dev/null
+            -f helm/gibson/values-baseline.yaml >/dev/null
           helm template gibson-crds "/tmp/pulled/gibson-crds-$ver.tgz" >/dev/null
           helm template gibson-operator-crds "/tmp/pulled/gibson-operator-crds-$ver.tgz" >/dev/null
           helm template gibson-velero "/tmp/pulled/gibson-velero-$ver.tgz" >/dev/null

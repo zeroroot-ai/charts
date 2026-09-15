@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# vanilla-verify.sh — assert a vanilla install actually came up.
+# baseline-verify.sh — assert a baseline install actually came up.
 #
 # Every assertion here was first checked by hand while building the install, so
 # it lives in the repo instead of in a transcript. An install that "returned"
@@ -8,7 +8,7 @@
 #
 # Env: NS (default gibson), RELEASE (default gibson), WAIT_SECS (default 600)
 #      KEYRING_FILE — the bringup keyring file stage 0 wrote (scripts/keyring.sh
-#      shape), set by vanilla-up.sh on the kind fixture to run the keyring
+#      shape), set by baseline-up.sh on the kind fixture to run the keyring
 #      drill (section 5). Unset = skipped.
 set -euo pipefail
 
@@ -218,7 +218,7 @@ if [ -n "${KEYRING_FILE:-}" ] && [ "${SKIP_RESTORE_DRILL:-}" != "1" ]; then
 fi
 
 if [ -n "${KEYRING_FILE:-}" ] && [ "${SKIP_RESTORE_DRILL:-}" != "1" ]; then
-  printf '\n\033[1;32m✅ vanilla install verified: OpenBao bootstrapped, one backend store, %s ExternalSecrets synced in every namespace, the store survives a restart, and it opens only under the bringup keyring\033[0m\n' "$total"
+  printf '\n\033[1;32m✅ baseline install verified: OpenBao bootstrapped, one backend store, %s ExternalSecrets synced in every namespace, the store survives a restart, and it opens only under the bringup keyring\033[0m\n' "$total"
 else
-  printf '\n\033[1;32m✅ vanilla install verified: OpenBao bootstrapped, one backend store, %s ExternalSecrets synced in every namespace, the store survives a restart (keyring drill NOT run)\033[0m\n' "$total"
+  printf '\n\033[1;32m✅ baseline install verified: OpenBao bootstrapped, one backend store, %s ExternalSecrets synced in every namespace, the store survives a restart (keyring drill NOT run)\033[0m\n' "$total"
 fi

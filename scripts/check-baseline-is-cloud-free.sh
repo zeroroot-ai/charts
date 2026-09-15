@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# check-vanilla-is-cloud-free.sh — the vanilla profile must assume no cloud.
+# check-baseline-is-cloud-free.sh — the baseline profile must assume no cloud.
 #
-# ADR-0010 makes the vanilla Kubernetes cluster the supported self-hosted
+# ADR-0010 makes a plain Kubernetes cluster the supported self-hosted
 # target, with EKS as one specialisation layered on top. The failure mode this
 # guards is quiet: someone adds an IRSA annotation or a gp3 storage class to
 # the base "because that is where the other one had it", and the profile
@@ -11,15 +11,15 @@
 # It checks the RENDER, not the values file, because a cloud assumption can
 # arrive through a sub-chart default just as easily as through this profile.
 #
-# Usage: scripts/check-vanilla-is-cloud-free.sh
-# Exit:  0 clean · 1 a cloud assumption reached the vanilla render
+# Usage: scripts/check-baseline-is-cloud-free.sh
+# Exit:  0 clean · 1 a cloud assumption reached the baseline render
 set -euo pipefail
 
 CHART_DIR="${CHART_DIR:-helm/gibson}"
 RENDER="$(mktemp)"
 trap 'rm -f "$RENDER"' EXIT
 
-helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-vanilla.yaml" \
+helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" \
   --namespace gibson > "$RENDER"
 
 # Patterns that mean "this only works on a cloud". Deliberately narrow: they
@@ -39,13 +39,13 @@ check() {
 }
 
 check 'eks\.amazonaws\.com/role-arn' \
-  "IRSA annotation in the vanilla render — a non-EKS cluster cannot honour it. Put it in the substrate overlay (helm/gibson/values-eks.yaml)."
+  "IRSA annotation in the baseline render — a non-EKS cluster cannot honour it. Put it in the substrate overlay (helm/gibson/values-eks.yaml)."
 check 'service\.beta\.kubernetes\.io/aws-load-balancer' \
-  "AWS load-balancer annotation in the vanilla render — inert off EKS. Put it in the substrate overlay (helm/gibson/values-eks.yaml)."
+  "AWS load-balancer annotation in the baseline render — inert off EKS. Put it in the substrate overlay (helm/gibson/values-eks.yaml)."
 check '(storageClass|storageClassName): *"?gp3"?' \
-  "gp3 storage class in the vanilla render — leave it empty so the cluster default applies."
+  "gp3 storage class in the baseline render — leave it empty so the cluster default applies."
 check 'arn:aws:(kms|iam|secretsmanager)' \
-  "An AWS ARN in the vanilla render — the vanilla profile must not name cloud resources."
+  "An AWS ARN in the baseline render — the baseline profile must not name cloud resources."
 check 'service: *SecretsManager' \
   "AWS Secrets Manager as the secret backend — the platform's own OpenBao is the one backend on every substrate (ADR-0015)."
 # 172.20.0.0/16 is the EKS Service CIDR. kubeadm and kind default to
@@ -56,17 +56,17 @@ check 'service: *SecretsManager' \
 # That is deploy#1627: the profile was extracted from the EKS one and carried
 # the address across. No AWS name appears in it, so every check above passed.
 check 'clusterIP: *"?172\.20\.' \
-  "A ClusterIP from the EKS Service CIDR (172.20.0.0/16) in the vanilla render — kind and kubeadm use 10.96.0.0/12 and will refuse to allocate it. Pin one inside the target cluster's Service CIDR."
+  "A ClusterIP from the EKS Service CIDR (172.20.0.0/16) in the baseline render — kind and kubeadm use 10.96.0.0/12 and will refuse to allocate it. Pin one inside the target cluster's Service CIDR."
 
 # ---------------------------------------------------------------------------
 # Cloud-free is necessary but NOT sufficient. A profile can name no cloud
 # resource and still be unusable, by suppressing an in-cluster datastore that
 # something else assumes is there.
 #
-# That is deploy#1627: values-vanilla.yaml was extracted from the EKS profile
+# That is deploy#1627: values-baseline.yaml was extracted from the EKS profile
 # and carried a flag across that suppressed the in-cluster CNPG Cluster, on
 # the premise that terraform provisions a managed Postgres instead. On a
-# vanilla cluster nothing does, so platform-postgres-rw had no cluster behind
+# plain Kubernetes cluster nothing does, so platform-postgres-rw had no cluster behind
 # it, and the -6 postgres-setup pre-install hooks blocked on
 # Cluster.status.currentPrimary forever. `helm install` hung for its full 25m
 # timeout and then said only "failed pre-install: timed out waiting for the
@@ -87,7 +87,7 @@ requires() {
 # Cluster that serves it has to be in the same render.
 if grep -q "platform-postgres-rw" "$RENDER"; then
   requires '^kind: Cluster$' \
-    "The vanilla render uses platform-postgres-rw but renders no CNPG Cluster. The Cluster is structural on every profile (ADR-0015); find what suppressed templates/postgres/platform-postgres-cluster.yaml."
+    "The baseline render uses platform-postgres-rw but renders no CNPG Cluster. The Cluster is structural on every profile (ADR-0015); find what suppressed templates/postgres/platform-postgres-cluster.yaml."
 fi
 
 # Same rule for secrets: every ExternalSecret points at the gibson-secrets
@@ -96,7 +96,7 @@ fi
 # in this render, not merely a name the ExternalSecrets repeat.
 if grep -qE '^ +kind: ClusterSecretStore$' "$RENDER"; then
   if ! awk 'BEGIN{RS="\n---\n"} /(^|\n)kind: ClusterSecretStore\n/ && /name: "gibson-secrets"/{f=1} END{exit f?0:1}' "$RENDER"; then
-    echo "❌ The vanilla render points ExternalSecrets at the gibson-secrets ClusterSecretStore but renders no such store. The store is structural on every profile (ADR-0015, deploy#1733)."
+    echo "❌ The baseline render points ExternalSecrets at the gibson-secrets ClusterSecretStore but renders no such store. The store is structural on every profile (ADR-0015, deploy#1733)."
     fail=1
   fi
 fi
@@ -128,10 +128,10 @@ fi
 
 if [ "$fail" -ne 0 ]; then
   echo
-  echo "The vanilla profile is the one a customer on OpenShift, Rancher, kind or"
+  echo "The baseline profile is the one a customer on OpenShift, Rancher, kind or"
   echo "bare metal installs. Anything cloud-specific belongs in the EKS overlay,"
   echo "and anything the render depends on must be in the render."
   exit 1
 fi
 
-echo "✅ vanilla render is cloud-free and self-contained"
+echo "✅ baseline render is cloud-free and self-contained"

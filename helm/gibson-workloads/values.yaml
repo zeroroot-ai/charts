@@ -450,7 +450,7 @@ gibson:
         # The OpenBao key the ClusterSecretStore reads, flat under
         # `secret/data/`. The default `ses-smtp-credentials` is a
         # seed-table key an operator fills in with
-        # scripts/vanilla-set-secret.sh. Override it for any other delivering
+        # scripts/baseline-set-secret.sh. Override it for any other delivering
         # provider whose credentials are seeded as one key with a username
         # and a password property.
         remoteKey: "ses-smtp-credentials"
@@ -2008,7 +2008,7 @@ fga-postgresql:
 #
 # Sole IdP after the Better-Auth removal. Owns user records, login UI, MFA,
 # organizations, invitations, and federation to upstream IdPs (Google,
-# GitHub, generic OIDC, SAML). The dashboard becomes a vanilla OIDC RP
+# GitHub, generic OIDC, SAML). The dashboard becomes a standard OIDC RP
 # (Auth.js v5).
 #
 # Per epic one-code-path (deploy#186), slice deploy#196: the previous
@@ -2655,7 +2655,7 @@ envoy:
     #                                  letsencrypt-staging | selfsigned-ca
     selfSigned: false
     secretName: "gibson-envoy-tls"
-  resources:  # 512Mi/1Gi: the Coraza WASM VM (V8 + OWASP CRS) needs it — 512Mi OOMKilled Envoy on a live vanilla install
+  resources:  # 512Mi/1Gi: the Coraza WASM VM (V8 + OWASP CRS) needs it — 512Mi OOMKilled Envoy on a live baseline install
     requests:
       cpu: 200m
       memory: 512Mi
@@ -2778,7 +2778,7 @@ mailpit:
 # -----------------------------------------------------------------------------
 #
 # Identity is owned by Zitadel (see the `zitadel:` block above); the dashboard
-# is a vanilla OIDC RP via Auth.js v5. The dashboard's externally-facing URL
+# is a standard OIDC RP via Auth.js v5. The dashboard's externally-facing URL
 # used for OAuth callbacks lives at .Values.dashboard.authUrl. The Auth.js
 # HMAC (AUTH_SECRET) is auto-generated into the dashboard Secret by
 # templates/dashboard/secret.yaml.
@@ -3199,7 +3199,7 @@ openbao:
     # umbrella syncs, from the OPENBAO_SEAL_KEY member of the keyring file
     # stage 0 wrote (`make substrate ENV=kind`, scripts/keyring.sh): through
     # scripts/keyring-to-cluster.sh, run by `make recreate ENV=kind` and by
-    # scripts/vanilla-up.sh (deploy#1737), and in the backup exit test by the
+    # scripts/baseline-up.sh (deploy#1737), and in the backup exit test by the
     # workflow itself. An operator installing by hand creates it once:
     #   kubectl -n gibson create secret generic bringup-keyring \
     #     --from-literal=openbao-seal-key="$(head -c 32 /dev/urandom | base64 -w0)"
@@ -3570,7 +3570,7 @@ spire:
     # rollback is this value.
     #
     # If a control plane turns out to name a creator we did not list — EKS
-    # is managed and is not assumed vanilla — the evidence is the apiserver
+    # is managed and is not assumed to be a plain cluster — the evidence is the apiserver
     # audit annotation
     # `validation.policy.admission.k8s.io/validation_failure` naming
     # `gibson-platform-identity-{pods,workloads}` over one bringup cycle.
@@ -4496,7 +4496,7 @@ setec:
       #                 4Gi). defaultResources is NOT that: setec reads it
       #                 for the warm-pool template only.
       # Two idle members cost 0.5 vCPU / 1.5Gi. The sanctioned profile
-      # (helm/gibson/values-vanilla.yaml) restates the class list and is
+      # (helm/gibson/values-baseline.yaml) restates the class list and is
       # pinned by helm/gibson/tests/bank-member-sizing.bats.
       - name: agent
         spec:
@@ -4741,7 +4741,7 @@ upgrade:
 # create-only.
 firstAdmin:
   # Off by default: SaaS uses self-serve signup and must not seed an owner.
-  # values-vanilla.yaml turns it on.
+  # values-baseline.yaml turns it on.
   enabled: false
   # The address the operator signs in with. REQUIRED when enabled.
   email: ""
@@ -5033,7 +5033,7 @@ componentIngress:
 # holds trivially: this chart authors no Secret).
 #
 # The `plugins` map is keyed by vendor. It is EMPTY by default — a base install
-# runs no plugins. An overlay (e.g. values-vanilla.yaml, or a customer fork's
+# runs no plugins. An overlay (e.g. values-baseline.yaml, or a customer fork's
 # GitOps values) opts a plugin in. Each entry:
 #
 #   <vendor>:

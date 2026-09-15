@@ -7,7 +7,7 @@
 # chart escrows it: a post-sync Job writes it to OpenBao and an
 # ExternalSecret reads it back into `iam-admin-pat`, with creationPolicy
 # Orphan because the setup Job creates that Secret first on a fresh
-# bootstrap. This guard renders the vanilla profile and checks all three
+# bootstrap. This guard renders the baseline profile and checks all three
 # halves are there and agree; it self-tests by dropping the ExternalSecret
 # from a copy of the render.
 #
@@ -16,7 +16,7 @@
 set -euo pipefail
 CHART_DIR="${CHART_DIR:-helm/gibson}"
 RENDER="$(mktemp)"; trap 'rm -f "$RENDER"' EXIT
-helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-vanilla.yaml" --namespace gibson > "$RENDER"
+helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" --namespace gibson > "$RENDER"
 python3 - "$RENDER" <<'PY'
 import sys, yaml, copy
 KEY = "gibson-zitadel-iam-admin-pat"

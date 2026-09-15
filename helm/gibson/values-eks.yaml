@@ -1,13 +1,13 @@
 # Substrate overlay: eks. The AWS deltas, layered ON TOP of
-# values-vanilla.yaml.
+# values-baseline.yaml.
 #
-#   helm install gibson . -f values-vanilla.yaml -f values-eks.yaml
+#   helm install gibson . -f values-baseline.yaml -f values-eks.yaml
 #
 # Proof: installed on zeroroot-ai staging/prod EKS before the 2026-08-16
 #        teardown; the client-IP annotations below are rendered in CI, not yet
 #        installed on a cluster (exit-test-substrate.yml, deploy#1661).
 #
-# the vanilla cluster is the supported self-hosted target and a
+# a plain Kubernetes cluster is the supported self-hosted target and a
 # substrate is one specialisation of it. This file therefore contains ONLY
 # what is true because the cluster is EKS, and only from the allowlist in
 # CONTEXT.md § Substrate (scripts/check-substrate-overlay-allowlist.py):
@@ -30,7 +30,7 @@
 # fixture; this is a deployment source. Before that it was
 # values-self-hosted.yaml and carried the whole profile, which quietly made
 # "self-hosted" mean "self-hosted on AWS". If you are adding something here
-# that is not AWS-specific, it belongs in values-vanilla.yaml.
+# that is not AWS-specific, it belongs in values-baseline.yaml.
 #
 # The two operators that keep a per-cloud seam: cert-manager
 # solves DNS-01 against Route53 and external-dns publishes records into it.
@@ -67,7 +67,7 @@ gibson-workloads:
     region: "us-east-1"
 
   certManager:
-    # A real certificate rather than the vanilla self-signed one. DNS-01 over
+    # A real certificate rather than the baseline self-signed one. DNS-01 over
     # Route53 needs a hosted zone and the Route53 credential Secret named in
     # the seam note above.
     issuers:
@@ -86,7 +86,7 @@ gibson-workloads:
   envoy:
     service:
       # Read by the AWS Load Balancer Controller. On a non-EKS cluster these
-      # are inert strings, which is why they are not in the vanilla base.
+      # are inert strings, which is why they are not in the baseline profile.
       annotations:
         service.beta.kubernetes.io/aws-load-balancer-type: external
         service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip

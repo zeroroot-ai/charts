@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# check-vanilla-up-one-path.sh — the local and published installs are ONE path.
+# check-baseline-up-one-path.sh — the local and published installs are ONE path.
 #
-# scripts/vanilla-up.sh installs the platform two ways: from a chart checkout,
+# scripts/baseline-up.sh installs the platform two ways: from a chart checkout,
 # which is how this repository is developed, and from the published OCI
 # artifacts, which is what a stranger runs. Those two must install the SAME
 # charts in the SAME order for "it works from source" and "it works from the
@@ -27,8 +27,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT="${1:-$HERE/vanilla-up.sh}"
-[ -r "$SCRIPT" ] || { echo "check-vanilla-up-one-path: cannot read $SCRIPT" >&2; exit 2; }
+SCRIPT="${1:-$HERE/baseline-up.sh}"
+[ -r "$SCRIPT" ] || { echo "check-baseline-up-one-path: cannot read $SCRIPT" >&2; exit 2; }
 
 # The three first-party releases, in the order they must install.
 # The order is load-bearing: the operator CRDs and the platform's own CRDs
@@ -124,7 +124,7 @@ fi
 
 # --- the real assertion ----------------------------------------------------
 if ! reason="$(assert_one_path "$SCRIPT")"; then
-  echo "✗ check-vanilla-up-one-path: ${reason}" >&2
+  echo "✗ check-baseline-up-one-path: ${reason}" >&2
   echo "  the chart checkout and the published artifact must install the same releases in the same order" >&2
   exit 1
 fi

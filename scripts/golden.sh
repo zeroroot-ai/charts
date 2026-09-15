@@ -18,10 +18,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/helm/testdata/golden"
 # A profile is one or more values files, layered left to right. The guest
-# entry is the brownfield shape: the same vanilla install with the four
+# entry is the brownfield shape: the same baseline install with the four
 # operator-substitution seams off, proving the chart is a guest on a cluster
 # that already owns cert-manager, External Secrets, ExternalDNS and CNPG.
-PROFILES="values-vanilla.yaml values-vanilla.yaml+values-eks.yaml values-vanilla.yaml+values-guest.yaml"
+PROFILES="values-baseline.yaml values-baseline.yaml+values-eks.yaml values-baseline.yaml+values-guest.yaml"
 CAPS="monitoring.coreos.com/v1"
 
 # gibson-crds and gibson-velero are SEPARATE releases, not umbrella

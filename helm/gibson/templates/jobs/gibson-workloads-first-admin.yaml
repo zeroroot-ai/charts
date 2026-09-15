@@ -2,7 +2,7 @@
 first-admin — create the owner of the seeded first tenant on a self-hosted
 install (deploy#1631, gibson#1496).
 
-A vanilla install has no self-serve signup, so nothing creates the initial
+A baseline install has no self-serve signup, so nothing creates the initial
 principal. Without this the platform comes up perfectly and NOBODY CAN LOG IN.
 
 The tenant itself is seeded WITHOUT this Job: the tenant-operator enqueues it
@@ -22,7 +22,7 @@ becomes an ArgoCD Pre/PostSync hook and can deadlock the umbrella sync
 home for bring-up hook Jobs (same as signup-bot-pat-minter, deploy#788), so the
 Job renders here and reads the gibson-workloads value subtree explicitly.
 
-first-admin is off unless global.firstTenant.enabled (vanilla only); SaaS uses
+first-admin is off unless global.firstTenant.enabled (baseline only); SaaS uses
 self-serve signup and never renders this.
 */ -}}
 {{- $wl := index .Values "gibson-workloads" -}}
@@ -261,7 +261,7 @@ spec:
                    goes to the in-cluster Envoy listener; the first-admin Job was left
                    on the external issuer host, which the edge does not serve
                    in-cluster, so discovery timed out. Forward the same in-cluster URL
-                   when set; empty (non-vanilla) keeps the issuer-host fallback. */}}
+                   when set; empty (non-baseline) keeps the issuer-host fallback. */}}
             {{- with ((($wl.idp).zitadel).discoveryURL) }}
             - name: GIBSON_IDP_ADMIN_DISCOVERY_URL
               value: {{ . | quote }}

@@ -23,7 +23,7 @@ set -euo pipefail
 CHART_DIR="${CHART_DIR:-helm/gibson}"
 RENDER="$(mktemp)"
 trap 'rm -f "$RENDER"' EXIT
-helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-vanilla.yaml" --namespace gibson > "$RENDER"
+helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" --namespace gibson > "$RENDER"
 
 python3 - "$RENDER" <<'PY'
 import sys, yaml, copy
@@ -56,7 +56,7 @@ def check(docs):
 docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
 pods = list(pod_templates(docs))
 if not pods:
-    sys.exit("the vanilla render carries no pod templates; an empty set must never pass")
+    sys.exit("the baseline render carries no pod templates; an empty set must never pass")
 
 # Self-test: drop one annotation from a copy of the render and expect a finding.
 mutated = copy.deepcopy(docs)

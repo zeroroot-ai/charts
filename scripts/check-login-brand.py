@@ -55,7 +55,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 BRANDING = ROOT / "helm/gibson/files/branding"
-GOLDEN = ROOT / "helm/testdata/golden/values-vanilla.bare.yaml"
+GOLDEN = ROOT / "helm/testdata/golden/values-baseline.bare.yaml"
 JOB_NAME = "zitadel-login-branding"
 
 # @zeroroot-ai/brand, the one light brand (ADR-0064). Kept here so a policy

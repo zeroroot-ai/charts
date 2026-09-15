@@ -6,23 +6,23 @@ and the profiles that shape it for your cluster.
 ```sh
 helm install gibson oci://ghcr.io/zeroroot-ai/charts/gibson \
   --version <version> \
-  -f values-vanilla.yaml
+  -f values-baseline.yaml
 ```
 
 ## Profiles
 
 | Profile | For |
 |---|---|
-| `values-vanilla.yaml` | a Kubernetes cluster with a default StorageClass and nothing else assumed. **This is the supported self-hosted target.** kind is one. |
-| `values-eks.yaml`, `values-gke.yaml`, `values-aks.yaml` | layered on vanilla, carrying only that provider's deltas |
-| `values-guest.yaml` | layered on vanilla, for a cluster that already owns cert-manager, External Secrets, ExternalDNS and CloudNativePG |
+| `values-baseline.yaml` | a Kubernetes cluster with a default StorageClass and nothing else assumed. **This is the supported self-hosted target.** kind is one. |
+| `values-eks.yaml`, `values-gke.yaml`, `values-aks.yaml` | layered on baseline, carrying only that provider's deltas |
+| `values-guest.yaml` | layered on baseline, for a cluster that already owns cert-manager, External Secrets, ExternalDNS and CloudNativePG |
 
 ## The images are private
 
 The chart is Apache-2.0. The images it references are not, and they are not
 public. An install needs a registry credential, supplied as a member of the
 bringup keyring before the chart installs. There is exactly one credential
-path and the chart documents it in `values-vanilla.yaml`.
+path and the chart documents it in `values-baseline.yaml`.
 
 `global.registry` repoints every first-party image at your own registry in one
 value. An image whose *path* also changes is repointed by its own `repository`
@@ -32,8 +32,8 @@ key, which still wins.
 
 ```sh
 make check          # golden snapshots + attribution + cloud-free. No cluster.
-make vanilla-up     # install onto the current kube context
-make vanilla-verify # prove it came up
+make baseline-up     # install onto the current kube context
+make baseline-verify # prove it came up
 ```
 
 `make golden` renders every profile twice — bare, and with the Prometheus

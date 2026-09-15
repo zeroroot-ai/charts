@@ -2,10 +2,10 @@
 # keyring-to-cluster.sh — write the bringup keyring into the cluster (ADR-0015).
 #
 # The ONE producer of the in-cluster keyring Secrets. `make recreate` owns
-# this step (deploy#1737); scripts/vanilla-up.sh calls the same script for an
+# this step (deploy#1737); scripts/baseline-up.sh calls the same script for an
 # install on a cluster the operator brought. The interim producers this
 # replaces are deleted: kind/gibson/keyring.tf and the inline server-side
-# apply blocks vanilla-up.sh carried (deploy#1730, deploy#1731, deploy#1732,
+# apply blocks baseline-up.sh carried (deploy#1730, deploy#1731, deploy#1732,
 # deploy#1734).
 #
 # What it writes, from the keyring file substrate.env names:
@@ -111,7 +111,7 @@ GHCR_PULL_TOKEN_VALUE="$(keyring_get GHCR_PULL_TOKEN)"
 if [ -n "$GHCR_PULL_TOKEN_VALUE" ]; then
   log "GHCR pull token -> Secret ${NS}/bringup-keyring key ghcr-pull-token (sha256:$(printf '%s' "$GHCR_PULL_TOKEN_VALUE" | sha256sum | cut -c1-16))"
 else
-  log "keyring member GHCR_PULL_TOKEN is empty; first-party images will not pull until scripts/vanilla-set-secret.sh ghcr-pull-secret pat <token>"
+  log "keyring member GHCR_PULL_TOKEN is empty; first-party images will not pull until scripts/baseline-set-secret.sh ghcr-pull-secret pat <token>"
 fi
 kubectl apply --server-side --field-manager=bringup-seed-inputs -f - >/dev/null <<YAML
 apiVersion: v1

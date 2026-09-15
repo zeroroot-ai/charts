@@ -1784,6 +1784,136 @@ spec:
       app.kubernetes.io/instance: gibson
       app.kubernetes.io/component: envoy
 ---
+# Source: gibson/charts/cert-manager/templates/cainjector-serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+automountServiceAccountToken: true
+metadata:
+  name: cert-manager-cainjector
+  namespace: gibson
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+  labels:
+    app: cainjector
+    app.kubernetes.io/name: cainjector
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: "cainjector"
+    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+---
+# Source: gibson/charts/cert-manager/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+automountServiceAccountToken: true
+metadata:
+  name: cert-manager
+  namespace: gibson
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: "controller"
+    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+---
+# Source: gibson/charts/cert-manager/templates/webhook-serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+automountServiceAccountToken: true
+metadata:
+  name: cert-manager-webhook
+  namespace: gibson
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+  labels:
+    app: webhook
+    app.kubernetes.io/name: webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: "webhook"
+    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+---
+# Source: gibson/charts/cnpg/templates/rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gibson-cloudnative-pg
+  namespace: gibson
+  labels:
+    helm.sh/chart: cnpg-0.29.0
+    app.kubernetes.io/name: cloudnative-pg
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "1.30.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+---
+# Source: gibson/charts/external-dns/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: external-dns
+  namespace: gibson
+  labels:
+    helm.sh/chart: external-dns-1.21.1
+    app.kubernetes.io/name: external-dns
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.21.0"
+    app.kubernetes.io/managed-by: Helm
+automountServiceAccountToken: true
+---
+# Source: gibson/charts/external-secrets/templates/cert-controller-serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: external-secrets-cert-controller
+  namespace: gibson
+  labels:
+    
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets-cert-controller
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v2.10.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+---
+# Source: gibson/charts/external-secrets/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: external-secrets
+  namespace: gibson
+  labels:
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v2.10.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+---
+# Source: gibson/charts/external-secrets/templates/webhook-serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: external-secrets-webhook
+  namespace: gibson
+  labels:
+    
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets-webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v2.10.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/service-account.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -2169,6 +2299,23 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-6"
 ---
+# Source: gibson/charts/external-secrets/templates/webhook-secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: external-secrets-webhook
+  namespace: gibson
+  labels:
+    
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets-webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v2.10.0"
+    app.kubernetes.io/managed-by: Helm
+    external-secrets.io/component: webhook
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+---
 # Source: gibson/charts/openfga/templates/secrets.yaml
 apiVersion: v1
 kind: Secret
@@ -2184,6 +2331,543 @@ metadata:
     app.kubernetes.io/part-of: openfga
 data:
   uri: "cG9zdGdyZXM6Ly9wbGFjZWhvbGRlckBwbGF0Zm9ybS1wb3N0Z3Jlcy1ydy5naWJzb24uc3ZjLmNsdXN0ZXIubG9jYWw6NTQzMi9vcGVuZmdhP3NzbG1vZGU9cmVxdWlyZQ=="
+---
+# Source: gibson/charts/cnpg/templates/config.yaml
+#
+# Copyright © contributors to CloudNativePG, established as
+# CloudNativePG a Series of LF Projects, LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cnpg-controller-manager-config
+  namespace: gibson
+  labels:
+    helm.sh/chart: cnpg-0.29.0
+    app.kubernetes.io/name: cloudnative-pg
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "1.30.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+data:
+  {}
+---
+# Source: gibson/charts/cnpg/templates/monitoring-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cnpg-default-monitoring
+  namespace: gibson
+  labels:
+    helm.sh/chart: cnpg-0.29.0
+    app.kubernetes.io/name: cloudnative-pg
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "1.30.0"
+    app.kubernetes.io/managed-by: Helm
+    cnpg.io/reload: ""
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+data:
+  queries:
+    |
+      backends:
+        query: |
+          SELECT sa.datname
+            , sa.usename
+            , sa.application_name
+            , states.state
+            , COALESCE(sa.count, 0) AS total
+            , COALESCE(sa.max_tx_secs, 0) AS max_tx_duration_seconds
+          FROM ( VALUES ('active')
+            , ('idle')
+            , ('idle in transaction')
+            , ('idle in transaction (aborted)')
+            , ('fastpath function call')
+            , ('disabled')
+            ) AS states(state)
+          LEFT JOIN (
+            SELECT datname
+              , state
+              , usename
+              , COALESCE(application_name, '') AS application_name
+              , pg_catalog.count(*)
+              , COALESCE(EXTRACT (EPOCH FROM (pg_catalog.max(pg_catalog.now() OPERATOR(pg_catalog.-) xact_start))), 0) AS max_tx_secs
+            FROM pg_catalog.pg_stat_activity
+            GROUP BY datname, state, usename, application_name
+          ) sa ON states.state OPERATOR(pg_catalog.=) sa.state
+          WHERE sa.usename IS NOT NULL
+        metrics:
+          - datname:
+              usage: "LABEL"
+              description: "Name of the database"
+          - usename:
+              usage: "LABEL"
+              description: "Name of the user"
+          - application_name:
+              usage: "LABEL"
+              description: "Name of the application"
+          - state:
+              usage: "LABEL"
+              description: "State of the backend"
+          - total:
+              usage: "GAUGE"
+              description: "Number of backends"
+          - max_tx_duration_seconds:
+              usage: "GAUGE"
+              description: "Maximum duration of a transaction in seconds"
+    
+      backends_waiting:
+        query: |
+          SELECT pg_catalog.count(*) AS total
+          FROM pg_catalog.pg_locks blocked_locks
+          JOIN pg_catalog.pg_locks blocking_locks
+            ON blocking_locks.locktype OPERATOR(pg_catalog.=) blocked_locks.locktype
+            AND blocking_locks.database IS NOT DISTINCT FROM blocked_locks.database
+            AND blocking_locks.relation IS NOT DISTINCT FROM blocked_locks.relation
+            AND blocking_locks.page IS NOT DISTINCT FROM blocked_locks.page
+            AND blocking_locks.tuple IS NOT DISTINCT FROM blocked_locks.tuple
+            AND blocking_locks.virtualxid IS NOT DISTINCT FROM blocked_locks.virtualxid
+            AND blocking_locks.transactionid IS NOT DISTINCT FROM blocked_locks.transactionid
+            AND blocking_locks.classid IS NOT DISTINCT FROM blocked_locks.classid
+            AND blocking_locks.objid IS NOT DISTINCT FROM blocked_locks.objid
+            AND blocking_locks.objsubid IS NOT DISTINCT FROM blocked_locks.objsubid
+            AND blocking_locks.pid OPERATOR(pg_catalog.<>) blocked_locks.pid
+          JOIN pg_catalog.pg_stat_activity blocking_activity ON blocking_activity.pid OPERATOR(pg_catalog.=) blocking_locks.pid
+          WHERE NOT blocked_locks.granted
+        metrics:
+          - total:
+              usage: "GAUGE"
+              description: "Total number of backends that are currently waiting on other queries"
+    
+      pg_database:
+        query: |
+          SELECT datname
+            , pg_catalog.pg_database_size(datname) AS size_bytes
+            , pg_catalog.age(datfrozenxid) AS xid_age
+            , pg_catalog.mxid_age(datminmxid) AS mxid_age
+          FROM pg_catalog.pg_database
+          WHERE datallowconn
+        metrics:
+          - datname:
+              usage: "LABEL"
+              description: "Name of the database"
+          - size_bytes:
+              usage: "GAUGE"
+              description: "Disk space used by the database"
+          - xid_age:
+              usage: "GAUGE"
+              description: "Number of transactions from the frozen XID to the current one"
+          - mxid_age:
+              usage: "GAUGE"
+              description: "Number of multiple transactions (Multixact) from the frozen XID to the current one"
+    
+      pg_postmaster:
+        query: |
+          SELECT EXTRACT(EPOCH FROM pg_postmaster_start_time) AS start_time
+          FROM pg_catalog.pg_postmaster_start_time()
+        metrics:
+          - start_time:
+              usage: "GAUGE"
+              description: "Time at which postgres started (based on epoch)"
+    
+      pg_replication:
+        query: |
+          SELECT CASE WHEN (
+              NOT pg_catalog.pg_is_in_recovery()
+              OR pg_catalog.pg_last_wal_receive_lsn() OPERATOR(pg_catalog.=) pg_catalog.pg_last_wal_replay_lsn())
+            THEN 0
+            ELSE GREATEST (0,
+              EXTRACT(EPOCH FROM (pg_catalog.now() OPERATOR(pg_catalog.-) pg_catalog.pg_last_xact_replay_timestamp())))
+            END AS lag,
+            pg_catalog.pg_is_in_recovery() AS in_recovery,
+            EXISTS (TABLE pg_catalog.pg_stat_wal_receiver) AS is_wal_receiver_up,
+            (SELECT pg_catalog.count(*) FROM pg_catalog.pg_stat_replication) AS streaming_replicas
+        metrics:
+          - lag:
+              usage: "GAUGE"
+              description: "Replication lag behind primary in seconds"
+          - in_recovery:
+              usage: "GAUGE"
+              description: "Whether the instance is in recovery"
+          - is_wal_receiver_up:
+              usage: "GAUGE"
+              description: "Whether the instance wal_receiver is up"
+          - streaming_replicas:
+              usage: "GAUGE"
+              description: "Number of streaming replicas connected to the instance"
+    
+      pg_replication_slots:
+        query: |
+          SELECT slot_name,
+            slot_type,
+            database,
+            active,
+            (CASE pg_catalog.pg_is_in_recovery()
+              WHEN TRUE THEN pg_catalog.pg_wal_lsn_diff(pg_catalog.pg_last_wal_receive_lsn(), restart_lsn)
+              ELSE pg_catalog.pg_wal_lsn_diff(pg_catalog.pg_current_wal_lsn(), restart_lsn)
+            END) as pg_wal_lsn_diff
+          FROM pg_catalog.pg_replication_slots
+          WHERE NOT temporary
+        metrics:
+          - slot_name:
+              usage: "LABEL"
+              description: "Name of the replication slot"
+          - slot_type:
+              usage: "LABEL"
+              description: "Type of the replication slot"
+          - database:
+              usage: "LABEL"
+              description: "Name of the database"
+          - active:
+              usage: "GAUGE"
+              description: "Flag indicating whether the slot is active"
+          - pg_wal_lsn_diff:
+              usage: "GAUGE"
+              description: "Replication lag in bytes"
+    
+      pg_stat_archiver:
+        query: |
+          SELECT archived_count
+            , failed_count
+            , COALESCE(EXTRACT(EPOCH FROM (pg_catalog.now() OPERATOR(pg_catalog.-) last_archived_time)), -1) AS seconds_since_last_archival
+            , COALESCE(EXTRACT(EPOCH FROM (pg_catalog.now() OPERATOR(pg_catalog.-) last_failed_time)), -1) AS seconds_since_last_failure
+            , COALESCE(EXTRACT(EPOCH FROM last_archived_time), -1) AS last_archived_time
+            , COALESCE(EXTRACT(EPOCH FROM last_failed_time), -1) AS last_failed_time
+            , COALESCE(CAST(CAST('x' OPERATOR(pg_catalog.||) pg_catalog.right(pg_catalog.split_part(last_archived_wal, '.', 1), 16) AS pg_catalog.bit(64)) AS pg_catalog.int8), -1) AS last_archived_wal_start_lsn
+            , COALESCE(CAST(CAST('x' OPERATOR(pg_catalog.||) pg_catalog.right(pg_catalog.split_part(last_failed_wal, '.', 1), 16) AS pg_catalog.bit(64)) AS pg_catalog.int8), -1) AS last_failed_wal_start_lsn
+            , EXTRACT(EPOCH FROM stats_reset) AS stats_reset_time
+          FROM pg_catalog.pg_stat_archiver
+        predicate_query: |
+          SELECT NOT pg_catalog.pg_is_in_recovery()
+            OR pg_catalog.current_setting('archive_mode') OPERATOR(pg_catalog.=) 'always'
+        metrics:
+          - archived_count:
+              usage: "COUNTER"
+              description: "Number of WAL files that have been successfully archived"
+          - failed_count:
+              usage: "COUNTER"
+              description: "Number of failed attempts for archiving WAL files"
+          - seconds_since_last_archival:
+              usage: "GAUGE"
+              description: "Seconds since the last successful archival operation"
+          - seconds_since_last_failure:
+              usage: "GAUGE"
+              description: "Seconds since the last failed archival operation"
+          - last_archived_time:
+              usage: "GAUGE"
+              description: "Epoch of the last time WAL archiving succeeded"
+          - last_failed_time:
+              usage: "GAUGE"
+              description: "Epoch of the last time WAL archiving failed"
+          - last_archived_wal_start_lsn:
+              usage: "GAUGE"
+              description: "Archived WAL start LSN"
+          - last_failed_wal_start_lsn:
+              usage: "GAUGE"
+              description: "Last failed WAL LSN"
+          - stats_reset_time:
+              usage: "GAUGE"
+              description: "Time at which these statistics were last reset"
+    
+      pg_stat_bgwriter:
+        runonserver: "<17.0.0"
+        query: |
+          SELECT checkpoints_timed
+            , checkpoints_req
+            , checkpoint_write_time
+            , checkpoint_sync_time
+            , buffers_checkpoint
+            , buffers_clean
+            , maxwritten_clean
+            , buffers_backend
+            , buffers_backend_fsync
+            , buffers_alloc
+          FROM pg_catalog.pg_stat_bgwriter
+        metrics:
+          - checkpoints_timed:
+              usage: "COUNTER"
+              description: "Number of scheduled checkpoints that have been performed"
+          - checkpoints_req:
+              usage: "COUNTER"
+              description: "Number of requested checkpoints that have been performed"
+          - checkpoint_write_time:
+              usage: "COUNTER"
+              description: "Total amount of time that has been spent in the portion of checkpoint processing where files are written to disk, in milliseconds"
+          - checkpoint_sync_time:
+              usage: "COUNTER"
+              description: "Total amount of time that has been spent in the portion of checkpoint processing where files are synchronized to disk, in milliseconds"
+          - buffers_checkpoint:
+              usage: "COUNTER"
+              description: "Number of buffers written during checkpoints"
+          - buffers_clean:
+              usage: "COUNTER"
+              description: "Number of buffers written by the background writer"
+          - maxwritten_clean:
+              usage: "COUNTER"
+              description: "Number of times the background writer stopped a cleaning scan because it had written too many buffers"
+          - buffers_backend:
+              usage: "COUNTER"
+              description: "Number of buffers written directly by a backend"
+          - buffers_backend_fsync:
+              usage: "COUNTER"
+              description: "Number of times a backend had to execute its own fsync call (normally the background writer handles those even when the backend does its own write)"
+          - buffers_alloc:
+              usage: "COUNTER"
+              description: "Number of buffers allocated"
+    
+      pg_stat_bgwriter_17:
+        runonserver: ">=17.0.0"
+        name: pg_stat_bgwriter
+        query: |
+          SELECT buffers_clean
+            , maxwritten_clean
+            , buffers_alloc
+            , EXTRACT(EPOCH FROM stats_reset) AS stats_reset_time
+          FROM pg_catalog.pg_stat_bgwriter
+        metrics:
+          - buffers_clean:
+              usage: "COUNTER"
+              description: "Number of buffers written by the background writer"
+          - maxwritten_clean:
+              usage: "COUNTER"
+              description: "Number of times the background writer stopped a cleaning scan because it had written too many buffers"
+          - buffers_alloc:
+              usage: "COUNTER"
+              description: "Number of buffers allocated"
+          - stats_reset_time:
+              usage: "GAUGE"
+              description: "Time at which these statistics were last reset"
+    
+      pg_stat_checkpointer:
+        runonserver: ">=17.0.0"
+        query: |
+          SELECT num_timed AS checkpoints_timed
+            , num_requested AS checkpoints_req
+            , restartpoints_timed
+            , restartpoints_req
+            , restartpoints_done
+            , write_time
+            , sync_time
+            , buffers_written
+            , EXTRACT(EPOCH FROM stats_reset) AS stats_reset_time
+          FROM pg_catalog.pg_stat_checkpointer
+        metrics:
+          - checkpoints_timed:
+              usage: "COUNTER"
+              description: "Number of scheduled checkpoints that have been performed"
+          - checkpoints_req:
+              usage: "COUNTER"
+              description: "Number of requested checkpoints that have been performed"
+          - restartpoints_timed:
+              usage: "COUNTER"
+              description: "Number of scheduled restartpoints due to timeout or after a failed attempt to perform it"
+          - restartpoints_req:
+              usage: "COUNTER"
+              description: "Number of requested restartpoints that have been performed"
+          - restartpoints_done:
+              usage: "COUNTER"
+              description: "Number of restartpoints that have been performed"
+          - write_time:
+              usage: "COUNTER"
+              description: "Total amount of time that has been spent in the portion of processing checkpoints and restartpoints where files are written to disk, in milliseconds"
+          - sync_time:
+              usage: "COUNTER"
+              description: "Total amount of time that has been spent in the portion of processing checkpoints and restartpoints where files are synchronized to disk, in milliseconds"
+          - buffers_written:
+              usage: "COUNTER"
+              description: "Number of buffers written during checkpoints and restartpoints"
+          - stats_reset_time:
+              usage: "GAUGE"
+              description: "Time at which these statistics were last reset"
+    
+      pg_stat_database:
+        query: |
+          SELECT datname
+            , xact_commit
+            , xact_rollback
+            , blks_read
+            , blks_hit
+            , tup_returned
+            , tup_fetched
+            , tup_inserted
+            , tup_updated
+            , tup_deleted
+            , conflicts
+            , temp_files
+            , temp_bytes
+            , deadlocks
+            , blk_read_time
+            , blk_write_time
+          FROM pg_catalog.pg_stat_database
+        metrics:
+          - datname:
+              usage: "LABEL"
+              description: "Name of this database"
+          - xact_commit:
+              usage: "COUNTER"
+              description: "Number of transactions in this database that have been committed"
+          - xact_rollback:
+              usage: "COUNTER"
+              description: "Number of transactions in this database that have been rolled back"
+          - blks_read:
+              usage: "COUNTER"
+              description: "Number of disk blocks read in this database"
+          - blks_hit:
+              usage: "COUNTER"
+              description: "Number of times disk blocks were found already in the buffer cache, so that a read was not necessary (this only includes hits in the PostgreSQL buffer cache, not the operating system's file system cache)"
+          - tup_returned:
+              usage: "COUNTER"
+              description: "Number of rows returned by queries in this database"
+          - tup_fetched:
+              usage: "COUNTER"
+              description: "Number of rows fetched by queries in this database"
+          - tup_inserted:
+              usage: "COUNTER"
+              description: "Number of rows inserted by queries in this database"
+          - tup_updated:
+              usage: "COUNTER"
+              description: "Number of rows updated by queries in this database"
+          - tup_deleted:
+              usage: "COUNTER"
+              description: "Number of rows deleted by queries in this database"
+          - conflicts:
+              usage: "COUNTER"
+              description: "Number of queries canceled due to conflicts with recovery in this database"
+          - temp_files:
+              usage: "COUNTER"
+              description: "Number of temporary files created by queries in this database"
+          - temp_bytes:
+              usage: "COUNTER"
+              description: "Total amount of data written to temporary files by queries in this database"
+          - deadlocks:
+              usage: "COUNTER"
+              description: "Number of deadlocks detected in this database"
+          - blk_read_time:
+              usage: "COUNTER"
+              description: "Time spent reading data file blocks by backends in this database, in milliseconds"
+          - blk_write_time:
+              usage: "COUNTER"
+              description: "Time spent writing data file blocks by backends in this database, in milliseconds"
+    
+      pg_stat_replication:
+        primary: true
+        query: |
+          SELECT usename
+            , COALESCE(application_name, '') AS application_name
+            , COALESCE(client_addr::text, '') AS client_addr
+            , COALESCE(client_port::text, '') AS client_port
+            , EXTRACT(EPOCH FROM backend_start) AS backend_start
+            , COALESCE(pg_catalog.age(backend_xmin), 0) AS backend_xmin_age
+            , pg_catalog.pg_wal_lsn_diff(pg_catalog.pg_current_wal_lsn(), sent_lsn) AS sent_diff_bytes
+            , pg_catalog.pg_wal_lsn_diff(pg_catalog.pg_current_wal_lsn(), write_lsn) AS write_diff_bytes
+            , pg_catalog.pg_wal_lsn_diff(pg_catalog.pg_current_wal_lsn(), flush_lsn) AS flush_diff_bytes
+            , COALESCE(pg_catalog.pg_wal_lsn_diff(pg_catalog.pg_current_wal_lsn(), replay_lsn),0) AS replay_diff_bytes
+            , COALESCE((EXTRACT(EPOCH FROM write_lag)),0)::float AS write_lag_seconds
+            , COALESCE((EXTRACT(EPOCH FROM flush_lag)),0)::float AS flush_lag_seconds
+            , COALESCE((EXTRACT(EPOCH FROM replay_lag)),0)::float AS replay_lag_seconds
+          FROM pg_catalog.pg_stat_replication
+        metrics:
+          - usename:
+              usage: "LABEL"
+              description: "Name of the replication user"
+          - application_name:
+              usage: "LABEL"
+              description: "Name of the application"
+          - client_addr:
+              usage: "LABEL"
+              description: "Client IP address"
+          - client_port:
+              usage: "LABEL"
+              description: "Client TCP port"
+          - backend_start:
+              usage: "COUNTER"
+              description: "Time when this process was started"
+          - backend_xmin_age:
+              usage: "COUNTER"
+              description: "The age of this standby's xmin horizon"
+          - sent_diff_bytes:
+              usage: "GAUGE"
+              description: "Difference in bytes from the last write-ahead log location sent on this connection"
+          - write_diff_bytes:
+              usage: "GAUGE"
+              description: "Difference in bytes from the last write-ahead log location written to disk by this standby server"
+          - flush_diff_bytes:
+              usage: "GAUGE"
+              description: "Difference in bytes from the last write-ahead log location flushed to disk by this standby server"
+          - replay_diff_bytes:
+              usage: "GAUGE"
+              description: "Difference in bytes from the last write-ahead log location replayed into the database on this standby server"
+          - write_lag_seconds:
+              usage: "GAUGE"
+              description: "Time elapsed between flushing recent WAL locally and receiving notification that this standby server has written it"
+          - flush_lag_seconds:
+              usage: "GAUGE"
+              description: "Time elapsed between flushing recent WAL locally and receiving notification that this standby server has written and flushed it"
+          - replay_lag_seconds:
+              usage: "GAUGE"
+              description: "Time elapsed between flushing recent WAL locally and receiving notification that this standby server has written, flushed and applied it"
+    
+      pg_settings:
+        query: |
+          SELECT name,
+          CASE setting WHEN 'on' THEN '1' WHEN 'off' THEN '0' ELSE setting END AS setting
+          FROM pg_catalog.pg_settings
+          WHERE vartype IN ('integer', 'real', 'bool')
+          ORDER BY 1
+        metrics:
+          - name:
+              usage: "LABEL"
+              description: "Name of the setting"
+          - setting:
+              usage: "GAUGE"
+              description: "Setting value"
+    
+      pg_extensions:
+        query: |
+          SELECT
+            pg_catalog.current_database() as datname,
+            name as extname,
+            default_version,
+            installed_version,
+            CASE
+              WHEN default_version OPERATOR(pg_catalog.=) installed_version THEN 0
+              ELSE 1
+          END AS update_available
+          FROM pg_catalog.pg_available_extensions
+          WHERE installed_version IS NOT NULL
+        metrics:
+          - datname:
+              usage: "LABEL"
+              description: "Name of the database"
+          - extname:
+              usage: "LABEL"
+              description: "Extension name"
+          - default_version:
+              usage: "LABEL"
+              description: "Default version"
+          - installed_version:
+              usage: "LABEL"
+              description: "Installed version"
+          - update_available:
+              usage: "GAUGE"
+              description: "An update is available"
+        target_databases:
+          - '*'
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/plans-configmap.yaml
 # gibson-tenant-operator-plans — canonical plan registry mounted into the
@@ -2420,262 +3104,6 @@ data:
 
   # Next.js Configuration
   NEXT_TELEMETRY_DISABLED: "1"
----
-# Source: gibson/charts/gibson-workloads/templates/dashboards/configmap-auth-dashboard.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: gibson-grafana-auth-dashboard
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.132.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: grafana
-    grafana_dashboard: "1"
-  annotations:
-    k8s-sidecar-target-directory: "/var/lib/grafana/dashboards/gibson"
-data:
-  auth.json: |-
----
-# Source: gibson/charts/gibson-workloads/templates/dashboards/configmap-sandbox-health-dashboard.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: gibson-grafana-sandbox-health-dashboard
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.132.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: grafana
-    grafana_dashboard: "1"
-  annotations:
-    k8s-sidecar-target-directory: "/var/lib/grafana/dashboards/gibson"
-    gibson.zeroroot.ai/spec: setec-sandbox-prod-default
-data:
-  sandbox-health.json: |-
----
-# Source: gibson/charts/gibson-workloads/templates/dashboards/configmap-tenant-neo4j-dashboard.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: gibson-grafana-tenant-neo4j-dashboard
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.132.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: grafana
-    grafana_dashboard: "1"
-  annotations:
-    k8s-sidecar-target-directory: "/var/lib/grafana/dashboards/gibson"
-data:
-  tenant-neo4j.json: |-
-    {
-      "annotations": {
-        "list": [
-          {
-            "builtIn": 1,
-            "datasource": { "type": "grafana", "uid": "-- Grafana --" },
-            "enable": true,
-            "hide": true,
-            "iconColor": "rgba(0, 211, 255, 1)",
-            "name": "Annotations & Alerts",
-            "type": "dashboard"
-          }
-        ]
-      },
-      "description": "Per-tenant Neo4j observability: heap, page-cache hit rate, query throughput, and slow-query count. Filter by tenant via the $tenant_id template variable. Spec: per-tenant-data-plane-completion Task 31 / Req 10.3.",
-      "editable": true,
-      "fiscalYearStartMonth": 0,
-      "graphTooltip": 0,
-      "id": null,
-      "links": [],
-      "liveNow": false,
-      "panels": [
-        {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "description": "JVM heap used per tenant. Saturation here triggers GC pauses and tenant-operator should re-tier.",
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "palette-classic" },
-              "custom": {
-                "drawStyle": "line",
-                "lineWidth": 1,
-                "fillOpacity": 10,
-                "showPoints": "never"
-              },
-              "unit": "bytes"
-            },
-            "overrides": []
-          },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
-          "id": 1,
-          "options": {
-            "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-            "tooltip": { "mode": "multi", "sort": "desc" }
-          },
-          "targets": [
-            {
-              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-              "editorMode": "code",
-              "expr": "neo4j_dbms_vm_memory_pool_used{tenant_id=~\"$tenant_id\"}",
-              "legendFormat": "{{tenant_id}} / {{pool}}",
-              "refId": "A"
-            }
-          ],
-          "title": "Heap usage (per tenant)",
-          "type": "timeseries"
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "description": "Page-cache hit ratio. Below 0.95 indicates undersized cache or hot-key churn.",
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "thresholds" },
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  { "color": "red", "value": null },
-                  { "color": "orange", "value": 0.85 },
-                  { "color": "green", "value": 0.95 }
-                ]
-              },
-              "unit": "percentunit",
-              "min": 0,
-              "max": 1
-            },
-            "overrides": []
-          },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
-          "id": 2,
-          "options": {
-            "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-            "tooltip": { "mode": "multi", "sort": "desc" }
-          },
-          "targets": [
-            {
-              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-              "editorMode": "code",
-              "expr": "rate(neo4j_database_page_cache_hits_total{tenant_id=~\"$tenant_id\"}[5m]) / (rate(neo4j_database_page_cache_hits_total{tenant_id=~\"$tenant_id\"}[5m]) + rate(neo4j_database_page_cache_faults_total{tenant_id=~\"$tenant_id\"}[5m]))",
-              "legendFormat": "{{tenant_id}}",
-              "refId": "A"
-            }
-          ],
-          "title": "Page cache hit rate",
-          "type": "timeseries"
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "description": "Cypher query throughput per tenant (queries/sec). Sustained traffic per tenant for capacity planning.",
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "palette-classic" },
-              "custom": {
-                "drawStyle": "line",
-                "lineWidth": 1,
-                "fillOpacity": 10,
-                "showPoints": "never"
-              },
-              "unit": "qps"
-            },
-            "overrides": []
-          },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
-          "id": 3,
-          "options": {
-            "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-            "tooltip": { "mode": "multi", "sort": "desc" }
-          },
-          "targets": [
-            {
-              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-              "editorMode": "code",
-              "expr": "rate(neo4j_database_transaction_committed_total{tenant_id=~\"$tenant_id\"}[5m])",
-              "legendFormat": "{{tenant_id}}",
-              "refId": "A"
-            }
-          ],
-          "title": "Query throughput (committed tx/sec)",
-          "type": "timeseries"
-        },
-        {
-          "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-          "description": "Long-running query count per tenant (>1s). Spike indicates cypher regression or missing index.",
-          "fieldConfig": {
-            "defaults": {
-              "color": { "mode": "palette-classic" },
-              "custom": {
-                "drawStyle": "bars",
-                "lineWidth": 1,
-                "fillOpacity": 60,
-                "showPoints": "never"
-              },
-              "unit": "short"
-            },
-            "overrides": []
-          },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
-          "id": 4,
-          "options": {
-            "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-            "tooltip": { "mode": "multi", "sort": "desc" }
-          },
-          "targets": [
-            {
-              "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-              "editorMode": "code",
-              "expr": "increase(neo4j_database_query_execution_failure_total{tenant_id=~\"$tenant_id\"}[5m])",
-              "legendFormat": "{{tenant_id}}",
-              "refId": "A"
-            }
-          ],
-          "title": "Slow / failed queries (5m)",
-          "type": "timeseries"
-        }
-      ],
-      "refresh": "30s",
-      "schemaVersion": 39,
-      "tags": ["gibson", "neo4j", "tenant"],
-      "templating": {
-        "list": [
-          {
-            "current": { "selected": false, "text": "All", "value": ".*" },
-            "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-            "definition": "label_values(neo4j_dbms_vm_memory_pool_used, tenant_id)",
-            "hide": 0,
-            "includeAll": true,
-            "label": "Tenant",
-            "multi": true,
-            "name": "tenant_id",
-            "options": [],
-            "query": {
-              "query": "label_values(neo4j_dbms_vm_memory_pool_used, tenant_id)",
-              "refId": "StandardVariableQuery"
-            },
-            "refresh": 2,
-            "regex": "",
-            "skipUrlSync": false,
-            "sort": 1,
-            "type": "query"
-          }
-        ]
-      },
-      "time": { "from": "now-1h", "to": "now" },
-      "timepicker": {},
-      "timezone": "",
-      "title": "Gibson — Per-Tenant Neo4j",
-      "uid": "gibson-tenant-neo4j",
-      "version": 1,
-      "weekStart": ""
-    }
 ---
 # Source: gibson/charts/gibson-workloads/templates/databases/redis-stack.yaml
 apiVersion: v1
@@ -6192,6 +6620,355 @@ metadata:
 data:
   branding-hash: "09e3cd11328d6e21b3a358fd55cc1905171ca589ec2e3a9c3011aa5b2a33c843"
 ---
+# Source: gibson/charts/cnpg/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gibson-cloudnative-pg
+  labels:
+    helm.sh/chart: cnpg-0.29.0
+    app.kubernetes.io/name: cloudnative-pg
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "1.30.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - mutatingwebhookconfigurations
+  - validatingwebhookconfigurations
+  verbs:
+  - get
+  - patch
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - clusterimagecatalogs
+  verbs:
+  - get
+  - list
+  - watch
+
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - secrets
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - configmaps/status
+  - secrets/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  - pods
+  - pods/exec
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/status
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - monitoring.coreos.com
+  resources:
+  - podmonitors
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - backups
+  - clusters
+  - databaseroles
+  - databases
+  - poolers
+  - publications
+  - scheduledbackups
+  - subscriptions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - failoverquorums
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - backups/status
+  - databases/status
+  - publications/status
+  - scheduledbackups/status
+  - subscriptions/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - imagecatalogs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - clusters/finalizers
+  - databaseroles/finalizers
+  - poolers/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - clusters/status
+  - databaseroles/status
+  - poolers/status
+  - failoverquorums/status
+  verbs:
+  - get
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  - roles
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - snapshot.storage.k8s.io
+  resources:
+  - volumesnapshots
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - watch
+---
+# Source: gibson/charts/cnpg/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gibson-cloudnative-pg-view
+  labels:
+    helm.sh/chart: cnpg-0.29.0
+    app.kubernetes.io/name: cloudnative-pg
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "1.30.0"
+    app.kubernetes.io/managed-by: Helm
+rules:
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - backups
+  - clusters
+  - clusters/status
+  - databaseroles
+  - databases
+  - failoverquorums
+  - poolers
+  - publications
+  - scheduledbackups
+  - imagecatalogs
+  - clusterimagecatalogs
+  - subscriptions
+  verbs:
+  - get
+  - list
+  - watch
+---
+# Source: gibson/charts/cnpg/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gibson-cloudnative-pg-edit
+  labels:
+    helm.sh/chart: cnpg-0.29.0
+    app.kubernetes.io/name: cloudnative-pg
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "1.30.0"
+    app.kubernetes.io/managed-by: Helm
+rules:
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - backups
+  - clusters
+  - clusters/status
+  - databaseroles
+  - databases
+  - failoverquorums
+  - poolers
+  - publications
+  - scheduledbackups
+  - imagecatalogs
+  - clusterimagecatalogs
+  - subscriptions
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - patch
+  - update
+---
+# Source: gibson/charts/external-dns/templates/clusterrole.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: external-dns
+  labels:
+    helm.sh/chart: external-dns-1.21.1
+    app.kubernetes.io/name: external-dns
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.21.0"
+    app.kubernetes.io/managed-by: Helm
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["list","watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get","watch","list"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get","watch","list"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get","watch","list"]
+  - apiGroups: ["extensions","networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get","watch","list"]
+---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/cluster-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -7001,6 +7778,1172 @@ rules:
       - get
       - list
 ---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-cainjector
+  labels:
+    app: cainjector
+    app.kubernetes.io/name: cainjector
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: cainjector
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ''
+  resources:
+  - events
+  verbs:
+  - get
+  - create
+  - update
+  - patch
+- apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - validatingwebhookconfigurations
+  - mutatingwebhookconfigurations
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+  - patch
+- apiGroups:
+  - apiregistration.k8s.io
+  resources:
+  - apiservices
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+  - patch
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+  - patch
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-cluster-view
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+    rbac.authorization.k8s.io/aggregate-to-cluster-reader: 'true'
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - clusterissuers
+  verbs:
+  - get
+  - list
+  - watch
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-controller-approve:cert-manager-io
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: cert-manager
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - signers
+  verbs:
+  - approve
+  resourceNames:
+  - issuers.cert-manager.io/*
+  - clusterissuers.cert-manager.io/*
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-controller-certificates
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  - certificates/status
+  - certificaterequests
+  - certificaterequests/status
+  verbs:
+  - update
+  - patch
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  - certificaterequests
+  - clusterissuers
+  - issuers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates/finalizers
+  - certificaterequests/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - acme.cert-manager.io
+  resources:
+  - orders
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - delete
+  - patch
+- apiGroups:
+  - ''
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-controller-certificatesigningrequests
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: cert-manager
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - certificates.k8s.io
+  resources:
+  - certificatesigningrequests
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+- apiGroups:
+  - certificates.k8s.io
+  resources:
+  - certificatesigningrequests/status
+  verbs:
+  - update
+  - patch
+- apiGroups:
+  - certificates.k8s.io
+  resources:
+  - signers
+  resourceNames:
+  - issuers.cert-manager.io/*
+  - clusterissuers.cert-manager.io/*
+  verbs:
+  - sign
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-controller-challenges
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - acme.cert-manager.io
+  resources:
+  - challenges
+  - challenges/status
+  verbs:
+  - update
+  - patch
+- apiGroups:
+  - acme.cert-manager.io
+  resources:
+  - challenges
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - issuers
+  - clusterissuers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ''
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ''
+  resources:
+  - pods
+  - services
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - delete
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - delete
+  - update
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - httproutes
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - delete
+  - update
+- apiGroups:
+  - route.openshift.io
+  resources:
+  - routes/custom-host
+  verbs:
+  - create
+- apiGroups:
+  - acme.cert-manager.io
+  resources:
+  - challenges/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-controller-clusterissuers
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - clusterissuers
+  - clusterissuers/status
+  verbs:
+  - update
+  - patch
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - clusterissuers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - delete
+- apiGroups:
+  - ''
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-controller-ingress-shim
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  - certificaterequests
+  verbs:
+  - create
+  - update
+  - delete
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  - certificaterequests
+  - issuers
+  - clusterissuers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gateways
+  - httproutes
+  - listenersets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gateways/finalizers
+  - httproutes/finalizers
+  - listenersets/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - ''
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-controller-issuers
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - issuers
+  - issuers/status
+  verbs:
+  - update
+  - patch
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - issuers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - delete
+- apiGroups:
+  - ''
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-controller-orders
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - acme.cert-manager.io
+  resources:
+  - orders
+  - orders/status
+  verbs:
+  - update
+  - patch
+- apiGroups:
+  - acme.cert-manager.io
+  resources:
+  - orders
+  - challenges
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - clusterissuers
+  - issuers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - acme.cert-manager.io
+  resources:
+  - challenges
+  verbs:
+  - create
+  - delete
+- apiGroups:
+  - acme.cert-manager.io
+  resources:
+  - orders/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - clusterissuers/finalizers
+  - issuers/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ''
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-edit
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+    rbac.authorization.k8s.io/aggregate-to-edit: 'true'
+    rbac.authorization.k8s.io/aggregate-to-admin: 'true'
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  - certificaterequests
+  - issuers
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - patch
+  - update
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates/status
+  verbs:
+  - update
+- apiGroups:
+  - acme.cert-manager.io
+  resources:
+  - challenges
+  verbs:
+  - delete
+  - deletecollection
+  - patch
+  - update
+- apiGroups:
+  - acme.cert-manager.io
+  resources:
+  - orders
+  verbs:
+  - delete
+  - deletecollection
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-view
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+    rbac.authorization.k8s.io/aggregate-to-view: 'true'
+    rbac.authorization.k8s.io/aggregate-to-edit: 'true'
+    rbac.authorization.k8s.io/aggregate-to-admin: 'true'
+    rbac.authorization.k8s.io/aggregate-to-cluster-reader: 'true'
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - cert-manager.io
+  resources:
+  - certificates
+  - certificaterequests
+  - issuers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - acme.cert-manager.io
+  resources:
+  - challenges
+  - orders
+  verbs:
+  - get
+  - list
+  - watch
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-webhook:subjectaccessreviews
+  labels:
+    app: webhook
+    app.kubernetes.io/name: webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: webhook
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+---
+# Source: gibson/templates/operators/external-secrets-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: external-secrets-cert-controller
+  labels:
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets-cert-controller
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: v2.10.0
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  resourceNames:
+  - externalsecrets.external-secrets.io
+  - secretstores.external-secrets.io
+  - clustersecretstores.external-secrets.io
+  verbs:
+  - update
+  - patch
+- apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - validatingwebhookconfigurations
+  verbs:
+  - list
+  - watch
+  - get
+- apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - validatingwebhookconfigurations
+  resourceNames:
+  - secretstore-validate
+  - externalsecret-validate
+  verbs:
+  - update
+  - patch
+- apiGroups:
+  - ''
+  resources:
+  - endpoints
+  verbs:
+  - list
+  - get
+  - watch
+- apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs:
+  - list
+  - get
+  - watch
+- apiGroups:
+  - ''
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  resourceNames:
+  - external-secrets-webhook
+  verbs:
+  - update
+  - patch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - create
+  - update
+  - patch
+---
+# Source: gibson/templates/operators/external-secrets-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: external-secrets-controller
+  labels:
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: v2.10.0
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - external-secrets.io
+  resources:
+  - secretstores
+  - clustersecretstores
+  - externalsecrets
+  - clusterexternalsecrets
+  - pushsecrets
+  - clusterpushsecrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - external-secrets.io
+  resources:
+  - externalsecrets
+  - externalsecrets/status
+  - externalsecrets/finalizers
+  - secretstores
+  - secretstores/status
+  - secretstores/finalizers
+  - clustersecretstores
+  - clustersecretstores/status
+  - clustersecretstores/finalizers
+  - clusterexternalsecrets
+  - clusterexternalsecrets/status
+  - clusterexternalsecrets/finalizers
+  - pushsecrets
+  - pushsecrets/status
+  - pushsecrets/finalizers
+  - clusterpushsecrets
+  - clusterpushsecrets/status
+  - clusterpushsecrets/finalizers
+  verbs:
+  - get
+  - update
+  - patch
+- apiGroups:
+  - generators.external-secrets.io
+  resources:
+  - generatorstates
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+  - deletecollection
+- apiGroups:
+  - generators.external-secrets.io
+  resources:
+  - acraccesstokens
+  - cloudsmithaccesstokens
+  - clustergenerators
+  - ecrauthorizationtokens
+  - fakes
+  - gcraccesstokens
+  - githubaccesstokens
+  - gitlabdeploytokens
+  - quayaccesstokens
+  - passwords
+  - sshkeys
+  - stssessiontokens
+  - uuids
+  - vaultdynamicsecrets
+  - webhooks
+  - grafanas
+  - mfas
+  - beyondtrustworkloadcredentialsdynamicsecrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ''
+  resources:
+  - serviceaccounts
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ''
+  resources:
+  - namespaces
+  verbs:
+  - update
+  - patch
+- apiGroups:
+  - ''
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - delete
+  - patch
+- apiGroups:
+  - ''
+  resources:
+  - serviceaccounts/token
+  verbs:
+  - create
+- apiGroups:
+  - ''
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - external-secrets.io
+  resources:
+  - externalsecrets
+  verbs:
+  - create
+  - update
+  - delete
+- apiGroups:
+  - external-secrets.io
+  resources:
+  - pushsecrets
+  verbs:
+  - create
+  - update
+  - delete
+---
+# Source: gibson/templates/operators/external-secrets-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: external-secrets-edit
+  labels:
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: v2.10.0
+    app.kubernetes.io/managed-by: Helm
+    rbac.authorization.k8s.io/aggregate-to-edit: 'true'
+    rbac.authorization.k8s.io/aggregate-to-admin: 'true'
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - external-secrets.io
+  resources:
+  - externalsecrets
+  - secretstores
+  - clustersecretstores
+  - pushsecrets
+  - clusterpushsecrets
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - patch
+  - update
+- apiGroups:
+  - generators.external-secrets.io
+  resources:
+  - acraccesstokens
+  - cloudsmithaccesstokens
+  - clustergenerators
+  - ecrauthorizationtokens
+  - fakes
+  - gcraccesstokens
+  - githubaccesstokens
+  - gitlabdeploytokens
+  - quayaccesstokens
+  - passwords
+  - sshkeys
+  - vaultdynamicsecrets
+  - webhooks
+  - grafanas
+  - generatorstates
+  - mfas
+  - beyondtrustworkloadcredentialsdynamicsecrets
+  - uuids
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - patch
+  - update
+---
+# Source: gibson/templates/operators/external-secrets-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: external-secrets-servicebindings
+  labels:
+    servicebinding.io/controller: 'true'
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: v2.10.0
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - external-secrets.io
+  resources:
+  - externalsecrets
+  - pushsecrets
+  verbs:
+  - get
+  - list
+  - watch
+---
+# Source: gibson/templates/operators/external-secrets-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: external-secrets-view
+  labels:
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: v2.10.0
+    app.kubernetes.io/managed-by: Helm
+    rbac.authorization.k8s.io/aggregate-to-view: 'true'
+    rbac.authorization.k8s.io/aggregate-to-edit: 'true'
+    rbac.authorization.k8s.io/aggregate-to-admin: 'true'
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - external-secrets.io
+  resources:
+  - externalsecrets
+  - secretstores
+  - clustersecretstores
+  - pushsecrets
+  - clusterpushsecrets
+  verbs:
+  - get
+  - watch
+  - list
+- apiGroups:
+  - generators.external-secrets.io
+  resources:
+  - acraccesstokens
+  - beyondtrustworkloadcredentialsdynamicsecrets
+  - cloudsmithaccesstokens
+  - clustergenerators
+  - ecrauthorizationtokens
+  - fakes
+  - gcraccesstokens
+  - githubaccesstokens
+  - gitlabdeploytokens
+  - quayaccesstokens
+  - passwords
+  - sshkeys
+  - vaultdynamicsecrets
+  - webhooks
+  - grafanas
+  - generatorstates
+  - mfas
+  - uuids
+  verbs:
+  - get
+  - watch
+  - list
+---
+# Source: gibson/charts/cnpg/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gibson-cloudnative-pg
+  labels:
+    helm.sh/chart: cnpg-0.29.0
+    app.kubernetes.io/name: cloudnative-pg
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "1.30.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gibson-cloudnative-pg
+subjects:
+- kind: ServiceAccount
+  name: gibson-cloudnative-pg
+  namespace: gibson
+---
+# Source: gibson/charts/external-dns/templates/clusterrolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: external-dns-viewer
+  labels:
+    helm.sh/chart: external-dns-1.21.1
+    app.kubernetes.io/name: external-dns
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.21.0"
+    app.kubernetes.io/managed-by: Helm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: external-dns
+subjects:
+  - kind: ServiceAccount
+    name: external-dns
+    namespace: gibson
+---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/cluster-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -7339,6 +9282,290 @@ roleRef:
   kind: ClusterRole
   name: gibson-gibson-server
   apiGroup: rbac.authorization.k8s.io
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-cainjector
+  labels:
+    app: cainjector
+    app.kubernetes.io/name: cainjector
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: cainjector
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-cainjector
+subjects:
+- name: cert-manager-cainjector
+  namespace: gibson
+  kind: ServiceAccount
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-controller-approve:cert-manager-io
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: cert-manager
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-controller-approve:cert-manager-io
+subjects:
+- name: cert-manager
+  namespace: gibson
+  kind: ServiceAccount
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-controller-certificates
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-controller-certificates
+subjects:
+- name: cert-manager
+  namespace: gibson
+  kind: ServiceAccount
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-controller-certificatesigningrequests
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: cert-manager
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-controller-certificatesigningrequests
+subjects:
+- name: cert-manager
+  namespace: gibson
+  kind: ServiceAccount
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-controller-challenges
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-controller-challenges
+subjects:
+- name: cert-manager
+  namespace: gibson
+  kind: ServiceAccount
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-controller-clusterissuers
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-controller-clusterissuers
+subjects:
+- name: cert-manager
+  namespace: gibson
+  kind: ServiceAccount
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-controller-ingress-shim
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-controller-ingress-shim
+subjects:
+- name: cert-manager
+  namespace: gibson
+  kind: ServiceAccount
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-controller-issuers
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-controller-issuers
+subjects:
+- name: cert-manager
+  namespace: gibson
+  kind: ServiceAccount
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-controller-orders
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-controller-orders
+subjects:
+- name: cert-manager
+  namespace: gibson
+  kind: ServiceAccount
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-webhook:subjectaccessreviews
+  labels:
+    app: webhook
+    app.kubernetes.io/name: webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: webhook
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-webhook:subjectaccessreviews
+subjects:
+- kind: ServiceAccount
+  name: cert-manager-webhook
+  namespace: gibson
+---
+# Source: gibson/templates/operators/external-secrets-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: external-secrets-cert-controller
+  labels:
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets-cert-controller
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: v2.10.0
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: external-secrets-cert-controller
+subjects:
+- name: external-secrets-cert-controller
+  namespace: gibson
+  kind: ServiceAccount
+---
+# Source: gibson/templates/operators/external-secrets-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: external-secrets-controller
+  labels:
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: v2.10.0
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: external-secrets-controller
+subjects:
+- name: external-secrets
+  namespace: gibson
+  kind: ServiceAccount
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -7800,6 +10027,151 @@ rules:
     resources: [ "pods" ]
     verbs: [ "get" ]
 ---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cert-manager-cainjector:leaderelection
+  namespace: kube-system
+  labels:
+    app: cainjector
+    app.kubernetes.io/name: cainjector
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: cainjector
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  resourceNames:
+  - cert-manager-cainjector-leader-election
+  - cert-manager-cainjector-leader-election-core
+  verbs:
+  - get
+  - update
+  - patch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cert-manager:leaderelection
+  namespace: kube-system
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  resourceNames:
+  - cert-manager-controller
+  verbs:
+  - get
+  - update
+  - patch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cert-manager-webhook:dynamic-serving
+  namespace: gibson
+  labels:
+    app: webhook
+    app.kubernetes.io/name: webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: webhook
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  resourceNames:
+  - cert-manager-webhook-ca
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - create
+---
+# Source: gibson/templates/operators/external-secrets-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: external-secrets-leaderelection
+  namespace: gibson
+  labels:
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: v2.10.0
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - configmaps
+  resourceNames:
+  - external-secrets-controller
+  verbs:
+  - get
+  - update
+  - patch
+- apiGroups:
+  - ''
+  resources:
+  - configmaps
+  verbs:
+  - create
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - create
+  - update
+  - patch
+---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -8182,6 +10554,264 @@ roleRef:
   name: gibson-zitadel
   apiGroup: rbac.authorization.k8s.io
 ---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cert-manager-cainjector:leaderelection
+  namespace: kube-system
+  labels:
+    app: cainjector
+    app.kubernetes.io/name: cainjector
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: cainjector
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cert-manager-cainjector:leaderelection
+subjects:
+- kind: ServiceAccount
+  name: cert-manager-cainjector
+  namespace: gibson
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cert-manager:leaderelection
+  namespace: kube-system
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cert-manager:leaderelection
+subjects:
+- kind: ServiceAccount
+  name: cert-manager
+  namespace: gibson
+---
+# Source: gibson/templates/operators/cert-manager-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cert-manager-webhook:dynamic-serving
+  namespace: gibson
+  labels:
+    app: webhook
+    app.kubernetes.io/name: webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: webhook
+    app.kubernetes.io/version: v1.21.1
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cert-manager-webhook:dynamic-serving
+subjects:
+- kind: ServiceAccount
+  name: cert-manager-webhook
+  namespace: gibson
+---
+# Source: gibson/templates/operators/external-secrets-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: external-secrets-leaderelection
+  namespace: gibson
+  labels:
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: v2.10.0
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: external-secrets-leaderelection
+subjects:
+- kind: ServiceAccount
+  name: external-secrets
+  namespace: gibson
+---
+# Source: gibson/charts/cert-manager/templates/cainjector-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: cert-manager-cainjector
+  namespace: gibson
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+  labels:
+    app: cainjector
+    app.kubernetes.io/name: cainjector
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: "cainjector"
+    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+spec:
+  type: ClusterIP
+  ports:
+  - protocol: TCP
+    port: 9402
+    name: http-metrics
+  selector:
+    app.kubernetes.io/name: cainjector
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: "cainjector"
+---
+# Source: gibson/charts/cert-manager/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: cert-manager
+  namespace: gibson
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: "controller"
+    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+spec:
+  type: ClusterIP
+  ports:
+  - protocol: TCP
+    port: 9402
+    name: http-metrics
+  selector:
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: "controller"
+---
+# Source: gibson/charts/cert-manager/templates/webhook-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: cert-manager-webhook
+  namespace: gibson
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+  labels:
+    app: webhook
+    app.kubernetes.io/name: webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: "webhook"
+    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+spec:
+  type: ClusterIP
+  ports:
+  - name: https
+    port: 443
+    protocol: TCP
+    targetPort: "https"
+  - name: metrics
+    port: 9402
+    protocol: TCP
+    targetPort: "http-metrics"
+  selector:
+    app.kubernetes.io/name: webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: "webhook"
+---
+# Source: gibson/charts/cnpg/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: cnpg-webhook-service
+  namespace: gibson
+  labels:
+    helm.sh/chart: cnpg-0.29.0
+    app.kubernetes.io/name: cloudnative-pg
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "1.30.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 443
+    targetPort: webhook-server
+    name: webhook-server
+  selector:
+    app.kubernetes.io/name: cloudnative-pg
+    app.kubernetes.io/instance: gibson
+---
+# Source: gibson/charts/external-dns/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-dns
+  namespace: gibson
+  labels:
+    helm.sh/chart: external-dns-1.21.1
+    app.kubernetes.io/name: external-dns
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.21.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: external-dns
+    app.kubernetes.io/instance: gibson
+  ports:
+    - name: http
+      port: 7979
+      targetPort: http
+      protocol: TCP
+---
+# Source: gibson/charts/external-secrets/templates/webhook-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-secrets-webhook
+  namespace: gibson
+  labels:
+    
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets-webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v2.10.0"
+    app.kubernetes.io/managed-by: Helm
+    external-secrets.io/component: webhook
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 443
+    targetPort: webhook
+    protocol: TCP
+    name: webhook
+  selector:
+    app.kubernetes.io/name: external-secrets-webhook
+    app.kubernetes.io/instance: gibson
+---
 # Source: gibson/charts/gibson-operators/templates/platform-operator/service.yaml
 apiVersion: v1
 kind: Service
@@ -8426,7 +11056,7 @@ metadata:
 spec:
   type: LoadBalancer
   # Client-IP contract. Local stops kube-proxy from SNATing the
-  # client address on the NodePort / passthrough-LB path (kind, vanilla, GKE,
+  # client address on the NodePort / passthrough-LB path (kind, a plain cluster, GKE,
   # AKS), so Envoy's socket peer is the client. On AWS with nlb-target-type=ip
   # the controller dials pod IPs directly and ignores this field; there the
   # contract is met by preserve_client_ip.enabled=true on the target group.
@@ -9281,6 +11911,677 @@ spec:
           hostPath:
             path: /run/spire/agent-sockets
             type: DirectoryOrCreate
+---
+# Source: gibson/charts/cert-manager/templates/cainjector-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cert-manager-cainjector
+  namespace: gibson
+  labels:
+    app: cainjector
+    app.kubernetes.io/name: cainjector
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: "cainjector"
+    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cainjector
+      app.kubernetes.io/instance: gibson
+      app.kubernetes.io/component: "cainjector"
+  template:
+    metadata:
+      labels:
+        app: cainjector
+        app.kubernetes.io/name: cainjector
+        app.kubernetes.io/instance: gibson
+        app.kubernetes.io/component: "cainjector"
+        app.kubernetes.io/version: "v1.21.1"
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: cert-manager-v1.21.1
+      annotations:
+        prometheus.io/path: "/metrics"
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9402'
+    spec:
+      serviceAccountName: cert-manager-cainjector
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cert-manager-cainjector
+          image: "quay.io/jetstack/cert-manager-cainjector:v1.21.1"
+          imagePullPolicy: IfNotPresent
+          args:
+          - --v=2
+          - --leader-election-namespace=kube-system
+          ports:
+          - containerPort: 9402
+            name: http-metrics
+            protocol: TCP
+          env:
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+      nodeSelector:
+        kubernetes.io/os: "linux"
+---
+# Source: gibson/charts/cert-manager/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cert-manager
+  namespace: gibson
+  labels:
+    app: cert-manager
+    app.kubernetes.io/name: cert-manager
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: "controller"
+    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cert-manager
+      app.kubernetes.io/instance: gibson
+      app.kubernetes.io/component: "controller"
+  template:
+    metadata:
+      labels:
+        app: cert-manager
+        app.kubernetes.io/name: cert-manager
+        app.kubernetes.io/instance: gibson
+        app.kubernetes.io/component: "controller"
+        app.kubernetes.io/version: "v1.21.1"
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: cert-manager-v1.21.1
+      annotations:
+        prometheus.io/path: "/metrics"
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9402'
+    spec:
+      serviceAccountName: cert-manager
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cert-manager-controller
+          image: "quay.io/jetstack/cert-manager-controller:v1.21.1"
+          imagePullPolicy: IfNotPresent
+          args:
+          - --v=2
+          - --cluster-resource-namespace=$(POD_NAMESPACE)
+          - --leader-election-namespace=kube-system
+          - --acme-http01-solver-image=quay.io/jetstack/cert-manager-acmesolver:v1.21.1
+          - --max-concurrent-challenges=60
+          ports:
+          - containerPort: 9402
+            name: http-metrics
+            protocol: TCP
+          - containerPort: 9403
+            name: http-healthz
+            protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+          env:
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          # LivenessProbe settings are based on those used for the Kubernetes
+          # controller-manager. See:
+          # https://github.com/kubernetes/kubernetes/blob/806b30170c61a38fedd54cc9ede4cd6275a1ad3b/cmd/kubeadm/app/util/staticpod/utils.go#L241-L245
+          livenessProbe:
+            httpGet:
+              port: http-healthz
+              path: /livez
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 15
+            successThreshold: 1
+            failureThreshold: 8
+      nodeSelector:
+        kubernetes.io/os: "linux"
+---
+# Source: gibson/charts/cert-manager/templates/webhook-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cert-manager-webhook
+  namespace: gibson
+  labels:
+    app: webhook
+    app.kubernetes.io/name: webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: "webhook"
+    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: webhook
+      app.kubernetes.io/instance: gibson
+      app.kubernetes.io/component: "webhook"
+  template:
+    metadata:
+      labels:
+        app: webhook
+        app.kubernetes.io/name: webhook
+        app.kubernetes.io/instance: gibson
+        app.kubernetes.io/component: "webhook"
+        app.kubernetes.io/version: "v1.21.1"
+        app.kubernetes.io/managed-by: Helm
+        helm.sh/chart: cert-manager-v1.21.1
+      annotations:
+        prometheus.io/path: "/metrics"
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9402'
+    spec:
+      serviceAccountName: cert-manager-webhook
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cert-manager-webhook
+          image: "quay.io/jetstack/cert-manager-webhook:v1.21.1"
+          imagePullPolicy: IfNotPresent
+          args:
+          - --v=2
+          - --secure-port=10250
+          - --dynamic-serving-ca-secret-namespace=$(POD_NAMESPACE)
+          - --dynamic-serving-ca-secret-name=cert-manager-webhook-ca
+          - --dynamic-serving-dns-names=cert-manager-webhook
+          - --dynamic-serving-dns-names=cert-manager-webhook.$(POD_NAMESPACE)
+          - --dynamic-serving-dns-names=cert-manager-webhook.$(POD_NAMESPACE).svc
+          ports:
+          - name: https
+            protocol: TCP
+            containerPort: 10250
+          - name: healthcheck
+            protocol: TCP
+            containerPort: 6080
+          - containerPort: 9402
+            name: http-metrics
+            protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: healthcheck
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: healthcheck
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+          env:
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+      nodeSelector:
+        kubernetes.io/os: "linux"
+---
+# Source: gibson/charts/cnpg/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gibson-cloudnative-pg
+  namespace: gibson
+  labels:
+    helm.sh/chart: cnpg-0.29.0
+    app.kubernetes.io/name: cloudnative-pg
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "1.30.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudnative-pg
+      app.kubernetes.io/instance: gibson
+  template:
+    metadata:
+      annotations:
+        checksum/rbac: 702b38406a79cb1fc248c4f8f1760bd622ba8b0ca9fb054f9833c1e54b2b232c
+        checksum/config: 642757659e1ebcb29c1f7c23367f7d74934155e297e5cbd95d7df0973caf1139
+        checksum/monitoring-config: 2adad6e29b1342eb8e455f3e2e01bbbe798451eb0d7220cd1dc9f1cf41a65b96
+        backup.velero.io/backup-volumes-excludes: scratch-data
+      labels:
+        app.kubernetes.io/name: cloudnative-pg
+        app.kubernetes.io/instance: gibson
+    spec:
+      containers:
+      - args:
+        - controller
+        - --leader-elect
+        - --max-concurrent-reconciles=10
+        - --config-map-name=cnpg-controller-manager-config
+        - --webhook-port=9443
+        command:
+        - /manager
+        env:
+        - name: OPERATOR_IMAGE_NAME
+          value: "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0"
+        - name: OPERATOR_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: MONITORING_QUERIES_CONFIGMAP
+          value: "cnpg-default-monitoring"
+        image: "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0"
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          httpGet:
+            path: /readyz
+            port: webhook-server
+            scheme: HTTPS
+          initialDelaySeconds: 3
+        name: manager
+        ports:
+        - containerPort: 8080
+          name: metrics
+          protocol: TCP
+        - containerPort: 9443
+          name: webhook-server
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: webhook-server
+            scheme: HTTPS
+          initialDelaySeconds: 3
+        resources:
+          {}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsGroup: 10001
+          runAsUser: 10001
+          seccompProfile:
+            type: RuntimeDefault
+        startupProbe:
+          failureThreshold: 6
+          httpGet:
+            path: /readyz
+            port: webhook-server
+            scheme: HTTPS
+          periodSeconds: 5
+        volumeMounts:
+        - mountPath: /controller
+          name: scratch-data
+        - mountPath: /run/secrets/cnpg.io/webhook
+          name: webhook-certificates
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: gibson-cloudnative-pg
+      terminationGracePeriodSeconds: 10
+      volumes:
+      - emptyDir: {}
+        name: scratch-data
+      - name: webhook-certificates
+        secret:
+          defaultMode: 420
+          optional: true
+          secretName: cnpg-webhook-cert
+---
+# Source: gibson/charts/external-dns/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-dns
+  namespace: gibson
+  labels:
+    helm.sh/chart: external-dns-1.21.1
+    app.kubernetes.io/name: external-dns
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.21.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: external-dns
+      app.kubernetes.io/instance: gibson
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: external-dns
+        app.kubernetes.io/instance: gibson
+    spec:
+      automountServiceAccountToken: true
+      serviceAccountName: external-dns
+      securityContext:
+        fsGroup: 65534
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: external-dns
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsGroup: 65532
+            runAsNonRoot: true
+            runAsUser: 65532
+          image: registry.k8s.io/external-dns/external-dns:v0.21.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --log-level=info
+            - --log-format=text
+            - --interval=1m
+            - --source=service
+            - --source=ingress
+            - --policy=sync
+            - --registry=txt
+            - --txt-owner-id=gibson
+            - --txt-prefix=extdns-
+            - --provider=inmemory
+          ports:
+            - name: http
+              protocol: TCP
+              containerPort: 7979
+          livenessProbe:
+            failureThreshold: 2
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+          readinessProbe:
+            failureThreshold: 6
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+---
+# Source: gibson/charts/external-secrets/templates/cert-controller-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-secrets-cert-controller
+  namespace: gibson
+  labels:
+    
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets-cert-controller
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v2.10.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: external-secrets-cert-controller
+      app.kubernetes.io/instance: gibson
+  template:
+    metadata:
+      labels:
+        
+        helm.sh/chart: external-secrets-2.10.0
+        app.kubernetes.io/name: external-secrets-cert-controller
+        app.kubernetes.io/instance: gibson
+        app.kubernetes.io/version: "v2.10.0"
+        app.kubernetes.io/managed-by: Helm
+    spec:
+      serviceAccountName: external-secrets-cert-controller
+      automountServiceAccountToken: true
+      hostNetwork: false
+      containers:
+        - name: cert-controller
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          image: ghcr.io/external-secrets/external-secrets:v2.10.0
+          imagePullPolicy: IfNotPresent
+          args:
+          - certcontroller
+          - --crd-requeue-interval=5m
+          - --service-name=external-secrets-webhook
+          - --service-namespace=gibson
+          - --secret-name=external-secrets-webhook
+          - --secret-namespace=gibson
+          - --metrics-addr=:8080
+          - --healthz-addr=:8081
+          - --loglevel=info
+          - --zap-time-encoding=epoch
+          - --enable-partial-cache=true
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+              name: metrics
+            - containerPort: 8081
+              protocol: TCP
+              name: ready
+          readinessProbe:
+            httpGet:
+              port: ready
+              path: /readyz
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+---
+# Source: gibson/charts/external-secrets/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-secrets
+  namespace: gibson
+  labels:
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v2.10.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: external-secrets
+      app.kubernetes.io/instance: gibson
+  template:
+    metadata:
+      labels:
+        helm.sh/chart: external-secrets-2.10.0
+        app.kubernetes.io/name: external-secrets
+        app.kubernetes.io/instance: gibson
+        app.kubernetes.io/version: "v2.10.0"
+        app.kubernetes.io/managed-by: Helm
+    spec:
+      serviceAccountName: external-secrets
+      automountServiceAccountToken: true
+      hostNetwork: false
+      containers:
+        - name: external-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          image: ghcr.io/external-secrets/external-secrets:v2.10.0
+          imagePullPolicy: IfNotPresent
+          args:
+          - --concurrent=1
+          - --metrics-addr=:8080
+          - --loglevel=info
+          - --zap-time-encoding=epoch
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+              name: metrics
+      dnsPolicy: ClusterFirst
+---
+# Source: gibson/charts/external-secrets/templates/webhook-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: external-secrets-webhook
+  namespace: gibson
+  labels:
+    
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets-webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v2.10.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: external-secrets-webhook
+      app.kubernetes.io/instance: gibson
+  template:
+    metadata:
+      labels:
+        
+        helm.sh/chart: external-secrets-2.10.0
+        app.kubernetes.io/name: external-secrets-webhook
+        app.kubernetes.io/instance: gibson
+        app.kubernetes.io/version: "v2.10.0"
+        app.kubernetes.io/managed-by: Helm
+    spec:
+      hostNetwork: false
+      serviceAccountName: external-secrets-webhook
+      automountServiceAccountToken: true
+      containers:
+        - name: webhook
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          image: ghcr.io/external-secrets/external-secrets:v2.10.0
+          imagePullPolicy: IfNotPresent
+          args:
+          - webhook
+          - --port=10250
+          - --dns-name=external-secrets-webhook.gibson.svc
+          - --cert-dir=/tmp/certs
+          - --check-interval=5m
+          - --metrics-addr=:8080
+          - --healthz-addr=:8081
+          - --loglevel=info
+          - --zap-time-encoding=epoch
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+              name: metrics
+            - containerPort: 10250
+              protocol: TCP
+              name: webhook
+            - containerPort: 8081
+              protocol: TCP
+              name: ready
+          readinessProbe:
+            httpGet:
+              port: ready
+              path: /readyz
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+          volumeMounts:
+            - name: certs
+              mountPath: /tmp/certs
+              readOnly: true
+      volumes:
+        - name: certs
+          secret:
+            secretName: external-secrets-webhook
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/deployment.yaml
 apiVersion: apps/v1
@@ -13561,7 +16862,7 @@ spec:
               #   rsapub:<name>  the public key of transit key <name> (rsa-2048), PEM
               #   literal:<v>    the literal value <v>
               #   empty          the empty string. The operator fills it in later with
-              #                  scripts/vanilla-set-secret.sh
+              #                  scripts/baseline-set-secret.sh
               #   input:<file>   the bringup keyring input mounted at /etc/openbao/inputs/<file>
               #   inputjson:<f>  the property of the same name in the JSON object mounted at
               #                  /etc/openbao/inputs/<f>
@@ -17086,6 +20387,146 @@ spec:
                   cpu: 100m
                   memory: 64Mi
 ---
+# Source: gibson/charts/cnpg/templates/deployment.yaml
+#
+# Copyright © contributors to CloudNativePG, established as
+# CloudNativePG a Series of LF Projects, LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+---
+# Source: gibson/charts/cnpg/templates/monitoring-configmap.yaml
+#
+# Copyright © contributors to CloudNativePG, established as
+# CloudNativePG a Series of LF Projects, LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+---
+# Source: gibson/charts/cnpg/templates/mutatingwebhookconfiguration.yaml
+#
+# Copyright © contributors to CloudNativePG, established as
+# CloudNativePG a Series of LF Projects, LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+---
+# Source: gibson/charts/cnpg/templates/podmonitor.yaml
+#
+# Copyright © contributors to CloudNativePG, established as
+# CloudNativePG a Series of LF Projects, LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+---
+# Source: gibson/charts/cnpg/templates/rbac.yaml
+#
+# Copyright © contributors to CloudNativePG, established as
+# CloudNativePG a Series of LF Projects, LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+---
+# Source: gibson/charts/cnpg/templates/service.yaml
+#
+# Copyright © contributors to CloudNativePG, established as
+# CloudNativePG a Series of LF Projects, LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+---
+# Source: gibson/charts/cnpg/templates/validatingwebhookconfiguration.yaml
+#
+# Copyright © contributors to CloudNativePG, established as
+# CloudNativePG a Series of LF Projects, LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+---
 # Source: gibson/charts/zitadel/templates/hpa_login.yaml
 #file: noinspection ExcessiveWhitespaceTrimInspection,KubernetesUnknownResourcesInspection
 ---
@@ -19150,6 +22591,147 @@ spec:
   ca:
     secretName: setec-frontend-ca
 ---
+# Source: gibson/charts/cert-manager/templates/webhook-mutating-webhook.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: cert-manager-webhook
+  labels:
+    app: webhook
+    app.kubernetes.io/name: webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: "webhook"
+    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    cert-manager.io/inject-ca-from-secret: "gibson/cert-manager-webhook-ca"
+    argocd.argoproj.io/sync-wave: "-20"
+webhooks:
+  - name: webhook.cert-manager.io
+    rules:
+      - apiGroups:
+          - "cert-manager.io"
+        apiVersions:
+          - "v1"
+        operations:
+          - CREATE
+        resources:
+          - "certificaterequests"
+    admissionReviewVersions: ["v1"]
+    # This webhook only accepts v1 cert-manager resources.
+    # Equivalent matchPolicy ensures that non-v1 resource requests are sent to
+    # this webhook (after the resources have been converted to v1).
+    matchPolicy: Equivalent
+    timeoutSeconds: 30
+    failurePolicy: Fail
+    # Only include 'sideEffects' field in Kubernetes 1.12+
+    sideEffects: None
+    clientConfig:
+      service:
+        name: cert-manager-webhook
+        namespace: gibson
+        path: /mutate
+---
+# Source: gibson/charts/cnpg/templates/mutatingwebhookconfiguration.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: cnpg-mutating-webhook-configuration
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+  labels:
+    helm.sh/chart: cnpg-0.29.0
+    app.kubernetes.io/name: cloudnative-pg
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "1.30.0"
+    app.kubernetes.io/managed-by: Helm
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: cnpg-webhook-service
+      namespace: gibson
+      path: /mutate-postgresql-cnpg-io-v1-backup
+      port: 443
+  failurePolicy: Fail
+  name: mbackup.cnpg.io
+  rules:
+  - apiGroups:
+    - postgresql.cnpg.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - backups
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: cnpg-webhook-service
+      namespace: gibson
+      path: /mutate-postgresql-cnpg-io-v1-cluster
+      port: 443
+  failurePolicy: Fail
+  name: mcluster.cnpg.io
+  rules:
+  - apiGroups:
+    - postgresql.cnpg.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - clusters
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: cnpg-webhook-service
+      namespace: gibson
+      path: /mutate-postgresql-cnpg-io-v1-database
+      port: 443
+  failurePolicy: Fail
+  name: mdatabase.cnpg.io
+  rules:
+  - apiGroups:
+    - postgresql.cnpg.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - databases
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: cnpg-webhook-service
+      namespace: gibson
+      path: /mutate-postgresql-cnpg-io-v1-scheduledbackup
+      port: 443
+  failurePolicy: Fail
+  name: mscheduledbackup.cnpg.io
+  rules:
+  - apiGroups:
+    - postgresql.cnpg.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - scheduledbackups
+  sideEffects: None
+---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/webhook.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
@@ -19366,421 +22948,6 @@ spec:
       - name: "spire"
         owner: "spire"
 ---
-# Source: gibson/charts/gibson-operators/templates/tenant-operator/prometheusrule.yaml
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-metadata:
-  name: gibson-tenant-operator-rules
-  namespace: gibson
-  labels:
-    app.kubernetes.io/name: tenant-operator
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/component: tenant-operator
-spec:
-  groups:
-    - name: tenant-operator.orphan-gc
-      rules:
-        - alert: TenantOperatorOrphansAccumulating
-          expr: increase(gibson_tenant_operator_orphan_finalizers_stripped_total[1h]) > 5
-          for: 10m
-          labels:
-            severity: warning
-            component: tenant-operator
-          annotations:
-            summary: "Orphan CR finalizer-strip rate elevated on tenant-operator"
-            description: |
-              The orphan-reaper is stripping more than 5 finalizers/hour. A
-              single strip is expected after test teardown or an operator
-              restart mid-saga; a sustained rate indicates an upstream
-              problem (saga-path failures, or clients creating child CRs
-              without owner references and deleting parents quickly).
-              Runbook: docs/runbooks/stuck-terminating-namespaces.md
-        - alert: TenantOperatorStuckTerminatingNamespaces
-          expr: gibson_tenant_operator_stuck_terminating_namespaces > 0
-          for: 15m
-          labels:
-            severity: warning
-            component: tenant-operator
-          annotations:
-            summary: "Tenant namespace(s) stuck in Terminating past reaper grace period"
-            description: |
-              At least one tenant-* namespace has been Terminating longer
-              than the reaper grace period. The reaper should be clearing
-              orphan finalizers; if this alert fires, either the reaper is
-              disabled or the stuck resources have unknown finalizers that
-              require operator intervention.
-              Runbook: docs/runbooks/stuck-terminating-namespaces.md
-    - name: tenant-operator.daemon-calls
-      rules:
-        - alert: TenantOperatorDaemonCallsFailing
-          expr: increase(gibson_tenant_operator_daemon_call_errors_total[10m]) > 3
-          for: 5m
-          labels:
-            severity: critical
-            component: tenant-operator
-          annotations:
-            summary: "tenant-operator -> daemon gRPC calls failing repeatedly"
-            description: |
-              The tenant-operator's daemon client (SPIFFE-mTLS gRPC,
-              gibson.daemon.operator.v1.DaemonOperatorService) has returned
-              errors repeatedly over the last 10m. The admin-ops drain calls
-              the daemon every ~15s, so a sustained failure means tenant
-              admin CRUD / pending-provisioning is stalled and new signups
-              can hang in the "no access to workspace" loop.
-              Check the {method,outcome} labels: outcome="permission_denied"
-              or "unauthenticated" is an authz/SPIFFE-allowlist regression
-              (the gibson#1043 class); outcome="unavailable" /
-              "deadline_exceeded" is a daemon reachability problem.
-        - alert: TenantOperatorDaemonCallsDenied
-          expr: increase(gibson_tenant_operator_daemon_call_errors_total{outcome=~"permission_denied|unauthenticated"}[10m]) > 0
-          for: 5m
-          labels:
-            severity: critical
-            component: tenant-operator
-          annotations:
-            summary: "daemon is DENYING tenant-operator calls (authz/SPIFFE regression)"
-            description: |
-              The daemon returned permission_denied/unauthenticated to the
-              tenant-operator. This is the gibson#1043 signature: a
-              SPIFFE-allowlist or FGA-tuple omission silently blocking the
-              operator->daemon path. It will not self-heal — the deny is
-              deterministic. Inspect the daemon's spiffePlatformBypass
-              allow-list and the platform_operator FGA tuples for the
-              operator service account.
----
-# Source: gibson/charts/gibson-workloads/templates/dashboard/auth-prometheusrule.yaml
-# Spec auth-resolution-hardening (R3, R8) — SLO recording rules + alert
-# rules for the dashboard auth path. Surfaces sign-in error rate, FGA
-# unreachability, and sign-in latency budget burn.
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-metadata:
-  name: gibson-dashboard-auth-rules
-  namespace: gibson
-  labels:
-    app.kubernetes.io/name: gibson-dashboard
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/component: dashboard-auth
-spec:
-  groups:
-    # --------------------------------------------------------------------
-    # SLO recording rules — referenced by alerts below + the Grafana
-    # dashboard. Objectives (annotation-only):
-    #   p95(dashboard_signin_duration_seconds) < 1.5s
-    #   p99(dashboard_signin_duration_seconds) < 3.0s
-    # --------------------------------------------------------------------
-    - name: dashboard-auth-slos
-      interval: 30s
-      rules:
-        - record: slo:dashboard_signin_p95_seconds
-          expr: |
-            histogram_quantile(0.95, sum(rate(dashboard_signin_duration_seconds_bucket[5m])) by (le))
-        - record: slo:dashboard_signin_p99_seconds
-          expr: |
-            histogram_quantile(0.99, sum(rate(dashboard_signin_duration_seconds_bucket[5m])) by (le))
-
-    # --------------------------------------------------------------------
-    # Alerts — page on sign-in error rate, FGA unreachability, and SLO
-    # latency-budget burn.
-    # --------------------------------------------------------------------
-    - name: dashboard-auth-alerts
-      rules:
-        - alert: DashboardSignInErrorRateHigh
-          expr: |
-            (sum(rate(dashboard_signin_total{outcome="error"}[5m]))
-              /
-             sum(rate(dashboard_signin_total[5m]))) > 0.01
-          for: 5m
-          labels:
-            severity: page
-            component: dashboard-auth
-          annotations:
-            summary: "Dashboard sign-in error rate >1% over 5m"
-            description: |
-              More than 1% of dashboard sign-in attempts have failed over
-              the last 5 minutes. Check
-              dashboard_login_error_total{reason} and the auth Grafana
-              dashboard for the dominant reason.
-        - alert: DashboardFGAUnreachable
-          expr: |
-            increase(dashboard_membership_resolution_total{outcome="fga_error"}[1m]) > 0
-          for: 30s
-          labels:
-            severity: page
-            component: dashboard-auth
-          annotations:
-            summary: "Dashboard cannot reach FGA — membership resolution failing"
-            description: |
-              The dashboard's getMyMemberships() RPC is failing with FGA
-              unreachable. Sign-in routes users to /login/error. Check
-              gibson-fga health and the daemon's ListMyMemberships handler
-              logs.
-        - alert: DashboardSignInLatencyBudgetBurn
-          # Multi-window burn-rate: page if p95 latency exceeds the SLO
-          # objective sustained over both a 5m and 1h window.
-          expr: |
-            (slo:dashboard_signin_p95_seconds > 1.5)
-              and
-            (avg_over_time(slo:dashboard_signin_p95_seconds[1h]) > 1.5)
-          for: 10m
-          labels:
-            severity: page
-            component: dashboard-auth
-          annotations:
-            summary: "Dashboard sign-in p95 latency budget burning at >2x"
-            description: |
-              p95 sign-in latency has been above the 1.5s SLO objective
-              for >10m sustained. Investigate Zitadel JWKS cache,
-              membership-resolution latency, and Envoy upstream health.
-        - alert: DashboardUserTokenForwardingDisabled
-          # Spec dashboard-fga-user-identity R8 — degraded-mode detector.
-          expr: |
-            increase(dashboard_user_token_forwarding_disabled_total[5m]) > 0
-          for: 10m
-          labels:
-            severity: warning
-            component: dashboard-auth
-          annotations:
-            summary: "Dashboard running in user-token-forwarding backout mode"
-            description: |
-              The dashboard is making daemon RPCs via the SPIFFE
-              workload-JWT fallback. Per-user FGA is disabled and audit
-              attribution is wrong. Either the soak hot-revert is active
-              (intentional) or USE_USER_TOKEN_FORWARDING=false slipped
-              into the deployed env. Verify
-              dashboard.userTokenForwarding=true in the live values.
----
-# Source: gibson/charts/gibson-workloads/templates/databases/redis-alertrule.yaml
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-metadata:
-  name: gibson-redis-alerts
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.132.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: redis
-spec:
-  groups:
-    - name: redis-health-alerts
-      rules:
-
-        # Fires when the redis-stack StatefulSet has 0 ready replicas for >2m.
-        # Does not require the redis-exporter — uses kube-state-metrics if present.
-        # Relies on kube_statefulset_status_replicas_ready; omitted gracefully if
-        # kube-state-metrics is not installed (the expression simply returns no series).
-        - alert: RedisStackUnhealthy
-          expr: |
-            kube_statefulset_status_replicas_ready{
-              namespace="gibson",
-              statefulset="gibson-redis-stack"
-            } == 0
-          for: 2m
-          labels:
-            severity: page
-            component: redis
-          annotations:
-            summary: "redis-stack StatefulSet has 0 ready replicas"
-            description: |
-              redis-stack in gibson has had 0 ready replicas for
-              >2 minutes. All Redis-dependent operations (daemon, tenant-operator)
-              will be failing.
-
-              Check: kubectl describe statefulset/gibson-redis-stack -n gibson
----
-# Source: gibson/charts/gibson-workloads/templates/observability/sandbox-slo.yaml
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-metadata:
-  name: gibson-gibson-workloads-sandbox-slo
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.132.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: sandbox-slo
-  annotations:
-    gibson.zeroroot.ai/spec: setec-sandbox-prod-default
-spec:
-  groups:
-    - name: gibson.sandbox.slo
-      interval: 30s
-      rules:
-        # ---- Recording rules: SLI inputs --------------------------------
-        # Cold-start vs warm-start split via the `cold_start` label
-        # emitted by the daemon's dispatch-duration histogram (Task 52,
-        # daemon-side).
-        - record: gibson:sandbox_dispatch_duration_seconds:p95_5m
-          expr: |
-            histogram_quantile(0.95,
-              sum by (le, cold_start) (
-                rate(gibson_sandbox_dispatch_duration_seconds_bucket[5m])
-              ))
-        - record: gibson:sandbox_dispatch_duration_seconds:p99_5m
-          expr: |
-            histogram_quantile(0.99,
-              sum by (le) (
-                rate(gibson_sandbox_dispatch_duration_seconds_bucket[5m])
-              ))
-
-        # ---- Alerts: SLO violations -------------------------------------
-        # NFR-P1: cold-start p95 = 500ms.
-        - alert: SandboxColdStartLatencyHigh
-          expr: |
-            gibson:sandbox_dispatch_duration_seconds:p95_5m{cold_start="true"} > 0.5
-          for: 10m
-          labels:
-            severity: warning
-            slo: cold_start_p95_500ms
-            component: setec-sandbox
-          annotations:
-            summary: "Setec cold-start p95 above 500ms (SLI breach)"
-            description: |
-              The 5-minute p95 latency of cold-start SANDBOXED dispatches
-              has been above 500ms for 10 minutes. Cold starts launch a
-              fresh microVM; sustained breach usually means Setec's
-              snapshot pre-warm pool is exhausted or the bare-metal
-              sandbox-host node is at CPU saturation.
-
-        # NFR-P2: warm-start p95 = 100ms.
-        - alert: SandboxWarmStartLatencyHigh
-          expr: |
-            gibson:sandbox_dispatch_duration_seconds:p95_5m{cold_start="false"} > 0.1
-          for: 10m
-          labels:
-            severity: warning
-            slo: warm_start_p95_100ms
-            component: setec-sandbox
-          annotations:
-            summary: "Setec warm-start p95 above 100ms (SLI breach)"
-            description: |
-              The 5-minute p95 latency of warm-start SANDBOXED
-              dispatches (re-using a pre-warmed microVM from the snapshot
-              pool) has been above 100ms for 10 minutes. Likely causes:
-              snapshot-pool starvation, KVM contention, or a Setec
-              frontend slowdown.
-
-        # R10.3: 99% of SANDBOXED dispatches < 10s.
-        - alert: SandboxDispatchSLOBreach
-          expr: |
-            gibson:sandbox_dispatch_duration_seconds:p99_5m > 10
-          for: 5m
-          labels:
-            severity: critical
-            slo: dispatch_p99_10s
-            component: setec-sandbox
-          annotations:
-            summary: "99th-percentile SANDBOXED dispatch above 10s SLO"
-            description: |
-              At least 1% of SANDBOXED dispatches are taking longer than
-              10 seconds end-to-end. This is the hard user-facing SLO;
-              a sustained breach blocks UNTRUSTED-content missions for
-              users.
-
-        # R5.3: sandbox unavailable for >5m.
-        - alert: SandboxUnavailable
-          expr: |
-            avg_over_time(gibson_sandbox_health{status="up"}[5m]) < 0.5
-          for: 5m
-          labels:
-            severity: critical
-            component: setec-sandbox
-          annotations:
-            summary: "Setec sandbox unavailable for >5m — SANDBOXED dispatch failing closed"
-            description: |
-              The daemon's 30s health probe has reported the Setec
-              frontend unreachable for the majority of the last 5
-              minutes. UNTRUSTED-content missions are failing closed with
-              `sandbox_unavailable`; trusted-content missions continue.
-              The R3.4 OverrideDispatchPolicy RPC is the documented
-              escape hatch (1-hour TTL, audit-logged).
-
-        # NFR-R1 + Scenario 4: spot-eviction storm signal.
-        # health=degraded for >5m means the eviction handler in
-        # core/gibson/internal/sandbox/eviction has been cancelling
-        # in-flight detonations (the gauge flip, NOT a Setec frontend
-        # outage). Sustained degraded means too many spot evictions
-        # in flight.
-        - alert: SandboxSpotEvictionStorm
-          expr: |
-            avg_over_time(gibson_sandbox_health{status="degraded"}[5m]) > 0.5
-          for: 5m
-          labels:
-            severity: warning
-            component: setec-sandbox
-          annotations:
-            summary: "Sustained spot-eviction churn — consider raising on-demand fallback cap"
-            description: |
-              The sandbox health gauge has been in `degraded` state for
-              >5m, which means the in-daemon eviction handler is
-              cancelling detonations in response to AWS spot-interruption
-              notices faster than the on-demand fallback ASG can
-              backfill. Mitigation: open a GitOps PR raising
-              `setec.spotEvictionFallback.onDemandMax` (current cap is 2);
-              wait for ArgoCD sync (≤5 min); revert once the spot pool
-              recovers. Escalate to the EKS sister-spec owner if
-              sustained >24h.
-
-        # R4.4: per-tenant quota-exceeded rate elevated.
-        # The alert uses the sum across tenants intentionally — a
-        # per-tenant alert would create cardinality + alert-storm
-        # problems. Operators triage which tenant via the dashboard
-        # panel keyed off gibson_sandbox_detonation_total{outcome=
-        # "quota_exceeded"}.
-        - alert: SandboxQuotaExceededRate
-          expr: |
-            sum(rate(gibson_sandbox_detonation_total{outcome="quota_exceeded"}[5m])) > 0.1
-          for: 15m
-          labels:
-            severity: warning
-            component: setec-sandbox
-          annotations:
-            summary: "Setec quota_exceeded rejections elevated across tenants"
-            description: |
-              SANDBOXED dispatches are being rejected with
-              `quota_exceeded` at a sustained rate above 0.1/sec for 15m.
-              Likely a single tenant driving traffic past the per-tenant
-              cap; check the Sandbox Health dashboard's "quota-exceeded
-              by tenant" panel and follow setec-cost-spike.md.
----
-# Source: gibson/charts/gibson-workloads/templates/ratelimit/alertrule.yaml
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-metadata:
-  name: gibson-ratelimit-alerts
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.132.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: ratelimit
-spec:
-  groups:
-    - name: ratelimit-degradation
-      rules:
-        - alert: EdgePerClientQuotaFailingOpen
-          expr: |
-            sum(increase({__name__=~"envoy_cluster_ratelimit_(public|api)_per_client_failure_mode_allowed"}[5m])) > 0
-          for: 2m
-          labels:
-            severity: page
-            component: ratelimit
-          annotations:
-            summary: "Edge per-client quota is failing open — requests pass unchecked"
-            description: |
-              The edge Envoy could not reach the ratelimit service for at least
-              one request in the last 5 minutes and let it through under the
-              per-pod fuse only. Per-client quotas (signup, login) are NOT being
-              enforced. Check gibson-ratelimit pods, the SPIFFE mTLS sidecar,
-              and gibson-redis-stack.
----
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/runtime-classes.yaml
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
@@ -19827,126 +22994,6 @@ handler: runc
 scheduling:
   nodeSelector:
     setec.zeroroot.ai/runtime.runc: "true"
----
-# Source: gibson/charts/gibson-workloads/templates/envoy/servicemonitor.yaml
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: gibson-envoy
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.132.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: envoy
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: gibson-workloads
-      app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: envoy
-  endpoints:
-    - port: admin
-      path: /stats/prometheus
-      interval: 30s
----
-# Source: gibson/charts/gibson-workloads/templates/ext-authz/servicemonitor.yaml
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: gibson-ext-authz
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.132.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: ext-authz
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: gibson-workloads
-      app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: ext-authz
-  endpoints:
-    - port: health
-      path: /metrics
-      interval: 30s
----
-# Source: gibson/charts/gibson-workloads/templates/gibson/servicemonitor.yaml
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: gibson-gibson-workloads
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.132.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: daemon
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: gibson-workloads
-      app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: daemon
-  endpoints:
-    - port: metrics
-      path: /metrics
-      interval: 30s
-      # spec security-hardening R20: daemon :9090 is mTLS-only
-      # (gibson-daemon-metrics-tls Secret). Plain HTTP scrapes trigger a
-      # TLS handshake error every 15s and return no metrics. insecureSkipVerify
-      # is appropriate here — the metrics-tls cert is issued by the cluster-
-      # internal selfsigned-ca Issuer (kind) / openbao-issuer (prod), neither
-      # of which is in the Prometheus trust bundle. Network-level trust is
-      # established by the cluster NetworkPolicy. deploy#461.
-      scheme: https
-      tlsConfig:
-        insecureSkipVerify: true
----
-# Source: gibson/charts/gibson-workloads/templates/observability/tenant-neo4j-servicemonitor.yaml
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: gibson-tenant-neo4j
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.132.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: tenant-neo4j
-    # Match the Prometheus Operator's serviceMonitorSelector if configured.
-    release: gibson
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/component: tenant-neo4j
-  endpoints:
-    - port: metrics
-      path: /metrics
-      interval: 30s
-      scrapeTimeout: 10s
-      # Promote the per-tenant label so PromQL can filter by tenant_id.
-      relabelings:
-        - sourceLabels:
-            - __meta_kubernetes_service_label_gibson_io_tenant_id
-          targetLabel: tenant_id
-        - sourceLabels:
-            - __meta_kubernetes_service_label_gibson_io_tier
-          targetLabel: tier
-  # Tenants land in per-tenant namespaces under the operator-provisioning
-  # path, so scrape across all namespaces — the label selector above is the
-  # only filter that matters.
-  namespaceSelector:
-    any: true
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/runtime-agent-node-guard.yaml
 # Node-write guard for the runtime-agent ServiceAccount
@@ -20443,6 +23490,258 @@ spec:
     namespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: gibson
+---
+# Source: gibson/charts/cert-manager/templates/webhook-validating-webhook.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: cert-manager-webhook
+  labels:
+    app: webhook
+    app.kubernetes.io/name: webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: "webhook"
+    app.kubernetes.io/version: "v1.21.1"
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: cert-manager-v1.21.1
+  annotations:
+    cert-manager.io/inject-ca-from-secret: "gibson/cert-manager-webhook-ca"
+    argocd.argoproj.io/sync-wave: "-20"
+webhooks:
+  - name: webhook.cert-manager.io
+    namespaceSelector:
+      matchExpressions:
+      - key: cert-manager.io/disable-validation
+        operator: NotIn
+        values:
+        - "true"
+    rules:
+      - apiGroups:
+          - "cert-manager.io"
+          - "acme.cert-manager.io"
+        apiVersions:
+          - "v1"
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - "*/*"
+    admissionReviewVersions: ["v1"]
+    # This webhook only accepts v1 cert-manager resources.
+    # Equivalent matchPolicy ensures that non-v1 resource requests are sent to
+    # this webhook (after the resources have been converted to v1).
+    matchPolicy: Equivalent
+    timeoutSeconds: 30
+    failurePolicy: Fail
+    sideEffects: None
+    clientConfig:
+      service:
+        name: cert-manager-webhook
+        namespace: gibson
+        path: /validate
+---
+# Source: gibson/charts/cnpg/templates/validatingwebhookconfiguration.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: cnpg-validating-webhook-configuration
+  labels:
+    helm.sh/chart: cnpg-0.29.0
+    app.kubernetes.io/name: cloudnative-pg
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "1.30.0"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: cnpg-webhook-service
+      namespace: gibson
+      path: /validate-postgresql-cnpg-io-v1-backup
+      port: 443
+  failurePolicy: Fail
+  name: vbackup.cnpg.io
+  rules:
+  - apiGroups:
+    - postgresql.cnpg.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - backups
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: cnpg-webhook-service
+      namespace: gibson
+      path: /validate-postgresql-cnpg-io-v1-cluster
+      port: 443
+  failurePolicy: Fail
+  name: vcluster.cnpg.io
+  rules:
+  - apiGroups:
+    - postgresql.cnpg.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - clusters
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: cnpg-webhook-service
+      namespace: gibson
+      path: /validate-postgresql-cnpg-io-v1-scheduledbackup
+      port: 443
+  failurePolicy: Fail
+  name: vscheduledbackup.cnpg.io
+  rules:
+  - apiGroups:
+    - postgresql.cnpg.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - scheduledbackups
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: cnpg-webhook-service
+      namespace: gibson
+      path: /validate-postgresql-cnpg-io-v1-database
+      port: 443
+  failurePolicy: Fail
+  name: vdatabase.cnpg.io
+  rules:
+  - apiGroups:
+    - postgresql.cnpg.io
+    apiVersions:
+    - v1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - databases
+  sideEffects: None
+- admissionReviewVersions:
+    - v1
+  clientConfig:
+    service:
+      name: cnpg-webhook-service
+      namespace: gibson
+      path: /validate-postgresql-cnpg-io-v1-pooler
+      port: 443
+  failurePolicy: Fail
+  name: vpooler.cnpg.io
+  rules:
+    - apiGroups:
+        - postgresql.cnpg.io
+      apiVersions:
+        - v1
+      operations:
+        - CREATE
+        - UPDATE
+      resources:
+        - poolers
+  sideEffects: None
+---
+# Source: gibson/charts/external-secrets/templates/validatingwebhook.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: secretstore-validate
+  labels:
+    
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets-webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v2.10.0"
+    app.kubernetes.io/managed-by: Helm
+    external-secrets.io/component: webhook
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+webhooks:
+- name: "validate.secretstore.external-secrets.io"
+  rules:
+  - apiGroups:   ["external-secrets.io"]
+    apiVersions: ["v1"]
+    operations:  ["CREATE", "UPDATE", "DELETE"]
+    resources:   ["secretstores"]
+    scope:       "Namespaced"
+  clientConfig:
+    service:
+      namespace: gibson
+      name: external-secrets-webhook
+      path: /validate-external-secrets-io-v1-secretstore
+  admissionReviewVersions: ["v1", "v1beta1"]
+  sideEffects: None
+  timeoutSeconds: 5
+  failurePolicy: Fail
+
+- name: "validate.clustersecretstore.external-secrets.io"
+  rules:
+  - apiGroups:   ["external-secrets.io"]
+    apiVersions: ["v1"]
+    operations:  ["CREATE", "UPDATE", "DELETE"]
+    resources:   ["clustersecretstores"]
+    scope:       "Cluster"
+  clientConfig:
+    service:
+      namespace: gibson
+      name: external-secrets-webhook
+      path: /validate-external-secrets-io-v1-clustersecretstore
+  admissionReviewVersions: ["v1", "v1beta1"]
+  sideEffects: None
+  timeoutSeconds: 5
+  failurePolicy: Fail
+---
+# Source: gibson/charts/external-secrets/templates/validatingwebhook.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: externalsecret-validate
+  labels:
+    
+    helm.sh/chart: external-secrets-2.10.0
+    app.kubernetes.io/name: external-secrets-webhook
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v2.10.0"
+    app.kubernetes.io/managed-by: Helm
+    external-secrets.io/component: webhook
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+webhooks:
+- name: "validate.externalsecret.external-secrets.io"
+  rules:
+  - apiGroups:   ["external-secrets.io"]
+    apiVersions: ["v1"]
+    operations:  ["CREATE", "UPDATE", "DELETE"]
+    resources:   ["externalsecrets"]
+    scope:       "Namespaced"
+  clientConfig:
+    service:
+      namespace: gibson
+      name: external-secrets-webhook
+      path: /validate-external-secrets-io-v1-externalsecret
+  admissionReviewVersions: ["v1", "v1beta1"]
+  sideEffects: None
+  timeoutSeconds: 5
+  failurePolicy: Fail
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/webhook.yaml
 apiVersion: admissionregistration.k8s.io/v1

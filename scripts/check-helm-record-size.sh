@@ -25,7 +25,7 @@
 # on. Failing at 80% leaves room to see it coming and act on a normal day.
 #
 # THIS IS AN EARLY WARNING, NOT A PROOF. The proof that a chart installs is an
-# install, and scripts/vanilla-up.sh does one on a cluster.
+# install, and scripts/baseline-up.sh does one on a cluster.
 #
 # The estimate here is the manifest plus the chart's own templates and files,
 # gzipped and base64-scaled. Helm stores rather more: the manifest sits
@@ -91,7 +91,7 @@ record_bytes() {
 # umbrella has required values; the CRD charts render bare.
 values_for() {
   case "$1" in
-    gibson) printf '%s/helm/gibson/values-vanilla.yaml' "$ROOT" ;;
+    gibson) printf '%s/helm/gibson/values-baseline.yaml' "$ROOT" ;;
     *)      printf '' ;;
   esac
 }
