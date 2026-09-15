@@ -1,0 +1,54 @@
+{{/*
+The per-tier sizing for per-tenant Neo4j, delivered to the tenant-operator.
+
+WHY THIS EXISTS
+
+The operator carries an inline tier table documented as a fallback that
+applies "only when the ConfigMap is absent", with production sizing arriving
+here from chart values. This ConfigMap is what "here" means, and until this
+template it was never rendered.
+
+So the fallback was not a fallback. It was the only path. STAGING AND
+PRODUCTION ran the dev-shaped `team` sizing — a number chosen so a team tenant
+can schedule on a single-node kind cluster — while `tenantNeo4j.tiers` sat in
+values.yaml, read by nothing.
+
+WHAT IT CARRIES
+
+One key, `tiers.yaml`, holding tier -> {storage, cpu, memory}. The keys are
+the tier ids a Tenant CR carries, because that is what the operator resolves.
+
+`memory` is one number used for BOTH the container's request and its limit.
+The operator pins the JVM heap to a quarter of it and the page cache to an
+eighth, so a request and limit that disagreed would size the JVM against
+memory the container may not get.
+
+WHAT READS IT
+
+gibson operators/tenant/internal/dataplane/neo4j.go. A tier it finds here wins
+over its inline table. A tier it does not find keeps the inline aliasing, so
+the legacy ids the migrate job will rewrite still resolve. A table it cannot
+parse FAILS the provision rather than falling through to dev sizes, because
+falling through is the defect this closes.
+
+It lives in the release namespace, not a tenant namespace: it is one table for
+the whole platform, and the operator reads it once per provision.
+*/}}
+{{- if .Values.tenantNeo4j.tiers }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tenant-neo4j-template
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tenant-neo4j
+data:
+  tiers.yaml: |
+    {{- range $tier, $size := .Values.tenantNeo4j.tiers }}
+    {{ $tier }}:
+      storage: {{ required (printf "tenantNeo4j.tiers.%s.storage is required: the operator refuses a tier with no size rather than silently using its dev default" $tier) $size.storage | quote }}
+      cpu: {{ required (printf "tenantNeo4j.tiers.%s.cpu is required" $tier) $size.cpu | quote }}
+      memory: {{ required (printf "tenantNeo4j.tiers.%s.memory is required" $tier) $size.memory | quote }}
+    {{- end }}
+{{- end }}

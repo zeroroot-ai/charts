@@ -6089,6 +6089,34 @@ data:
     openshift-
     kyverno-
 ---
+# Source: gibson/charts/gibson-workloads/templates/operations/tenant-neo4j-template.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tenant-neo4j-template
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.132.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: tenant-neo4j
+data:
+  tiers.yaml: |
+    enterprise:
+      storage: "200Gi"
+      cpu: "1"
+      memory: "8Gi"
+    org:
+      storage: "50Gi"
+      cpu: "500m"
+      memory: "4Gi"
+    team:
+      storage: "10Gi"
+      cpu: "100m"
+      memory: "1Gi"
+---
 # Source: gibson/charts/gibson-workloads/templates/ratelimit/configmap.yaml
 apiVersion: v1
 kind: ConfigMap
