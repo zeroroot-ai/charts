@@ -100,8 +100,31 @@ global:
   domain: zeroroot.ai
   networkPolicy:
     # CIDRs the kube-apiserver answers from, for the few policies that
-    # narrow egress (OpenBao). Empty means no rule: kind does not police
-    # node-bound traffic. An EKS estate lists TWO things here: its VPC CIDR
+    # narrow egress (OpenBao).
+    #
+    # Empty means NO RULE, and that is a trap rather than a default. It was
+    # written as "kind does not police node-bound traffic", which is true and
+    # is not a reason: kind's CNI does not implement NetworkPolicy at all, so
+    # every policy this chart ships is inert there and an omission is
+    # invisible. k3s enforces them. On k3d, OpenBao's first Kubernetes-auth
+    # login died with
+    #
+    #   Post ".../tokenreviews": dial tcp 10.43.0.1:443: connect: connection
+    #   refused
+    #
+    # which the login reports as a bare "permission denied", and from there
+    # the secret store is InvalidProviderConfig, every ExternalSecret is
+    # SecretSyncedError, and the platform never finishes. Measured 2026-09-14
+    # (charts#80).
+    #
+    # scripts/vanilla-up.sh now passes the cluster's own `kubernetes` Service
+    # ClusterIP here on every substrate, which is the address a pod reaches
+    # the apiserver through. A manual `helm install` must pass it too:
+    #
+    #   --set-json "global.networkPolicy.apiServerCIDRs=[\"$(kubectl get svc \
+    #     kubernetes -o jsonpath='{.spec.clusterIP}')/32\"]"
+    #
+    # An EKS estate lists TWO things here: its VPC CIDR
     # (the control-plane ENIs) and the `kubernetes` Service ClusterIP (the
     # first address of the cluster's service CIDR). The AWS VPC CNI network
     # policy agent judges egress against the destination before kube-proxy
