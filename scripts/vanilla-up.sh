@@ -149,6 +149,36 @@ case "$K8S_SVC_IP" in
 esac
 ENVOY_CLUSTER_IP="${ENVOY_CLUSTER_IP:-${K8S_SVC_IP%.*.*}.0.250}"
 echo "service CIDR anchor: ${K8S_SVC_IP} -> pinning envoy at ${ENVOY_CLUSTER_IP}"
+# The apiserver egress the OpenBao policy must allow. Its Kubernetes auth
+# method calls TokenReview against the apiserver on every login, and without
+# this rule the login fails, the secret store never validates, every
+# ExternalSecret sits in SecretSyncedError and the platform never finishes.
+# Measured on k3d 2026-09-14 (charts#80): one missing egress rule, a whole
+# screen of symptoms, and a bare "permission denied" that names none of it.
+#
+# TWO addresses, because CNIs disagree about WHEN they judge a packet.
+#
+#   the Service ClusterIP     The AWS VPC CNI's policy agent judges egress
+#     against the destination BEFORE kube-proxy rewrites it, so a pod dialing
+#     kubernetes.default.svc is matched on the ClusterIP (staging 2026-09-10).
+#
+#   the Endpoints address     kube-router, which k3s ships, judges AFTER the
+#     rewrite, so the ClusterIP rule never matches and only the real apiserver
+#     address does. Proven on k3d 2026-09-14: with the ClusterIP alone the
+#     login still failed; adding the endpoint address made it succeed.
+#
+# Allowing both is correct everywhere and costs nothing: they are the same
+# apiserver by two names.
+#
+# Passed on EVERY substrate, not only where someone remembered to list CIDRs.
+# kind's CNI does not implement NetworkPolicy at all, so every policy this
+# chart ships is inert there and an omission like this is invisible until the
+# first cluster that enforces them.
+API_CIDRS="${K8S_SVC_IP}/32"
+for ep in $(kubectl get endpoints kubernetes -o jsonpath='{range .subsets[*].addresses[*]}{.ip}{"\n"}{end}' 2>/dev/null); do
+  API_CIDRS="${API_CIDRS},${ep}/32"
+done
+echo "apiserver egress: ${API_CIDRS}"
 
 # Dependencies are built only in LOCAL mode. A published chart already carries
 # its subcharts inside the artifact, and `helm dependency update` against an
@@ -321,6 +351,7 @@ helm upgrade --install "$RELEASE" "${GIBSON_CHART[@]}" \
   "${EXTRA_VALUES_ARGS[@]}" \
   "${BUCKET_ARGS[@]}" \
   --set-json "gibson-workloads.spire.identityAdmission.workloadCreators=[\"${PRINCIPAL}\"]" \
+  --set "global.networkPolicy.apiServerCIDRs={${API_CIDRS}}" \
   --set "gibson-workloads.envoy.service.clusterIP=${ENVOY_CLUSTER_IP}" \
   --set "gibson-workloads.dashboard.envoy.service.clusterIP=${ENVOY_CLUSTER_IP}" \
   --namespace "$NS" --timeout 30m

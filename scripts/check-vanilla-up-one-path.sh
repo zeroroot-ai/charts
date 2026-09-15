@@ -60,6 +60,19 @@ assert_one_path() {
     fi
   done
 
+  # 4. The apiserver egress CIDR is passed. OpenBao's Kubernetes auth calls
+  #    TokenReview on every login and a pod reaches the apiserver through the
+  #    `kubernetes` Service ClusterIP. Omit it and the policy has no such
+  #    egress rule: on kind nothing notices, because kind's CNI does not
+  #    implement NetworkPolicy and every policy here is inert; on k3s the
+  #    login fails, the secret store never validates, and the platform never
+  #    finishes. The installer discovers that address already, for the Envoy
+  #    ClusterIP anchor, so there is no reason for it to be optional.
+  if ! printf '%s\n' "$body" | grep -q 'apiServerCIDRs'; then
+    echo "the install passes no global.networkPolicy.apiServerCIDRs, so OpenBao has no egress to the apiserver and its Kubernetes-auth login fails wherever NetworkPolicy is actually enforced"
+    return 1
+  fi
+
   # 3. The order is fixed.
   mapfile -t seen < <(printf '%s\n' "$body" | grep -oE "chart_args (gibson-operator-crds|gibson-crds|gibson-velero|gibson)\b" | awk '{print $2}')
   if [ "${#seen[@]}" -ne "${#ORDER[@]}" ]; then
@@ -99,6 +112,13 @@ open(dst, "w").write(s)
 PY
 if assert_one_path "$WORK/swapped.sh" >/dev/null 2>&1; then
   echo "✗ self-test broken: installing the CRDs after the umbrella must be rejected" >&2
+  exit 1
+fi
+
+# --- self-test 3: a missing apiserver CIDR is rejected ---------------------
+grep -v 'apiServerCIDRs' "$SCRIPT" > "$WORK/nocidr.sh"
+if assert_one_path "$WORK/nocidr.sh" >/dev/null 2>&1; then
+  echo "✗ self-test broken: an install that passes no apiServerCIDRs must be rejected" >&2
   exit 1
 fi
 
