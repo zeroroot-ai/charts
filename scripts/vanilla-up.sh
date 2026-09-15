@@ -19,7 +19,15 @@
 # Env:
 #   NS             namespace to install into            (default: gibson)
 #   RELEASE        helm release name                    (default: gibson)
-#   CHART_DIR      chart root                           (default: helm)
+#   CHART_DIR      chart root, LOCAL mode               (default: helm)
+#   CHART_VERSION  a published version, e.g. 0.127.2     (default: empty)
+#                  Set it and the four releases come from the REGISTRY
+#                  instead of CHART_DIR. That is the artifact a stranger
+#                  installs, and until it was reachable from here nothing in
+#                  the estate had ever installed it onto a local cluster:
+#                  this script built from source, and the one script that did
+#                  pull the published charts seeded nothing and targeted EKS.
+#   REGISTRY       OCI chart repo, PUBLISHED mode        (default: ghcr.io/zeroroot-ai/charts)
 #   VALUES         profile values file                  (default: helm/gibson/values-vanilla.yaml)
 #   SUBSTRATE_DIR  where stage 0 keeps its state per environment
 #                  (default: ${XDG_STATE_HOME:-$HOME/.local/state}/zeroroot/substrate)
@@ -43,6 +51,26 @@ EXTRA_VALUES="${EXTRA_VALUES:-}"
 EXTRA_VALUES_ARGS=()
 for _ov in $EXTRA_VALUES; do EXTRA_VALUES_ARGS+=(-f "$_ov"); done
 TIMEOUT="${TIMEOUT:-10m}"
+CHART_VERSION="${CHART_VERSION:-}"
+REGISTRY="${REGISTRY:-ghcr.io/zeroroot-ai/charts}"
+
+# chart_args <name> — the helm arguments that name one chart, in whichever
+# mode this run is in. One line per argument, because a version is two.
+#
+# ONE helper for all four releases, on purpose. The published mode and the
+# local mode must install the SAME charts in the SAME order, or "it works from
+# source" and "it works from the registry" stop meaning the same thing. A
+# second copy of that decision is how they would drift, and nothing would
+# notice: nothing in the estate installed the published artifact at all until
+# this existed. scripts/check-vanilla-up-one-path.sh fails the build if a helm
+# install in this file names a chart any other way.
+chart_args() {
+  if [ -n "$CHART_VERSION" ]; then
+    printf 'oci://%s/%s\n--version\n%s\n' "$REGISTRY" "$1" "$CHART_VERSION"
+  else
+    printf '%s/%s\n' "$CHART_DIR" "$1"
+  fi
+}
 # ToolHive operator version. Pinned; bump deliberately — the
 # ConnectorInstance wrapper absorbs the change. Serves v1alpha1 as of 0.12.1.
 TOOLHIVE_VERSION="${TOOLHIVE_VERSION:-0.12.1}"
@@ -122,7 +150,34 @@ esac
 ENVOY_CLUSTER_IP="${ENVOY_CLUSTER_IP:-${K8S_SVC_IP%.*.*}.0.250}"
 echo "service CIDR anchor: ${K8S_SVC_IP} -> pinning envoy at ${ENVOY_CLUSTER_IP}"
 
+# Dependencies are built only in LOCAL mode. A published chart already carries
+# its subcharts inside the artifact, and `helm dependency update` against an
+# oci:// reference is not a thing that exists.
+if [ -n "$CHART_VERSION" ]; then
+  log "published mode: charts come from ${REGISTRY} at ${CHART_VERSION}"
+  # The PROFILE has to come from the artifact too, or published mode is a lie:
+  # `helm install oci://...` cannot -f a file that lives inside the chart, and
+  # a stranger has no checkout to read values-vanilla.yaml out of — this
+  # organization's repositories are private while the chart artifact is not.
+  # The artifact does carry every profile file, so pull it once and read the
+  # profile from there. Then the only thing an installer needs is helm.
+  # An explicit VALUES still wins: that is how a tester overrides the profile.
+  if [ "$VALUES" = "helm/gibson/values-vanilla.yaml" ]; then
+    PROFILE_DIR="$(mktemp -d)"
+    trap 'rm -rf "$PROFILE_DIR"' EXIT
+    helm pull "oci://${REGISTRY}/gibson" --version "$CHART_VERSION" \
+      --untar --untardir "$PROFILE_DIR" >/dev/null
+    VALUES="${PROFILE_DIR}/gibson/values-vanilla.yaml"
+    [ -r "$VALUES" ] || { echo "FATAL: ${REGISTRY}/gibson:${CHART_VERSION} carries no values-vanilla.yaml, so there is no profile to install" >&2; exit 1; }
+    log "profile from the artifact: gibson/values-vanilla.yaml"
+  fi
+else
 log "building chart dependencies (bottom-up)"
+# gibson-operator-crds has a file:// dependency of its own (charts#82) and is
+# installed below, so it is built here too. The list is written out by hand,
+# which is exactly how the chart was missed when it was added: the render
+# then fails with "missing in charts/ directory: gibson-operator-crd-files".
+helm dependency update "${CHART_DIR}/gibson-operator-crds" >/dev/null
 helm dependency update "${CHART_DIR}/gibson-crds" >/dev/null
 helm dependency update "${CHART_DIR}/gibson-operators" >/dev/null
 helm dependency update "${CHART_DIR}/gibson-workloads" >/dev/null
@@ -135,6 +190,7 @@ helm dependency update "${CHART_DIR}/gibson" >/dev/null
 # carry the stamp (CHART_DEPS_VELERO); this script is the one other place
 # that builds dependencies, and it must stay complete.
 helm dependency update "${CHART_DIR}/gibson-velero" >/dev/null
+fi
 
 # ---------------------------------------------------------------------------
 # Cluster prerequisite: ToolHive.
@@ -169,9 +225,11 @@ kubectl get namespace "$NS" >/dev/null 2>&1 || kubectl create namespace "$NS"
 # every cluster until they were split (charts#82). Apart they are 611 KB and
 # 519 KB. A cluster that already runs cert-manager, External Secrets or
 # CloudNativePG skips this release and keeps its own CRDs.
-helm upgrade --install gibson-operator-crds "${CHART_DIR}/gibson-operator-crds" \
+mapfile -t OPCRDS_CHART < <(chart_args gibson-operator-crds)
+helm upgrade --install gibson-operator-crds "${OPCRDS_CHART[@]}" \
   --namespace "$NS" --wait --timeout 5m
-helm upgrade --install gibson-crds "${CHART_DIR}/gibson-crds" \
+mapfile -t CRDS_CHART < <(chart_args gibson-crds)
+helm upgrade --install gibson-crds "${CRDS_CHART[@]}" \
   --namespace "$NS" --wait --timeout 5m
 # Established, not merely created: a CRD the API server has not accepted yet is
 # indistinguishable from a missing one when the umbrella's manifests are
@@ -249,14 +307,16 @@ BUCKET_ARGS=(
 )
 
 log "phase 1b — velero (its own release, namespace velero)"
-helm upgrade --install velero "${CHART_DIR}/gibson-velero" \
+mapfile -t VELERO_CHART < <(chart_args gibson-velero)
+helm upgrade --install velero "${VELERO_CHART[@]}" \
   --namespace velero \
   --set "bucket.name=${BUCKET_NAME}" \
   --set "bucket.endpoint=${BUCKET_ENDPOINT}" \
   --wait --timeout 10m
 
 log "phase 2 — the platform"
-helm upgrade --install "$RELEASE" "${CHART_DIR}/gibson" \
+mapfile -t GIBSON_CHART < <(chart_args gibson)
+helm upgrade --install "$RELEASE" "${GIBSON_CHART[@]}" \
   -f "$VALUES" \
   "${EXTRA_VALUES_ARGS[@]}" \
   "${BUCKET_ARGS[@]}" \

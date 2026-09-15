@@ -24,12 +24,30 @@
 # release that crosses it, which is the release you least want to be blocked
 # on. Failing at 80% leaves room to see it coming and act on a normal day.
 #
-# This measures the MANIFEST, which is what grows. The record also carries the
-# top-level chart's own templates and files; the memory of the 2026-09-01
-# measurement records that estimating the whole record offline over-states it
-# by about half again, so a manifest-only number with a 20% margin is both
-# honest and conservative. The real proof that a chart installs is an install,
-# and scripts/vanilla-up.sh does that on a cluster.
+# THIS IS AN EARLY WARNING, NOT A PROOF. The proof that a chart installs is an
+# install, and scripts/vanilla-up.sh does one on a cluster.
+#
+# The estimate here is the manifest plus the chart's own templates and files,
+# gzipped and base64-scaled. Helm stores rather more: the manifest sits
+# uncompressed inside a JSON document that also holds the chart metadata and
+# the resolved values, and the whole document is gzipped. So the estimate runs
+# LOW, and by a factor that depends on the shape of the chart rather than its
+# size — a chart that is mostly manifest lands near 1.3, one with many small
+# top-level templates near 2.1, a tiny chart near 4.5 where the fixed overhead
+# dominates.
+#
+# A single fudge factor therefore cannot work: applied high enough to protect
+# the umbrella it fails the operator CRDs, which are nowhere near the cap.
+# So each chart carries its OWN factor, measured by installing it on a kind
+# cluster and reading the Secret back. Every number below is a measurement,
+# not a guess, and it is dated. A chart with no entry uses the worst factor
+# seen, and says so.
+#
+#   measured 2026-09-14, kind, helm 3.18.4    estimate   actual   factor
+#     gibson                                    283 KB   594 KB     2.10
+#     gibson-crds                                43 KB   136 KB     3.16
+#     gibson-operator-crds                      520 KB   699 KB     1.34
+#     gibson-velero                              11 KB    49 KB     4.45
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,9 +57,17 @@ ROOT="$(cd "$HERE/.." && pwd)"
 CAP=1048576
 MARGIN_PCT="${MARGIN_PCT:-80}"
 
-# The charts that are PUBLISHED and therefore installed by helm. A chart that
-# only ever renders through Argo is not listed, because Argo writes no record.
+# The charts that are PUBLISHED and therefore installed by helm, each with the
+# factor measured for it (see the header). A chart that only ever renders
+# through Argo is not listed, because Argo writes no record.
 CHARTS=(gibson gibson-crds gibson-operator-crds gibson-velero)
+FACTOR_gibson=210
+FACTOR_gibson_crds=316
+FACTOR_gibson_operator_crds=134
+FACTOR_gibson_velero=445
+# Used for a chart nobody has measured yet. The worst seen, so a new chart is
+# over-reported rather than under-reported, and the message says to measure it.
+FACTOR_DEFAULT=445
 
 # record_bytes <chart-dir> [values-file] — the manifest as Helm would store
 # it: gzip, then base64. Prints the byte count.
@@ -79,10 +105,18 @@ for chart in "${CHARTS[@]}"; do
     echo "✗ check-helm-record-size: helm template failed for $chart, so its record size is unknown" >&2
     exit 2
   fi
-  pct=$(( bytes * 100 / CAP ))
+  # The chart's own measured factor, in hundredths.
+  var="FACTOR_${chart//-/_}"
+  factor="${!var:-}"
+  measured=yes
+  if [ -z "$factor" ]; then factor="$FACTOR_DEFAULT"; measured=no; fi
+  estimate=$(( bytes * factor / 100 ))
+  pct=$(( estimate * 100 / CAP ))
   mark=" "
   if [ "$pct" -ge "$MARGIN_PCT" ]; then mark="✗"; fail=1; fi
-  printf '  %s %-22s %7d KB %6d%%\n' "$mark" "$chart" "$((bytes / 1024))" "$pct"
+  note=""
+  [ "$measured" = no ] && note="  (no measured factor; using the worst seen — install it once and record its own)"
+  printf '  %s %-22s %7d KB %6d%%%s\n' "$mark" "$chart" "$((estimate / 1024))" "$pct" "$note"
 done
 
 if [ "$fail" = 1 ]; then
