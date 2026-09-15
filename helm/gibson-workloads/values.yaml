@@ -1102,11 +1102,18 @@ dashboard:
   image:
     repository: ghcr.io/zeroroot-ai/dashboard
     # deploy#789: digest-pinned for staging/prod immutability.
-    # The dashboard package publishes v0.x release tags + main/sha-* (no
-    # v1.11.0), so the digest below is the current `main` (staging/prod deploy
-    # reality). kind keeps a moving :main tag (values-kind.yaml), exempt.
-    # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/dashboard/versions
-    tag: "main@sha256:6f52127ef0b5559c4070c23dad510d027e42081c186bb5beec09ebf5e9a43954"
+    #
+    # Pinned to a RELEASE TAG, like every other first-party image here. It
+    # used to track `main@<digest>`, which is a different thing wearing the
+    # same shape: re-pinning it shipped whatever else had merged since the
+    # last bump, so nobody could bump it to deliver one fix. A release tag
+    # names one commit, and `scripts/bump-image-digest.py --list` reads the
+    # same way for every row.
+    #
+    # kind keeps a moving :main tag (values-kind.yaml), exempt on purpose.
+    # Bump: scripts/bump-image-digest.py --image dashboard --ref v<x.y.z> \
+    #         --digest "$(HEAD /v2/zeroroot-ai/dashboard/manifests/v<x.y.z>)"
+    tag: "v0.120.12@sha256:6c6da5d393aa7eba837cb3d68388248514931b3ba86d73615800feb1f8d90e8e"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
