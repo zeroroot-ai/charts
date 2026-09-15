@@ -1,0 +1,179 @@
+# values-developer.yaml — the DEVELOPER rung of the profile ladder (ADR-0090).
+#
+#   baseline < developer < CI < staging < production
+#
+# Layered on values-baseline.yaml, never installed alone:
+#
+#   helm install gibson . -f values-baseline.yaml -f values-developer.yaml
+#
+# This is the profile for one local node. kind and k3d both get it, and they
+# get the same one: the owner decided on 2026-09-15 that every environment
+# below staging shares one footprint, so a failure on a laptop and a failure
+# in CI are the same failure.
+#
+# WHAT IT DOES
+#   It lowers CPU and memory *requests* only, never limits. A request is a
+#   scheduling reservation, so this changes what the scheduler sets aside and
+#   nothing about what a pod may use at runtime. Every pod still bursts to its
+#   limit. On a single-node cluster there is nothing to protect against
+#   contention, so tight packing changes nothing about WHAT the platform does.
+#
+# WHY IT IS NEEDED
+#   The baseline requests about 2.85 CPU of reservations. That is the honest
+#   self-hosted floor and it MUST NOT be lowered in the baseline: an operator's
+#   single-node install needs it. One local node cannot meet it. With the real
+#   requests the daemon, neo4j, OpenBao and the rest never schedule ("0/1 nodes
+#   are available: 1 Insufficient cpu"), OpenBao never unseals, no admin token,
+#   no pull secret, no workload Ready, and the post-install hook times out at
+#   30 minutes. Measured on run 32773702081. The node is the constraint, not
+#   the product.
+#
+#   Memory matters as much as CPU. With CPU alone shrunk, run 32839842295
+#   requested 7264Mi against about 5.5 GB allocatable and the CNPG initdb pod
+#   sat Pending for 30 minutes, starving SPIRE, OpenFGA and Zitadel behind it.
+#
+# WHAT IS NOT HERE
+#   The metrics-server add-on is not a chart in this repository. The bringup
+#   verb installs it directly, so its rung overlay stays with that verb in
+#   zeroroot-ai/hosted. This file cannot reach it.
+#
+# WHEN TO CHANGE IT
+#   - the node grows past 4 cores: this rung stops being necessary;
+#   - a new component with a large request joins the baseline: it will not
+#     schedule until it is shrunk here too (symptom: a Pending pod with
+#     "Insufficient cpu");
+#   - a request's value path moves: a stale path here silently does nothing,
+#     and the pod goes Pending. The budget guard in zeroroot-ai/hosted renders
+#     baseline plus this file and fails when the total exceeds what one
+#     2-vCPU node can schedule.
+#
+# neo4j is NOT lowered: its chart refuses to render below 500m CPU and 2Gi
+#   ("Provided cpu value ... is less than minimum"), so that floor is what
+#   every other request here makes room for.
+#
+# IDENTICAL TO values-ci.yaml TODAY. They are two files so either may change
+#   later without a rename. Nothing forces them equal, and a guard that did
+#   would defeat the reason for two names. If they ever differ, say why in the
+#   file that changed, because nothing else will catch it.
+gibson-workloads:
+  # daemon — the single biggest request (1000m / 2Gi). 50m / 512Mi schedules;
+  # it bursts to its limits.
+  gibson:
+    resources:
+      requests:
+        cpu: 20m
+        memory: 512Mi
+    # belief sidecar (ECS brain): 25m shipped, bursts to its limit.
+    belief:
+      resources:
+        requests:
+          cpu: 5m
+          memory: 256Mi
+  dashboard:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 128Mi
+  # docs-svc: static files behind Envoy, 50m shipped.
+  docs:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+  openbao:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 128Mi
+  # envoy: the chart now reserves 512Mi (the Coraza WASM VM needs it at runtime),
+  # but the 2-core test node cannot spare that as a RESERVATION — the limit
+  # stays 1Gi so the VM still fits, only the scheduling request is cut.
+  envoy:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 96Mi
+  extAuthz:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+  ratelimit:
+    resources:
+      requests:
+        cpu: 5m
+    sidecar:
+      resources:
+        requests:
+          cpu: 5m
+  redis:
+    master:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 128Mi
+  # The tenant data planes are NOT trimmed here, because they cannot be: the
+  # tenant-operator sizes every per-tenant neo4j from its own tierDefaults
+  # (gibson operators/tenant/internal/dataplane/neo4j.go, small = 100m / 1Gi)
+  # and discards the chart's tenantNeo4j.tiers.* values (the D7 ConfigMap
+  # path is substituted and thrown away). A first version of this file set
+  # tiers.small to 50m and the node still held 100m per tenant (hosted run
+  # 34233760977). Two tenants stand on the runner during the loop: the
+  # bringup's tenant-primary and the one the exit test seeds. The budget
+  # guard counts both at the operator's number.
+  # setec — enabled in the sanctioned baseline profile (gvisor). Its operator
+  # (2 replicas for fail-closed admission), frontend and runtime-agent add
+  # ~305m / ~296Mi of REQUESTS the 2-core node cannot spare. Shrink the
+  # scheduling reservations only; every pod still bursts to its limit, and a
+  # sandbox's own resources come from the SandboxClass, not these.
+  setec:
+    # operator (the top-level `resources` in the setec subchart), x2 replicas.
+    resources:
+      requests:
+        cpu: 5m
+        memory: 32Mi
+    frontend:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 40Mi
+    runtimeAgent:
+      resources:
+        requests:
+          cpu: 5m
+          memory: 24Mi
+
+gibson-operators:
+  tenantOperator:
+    resources:
+      requests:
+        cpu: 5m
+        memory: 64Mi
+  platformOperator:
+    resources:
+      requests:
+        cpu: 5m
+        memory: 64Mi
+  connectorOperator:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+
+# The in-cluster Postgres (CNPG Cluster CR, umbrella key `platformPostgres`). Its pods
+# are created by the operator, not by a Deployment — the first draft of the
+# budget guard missed it, and it was the pod that sat Pending.
+platformPostgres:
+  # kind keeps one instance as a profile value (ADR-0015, deploy#1729). The
+  # shipped default is three with synchronous replication; the budget guard
+  # multiplies the requests by the instance count, so this line is what keeps
+  # Postgres at one pod on the 2-vCPU runner. No other posture setting changes.
+  instances: 1
+  resources:
+    requests:
+      cpu: 10m
+      memory: 256Mi
+
+# neo4j is NOT lowered: chart v2026.4.0 refuses to render below 500m CPU
+# ("Provided cpu value ... is less than minimum"), so its 500m is the floor
+# every other request here makes room for.
