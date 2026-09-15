@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.130.0](https://github.com/zeroroot-ai/charts/compare/v0.129.0...v0.130.0) (2026-09-15)
+
+
+### Features
+
+* **tenant-neo4j:** the chart delivers the per-tier sizing it always claimed to own ([#99](https://github.com/zeroroot-ai/charts/issues/99)) ([b86bb35](https://github.com/zeroroot-ai/charts/commit/b86bb35703756a3c778dc0318eeb55d24a29af87))
+
 ## [0.129.0](https://github.com/zeroroot-ai/charts/compare/v0.128.0...v0.129.0) (2026-09-15)
 
 
