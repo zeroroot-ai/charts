@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.129.0](https://github.com/zeroroot-ai/charts/compare/v0.128.0...v0.129.0) (2026-09-15)
+
+
+### Features
+
+* **profile:** developer and CI become rungs the chart ships ([#97](https://github.com/zeroroot-ai/charts/issues/97)) ([86d86e7](https://github.com/zeroroot-ai/charts/commit/86d86e7220222e34f959b34de7577cc50dbf7539))
+* **publish:** prove every published chart pulls with no credential ([#98](https://github.com/zeroroot-ai/charts/issues/98)) ([a276718](https://github.com/zeroroot-ai/charts/commit/a2767187d0b632794646413d68820f0136e24797)), closes [#94](https://github.com/zeroroot-ai/charts/issues/94)
+
+
+### Bug Fixes
+
+* **ci:** pin the org tree guards to a commit SHA ([#90](https://github.com/zeroroot-ai/charts/issues/90)) ([634b67e](https://github.com/zeroroot-ai/charts/commit/634b67e7fbc43546a536b52e990289d105076118))
+
 ## [0.128.0](https://github.com/zeroroot-ai/charts/compare/v0.127.2...v0.128.0) (2026-09-15)
 
 
