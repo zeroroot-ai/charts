@@ -28,7 +28,10 @@
 #                  this script built from source, and the one script that did
 #                  pull the published charts seeded nothing and targeted EKS.
 #   REGISTRY       OCI chart repo, PUBLISHED mode        (default: ghcr.io/zeroroot-ai/charts)
-#   VALUES         profile values file                  (default: helm/gibson/values-baseline.yaml)
+#   VALUES         the baseline values file             (default: helm/gibson/values-baseline.yaml)
+#   RUNG           a rung of the profile ladder to layer on the baseline:
+#                  developer, ci, or empty for the baseline alone (ADR-0090).
+#                  `RUNG=developer` is what fits one local node, kind or k3d.
 #   SUBSTRATE_DIR  where stage 0 keeps its state per environment
 #                  (default: ${XDG_STATE_HOME:-$HOME/.local/state}/zeroroot/substrate)
 #   SUBSTRATE_ENV  stage 0 output, read for the bucket  (default: $SUBSTRATE_DIR/kind/substrate.env)
@@ -48,8 +51,28 @@ VALUES="${VALUES:-helm/gibson/values-baseline.yaml}"
 # so nothing has to edit the release-mirror file. Absent, the install is
 # byte-for-byte the customer path.
 EXTRA_VALUES="${EXTRA_VALUES:-}"
+# RUNG: which rung of the profile ladder to layer on the baseline (ADR-0090).
+#
+#   baseline < developer < CI < staging < production
+#
+# The baseline is the substrate-neutral floor and requests the honest
+# self-hosted amount, which one local node cannot meet. `RUNG=developer` layers
+# the file that fits it. The rung file lives in the chart, so it travels with
+# the artifact and a stranger needs nothing but helm to name it.
+#
+# Empty means the baseline alone, which is what staging and production install:
+# their own values layer on it from the environment, not from here.
+RUNG="${RUNG:-}"
+case "$RUNG" in
+  ""|baseline|developer|ci) : ;;
+  *) echo "FATAL: RUNG=$RUNG is not a rung of the ladder. Use developer, ci, or leave it empty for the baseline alone (ADR-0090)." >&2; exit 2 ;;
+esac
+if [ "$RUNG" = baseline ]; then RUNG=""; fi  # the baseline needs no overlay
 EXTRA_VALUES_ARGS=()
 for _ov in $EXTRA_VALUES; do EXTRA_VALUES_ARGS+=(-f "$_ov"); done
+# Set here for the source path; published mode re-points it at the artifact.
+RUNG_FILE=""
+if [ -n "$RUNG" ]; then RUNG_FILE="helm/gibson/values-${RUNG}.yaml"; fi
 TIMEOUT="${TIMEOUT:-10m}"
 CHART_VERSION="${CHART_VERSION:-}"
 REGISTRY="${REGISTRY:-ghcr.io/zeroroot-ai/charts}"
@@ -200,6 +223,15 @@ if [ -n "$CHART_VERSION" ]; then
     VALUES="${PROFILE_DIR}/gibson/values-baseline.yaml"
     [ -r "$VALUES" ] || { echo "FATAL: ${REGISTRY}/gibson:${CHART_VERSION} carries no values-baseline.yaml, so there is no profile to install" >&2; exit 1; }
     log "profile from the artifact: gibson/values-baseline.yaml"
+    # The rung travels in the artifact for the same reason the baseline does.
+    if [ -n "$RUNG" ]; then
+      RUNG_FILE="${PROFILE_DIR}/gibson/values-${RUNG}.yaml"
+      [ -r "$RUNG_FILE" ] || { echo "FATAL: ${REGISTRY}/gibson:${CHART_VERSION} carries no values-${RUNG}.yaml, so that rung cannot be installed from the artifact" >&2; exit 1; }
+      log "rung from the artifact: gibson/values-${RUNG}.yaml"
+    fi
+  elif [ -n "$RUNG" ]; then
+    echo "FATAL: VALUES was overridden AND RUNG=$RUNG was asked for. Pick one: an explicit VALUES is a full override, a RUNG layers on the shipped baseline." >&2
+    exit 2
   fi
 else
 log "building chart dependencies (bottom-up)"
@@ -348,6 +380,7 @@ log "phase 2 — the platform"
 mapfile -t GIBSON_CHART < <(chart_args gibson)
 helm upgrade --install "$RELEASE" "${GIBSON_CHART[@]}" \
   -f "$VALUES" \
+  ${RUNG_FILE:+-f "$RUNG_FILE"} \
   "${EXTRA_VALUES_ARGS[@]}" \
   "${BUCKET_ARGS[@]}" \
   --set-json "gibson-workloads.spire.identityAdmission.workloadCreators=[\"${PRINCIPAL}\"]" \

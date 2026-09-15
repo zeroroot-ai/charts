@@ -58,6 +58,10 @@ cnpg-netpol-covers-jobs: ## Every pod CNPG creates, bootstrap Jobs included, has
 values-no-duplicate-keys: ## No values file declares a key twice (YAML keeps the last and drops the first, silently)
 	@./scripts/check-values-no-duplicate-keys.sh
 
+.PHONY: rungs
+rungs: ## Every rung of the profile ladder renders and shrinks the baseline
+	@./scripts/check-rungs.sh
+
 .PHONY: baseline-up-one-path
 baseline-up-one-path: ## The chart checkout and the published artifact install the same releases, in the same order
 	@./scripts/check-baseline-up-one-path.sh
@@ -91,7 +95,7 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords helm-record-size values-no-duplicate-keys baseline-up-one-path ## Everything that runs without a cluster
+check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords helm-record-size values-no-duplicate-keys baseline-up-one-path rungs ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context

@@ -33,6 +33,13 @@ environment rather than with the chart.
 
 A rung lowers CPU and memory *requests*, never limits. A request is a
 scheduling reservation, so a smaller rung does not cap what a pod may use.
+
+`developer` and `CI` ship as `helm/gibson/values-<rung>.yaml`, overlays on the
+baseline rather than standalone files, and the gibson-velero release carries
+its own pair. They travel inside the published artifact, so a stranger names a
+rung with nothing but helm. `scripts/check-rungs.sh` asserts each one renders
+and actually shrinks the baseline, and reports whether the two still agree
+without requiring it.
 _Avoid_: vanilla, the self-hosted profile, the small profile, tier
 
 **Substrate overlay**:

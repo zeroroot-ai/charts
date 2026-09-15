@@ -9,6 +9,19 @@ helm install gibson oci://ghcr.io/zeroroot-ai/charts/gibson \
   -f values-baseline.yaml
 ```
 
+On one local node (kind or k3d), add the `developer` rung. The baseline asks
+for the honest self-hosted floor, about 2.9 CPU of scheduling reservations,
+which a single local node cannot meet:
+
+```sh
+helm install gibson oci://ghcr.io/zeroroot-ai/charts/gibson \
+  --version <version> \
+  -f values-baseline.yaml -f values-developer.yaml
+```
+
+Both files travel inside the artifact, so nothing but helm is needed. The rung
+lowers *requests* only, never limits, so every pod still bursts as it would.
+
 ## Profiles
 
 | Profile | For |
@@ -16,6 +29,8 @@ helm install gibson oci://ghcr.io/zeroroot-ai/charts/gibson \
 | `values-baseline.yaml` | a Kubernetes cluster with a default StorageClass and nothing else assumed. **This is the supported self-hosted target.** kind is one. |
 | `values-eks.yaml`, `values-gke.yaml`, `values-aks.yaml` | layered on baseline, carrying only that provider's deltas |
 | `values-guest.yaml` | layered on baseline, for a cluster that already owns cert-manager, External Secrets, ExternalDNS and CloudNativePG |
+| `values-developer.yaml` | layered on baseline, sized to fit ONE local node (kind or k3d). The rung a developer installs. |
+| `values-ci.yaml` | layered on baseline, the same content as `developer` under its own name so either may change later |
 
 ## The images are private
 

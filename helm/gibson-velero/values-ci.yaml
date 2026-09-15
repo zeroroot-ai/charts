@@ -1,0 +1,54 @@
+# values-ci.yaml — the CI rung for the gibson-velero release.
+#
+# The platform installs Velero as its own release, so a rung overlay for the
+# umbrella never reaches it. This is that rung, for the same one-local-node
+# footprint (ADR-0090):
+#
+#   helm install velero . -f values-ci.yaml
+#
+# It lowers the REQUESTS of both pods and caps the node-agent's CPU.
+#
+# THE CAP. The chart ships the node-agent with no limits, so kopia hashes and
+# uploads on every core it can see. On a two-core node that is both cores. One
+# core for kopia leaves one for the node. A CPU limit throttles and never
+# kills, so the chart's reason for omitting a MEMORY limit (an OOM kill
+# mid-upload leaves a partial snapshot) still holds, and no memory limit is set
+# here. The cap is a bound, not a fix: run 34227548606 with the cap in place
+# restarted every platform pod in the same minute as run 34190800718 without
+# it. Run 34233760977 measured the node at 7149 of 7938 MB used with 721 MB of
+# swap during the loop. That pressure is the restart wave, and it is the next
+# thing to size.
+#
+# BYTE-IDENTICAL TO values-developer.yaml below this header, deliberately.
+# One footprint below staging, two names so either may change later.
+velero:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+  nodeAgent:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        cpu: "1"
+  # The restore helper. Velero restores a pod that carries fs-backup volumes
+  # with an init container that waits for the PodVolumeRestore, and that
+  # init container asks for 100m / 128Mi unless a ConfigMap carrying these
+  # two labels says otherwise (velero.io docs, file-system-backup, "Customize
+  # Restore Helper Container"). Measured on hosted run 34233760977
+  # (2026-09-08): the node held 1915m of 2000m, and the restored canary pod
+  # sat Pending "0/1 nodes are available: 1 Insufficient cpu" for the whole
+  # 900 s of backup-verify check 2, on a pod whose own containers request
+  # nothing. The 100m was the init container. 10m fits; the guard counts it.
+  configMaps:
+    fs-restore-action-config:
+      labels:
+        velero.io/plugin-config: ""
+        velero.io/pod-volume-restore: RestoreItemAction
+      data:
+        cpuRequest: 10m
+        memRequest: 32Mi
+        cpuLimit: 100m
+        memLimit: 128Mi
