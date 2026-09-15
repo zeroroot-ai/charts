@@ -119,15 +119,20 @@ gibson-workloads:
         requests:
           cpu: 10m
           memory: 128Mi
-  # The tenant data planes are NOT trimmed here, because they cannot be: the
-  # tenant-operator sizes every per-tenant neo4j from its own tierDefaults
-  # (gibson operators/tenant/internal/dataplane/neo4j.go, small = 100m / 1Gi)
-  # and discards the chart's tenantNeo4j.tiers.* values (the D7 ConfigMap
-  # path is substituted and thrown away). A first version of this file set
-  # tiers.small to 50m and the node still held 100m per tenant (hosted run
-  # 34233760977). Two tenants stand on the runner during the loop: the
-  # bringup's tenant-primary and the one the exit test seeds. The budget
-  # guard counts both at the operator's number.
+  # The tenant data planes are NOT trimmed here, and no longer need to be.
+  # gibson-workloads' tenantNeo4j.tiers is the sizing now, delivered to the
+  # tenant-operator by the tenant-neo4j-template ConfigMap, and its `team`
+  # tier is already the measured floor: 100m / 1Gi, the smallest size a
+  # non-backed-up Neo4j is known to run at with its heap pinned.
+  #
+  # Trimming it further here would not work anyway. A first version of this
+  # file set the tier to 50m and the node still held 100m per tenant (hosted
+  # run 34233760977), because the operator was discarding the chart's values
+  # entirely. That is fixed, and the floor is the floor.
+  #
+  # Two tenants stand on the runner during the loop: the bringup's
+  # tenant-primary and the one the exit test seeds. The budget guard counts
+  # both. staging and production raise this tier in their environment values.
   # setec — enabled in the sanctioned baseline profile (gvisor). Its operator
   # (2 replicas for fail-closed admission), frontend and runtime-agent add
   # ~305m / ~296Mi of REQUESTS the 2-core node cannot spare. Shrink the

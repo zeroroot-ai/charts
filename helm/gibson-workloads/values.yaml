@@ -3987,18 +3987,33 @@ dataPlane:
 # Spec: per-tenant-data-plane-completion Task 23 / Req 5.7, 6.4 (D7).
 #
 # INTENDED CONSUMER, NOT YET BUILT (deploy#1437): no template in this
-# chart renders the tenant-neo4j-template ConfigMap — Task 22 is the
-# work of creating it. Until it lands, the tenant-operator's ConfigMap
-# read gets NotFound and silently falls back to its Go-built resources
-# and tierDefaults() (gibson operators/tenant/internal/dataplane/
-# neo4j.go), so the values below are NOT consumed by anything today.
-# When Task 22 builds the template, the operator clones the rendered
-# template per tenant and substitutes {{tenantID}} / {{tier}} /
-# {{neo4jPassword}} / {{namespace}} at runtime.
+# Tier -> resources mapping lives HERE in the chart, NOT in the operator.
+# SREs change sizing by editing values; the operator only resolves which
+# tier a tenant is on (from the Tenant CRD) and builds the shape.
 #
-# Tier→resources mapping lives HERE in the chart (D7), NOT in the
-# operator. SREs change sizing by editing values; the operator only
-# resolves which tier a tenant is on (from the Tenant CRD).
+# These values are delivered by templates/operations/tenant-neo4j-template.yaml,
+# which renders the `tenant-neo4j-template` ConfigMap the operator reads.
+#
+# THEY WERE NOT DELIVERED UNTIL THAT TEMPLATE EXISTED. The operator read the
+# ConfigMap and threw its content away, so its own inline table was not a
+# fallback — it was the only path, and staging and production ran the
+# dev-shaped `team` sizing while this table sat here unread.
+#
+# THE KEYS ARE THE TIER IDS A Tenant CR CARRIES: team, org, enterprise. They
+# used to be small/medium/large, which named the same three things a second
+# way and matched nothing the operator resolves.
+#
+# THE SHAPE IS WHAT THE OPERATOR APPLIES: one storage request, one CPU
+# request, and one memory number used for BOTH the request and the limit.
+# The JVM heap (memory/4) and page cache (memory/8) are pinned from it, so a
+# request and limit that disagreed would size the JVM against memory the
+# container may not get. That is why there is no requests/limits split here.
+#
+# WHICH RUNG GETS WHICH SIZE (ADR-0090). The table below is the floor:
+# `team` at the smallest size a non-backed-up Neo4j is measured to run at,
+# which is what baseline, developer and CI install. staging and production
+# raise `team` to Neo4j's own stated minimum in their environment values,
+# where environment sizing belongs.
 # =============================================================================
 tenantNeo4j:
   image:
@@ -4015,33 +4030,26 @@ tenantNeo4j:
   # tiny dev node.
   kindResourceCap: ""
   tiers:
-    small:
-      resources:
-        requests:
-          cpu: 250m
-          memory: 1Gi
-        limits:
-          cpu: "1"
-          memory: 2Gi
+    # The measured floor. 100m/1Gi is what every exit test has provisioned a
+    # team tenant at, on a single node, with the heap pinned — so it is the
+    # smallest size this is known to work at rather than the smallest number
+    # someone was willing to write. Neo4j's own chart refuses to render below
+    # 500m/2Gi; this runs under that only because the operator pins the heap
+    # and page cache instead of letting Neo4j size itself from what it detects.
+    team:
       storage: 10Gi
-    medium:
-      resources:
-        requests:
-          cpu: 500m
-          memory: 4Gi
-        limits:
-          cpu: "2"
-          memory: 8Gi
+      cpu: 100m
+      memory: 1Gi
+    # org and enterprise are the chart's existing sizes, which are already at
+    # or above Neo4j's stated minimum, so they are the same on every rung.
+    org:
       storage: 50Gi
-    large:
-      resources:
-        requests:
-          cpu: "1"
-          memory: 8Gi
-        limits:
-          cpu: "4"
-          memory: 16Gi
+      cpu: 500m
+      memory: 4Gi
+    enterprise:
       storage: 200Gi
+      cpu: "1"
+      memory: 8Gi
 
 # =============================================================================
 # reservedNames — chart-managed denylist consumed by:
