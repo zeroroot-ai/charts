@@ -11309,10 +11309,17 @@ metadata:
     app.kubernetes.io/component: envoy
   annotations:
     external-dns.alpha.kubernetes.io/hostname: selfhosted.example.com,app.selfhosted.example.com,api.selfhosted.example.com,docs.selfhosted.example.com
+    service.beta.kubernetes.io/aws-load-balancer-attributes: deletion_protection.enabled=true
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-manage-backend-security-group-rules: "true"
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+    service.beta.kubernetes.io/aws-load-balancer-target-group-attributes: preserve_client_ip.enabled=true
+    service.beta.kubernetes.io/aws-load-balancer-type: external
 spec:
   type: LoadBalancer
   # Client-IP contract. Local stops kube-proxy from SNATing the
-  # client address on the NodePort / passthrough-LB path (kind, vanilla, GKE,
+  # client address on the NodePort / passthrough-LB path (kind, a plain cluster, GKE,
   # AKS), so Envoy's socket peer is the client. On AWS with nlb-target-type=ip
   # the controller dials pod IPs directly and ignores this field; there the
   # contract is met by preserve_client_ip.enabled=true on the target group.
@@ -12582,6 +12589,19 @@ spec:
             runAsUser: 65532
           image: registry.k8s.io/external-dns/external-dns:v0.21.0
           imagePullPolicy: IfNotPresent
+          env:
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  key: access-key-id
+                  name: route53-credential
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: secret-access-key
+                  name: route53-credential
           args:
             - --log-level=info
             - --log-format=text
@@ -12592,7 +12612,7 @@ spec:
             - --registry=txt
             - --txt-owner-id=gibson
             - --txt-prefix=extdns-
-            - --provider=inmemory
+            - --provider=aws
           ports:
             - name: http
               protocol: TCP
@@ -14864,15 +14884,6 @@ spec:
                 secretKeyRef:
                   name: gibson-dashboard-oidc
                   key: client_secret
-            # Trust Envoy's edge TLS cert when its CA is NOT in the system
-            # trust bundle (kind selfsigned-ca, vault-issuer). Auth.js's
-            # server-side calls to Zitadel go through Envoy at
-            # https://app.<domain>:30443; Node rejects unknown CAs by
-            # default. NODE_EXTRA_CA_CERTS appends the mounted PEM to Node's
-            # trust store. Letsencrypt / awspca issuers chain to roots
-            # already in the system bundle — no mount needed (deploy#126).
-            - name: NODE_EXTRA_CA_CERTS
-              value: /etc/ssl/envoy-ca/ca.crt
 
             # Gibson Platform Public URL (spec: naming-and-config-standardization).
             # Required by the dashboard to render user-facing links to the platform
@@ -15088,9 +15099,6 @@ spec:
           # dashboard always reads /shared/allowed-service-subjects on
           # startup.
           volumeMounts:
-            - name: envoy-ca
-              mountPath: /etc/ssl/envoy-ca
-              readOnly: true
             # SPIRE agent socket — matches SPIFFE_ENDPOINT_SOCKET above.
             # Without this the wait-for-spire-socket init container gated the
             # Pod on a socket the dashboard container could not then reach
@@ -15109,21 +15117,6 @@ spec:
           csi:
             driver: csi.spiffe.io
             readOnly: true
-        - name: envoy-ca
-          secret:
-            secretName: gibson-envoy-tls
-            # Mount the CA cert (signed by cert-manager in envoy-cert-unify)
-            # AND the leaf for completeness. Node trusts NODE_EXTRA_CA_CERTS
-            # pointed at ca.crt; the leaf is harmless and lets in-pod
-            # debugging inspect the chain. Key (tls.key) is NOT projected —
-            # only envoy holds it. Volume renders only when the Envoy edge
-            # CA is NOT in the system trust bundle (deploy#126).
-            items:
-              - key: ca.crt
-                path: ca.crt
-              - key: tls.crt
-                path: tls.crt
-            defaultMode: 0444
         # Per epic one-code-path (deploy#186), slice deploy#196: Zitadel
         # volumes are unconditional. The OIDC client Secret + SA identity
         # ConfigMap retain `optional: true` ONLY as the kubelet's
@@ -17118,7 +17111,7 @@ spec:
               #   rsapub:<name>  the public key of transit key <name> (rsa-2048), PEM
               #   literal:<v>    the literal value <v>
               #   empty          the empty string. The operator fills it in later with
-              #                  scripts/vanilla-set-secret.sh
+              #                  scripts/baseline-set-secret.sh
               #   input:<file>   the bringup keyring input mounted at /etc/openbao/inputs/<file>
               #   inputjson:<f>  the property of the same name in the JSON object mounted at
               #                  /etc/openbao/inputs/<f>
@@ -18095,6 +18088,7 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
+        storageClassName: "gp3"
         resources:
           requests:
             storage: 10Gi
@@ -18800,7 +18794,7 @@ spec:
             - name: GIBSON_DAEMON_VAULT_JWT_AUDIENCE
               value: "gibson-saas"
             - name: SSL_CERT_DIR
-              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/fga-ca"
             # ----------------------------------------------------------------
             # Signup seam knob (/ deploy#1055, gibson#1094).
             # SIGNUP_SELF_SERVE=true (default) → daemon serves public signup.
@@ -18968,9 +18962,6 @@ spec:
               readOnly: true
             - name: metrics-tls
               mountPath: /etc/gibson/tls/metrics
-              readOnly: true
-            - name: envoy-ca
-              mountPath: /etc/ssl/envoy-ca
               readOnly: true
             # CA for the OpenFGA HTTP-listener cert (deploy#1382); picked
             # up via SSL_CERT_DIR above.
@@ -19201,10 +19192,6 @@ spec:
         - name: provider-catalogue
           configMap:
             name: gibson-gibson-workloads-provider-catalogue
-            defaultMode: 0444
-        - name: envoy-ca
-          secret:
-            secretName: gibson-envoy-tls
             defaultMode: 0444
         # CA that signs the OpenFGA HTTP-listener cert (deploy#1382). Only
         # ca.crt is projected — the daemon must never hold the listener's
@@ -20886,8 +20873,8 @@ metadata:
 spec:
   secretName: "gibson-envoy-tls"
   issuerRef:
-    name: "selfsigned-ca"
-    kind: "Issuer"
+    name: "letsencrypt-prod"
+    kind: "ClusterIssuer"
     group: cert-manager.io
   commonName: "app.selfhosted.example.com"
   dnsNames:
@@ -20896,7 +20883,6 @@ spec:
     - www.selfhosted.example.com
     - docs.selfhosted.example.com
     - selfhosted.example.com
-    - gibson-envoy.gibson.svc.cluster.local
   privateKey:
     algorithm: ECDSA
     size: 256
@@ -21369,6 +21355,66 @@ spec:
       data:
         compression: "gzip"
         jobs: 2
+---
+# Source: gibson/charts/gibson-workloads/templates/cert-manager/cluster-issuer.yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.132.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: cert-manager-issuer
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: "ops@example.com"
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      
+      - dns01:
+          route53:
+            region: "us-east-1"
+            accessKeyIDSecretRef:
+              name: "route53-credential"
+              key: "access-key-id"
+            secretAccessKeySecretRef:
+              name: "route53-credential"
+              key: "secret-access-key"
+---
+# Source: gibson/charts/gibson-workloads/templates/cert-manager/cluster-issuer.yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.132.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: cert-manager-issuer
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: "ops@example.com"
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      
+      - dns01:
+          route53:
+            region: "us-east-1"
+            accessKeyIDSecretRef:
+              name: "route53-credential"
+              key: "access-key-id"
+            secretAccessKeySecretRef:
+              name: "route53-credential"
+              key: "secret-access-key"
 ---
 # Source: gibson/charts/gibson-workloads/templates/cert-manager/cluster-issuer.yaml
 # Bootstrap self-signed Issuer — used to mint a root CA cert below.

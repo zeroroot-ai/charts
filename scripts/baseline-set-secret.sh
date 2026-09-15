@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# vanilla-set-secret.sh — put an operator-supplied secret into the platform's
+# baseline-set-secret.sh — put an operator-supplied secret into the platform's
 # OpenBao KV, where ExternalSecrets read it.
 #
 # The auto-init sidecar generates everything the platform can generate, but
@@ -12,9 +12,9 @@
 # should not be a paragraph in a runbook.
 #
 # Usage:
-#   scripts/vanilla-set-secret.sh <key> <property> <value>
-#   scripts/vanilla-set-secret.sh ghcr-pull-secret pat "$GHCR_TOKEN"
-#   scripts/vanilla-set-secret.sh ses-smtp-credentials password "$SMTP_PASSWORD"
+#   scripts/baseline-set-secret.sh <key> <property> <value>
+#   scripts/baseline-set-secret.sh ghcr-pull-secret pat "$GHCR_TOKEN"
+#   scripts/baseline-set-secret.sh ses-smtp-credentials password "$SMTP_PASSWORD"
 #
 # Env: NS (default gibson), RELEASE (default gibson)
 set -euo pipefail

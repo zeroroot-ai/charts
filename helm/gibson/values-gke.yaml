@@ -1,12 +1,12 @@
 # Substrate overlay: gke. The Google Cloud deltas, layered ON TOP
-# of values-vanilla.yaml.
+# of values-baseline.yaml.
 #
-#   helm install gibson . -f values-vanilla.yaml -f values-gke.yaml
+#   helm install gibson . -f values-baseline.yaml -f values-gke.yaml
 #
 # Proof: rendered in CI, not yet installed on a cluster
 #        (exit-test-substrate.yml, deploy#1661, flips this line to the run).
 #
-# the vanilla cluster is the supported self-hosted target and a
+# a plain Kubernetes cluster is the supported self-hosted target and a
 # substrate is one specialisation of it. This file contains ONLY what is true
 # because the cluster is GKE, from the allowlist in CONTEXT.md § Substrate
 # (scripts/check-substrate-overlay-allowlist.py). The Envoy config it renders
@@ -20,7 +20,7 @@
 #
 # Not in this overlay, on purpose:
 #   - a DNS-01 solver for Cloud DNS: the chart has no such solver yet, so the
-#     vanilla self-signed edge issuer stays until an operator supplies one.
+#     baseline self-signed edge issuer stays until an operator supplies one.
 # There is no secret-backend line on any substrate: the platform's own OpenBao
 # is the one External Secrets backend, reached through one ClusterSecretStore
 #. Its seal is the static seal from the bringup keyring.
@@ -35,7 +35,7 @@ gibson-workloads:
   envoy:
     service:
       # Read by the GKE service controller. On a non-GKE cluster this is an
-      # inert string, which is why it is not in the vanilla base.
+      # inert string, which is why it is not in the baseline profile.
       annotations:
         # Backend-service-based external passthrough NLB (RBS). Preserves the
         # client IP, supports externalTrafficPolicy: Local with the

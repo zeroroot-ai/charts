@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# vanilla-up.sh — stand the platform up on a plain Kubernetes cluster, in one
+# baseline-up.sh — stand the platform up on a plain Kubernetes cluster, in one
 # command, with no manual steps.
 #
 # This is THE install path. The exit-test workflow runs this same script rather
@@ -14,7 +14,7 @@
 # a cluster that already carries the stage 1 rows (docs/bringup.md).
 #
 # Usage:
-#   scripts/vanilla-up.sh                 # use the current kube context
+#   scripts/baseline-up.sh                 # use the current kube context
 #
 # Env:
 #   NS             namespace to install into            (default: gibson)
@@ -28,7 +28,7 @@
 #                  this script built from source, and the one script that did
 #                  pull the published charts seeded nothing and targeted EKS.
 #   REGISTRY       OCI chart repo, PUBLISHED mode        (default: ghcr.io/zeroroot-ai/charts)
-#   VALUES         profile values file                  (default: helm/gibson/values-vanilla.yaml)
+#   VALUES         profile values file                  (default: helm/gibson/values-baseline.yaml)
 #   SUBSTRATE_DIR  where stage 0 keeps its state per environment
 #                  (default: ${XDG_STATE_HOME:-$HOME/.local/state}/zeroroot/substrate)
 #   SUBSTRATE_ENV  stage 0 output, read for the bucket  (default: $SUBSTRATE_DIR/kind/substrate.env)
@@ -38,11 +38,11 @@ set -euo pipefail
 NS="${NS:-gibson}"
 RELEASE="${RELEASE:-gibson}"
 CHART_DIR="${CHART_DIR:-helm}"
-VALUES="${VALUES:-helm/gibson/values-vanilla.yaml}"
+VALUES="${VALUES:-helm/gibson/values-baseline.yaml}"
 # EXTRA_VALUES: optional space-separated list of additional helm values overlays
-# layered on top of $VALUES, last-wins. The committed vanilla profile digest-pins
+# layered on top of $VALUES, last-wins. The committed baseline profile digest-pins
 # first-party images to the current release (it must mirror a real customer
-# install). A tester validating unreleased code on a kind-vanilla cluster passes
+# install). A tester validating unreleased code on a plain kind cluster passes
 # an overlay here that floats those images to a moving tag, e.g.
 #   EXTRA_VALUES=/tmp/main-images.yaml make recreate ENV=kind
 # so nothing has to edit the release-mirror file. Absent, the install is
@@ -62,7 +62,7 @@ REGISTRY="${REGISTRY:-ghcr.io/zeroroot-ai/charts}"
 # source" and "it works from the registry" stop meaning the same thing. A
 # second copy of that decision is how they would drift, and nothing would
 # notice: nothing in the estate installed the published artifact at all until
-# this existed. scripts/check-vanilla-up-one-path.sh fails the build if a helm
+# this existed. scripts/check-baseline-up-one-path.sh fails the build if a helm
 # install in this file names a chart any other way.
 chart_args() {
   if [ -n "$CHART_VERSION" ]; then
@@ -187,19 +187,19 @@ if [ -n "$CHART_VERSION" ]; then
   log "published mode: charts come from ${REGISTRY} at ${CHART_VERSION}"
   # The PROFILE has to come from the artifact too, or published mode is a lie:
   # `helm install oci://...` cannot -f a file that lives inside the chart, and
-  # a stranger has no checkout to read values-vanilla.yaml out of — this
+  # a stranger has no checkout to read values-baseline.yaml out of — this
   # organization's repositories are private while the chart artifact is not.
   # The artifact does carry every profile file, so pull it once and read the
   # profile from there. Then the only thing an installer needs is helm.
   # An explicit VALUES still wins: that is how a tester overrides the profile.
-  if [ "$VALUES" = "helm/gibson/values-vanilla.yaml" ]; then
+  if [ "$VALUES" = "helm/gibson/values-baseline.yaml" ]; then
     PROFILE_DIR="$(mktemp -d)"
     trap 'rm -rf "$PROFILE_DIR"' EXIT
     helm pull "oci://${REGISTRY}/gibson" --version "$CHART_VERSION" \
       --untar --untardir "$PROFILE_DIR" >/dev/null
-    VALUES="${PROFILE_DIR}/gibson/values-vanilla.yaml"
-    [ -r "$VALUES" ] || { echo "FATAL: ${REGISTRY}/gibson:${CHART_VERSION} carries no values-vanilla.yaml, so there is no profile to install" >&2; exit 1; }
-    log "profile from the artifact: gibson/values-vanilla.yaml"
+    VALUES="${PROFILE_DIR}/gibson/values-baseline.yaml"
+    [ -r "$VALUES" ] || { echo "FATAL: ${REGISTRY}/gibson:${CHART_VERSION} carries no values-baseline.yaml, so there is no profile to install" >&2; exit 1; }
+    log "profile from the artifact: gibson/values-baseline.yaml"
   fi
 else
 log "building chart dependencies (bottom-up)"
@@ -360,5 +360,5 @@ log "waiting for OpenBao to bootstrap and ESO to converge"
 # The keyring drill (swap the seal key, expect sealed; restore it, expect
 # unsealed) is NOT run here: it rewrites the live keyring Secret twice, and
 # this script may target a customer's cluster. The exit tests run it against
-# their disposable kind fixture with KEYRING_FILE set (make vanilla-verify).
-scripts/vanilla-verify.sh
+# their disposable kind fixture with KEYRING_FILE set (make baseline-verify).
+scripts/baseline-verify.sh

@@ -25,7 +25,7 @@ make golden-update  # accept an intentional render change
 
 - **golden** — every profile is rendered twice (bare, and with `--api-versions monitoring.coreos.com/v1`) and diffed against a committed snapshot. A render change must be accepted deliberately with `make golden-update`. This is also what carries the `randAlphaNum` ban: an inline-minted secret changes the render and fails the diff.
 - **attribution** — every vendored redistribution carries upstream, license and NOTICE. Ships with a self-test proving the guard can fail.
-- **cloud-free** — the vanilla render reaches no cloud endpoint.
+- **cloud-free** — the baseline render reaches no cloud endpoint.
 
 Every pull request runs it. A red gate is a real signal: **do not** disable a
 guard to get a PR through. If a guard is wrong, fix the guard in the same PR

@@ -1,4 +1,4 @@
-# Vanilla-cluster profile: the supported self-hosted install.
+# Baseline profile: the supported self-hosted install.
 #
 # This is a DEPLOYMENT SOURCE, not a render fixture. It is installed and tested,
 # not merely rendered — a profile that had never run anywhere is the defect
@@ -13,7 +13,7 @@
 #
 # No IRSA, no cloud KMS, no cloud secret manager, no cloud load-balancer
 # annotations, no DNS-01 solver. A cluster on EKS, OpenShift, Rancher, kind or
-# bare metal installs the same file. kind IS a vanilla cluster, so proving this
+# bare metal installs the same file. kind IS a plain Kubernetes cluster, so proving this
 # profile there is the target shape rather than a compromise ahead of it.
 #
 # A SUBSTRATE OVERLAY (values-eks.yaml, values-gke.yaml, values-aks.yaml) layers
@@ -28,7 +28,7 @@
 #     in the release namespace, holding the 32-byte OpenBao seal key
 #     (deploy#1731). The chart renders no Secret for it. Create it
 #     BEFORE install and keep the value outside the cluster: it is the only
-#     thing that opens the OpenBao archive. `scripts/vanilla-up.sh` does this
+#     thing that opens the OpenBao archive. `scripts/baseline-up.sh` does this
 #     for local and CI installs from a keyring file it generates once.
 #   - spire.identityAdmission.workloadCreators — the principal that APPLIES
 #     this chart. The default below is ZeroRoot's Argo CD controller, which
@@ -68,7 +68,7 @@ gibson-workloads:
     clusterSecretStore:
       name: "gibson-secrets"
   certManager:
-    # A vanilla cluster has no cloud DNS to solve a DNS-01 challenge against, so
+    # A plain Kubernetes cluster has no cloud DNS to solve a DNS-01 challenge against, so
     # the base profile ships a self-signed edge issuer. Honest for a private
     # install and wrong for a public one: supply your own issuer (an internal
     # CA, an ACME account with a solver your DNS supports, or a pre-provisioned
@@ -108,7 +108,7 @@ gibson-workloads:
       #
       # It therefore has to sit inside the cluster's Service CIDR, and that is
       # cluster-specific. 10.96.0.0/12 is the kubeadm and kind default, so this
-      # is the right default for a vanilla cluster. EKS uses 172.20.0.0/16, and
+      # is the right default for a plain Kubernetes cluster. EKS uses 172.20.0.0/16, and
       # this profile was extracted from the EKS one and carried 172.20.0.250
       # across — kind rejected it outright (deploy#1627):
       #
@@ -169,7 +169,7 @@ gibson-workloads:
       audience: "gibson-saas"
   gibson:
     replicas: 1
-    # First-party plugin SVID enrollment. The vanilla install always
+    # First-party plugin SVID enrollment. The baseline install always
     # provisions tenant "primary", so bind plugin SVIDs to it. The owner sub is
     # per-instance runtime data (a fresh Zitadel org on every cluster recreate),
     # so platformTenantOwner is NOT set here — it is supplied at deploy via
@@ -205,7 +205,7 @@ gibson-workloads:
     # gibson#1496). The daemon's default NetworkPolicy admits only Envoy on :50051
     # ("Envoy is the sole ingress"), so without this the operator's dial is DROPPED
     # (i/o timeout) and NO tenant is ever provisioned — the whole seam had only ever
-    # been render-tested. Mirrors values-kind.yaml's escape-hatch rule; the vanilla
+    # been render-tested. Mirrors values-kind.yaml's escape-hatch rule; the baseline
     # profile was missing it. (Promotion to a first-class chart helper is
     # tenant-operator#76 Module 6.)
     networkPolicy:
@@ -390,7 +390,7 @@ gibson-workloads:
   #
   # NODE PREP: gvisor needs the runsc binary + a containerd runtime handler on
   # the node. Unlike kata, the setec installer does NOT lay gvisor down, so the
-  # bring-up does it (scripts/vanilla-up.sh: install runsc + a containerd
+  # bring-up does it (scripts/baseline-up.sh: install runsc + a containerd
   # config drop-in registering runsc under the containerd 2.x plugin path
   # `io.containerd.cri.v1.runtime`). installer.enabled is therefore false —
   # there is no kata payload to lay.
@@ -514,16 +514,16 @@ gibson-workloads:
     multiTenancy:
       enabled: false
   # First-party plugins (R5): the `plugins` mechanism is shipped by the
-  # gibson-workloads chart and is EMPTY here on purpose. values-vanilla.yaml is
+  # gibson-workloads chart and is EMPTY here on purpose. values-baseline.yaml is
   # the customer-install-grade profile — every first-party image it names must
   # be an @sha256 digest of a RELEASED image (digest-pin-check, deploy#789). The
   # github reference plugin's image is published by the integrations-repo CI and
   # is not yet a released, digest-pinned artifact, so it is brought up through
-  # the sanctioned moving-tag overlay (test/vanilla/plugins.values.yaml, layered
-  # by `make vanilla-plugins` / EXTRA_VALUES) rather than pinned here. Once the
+  # the sanctioned moving-tag overlay (test/baseline/plugins.values.yaml, layered
+  # by `make baseline-plugins` / EXTRA_VALUES) rather than pinned here. Once the
   # plugin image is published and a release is cut, promote it into this file
   # digest-pinned (bump-image-digest) and retire the overlay — the standard
-  # first-party image onboarding lifecycle documented in scripts/vanilla-up.sh.
+  # first-party image onboarding lifecycle documented in scripts/baseline-up.sh.
 gibson-operators:
   global:
     domain: "selfhosted.example.com"
@@ -757,7 +757,7 @@ zitadel:
       # the port unless it is the scheme default. With 30443 every self-signed
       # system JWT (aud https://app.<domain>) fails CheckAudience with
       # Errors.Token.Invalid — proven live: portless aud -> 401, aud with
-      # :30443 -> 200. A vanilla install serves 443 behind the LoadBalancer,
+      # :30443 -> 200. A baseline install serves 443 behind the LoadBalancer,
       # so the port must be elided or every OIDC issuer URL is wrong too.
       ExternalPort: 443
       ExternalSecure: true

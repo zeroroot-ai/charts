@@ -13,16 +13,35 @@ The `gibson` umbrella and its sub-charts, published as one signed OCI artifact
 per version. A chart version IS the deployable (ADR-0004).
 _Avoid_: the helm, the deployment, the manifests
 
-**Vanilla cluster**:
-A Kubernetes cluster with a default StorageClass and nothing else assumed. No
-cloud IAM, no cloud KMS, no cloud DNS, no cloud load balancer. The supported
-self-hosted target (ADR-0010). kind is one.
-_Avoid_: bare metal, on-prem cluster, plain k8s
+**Plain Kubernetes cluster**:
+A cluster with a default StorageClass and nothing else assumed. No cloud IAM,
+no cloud KMS, no cloud DNS, no cloud load balancer. The supported self-hosted
+target (ADR-0078). kind is one, and so is k3d.
+_Avoid_: vanilla cluster, bare metal, on-prem cluster, plain k8s
+
+**Profile ladder**:
+The five named profiles, each layering on the one before it (ADR-0090):
+
+    baseline < developer < CI < staging < production
+
+**baseline** is the substrate-neutral floor a customer installs on a plain
+Kubernetes cluster. **developer** is that floor sized to fit one local node,
+for kind and for k3d. **CI** ships the same content as developer, under its own
+name so either may change later without a rename. **staging** and
+**production** are the hosted environments, and their values live with the
+environment rather than with the chart.
+
+A rung lowers CPU and memory *requests*, never limits. A request is a
+scheduling reservation, so a smaller rung does not cap what a pod may use.
+_Avoid_: vanilla, the self-hosted profile, the small profile, tier
 
 **Substrate overlay**:
-A values file carrying only one provider's deltas, layered on top of
-`values-vanilla.yaml`. `values-eks.yaml`, `values-gke.yaml`, `values-aks.yaml`.
-_Avoid_: env values, cloud profile
+A values file carrying only one provider's deltas, layered on top of a rung of
+the **profile ladder**. `values-eks.yaml`, `values-gke.yaml`, `values-aks.yaml`.
+
+The substrate is a separate axis from the ladder, not a rung on it (ADR-0090).
+A cluster is both `production` and `eks`.
+_Avoid_: env values, cloud profile, substrate rung
 
 **Trust domain**:
 The SPIFFE trust domain, `zeroroot.ai`. It appears in every SPIFFE ID and every
@@ -72,8 +91,8 @@ _Avoid_: pull secret setup, image auth
 
 ## Relationships
 
-- A **Chart** version installs onto a **vanilla cluster**, optionally with one
-  **substrate overlay** on top.
+- A **Chart** version installs onto a **plain Kubernetes cluster** at one rung
+  of the **profile ladder**, optionally with one **substrate overlay** on top.
 - A **guest install** turns off one or more **operator-substitution seams**.
 - A **hook-in resource** renders only when the cluster supplies its controller.
 - The **bringup keyring** is written before the **Chart**, never by it.
@@ -105,6 +124,6 @@ _Avoid_: pull secret setup, image auth
   grafana-agent that value implies was never in the chart. Resolved: the enum is
   deleted, the chart ships no observability workload, and it emits **hook-in
   resources** only.
-- "the operator must supply the image pull secret" in `values-vanilla.yaml`
+- "the operator must supply the image pull secret" in `values-baseline.yaml`
   read as a second credential path beside the keyring. Resolved: stale prose,
   superseded by deploy#1732. There is one **registry credential path**.

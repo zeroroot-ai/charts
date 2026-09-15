@@ -11,7 +11,7 @@
 # Measured 2026-09-07: six failed recovery Jobs in 41 minutes, Postgres never
 # up, the whole platform down behind it.
 #
-# The pods never appear in a render, so this guard renders the vanilla
+# The pods never appear in a render, so this guard renders the baseline
 # profile and evaluates the policies' selectors against the label sets CNPG
 # stamps, the way the API server would. It self-tests first: the pre-fix
 # policy shape MUST fail the same evaluation.
@@ -24,7 +24,7 @@ CHART_DIR="${CHART_DIR:-helm/gibson}"
 RENDER="$(mktemp)"
 trap 'rm -f "$RENDER"' EXIT
 
-helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-vanilla.yaml" --namespace gibson > "$RENDER"
+helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" --namespace gibson > "$RENDER"
 
 python3 - "$RENDER" <<'PY'
 import sys, yaml
@@ -67,7 +67,7 @@ if not egress_allowed(prefix_only, SHAPES["instance"]) or egress_allowed(prefix_
 docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
 policies = [d for d in docs if d.get("kind") == "NetworkPolicy" and d["metadata"].get("namespace", "gibson") == "gibson"]
 if not policies:
-    sys.exit("the vanilla render carries no NetworkPolicy in gibson; an empty set must never pass")
+    sys.exit("the baseline render carries no NetworkPolicy in gibson; an empty set must never pass")
 bad = [name for name, labels in SHAPES.items() if not egress_allowed(policies, labels)]
 if bad:
     print("✗ check-cnpg-netpol-covers-jobs: no egress-allowing NetworkPolicy selects these CNPG pod shapes: " + ", ".join(bad), file=sys.stderr)

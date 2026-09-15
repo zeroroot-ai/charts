@@ -117,7 +117,7 @@ global:
     # SecretSyncedError, and the platform never finishes. Measured 2026-09-14
     # (charts#80).
     #
-    # scripts/vanilla-up.sh now passes the cluster's own `kubernetes` Service
+    # scripts/baseline-up.sh now passes the cluster's own `kubernetes` Service
     # ClusterIP here on every substrate, which is the address a pod reaches
     # the apiserver through. A manual `helm install` must pass it too:
     #
@@ -166,7 +166,7 @@ global:
 # copy before it returns), one instance per zone, a WAL volume of its own, a
 # switchover on every primary roll, and the operator's PodDisruptionBudgets.
 # kind sets `instances: 1` as a PROFILE value
-# (test/vanilla/ci-2core-resources.values.yaml in CI, gitops envs/dev for the
+# (test/baseline/ci-2core-resources.values.yaml in CI, gitops envs/dev for the
 # dev cluster). That count is the only difference between kind and prod: no
 # flag gates any setting below. helm/gibson/tests/cnpg-posture.bats asserts
 # the staging and prod renders, and the primary-kill step of
@@ -817,7 +817,7 @@ zitadel:
   # deploy#1631: DO NOT LET ZITADEL BOOT WITHOUT ITS SYSTEM KEY.
   #
   # SystemAPIUsers.Path is read from disk ONCE, at boot. Measured on two
-  # separate vanilla installs, ESO materialises gibson-zitadel-system-key about
+  # separate baseline installs, ESO materialises gibson-zitadel-system-key about
   # two minutes AFTER Zitadel starts:
   #
   #   zitadel started 21:41:25 / secret created 21:43:34
@@ -874,7 +874,7 @@ zitadel:
   #
   # which stalls the platform-operator at TrustedDomainReady, so it never
   # reaches the master-key step, so gibson-master-key is never created, so the
-  # daemon never leaves init and nobody can log in. Measured on a vanilla
+  # daemon never leaves init and nobody can log in. Measured on a baseline
   # install: Zitadel started at 20:48:20, the Secret was created at 20:50:27.
   #
   # Reloader is already deployed; it just was not told to watch this Secret.

@@ -83,14 +83,14 @@ DEP_CHARTS = ["helm/gibson-operators", "helm/gibson-workloads", "helm/gibson"]
 # union. The SaaS profiles (ci/values-staging, ci/values-saas) live in the
 # hosted repo now and are not part of the air-gap package.
 # The substrate and guest files are overlays: they render only on top of
-# values-vanilla.yaml, the way the README installs them.
-VANILLA = "helm/gibson/values-vanilla.yaml"
+# values-baseline.yaml, the way the README installs them.
+BASELINE = "helm/gibson/values-baseline.yaml"
 PROFILES = [
-    ("self-hosted", [VANILLA]),
-    ("eks", [VANILLA, "helm/gibson/values-eks.yaml"]),
-    ("gke", [VANILLA, "helm/gibson/values-gke.yaml"]),
-    ("aks", [VANILLA, "helm/gibson/values-aks.yaml"]),
-    ("guest", [VANILLA, "helm/gibson/values-guest.yaml"]),
+    ("self-hosted", [BASELINE]),
+    ("eks", [BASELINE, "helm/gibson/values-eks.yaml"]),
+    ("gke", [BASELINE, "helm/gibson/values-gke.yaml"]),
+    ("aks", [BASELINE, "helm/gibson/values-aks.yaml"]),
+    ("guest", [BASELINE, "helm/gibson/values-guest.yaml"]),
 ]
 
 IMAGE_LINE_RX = re.compile(r'^\s+(?:image|customImage):\s*"?([^"\s]+)"?\s*$')

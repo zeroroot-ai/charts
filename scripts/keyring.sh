@@ -36,7 +36,7 @@
 # property `pat`). It is the ONE exception to "never in OpenBao": an input
 # the platform consumes, not a key that opens the bucket. Empty is allowed
 # and means "not supplied": the sidecar seeds the key empty, and an operator
-# fills it later with scripts/vanilla-set-secret.sh. An input member may be
+# fills it later with scripts/baseline-set-secret.sh. An input member may be
 # absent from an older keyring file; that reads as empty. There is no LLM
 # key member: the platform holds no LLM credential of its own. A tenant's
 # providers and their keys live in that tenant's provider configuration.

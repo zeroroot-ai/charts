@@ -9,7 +9,7 @@
 GREEN := \033[0;32m
 NC    := \033[0m
 
-.PHONY: help chart-deps golden golden-update render-diff vanilla-up vanilla-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords login-brand \
+.PHONY: help chart-deps golden golden-update render-diff baseline-up baseline-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords login-brand \
         check attribution vendor-operators cloud-free
 
 help: ## Show available targets
@@ -21,8 +21,8 @@ help: ## Show available targets
 	@echo "  render-diff       resource-level delta against a ref (default origin/main)"
 	@echo "  check             golden + attribution + cloud-free"
 	@echo ""
-	@echo "  vanilla-up        install onto the CURRENT kube context"
-	@echo "  vanilla-verify    prove the install came up"
+	@echo "  baseline-up        install onto the CURRENT kube context"
+	@echo "  baseline-verify    prove the install came up"
 
 chart-deps: ## Vendor sub-chart tarballs
 	@./scripts/helm-dep-update.sh 2>/dev/null || { \
@@ -42,8 +42,8 @@ render-diff: ## Resource-level delta vs a ref
 attribution: ## Every verbatim redistribution carries its attribution
 	@python3 scripts/check-vendored-attribution.py
 
-cloud-free: ## The vanilla profile assumes no cloud
-	@./scripts/check-vanilla-is-cloud-free.sh
+cloud-free: ## The baseline profile assumes no cloud
+	@./scripts/check-baseline-is-cloud-free.sh
 
 postgres-archive-names: ## A recovered Postgres reads the old archive and writes a new one, never the same
 	@./scripts/check-postgres-archive-names.sh
@@ -58,9 +58,9 @@ cnpg-netpol-covers-jobs: ## Every pod CNPG creates, bootstrap Jobs included, has
 values-no-duplicate-keys: ## No values file declares a key twice (YAML keeps the last and drops the first, silently)
 	@./scripts/check-values-no-duplicate-keys.sh
 
-.PHONY: vanilla-up-one-path
-vanilla-up-one-path: ## The chart checkout and the published artifact install the same releases, in the same order
-	@./scripts/check-vanilla-up-one-path.sh
+.PHONY: baseline-up-one-path
+baseline-up-one-path: ## The chart checkout and the published artifact install the same releases, in the same order
+	@./scripts/check-baseline-up-one-path.sh
 
 .PHONY: helm-record-size
 helm-record-size: ## Every published chart fits in a Helm release record (one Secret, 1 MiB cap)
@@ -91,11 +91,11 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords helm-record-size values-no-duplicate-keys vanilla-up-one-path ## Everything that runs without a cluster
+check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords helm-record-size values-no-duplicate-keys baseline-up-one-path ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
-vanilla-up: ## Install onto the current kube context
-	@./scripts/vanilla-up.sh
+baseline-up: ## Install onto the current kube context
+	@./scripts/baseline-up.sh
 
-vanilla-verify: ## Prove the install came up
-	@./scripts/vanilla-verify.sh
+baseline-verify: ## Prove the install came up
+	@./scripts/baseline-verify.sh

@@ -15,7 +15,7 @@
 # 2026-08-13, deploy#1039) matches the shipped default: self-serve signup is
 # ON in both profiles (signupSelfServe: true — GitLab self-managed model),
 # and closed registration is the operator override signupSelfServe: false.
-# See helm/gibson/values-vanilla.yaml (+ values-eks.yaml on
+# See helm/gibson/values-baseline.yaml (+ values-eks.yaml on
 # EKS) and the assertion at
 # helm/gibson/tests/signup-seam.bats ("open card-free signup is the shipped
 # OSS default").
