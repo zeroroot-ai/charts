@@ -13,6 +13,12 @@ header, so the only way a file loses it is an edit to that script or a
 hand-written file dropped into the directory — neither of which any other guard
 notices, and both of which ship silently.
 
+Checks, once per run:
+  0. NOTICE names the same vendored-CRD directory this guard reads. The two
+     drifted apart once already: NOTICE kept an old path while this script read
+     the real one, so the guard passed and the attribution artifact pointed at a
+     directory that does not exist.
+
 Checks, per vendored file:
   1. an `# Upstream: <url>` line
   2. a `# License:  <id>` line
@@ -38,15 +44,31 @@ CRDS = ROOT / "helm" / "gibson-operator-crd-files" / "files" / "crds"
 LICENSES = ROOT / "LICENSES"
 NOTICE = ROOT / "NOTICE"
 
+# The directory above, written the way NOTICE has to write it.
+CRDS_REL = "helm/gibson-operator-crd-files/files/crds/"
+
 UPSTREAM_RE = re.compile(r"^#\s*Upstream:\s*(\S+)", re.M)
 LICENSE_RE = re.compile(r"^#\s*License:\s*(\S+)", re.M)
+# Any vendored-CRD directory NOTICE names. Every match must be CRDS_REL.
+NOTICE_CRDS_RE = re.compile(r"helm/[A-Za-z0-9._-]+/files/crds/")
 
 
-def audit(crds: pathlib.Path, licenses: pathlib.Path, notice: pathlib.Path) -> list[str]:
+def audit(
+    crds: pathlib.Path,
+    licenses: pathlib.Path,
+    notice: pathlib.Path,
+    crds_rel: str,
+) -> list[str]:
     problems: list[str] = []
     notice_text = notice.read_text() if notice.exists() else ""
     if not notice_text.strip():
         problems.append("NOTICE is missing or empty — Apache-2.0 section 4 needs it")
+    named = sorted(set(NOTICE_CRDS_RE.findall(notice_text)))
+    if named != [crds_rel]:
+        problems.append(
+            f"NOTICE names {named or 'no'} vendored-CRD directory, but this guard "
+            f"reads '{crds_rel}'. The two must be the same path."
+        )
     files = sorted(crds.glob("*.yaml"))
     if not files:
         problems.append(f"{crds} holds no vendored CRDs — did the path move?")
@@ -74,32 +96,48 @@ def selftest() -> int:
         crds = d / "crds"; crds.mkdir()
         lic = d / "LICENSES"; lic.mkdir()
         (lic / "Apache-2.0.txt").write_text("Apache License\nVersion 2.0\n")
-        notice = d / "NOTICE"; notice.write_text("cert-manager Apache-2.0\n")
+        rel = "helm/vendored/files/crds/"
+        good_notice = f"{rel} holds these copies.\ncert-manager Apache-2.0\n"
+        notice = d / "NOTICE"; notice.write_text(good_notice)
 
         good = ("# Upstream: https://example.invalid/x\n"
                 "# License:  Apache-2.0 — full text in LICENSES/Apache-2.0.txt\n---\n")
         (crds / "cert-manager.yaml").write_text(good)
-        if audit(crds, lic, notice):
+        if audit(crds, lic, notice, rel):
             print("SELFTEST BROKEN: a complete header was reported as a problem", file=sys.stderr)
             return 2
 
         # fixture 1: header stripped
         (crds / "cert-manager.yaml").write_text("---\nkind: CustomResourceDefinition\n")
-        if not audit(crds, lic, notice):
+        if not audit(crds, lic, notice, rel):
             print("SELFTEST BROKEN: a stripped header passed", file=sys.stderr)
             return 2
 
         # fixture 2: license named but its text absent
         (crds / "cert-manager.yaml").write_text(
             "# Upstream: https://example.invalid/x\n# License:  GPL-3.0\n---\n")
-        if not audit(crds, lic, notice):
+        if not audit(crds, lic, notice, rel):
             print("SELFTEST BROKEN: a license with no retained text passed", file=sys.stderr)
             return 2
 
         # fixture 3: attributed nowhere in NOTICE
         (crds / "unlisted.yaml").write_text(good)
-        if not any("NOTICE" in p for p in audit(crds, lic, notice)):
+        if not any("NOTICE" in p for p in audit(crds, lic, notice, rel)):
             print("SELFTEST BROKEN: a component absent from NOTICE passed", file=sys.stderr)
+            return 2
+        (crds / "unlisted.yaml").unlink()
+        (crds / "cert-manager.yaml").write_text(good)
+
+        # fixture 4: NOTICE names a different directory than the one read
+        notice.write_text(good_notice.replace(rel, "helm/stale-name/files/crds/"))
+        if not any("must be the same path" in p for p in audit(crds, lic, notice, rel)):
+            print("SELFTEST BROKEN: a NOTICE path that drifted passed", file=sys.stderr)
+            return 2
+
+        # fixture 5: NOTICE names no vendored-CRD directory at all
+        notice.write_text("cert-manager Apache-2.0\n")
+        if not any("must be the same path" in p for p in audit(crds, lic, notice, rel)):
+            print("SELFTEST BROKEN: a NOTICE with no path passed", file=sys.stderr)
             return 2
 
     print("check-vendored-attribution: selftest passed (guard can fail)")
@@ -112,7 +150,7 @@ def main() -> int:
     rc = selftest()
     if rc:
         return rc
-    problems = audit(CRDS, LICENSES, NOTICE)
+    problems = audit(CRDS, LICENSES, NOTICE, CRDS_REL)
     if problems:
         print("check-vendored-attribution: FAIL", file=sys.stderr)
         for p in problems:
