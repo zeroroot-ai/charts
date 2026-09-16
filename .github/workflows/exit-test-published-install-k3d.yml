@@ -1,0 +1,54 @@
+# The PUBLISHED chart installs on k3d.
+#
+# k3d runs k3s, which ENFORCES NetworkPolicy where kind's CNI implements
+# none of it. That is the whole reason to run it: charts#80 was found here and
+# could not have been found on kind — OpenBao had no egress to the apiserver,
+# its Kubernetes-auth login failed, and every symptom pointed somewhere else.
+#
+# KNOWN RED as of 2026-09-16. Everything installs, all 24 ExternalSecrets sync
+# and every other hook Job completes, but first-admin times out waiting for a
+# Tenant to report status.zitadelOrgID. That is a tenant-operator seeding
+# problem in zeroroot-ai/gibson, not a chart or CI one. It is a separate
+# workflow precisely so this cannot mask a real kind regression.
+#
+# The steps are NOT here. They live in published-install.yml and both
+# distributions call the same ones, so the two cannot drift into different
+# claims (ADR-0027). This file chooses a distribution and nothing else.
+#
+# CADENCE. On a schedule and on push to main, never on a pull request
+# (ADR-0012). A published artifact only changes when a release publishes, so a
+# per-PR run would measure the same artifact repeatedly and block unrelated
+# work. The two schedules are staggered so they do not contend for a runner.
+name: exit-test-published-install-k3d
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/baseline-up.sh'
+      - 'helm/kind-config.yaml'
+      - '.github/workflows/published-install.yml'
+      - '.github/workflows/exit-test-published-install-k3d.yml'
+  schedule:
+    - cron: '30 6 * * *'
+  workflow_dispatch:
+    inputs:
+      chart_version:
+        description: The published chart version to install (default, the newest)
+        required: false
+        type: string
+
+concurrency:
+  group: exit-test-published-install-k3d-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    uses: ./.github/workflows/published-install.yml
+    with:
+      distro: k3d
+      chart_version: ${{ inputs.chart_version }}
+    secrets: inherit

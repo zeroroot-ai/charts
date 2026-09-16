@@ -206,4 +206,10 @@ jobs:
       #
       # This step pulls each chart again with no credential and no cache.
       - name: EXIT TEST — every published chart pulls with NO credential
-        run: scripts/check-anonymous-pull.sh "${{ steps.ver.outputs.version }}" $CHARTS
+        run: |
+          set -euo pipefail
+          # CHARTS is a deliberate space-separated list. Split it into an array
+          # rather than leaning on unquoted word splitting, so the intent is
+          # stated and shellcheck has nothing to guess at.
+          read -ra charts <<< "$CHARTS"
+          scripts/check-anonymous-pull.sh "${{ steps.ver.outputs.version }}" "${charts[@]}"
