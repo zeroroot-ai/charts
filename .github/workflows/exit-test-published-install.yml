@@ -248,12 +248,31 @@ jobs:
           echo "=== anything evicted, and why ==="
           kubectl get pods -A --field-selector status.phase=Failed -o wide || true
           kubectl get events -A --field-selector reason=Evicted | head -40 || true
-          echo "=== the hook Jobs, and the logs of any that failed ==="
+          # A Job that hits activeDeadlineSeconds has its pod REAPED, so by the
+          # time this step runs `kubectl logs job/...` has nothing to read and
+          # reports "timed out waiting for the condition" — which looks like
+          # the Job's own output and is not. That cost a run to notice. So dump
+          # what SURVIVES the pod: the Job object, and the namespace's events.
+          echo "=== the hook Jobs ==="
           kubectl -n "$NS" get jobs || true
           for j in $(kubectl -n "$NS" get jobs -o jsonpath='{range .items[?(@.status.failed)]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
-            echo "--- logs: job/$j"
-            kubectl -n "$NS" logs "job/$j" --tail=80 --all-containers || true
+            echo "--- describe job/$j (survives the pod)"
+            kubectl -n "$NS" describe "job/$j" || true
+            echo "--- logs job/$j (empty if the pod was already reaped)"
+            kubectl -n "$NS" logs "job/$j" --tail=120 --all-containers --ignore-errors=true 2>&1 | head -120 || true
           done
+          echo "=== events, newest last: these outlive every pod ==="
+          kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -60 || true
+
+          # first-admin waits for the tenant-operator to seed a Tenant and
+          # report status.zitadelOrgID. If that never happens the Job can only
+          # time out, so the Tenant's own status is the answer.
+          echo "=== tenants, which is what first-admin waits on ==="
+          kubectl -n "$NS" get tenants -o wide || true
+          kubectl -n "$NS" get tenants -o yaml | head -120 || true
+          echo "=== the operators that would seed it ==="
+          kubectl -n "$NS" logs deploy/gibson-platform-operator --tail=60 || true
+          kubectl -n "$NS" logs deploy/gibson-tenant-operator --tail=60 || true
           echo "=== secret plane ==="
           kubectl get externalsecrets -A || true
           kubectl get clustersecretstore -o yaml || true
