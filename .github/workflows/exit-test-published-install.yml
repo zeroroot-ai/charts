@@ -1,0 +1,229 @@
+# The PUBLISHED chart installs, on both local distributions.
+#
+# WHY IT LIVES HERE AND NOT IN hosted
+#
+# It lived in hosted, and hosted's own header gave the reason:
+#
+#     charts is public, so the job's own token reads it; a job in charts
+#     could not read this private repo.
+#
+# The second half of that is wrong. zeroroot-ai/gibson is public and has been
+# checking out private hosted with a read-only PAT for weeks. So the choice
+# was never forced, and it was costing two things.
+#
+# MEASURED 2026-09-16, the same probe on each:
+#
+#     charts  (public)   ubuntu-latest : 4 vCPU, 15989 MB
+#     hosted  (private)  ubuntu-latest : 2 vCPU,  ~7990 MB
+#
+# Public repositories get twice the machine AND unlimited standard-runner
+# minutes at no cost. Private repositories get half the machine and a bill.
+#
+# That difference is not academic. The k3d leg of this test was deleted from
+# hosted because it could not pass: on 2 vCPU / 7 GB the node EVICTED 35 pods
+# — 24 of them the SPIFFE OIDC discovery provider — the operators cycled
+# through five generations, and the install died at the first-admin hook
+# reporting DeadlineExceeded. The timeout was the symptom and eviction was the
+# cause. Here there is room, so k3d comes back.
+#
+# WHY k3d MATTERS ENOUGH TO BRING BACK
+#
+# kind's CNI does not implement NetworkPolicy at all, so every policy this
+# chart ships is inert on kind. k3s enforces them. charts#80 was found exactly
+# that way: OpenBao had no egress to the apiserver, its Kubernetes-auth login
+# failed, and every symptom pointed somewhere else. A kind-only gate cannot
+# see that class of bug, and this chart ships NetworkPolicies as a security
+# boundary.
+#
+# This does NOT put kind or k3d into CI as a developer workflow. They remain
+# the local story (hosted's Makefile owns the k3d-* verbs). This is one job
+# asking one question about the published artifact.
+#
+# WHY NOT exit-test-baseline-install's QUESTION
+#
+# That one, in hosted, answers "does charts main install?" — it builds from a
+# source checkout. Valuable, and not what a stranger does. A stranger runs
+# `helm install` against the artifact in the registry. charts#82 is what that
+# gap bought: `helm install gibson-crds` had been failing on every cluster for
+# some time because the release record exceeded the 1 MiB Secret cap, and
+# nothing could see it — Argo applies server-side and writes no release
+# record, and the publish smoke test is `helm template`, which writes none
+# either.
+#
+# CADENCE. On a schedule and on push to main, never on a pull request
+# (ADR-0012). A published artifact only changes when a release publishes, so a
+# per-PR run would measure the same artifact repeatedly and block unrelated
+# work.
+name: exit-test-published-install
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/baseline-up.sh'
+      - 'helm/kind-config.yaml'
+      - '.github/workflows/exit-test-published-install.yml'
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      chart_version:
+        description: The published chart version to install (default, the newest)
+        required: false
+        type: string
+
+concurrency:
+  group: exit-test-published-install-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    # The distro is in the job name, so a failure says which one without
+    # opening a log.
+    name: published install on ${{ matrix.distro }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      # Both legs always run. fail-fast would hide the second distro's result
+      # whenever the first fails, which is exactly when the comparison matters.
+      fail-fast: false
+      matrix:
+        distro: [kind, k3d]
+    env:
+      NS: gibson
+      CHARTS_ROOT: ${{ github.workspace }}
+    steps:
+      # This repo IS the installer. Only the SCRIPT is taken from the
+      # checkout; every chart comes from the registry, which is the point.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+
+      # hosted owns stage 0 and the cluster verbs (ADR-0086). It is private,
+      # and this is the same read-only PAT zeroroot-ai/gibson has used to read
+      # it since 2026-09-07. It is never exposed to a pull request: this
+      # workflow does not run on one.
+      - name: Check out zeroroot-ai/hosted for stage 0 and the cluster verbs
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          repository: zeroroot-ai/hosted
+          ref: main
+          path: hosted
+          token: ${{ secrets.GH_PAT_PLATFORM_RO }}
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5
+        with:
+          version: v3.18.4
+
+      - name: Log in to ghcr.io
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Resolve the published version under test
+        id: version
+        run: |
+          set -euo pipefail
+          v="${{ inputs.chart_version }}"
+          if [ -z "$v" ]; then
+            # The newest published umbrella. A tag list, not a guess: the four
+            # charts publish together at one version.
+            v="$(helm show chart oci://ghcr.io/zeroroot-ai/charts/gibson 2>/dev/null \
+                 | awk '/^version:/{print $2}')"
+          fi
+          [ -n "$v" ] || { echo "::error::could not resolve a published chart version"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "installing published charts at $v"
+
+      - name: Install k3d
+        if: matrix.distro == 'k3d'
+        run: |
+          set -euo pipefail
+          # 5.9.0 or newer: older k3d rolls back a cluster whose node is in
+          # fact Ready, because its readiness wait cannot follow Docker's logs
+          # on Docker 25+. The error names the cluster and the fault is k3d's.
+          curl -fsSL https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64 \
+            -o /usr/local/bin/k3d
+          chmod +x /usr/local/bin/k3d
+          k3d version
+
+      - name: Stage 0 — the bucket, the relay and the keyring
+        working-directory: hosted
+        run: SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
+
+      # The cluster. Stage 0 owns the Docker network either way; the two verbs
+      # differ only in which tool builds the node on it.
+      - name: Create the ${{ matrix.distro }} cluster
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.distro }}" = kind ]; then
+            KIND_PV_DIR="$RUNNER_TEMP/kind-pv"; mkdir -p "$KIND_PV_DIR"
+            sed "s|__KIND_PV_DIR__|$KIND_PV_DIR|" helm/kind-config.yaml \
+              | kind create cluster --name gibson --config - --wait 180s
+            echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+          else
+            CLUSTER=gibson ./hosted/scripts/cluster-k3d.sh create
+            CLUSTER=gibson ./hosted/scripts/cluster-k3d.sh verify
+            echo "KUBECONFIG=/tmp/k3d-gibson.kubeconfig" >> "$GITHUB_ENV"
+          fi
+
+      # THE assertion, and the one a stranger's command is measured against.
+      #
+      # RUNG=developer is the documented local install (ADR-0090):
+      #
+      #   helm install gibson oci://... -f values-baseline.yaml -f values-developer.yaml
+      #
+      # Both files come OUT OF THE PULLED ARTIFACT, never out of this
+      # checkout. `helm install oci://...` cannot -f a file that lives inside
+      # the chart, and a stranger has no checkout to read one from, so if the
+      # rung did not travel in the artifact the claim "the only thing an
+      # installer needs is helm" would be false. Passing a local overlay here
+      # instead would test a path nobody outside this organization can run.
+      - name: Install the published charts at the developer rung
+        env:
+          CHART_VERSION: ${{ steps.version.outputs.version }}
+          SUBSTRATE_ENV: ${{ runner.temp }}/substrate/kind/substrate.env
+          RUNG: developer
+        run: scripts/baseline-up.sh
+
+      # The rung came from the ARTIFACT, not from anywhere on this runner.
+      # Without this, a future edit that quietly passes a local file would
+      # still go green and the stranger claim would rot silently.
+      - name: The rung travelled inside the artifact
+        env:
+          CHART_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          d="$(mktemp -d)"
+          helm pull "oci://ghcr.io/zeroroot-ai/charts/gibson" \
+            --version "$CHART_VERSION" --untar --untardir "$d"
+          for f in values-baseline.yaml values-developer.yaml values-ci.yaml; do
+            [ -s "$d/gibson/$f" ] \
+              || { echo "::error::the published chart $CHART_VERSION carries no $f, so a stranger cannot name that rung with helm alone"; exit 1; }
+            echo "  ✓ $f ships in the artifact"
+          done
+
+      # The hook Jobs are dumped too. The previous version of this step listed
+      # pods and ExternalSecrets and nothing else, so when the k3d leg died at
+      # `first-admin failed: DeadlineExceeded` the ONE thing that failed was
+      # the one thing with no log, and the cause took a second run to find.
+      - name: Diagnose a failure
+        if: failure()
+        run: |
+          echo "=== node capacity: what the runner actually gave us ==="
+          kubectl describe node | sed -n '/Capacity:/,/System Info/p' || true
+          echo "=== pods ==="
+          kubectl get pods -A -o wide || true
+          echo "=== anything evicted, and why ==="
+          kubectl get pods -A --field-selector status.phase=Failed -o wide || true
+          kubectl get events -A --field-selector reason=Evicted | head -40 || true
+          echo "=== the hook Jobs, and the logs of any that failed ==="
+          kubectl -n "$NS" get jobs || true
+          for j in $(kubectl -n "$NS" get jobs -o jsonpath='{range .items[?(@.status.failed)]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
+            echo "--- logs: job/$j"
+            kubectl -n "$NS" logs "job/$j" --tail=80 --all-containers || true
+          done
+          echo "=== secret plane ==="
+          kubectl get externalsecrets -A || true
+          kubectl get clustersecretstore -o yaml || true
