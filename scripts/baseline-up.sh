@@ -387,6 +387,7 @@ helm upgrade --install "$RELEASE" "${GIBSON_CHART[@]}" \
   --set "global.networkPolicy.apiServerCIDRs={${API_CIDRS}}" \
   --set "gibson-workloads.envoy.service.clusterIP=${ENVOY_CLUSTER_IP}" \
   --set "gibson-workloads.dashboard.envoy.service.clusterIP=${ENVOY_CLUSTER_IP}" \
+  --set "gibson-operators.envoy.service.clusterIP=${ENVOY_CLUSTER_IP}" \
   --namespace "$NS" --timeout 30m
 
 log "waiting for OpenBao to bootstrap and ESO to converge"
