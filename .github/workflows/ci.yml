@@ -46,6 +46,17 @@ jobs:
         with:
           version: v3.18.4
 
+      # actionlint, for `make check`'s workflows gate. A workflow with a bad
+      # expression is rejected by GitHub at dispatch and reports failure with
+      # no jobs and no log, so the merge gate is the only place to catch it.
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          ver=1.7.12
+          curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${ver}/actionlint_${ver}_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin actionlint
+          actionlint --version
+
       # `make check` runs `chart-deps`, which pulls subcharts from ghcr. The
       # packages are public, but an unauthenticated pull is rate-limited by IP
       # and shared runners exhaust that quota. Logging in costs nothing and

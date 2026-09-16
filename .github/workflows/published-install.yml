@@ -1,48 +1,27 @@
-# The PUBLISHED chart installs, on both local distributions.
+# THE published-install steps, defined ONCE and called by two workflows.
 #
-# WHY IT LIVES HERE AND NOT IN hosted
+# WHY TWO WORKFLOWS AND NOT A MATRIX
 #
-# It lived in hosted, and hosted's own header gave the reason:
+# Owner call, 2026-09-16: a developer uses kind OR k3d, not both, and each
+# needs its own answer. A matrix gives one run, one status and one badge for
+# two claims, so "does the published chart install on k3d?" cannot be read
+# without opening a log and finding the right leg. Two workflows give two
+# statuses, and a developer on either distribution can point at theirs.
 #
-#     charts is public, so the job's own token reads it; a job in charts
-#     could not read this private repo.
+# It also stops a known-red distribution from masking the other. k3d is red on
+# a Tenant-seeding problem that has nothing to do with kind; with one matrix,
+# a real kind regression would land inside an already-red run.
 #
-# The second half of that is wrong. zeroroot-ai/gibson is public and has been
-# checking out private hosted with a read-only PAT for weeks. So the choice
-# was never forced, and it was costing two things.
+# WHAT THE MATRIX WAS PROTECTING, kept. The argument for one matrix was drift:
+# two workflows diverge, the second gets a fix the first does not, and then
+# "it works on kind" and "it works on k3d" stop being the same claim. So the
+# STEPS live here, once. The two callers choose a distribution and nothing
+# else. There is no second copy to drift from.
 #
-# MEASURED 2026-09-16, the same probe on each:
+# WHY THIS IS NOT exit-test-baseline-install (in zeroroot-ai/hosted)
 #
-#     charts  (public)   ubuntu-latest : 4 vCPU, 15989 MB
-#     hosted  (private)  ubuntu-latest : 2 vCPU,  ~7990 MB
-#
-# Public repositories get twice the machine AND unlimited standard-runner
-# minutes at no cost. Private repositories get half the machine and a bill.
-#
-# That difference is not academic. The k3d leg of this test was deleted from
-# hosted because it could not pass: on 2 vCPU / 7 GB the node EVICTED 35 pods
-# — 24 of them the SPIFFE OIDC discovery provider — the operators cycled
-# through five generations, and the install died at the first-admin hook
-# reporting DeadlineExceeded. The timeout was the symptom and eviction was the
-# cause. Here there is room, so k3d comes back.
-#
-# WHY k3d MATTERS ENOUGH TO BRING BACK
-#
-# kind's CNI does not implement NetworkPolicy at all, so every policy this
-# chart ships is inert on kind. k3s enforces them. charts#80 was found exactly
-# that way: OpenBao had no egress to the apiserver, its Kubernetes-auth login
-# failed, and every symptom pointed somewhere else. A kind-only gate cannot
-# see that class of bug, and this chart ships NetworkPolicies as a security
-# boundary.
-#
-# This does NOT put kind or k3d into CI as a developer workflow. They remain
-# the local story (hosted's Makefile owns the k3d-* verbs). This is one job
-# asking one question about the published artifact.
-#
-# WHY NOT exit-test-baseline-install's QUESTION
-#
-# That one, in hosted, answers "does charts main install?" — it builds from a
-# source checkout. Valuable, and not what a stranger does. A stranger runs
+# That one answers "does charts main install?" — it builds from a source
+# checkout. Valuable, and not what a stranger does. A stranger runs
 # `helm install` against the artifact in the registry. charts#82 is what that
 # gap bought: `helm install gibson-crds` had been failing on every cluster for
 # some time because the release record exceeded the 1 MiB Secret cap, and
@@ -50,48 +29,44 @@
 # record, and the publish smoke test is `helm template`, which writes none
 # either.
 #
-# CADENCE. On a schedule and on push to main, never on a pull request
-# (ADR-0012). A published artifact only changes when a release publishes, so a
-# per-PR run would measure the same artifact repeatedly and block unrelated
-# work.
-name: exit-test-published-install
+# WHY IT RUNS HERE AND NOT IN hosted
+#
+# MEASURED 2026-09-16, the same probe on each:
+#
+#     charts  (public)   ubuntu-latest : 4 vCPU, 15989 MB
+#     hosted  (private)  ubuntu-latest : 2 vCPU,  ~7990 MB
+#
+# Public repositories get twice the machine AND unlimited standard-runner
+# minutes at no cost. That is not academic: the k3d leg had been deleted from
+# hosted because on 2 vCPU / 7 GB the node evicted 35 pods and the install
+# died. On 4 vCPU it evicts one.
+#
+# WHY k3d IS WORTH RUNNING AT ALL. kind's CNI does not implement NetworkPolicy,
+# so every policy this chart ships is inert there. k3s enforces them, and
+# charts#80 was found exactly that way: OpenBao had no egress to the apiserver
+# and every symptom pointed somewhere else.
+name: published-install
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'scripts/baseline-up.sh'
-      - 'helm/kind-config.yaml'
-      - '.github/workflows/exit-test-published-install.yml'
-  schedule:
-    - cron: '0 6 * * *'
-  workflow_dispatch:
+  workflow_call:
     inputs:
+      distro:
+        description: kind or k3d
+        required: true
+        type: string
       chart_version:
         description: The published chart version to install (default, the newest)
         required: false
         type: string
-
-concurrency:
-  group: exit-test-published-install-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   install:
-    # The distro is in the job name, so a failure says which one without
-    # opening a log.
-    name: published install on ${{ matrix.distro }}
+    name: published install on ${{ inputs.distro }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    strategy:
-      # Both legs always run. fail-fast would hide the second distro's result
-      # whenever the first fails, which is exactly when the comparison matters.
-      fail-fast: false
-      matrix:
-        distro: [kind, k3d]
     env:
       NS: gibson
       CHARTS_ROOT: ${{ github.workspace }}
@@ -167,7 +142,7 @@ jobs:
           echo "installing published charts at $v"
 
       - name: Install k3d
-        if: matrix.distro == 'k3d'
+        if: inputs.distro == 'k3d'
         run: |
           set -euo pipefail
           # 5.9.0 or newer: older k3d rolls back a cluster whose node is in
@@ -184,10 +159,10 @@ jobs:
 
       # The cluster. Stage 0 owns the Docker network either way; the two verbs
       # differ only in which tool builds the node on it.
-      - name: Create the ${{ matrix.distro }} cluster
+      - name: Create the ${{ inputs.distro }} cluster
         run: |
           set -euo pipefail
-          if [ "${{ matrix.distro }}" = kind ]; then
+          if [ "${{ inputs.distro }}" = kind ]; then
             KIND_PV_DIR="$RUNNER_TEMP/kind-pv"; mkdir -p "$KIND_PV_DIR"
             sed "s|__KIND_PV_DIR__|$KIND_PV_DIR|" helm/kind-config.yaml \
               | kind create cluster --name gibson --config - --wait 180s
