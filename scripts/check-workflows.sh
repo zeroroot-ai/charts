@@ -79,6 +79,12 @@ grep -q 'context "runner" is not allowed here' "$WORK/out" || {
 }
 echo "✅ self-test: a job-level \${{ runner.temp }} is rejected, the way it should have been before it merged"
 
+# WHICH actionlint judged. Versions disagree about what they report: 1.7.7
+# accepted a step that 1.7.12 rejects (SC2153), so `make check` passed on a
+# workstation and failed in CI on the same commit. ci.yml pins the version;
+# this prints it, so the next disagreement is one line rather than a hunt.
+echo "   actionlint $(actionlint --version 2>/dev/null | head -1)"
+
 # --- the check -------------------------------------------------------------
 cd "$ROOT"
 n=$(find .github/workflows -name '*.yml' -o -name '*.yaml' 2>/dev/null | wc -l)
