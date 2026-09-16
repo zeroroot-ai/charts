@@ -104,6 +104,36 @@ jobs:
       # and this is the same read-only PAT zeroroot-ai/gibson has used to read
       # it since 2026-09-07. It is never exposed to a pull request: this
       # workflow does not run on one.
+      # Checked BEFORE the checkout, because the checkout's own failure does
+      # not name the cause. A token that cannot see a private repository gets
+      # a 404 (GitHub does not confirm the repo exists), git decides it might
+      # need to log in, and the log reads
+      #
+      #     fatal: could not read Username for 'https://github.com'
+      #
+      # which sounds like a missing token and is equally consistent with a
+      # present-but-wrong one. It cost a run to tell apart. This says which.
+      - name: The hosted token works
+        env:
+          T: ${{ secrets.GH_PAT_PLATFORM_RO }}
+        run: |
+          set -euo pipefail
+          if [ -z "$T" ]; then
+            echo "::error::GH_PAT_PLATFORM_RO is empty in this repository. It is an org secret; check its visibility includes PUBLIC repositories — 'Private repositories' silently excludes this one."
+            exit 1
+          fi
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $T" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/zeroroot-ai/hosted)
+          case "$code" in
+            200) echo "✓ the token reads zeroroot-ai/hosted" ;;
+            401) echo "::error::GH_PAT_PLATFORM_RO is set but GitHub rejects it (401 Bad credentials). The value is not a valid GitHub token — a PAT begins ghp_ or github_pat_. Mint one at https://github.com/settings/personal-access-tokens with resource owner zeroroot-ai, repository zeroroot-ai/hosted, permission Contents: Read-only."; exit 1 ;;
+            403) echo "::error::GH_PAT_PLATFORM_RO authenticates but is forbidden (403) on zeroroot-ai/hosted. Check SSO authorization for the zeroroot-ai organization."; exit 1 ;;
+            404) echo "::error::GH_PAT_PLATFORM_RO authenticates but cannot see zeroroot-ai/hosted (404). A fine-grained token must list that repository explicitly and grant Contents: Read-only."; exit 1 ;;
+            *)   echo "::error::unexpected HTTP $code asking GitHub about zeroroot-ai/hosted"; exit 1 ;;
+          esac
+
       - name: Check out zeroroot-ai/hosted for stage 0 and the cluster verbs
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
