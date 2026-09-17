@@ -69,7 +69,7 @@ air-gap pin) — never a branch merge.
 That bump is **automatic**: the tag carries an `x-release-please-version`
 annotation and the file is listed under `extra-files` in
 `release-please-config.json`, so every release moves it in the same PR that
-cuts the version. It was manual until deploy#1171, and it had been sitting at
+cuts the version. It was manual until the release automation landed, and it had been sitting at
 `0.104.0` while the repo shipped 0.110.x — the package pointed at a chart six
 minor versions behind. Do not hand-edit the tag; `generate-image-list.py`
 fails if it disagrees with `.release-please-manifest.json`.
@@ -86,7 +86,7 @@ fails if it disagrees with `.release-please-manifest.json`.
    renders the umbrella across every `ci/` profile and derives the list, and
    the `airgap-image-list` CI job fails the build when the committed copy goes
    stale. Regenerate with `./bigbang/images/generate-image-list.py`; never edit
-   the two lists by hand. (They were hand-maintained until deploy#1171, by
+   the two lists by hand. (They were hand-maintained until the generator landed, by
    which point not one first-party entry matched the chart.)
 
    Almost every image is private now — first-party `ghcr.io/zeroroot-ai/*` and
@@ -146,7 +146,7 @@ fails if it disagrees with `.release-please-manifest.json`.
 - **Mutable tags forbidden for federal.** `images.yaml` flags any reference
   whose tag is mutable inline, under `hardening:`. The chart itself now
   digest-pins its first-party images in the staging/prod surface (a `make
-  digest-pin-check` gate enforces it), and deploy#1343 removed the last
+  digest-pin-check` gate enforces it), and the chart removed the last
   mutable reference — the Bitnami redis subchart's `bitnami/redis:latest`,
   which had no consumer — so no reference in the manifest carries a mutable
   tag today.

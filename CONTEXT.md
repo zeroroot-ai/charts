@@ -106,7 +106,7 @@ _Avoid_: pull secret setup, image auth
 - The **registry credential path** starts in the **bringup keyring**.
 - **hosted** consumes a published **Chart** version. It never holds chart source.
 
-## Example dialogue
+## Example dialog
 
 > **Dev:** "The customer is on Big Bang and already runs cert-manager. Do we
 > ship a profile that turns observability and cert-manager off?"
@@ -132,5 +132,5 @@ _Avoid_: pull secret setup, image auth
   deleted, the chart ships no observability workload, and it emits **hook-in
   resources** only.
 - "the operator must supply the image pull secret" in `values-baseline.yaml`
-  read as a second credential path beside the keyring. Resolved: stale prose,
-  superseded by deploy#1732. There is one **registry credential path**.
+  read as a second credential path beside the keyring. Resolved: stale prose.
+  There is one **registry credential path**.
