@@ -106,7 +106,7 @@ _Avoid_: pull secret setup, image auth
 - The **registry credential path** starts in the **bringup keyring**.
 - **hosted** consumes a published **Chart** version. It never holds chart source.
 
-## Example dialogue
+## Example dialog
 
 > **Dev:** "The customer is on Big Bang and already runs cert-manager. Do we
 > ship a profile that turns observability and cert-manager off?"
