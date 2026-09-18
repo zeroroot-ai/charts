@@ -5,18 +5,29 @@ title = "charts secret detection"
 [extend]
 useDefault = true
 
-[allowlist]
-description = "Rendered goldens and seed-key placeholders that are shaped like credentials but are not"
-# The golden snapshots are rendered charts: checksum annotations (hex digests)
-# and the documented placeholder values from values files. They are compared
-# byte for byte, so they cannot carry inline allow comments.
-paths = [
-  '''^helm/testdata/golden/''',
-  '''\.gitleaks\.toml$''',
+# Each allowlist is as narrow as the thing it covers. Nothing here exempts a
+# directory: the rendered goldens under helm/testdata/golden/ are scanned like
+# every other file, and a credential that reaches a render is found there.
+
+# The goldens carry checksum annotations (sha256 of a Secret or ConfigMap body)
+# whose keys contain "secret". Only a line of that exact shape is allowed.
+[[allowlists]]
+description = "checksum annotations on rendered pod templates"
+regexTarget = "line"
+regexes = [
+  '''^\s*checksum/[A-Za-z0-9._-]+: [0-9a-f]{64}$''',
 ]
-# The OpenBao seed-key list names the Stripe TEST key slot with a placeholder
-# (sk_test_placeholder, pk_test_placeholder); hex digests are checksums.
+
+# The OpenBao seed-key list names the Stripe TEST key slots with placeholders.
+[[allowlists]]
+description = "documented placeholder values from the seed-key list"
 regexes = [
   '''^(sk|pk|rk|whsec)_(test|live)_placeholder$''',
-  '''^[0-9a-f]{22,64}$''',
+]
+
+# This file names the placeholder shapes it allows.
+[[allowlists]]
+description = "this configuration"
+paths = [
+  '''\.gitleaks\.toml$''',
 ]
