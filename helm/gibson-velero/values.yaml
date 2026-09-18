@@ -84,7 +84,7 @@ schedule:
 velero:
   image:
     repository: ghcr.io/zeroroot-ai/mirror/velero
-    tag: v1.18.1
+    tag: "v1.18.1@sha256:11459094b1b21ec7c817b08f8067d9e89380835547915cac9c4132ff05b55b90"
     pullPolicy: IfNotPresent
 
   # The object-store plugin, copied into the shared /plugins volume at
@@ -92,7 +92,7 @@ velero:
   # upstream compatibility matrix). It speaks S3 and MinIO alike.
   initContainers:
     - name: velero-plugin-for-aws
-      image: ghcr.io/zeroroot-ai/mirror/velero-plugin-for-aws:v1.14.2
+      image: ghcr.io/zeroroot-ai/mirror/velero-plugin-for-aws:v1.14.2@sha256:0751144c1c8e52d52c48717fbd13ad5a3061e612ae4d7ad744a946cd5b139d1a
       imagePullPolicy: IfNotPresent
       volumeMounts:
         - mountPath: /target

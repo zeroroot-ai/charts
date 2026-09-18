@@ -828,7 +828,7 @@ tolerations:
 
 {{- define "gibson.waitForFgaConfig" -}}
 - name: wait-for-fga-config
-  image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+  image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
   command: ['/bin/bash', '-c']
   args:
     - |
@@ -913,7 +913,7 @@ tolerations:
 
 {{- define "gibson.waitForSpireSocket" -}}
 - name: wait-for-spire-socket
-  image: ghcr.io/zeroroot-ai/mirror/busybox:1.36
+  image: ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
   command: ['sh', '-c']
   args:
     - |

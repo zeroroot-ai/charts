@@ -96,7 +96,7 @@ global:
   # org mirror list before moving it.
   toolImage:
     repository: ghcr.io/zeroroot-ai/mirror/alpine-k8s
-    tag: "1.33.0"
+    tag: "1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
   # No default domain. Every profile (values-baseline.yaml and the overlays
   # in hosted/gitops) sets it, and gibson.domain fails the render when it is
   # empty. An install with no serving domain of its own must not claim
@@ -495,7 +495,7 @@ neo4j:
     admin:
       enabled: false
   image:
-    customImage: ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community
+    customImage: ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community@sha256:5a015e53de1895e7eee1574ae0325cf8c4b89587222778108c594bdd45a474b5
   # ---------------------------------------------------------------------------
   # APOC Core provisioning (deploy#1330, prerequisite for gibson#1257;
   # single-writer graph ingress).
@@ -579,7 +579,7 @@ openfga:
   # gibson-workloads' `openfga:` block carries service ports only.
   image:
     repository: ghcr.io/zeroroot-ai/mirror/openfga
-    tag: "v1.20.0"
+    tag: "v1.20.0@sha256:d53ce5c48413d01e75ecf375f3f74eb35c50f155fc028c41d03dbc7c9838fb38"
   # The SA is a plain main-sync resource on purpose. It was briefly a PreSync
   # hook (deploy#825) to outrun the migrate Job, but the SA is STANDING
   # infrastructure used by the running Deployment's pods — hook lifecycle
@@ -710,11 +710,11 @@ zitadel:
     kubectl:
       image:
         repository: zeroroot-ai/mirror/alpine-k8s
-        tag: "1.33.0"
+        tag: "1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
     wait4x:
       image:
         repository: zeroroot-ai/mirror/wait4x
-        tag: "3.7.1"
+        tag: "3.7.1@sha256:4168ec1328e4fa51b82f7d601c18813b5e4aa85d0eda237cf3501b4ddd70d2c5"
 
   zitadel:
     # deploy#1348 — the masterkey is ESO-materialised, never a literal.
@@ -847,7 +847,7 @@ zitadel:
   # until the key is on disk and non-empty.
   initContainers:
     - name: wait-for-system-key
-      image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0
+      image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
       command:
         - sh
         - -c
