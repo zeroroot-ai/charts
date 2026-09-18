@@ -63,6 +63,11 @@ tenantOperator:
     create: true
     name: gibson-tenant-operator
     annotations: {}
+  # The daemon's ServiceAccount name. The operator binds it to ClusterRole
+  # gibson-connector-creds inside every tenant namespace it provisions
+  # (gibson#137). Must equal gibson-workloads gibson.serviceAccount.name;
+  # scripts/check-daemon-sa-binding.py enforces that on the render.
+  daemonServiceAccountName: gibson
   rbac:
     create: true
   webhook:

@@ -149,6 +149,10 @@ workload-rbac: ## Every grant to a ServiceAccount is on helm/gibson/rbac-allowli
 	@python3 scripts/check-workload-rbac.py --selftest
 	@python3 scripts/check-workload-rbac.py
 
+daemon-sa-binding: ## The tenant-operator binds the daemon's real ServiceAccount to gibson-connector-creds, per tenant namespace only (gibson#137)
+	@python3 scripts/check-daemon-sa-binding.py --selftest
+	@python3 scripts/check-daemon-sa-binding.py
+
 webhooks: ## Every Fail webhook is probed before activation, every webhook is service-backed, none fail open (charts#17)
 	@python3 scripts/check-webhooks.py --selftest
 	@python3 scripts/check-webhooks.py
@@ -171,7 +175,7 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free substrate-overlays subchart-overrides zitadel-lockstep login-brand tool-image secret-plumbing backup-coverage extauthz-transport workload-rbac webhooks edge-config-identical hook-jobs-sh kubeconform image-registry orphan-templates probes netpol-coverage hostnames reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
+check: golden attribution cloud-free substrate-overlays subchart-overrides zitadel-lockstep login-brand tool-image secret-plumbing backup-coverage extauthz-transport workload-rbac daemon-sa-binding webhooks edge-config-identical hook-jobs-sh kubeconform image-registry orphan-templates probes netpol-coverage hostnames reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context

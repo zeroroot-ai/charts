@@ -209,6 +209,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            # The daemon's ServiceAccount, the subject of the per-tenant
+            # RoleBinding to ClusterRole gibson-connector-creds (gibson#137).
+            # It is the workloads release's gibson.serviceAccount.name;
+            # scripts/check-daemon-sa-binding.py fails the render when the
+            # two disagree, because a wrong name is a 403 on every connector
+            # credential write.
+            - name: DAEMON_SERVICE_ACCOUNT_NAME
+              value: {{ .Values.tenantOperator.daemonServiceAccountName | quote }}
             # Dashboard base URL the operator's entitlements client posts to
             # (/api/admin/provisioning/entitlements/upsert-quota etc.). SPIFFE
             # JWT-SVIDs handle auth — no shared secret. Without this the

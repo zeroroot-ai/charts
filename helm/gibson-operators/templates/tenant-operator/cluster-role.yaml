@@ -127,10 +127,13 @@ rules:
   # operator reference the named ClusterRole from a RoleBinding even
   # though the operator itself doesn't hold every verb in that
   # ClusterRole's rules. Scoped via resourceNames so the operator can
-  # bind ONLY this one ClusterRole — not arbitrary cluster-admin etc.
+  # bind ONLY these two ClusterRoles — not arbitrary cluster-admin etc.
+  # gibson-connector-creds is the daemon's Secret grant (gibson-workloads
+  # connector-rbac.yaml); the operator binds it into each tenant namespace
+  # so the daemon's Secret access is bounded to tenant namespaces.
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
-    resourceNames: ["gibson-tenant-operator-tenant-namespace"]
+    resourceNames: ["gibson-tenant-operator-tenant-namespace", "gibson-connector-creds"]
     verbs: ["bind"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
