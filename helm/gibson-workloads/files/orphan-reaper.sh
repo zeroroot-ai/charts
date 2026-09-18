@@ -291,7 +291,6 @@ while IFS=$'\t' read -r user_id email creation_date; do
   fi
 
   user_resource_owner=$(echo "$detail_body" | jq -r '.user.details.resourceOwner // empty')
-  bot_resource_owner=$(echo "$detail_body" | jq -r 'empty') # placeholder; overridden below
 
   # Resolve the IAM admin org ID from the signup-bot's resourceOwner
   # (done once, cached in BOT_ORG_ID).
@@ -302,15 +301,21 @@ while IFS=$'\t' read -r user_id email creation_date; do
     if [ "$bot_code" = "200" ]; then
       BOT_ORG_ID=$(echo "$bot_body" | jq -r '.user.details.resourceOwner // empty')
       echo "    iam_admin_org_id=${BOT_ORG_ID}"
-    else
-      echo "    [warn] could not resolve IAM admin org ID — skipping creator check for safety"
-      BOT_ORG_ID="UNKNOWN"
+    fi
+    # A reaper that cannot verify ownership deletes nothing. An earlier
+    # version set BOT_ORG_ID=UNKNOWN here and SKIPPED the org check, which
+    # put every human user older than 24 hours without a Tenant CR in the
+    # delete path. That is the opposite of safe, whatever the comment said.
+    if [ -z "${BOT_ORG_ID:-}" ]; then
+      log_json "action=reap_orphan_zitadel_user_error" "error=cannot_resolve_iam_admin_org" "httpCode=$bot_code" "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      echo "[fail] cannot resolve the IAM admin org id (HTTP ${bot_code}); refusing to delete anything this run" >&2
+      exit 1
     fi
   fi
 
   # If the user does not live in the same org as the signup-bot, skip —
   # they were not created through the signup flow.
-  if [ "${BOT_ORG_ID}" != "UNKNOWN" ] && [ "$user_resource_owner" != "$BOT_ORG_ID" ]; then
+  if [ "$user_resource_owner" != "$BOT_ORG_ID" ]; then
     SKIP_COUNT=$(( SKIP_COUNT + 1 ))
     continue
   fi
