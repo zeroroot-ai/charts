@@ -23829,16 +23829,21 @@ spec:
     - port: metrics
       path: /metrics
       interval: 30s
-      # spec security-hardening R20: daemon :9090 is mTLS-only
-      # (gibson-daemon-metrics-tls Secret). Plain HTTP scrapes trigger a
-      # TLS handshake error every 15s and return no metrics. insecureSkipVerify
-      # is appropriate here — the metrics-tls cert is issued by the cluster-
-      # internal selfsigned-ca Issuer (kind) / openbao-issuer (prod), neither
-      # of which is in the Prometheus trust bundle. Network-level trust is
-      # established by the cluster NetworkPolicy. deploy#461.
+      # spec security-hardening R20: daemon :9090 is TLS-only, served with
+      # the gibson-daemon-metrics-tls Secret that cert-manager issues from
+      # the component issuer. cert-manager writes the issuing CA into that
+      # Secret's ca.crt, so Prometheus verifies the daemon against it and
+      # checks the certificate's service name. A scrape that skipped
+      # verification would speak to any responder on the port.
+      # scripts/check-servicemonitor-tls.py fails a ServiceMonitor that
+      # sets insecureSkipVerify.
       scheme: https
       tlsConfig:
-        insecureSkipVerify: true
+        serverName: "gibson-gibson-workloads.gibson.svc"
+        ca:
+          secret:
+            name: gibson-daemon-metrics-tls
+            key: ca.crt
 ---
 # Source: gibson/charts/gibson-workloads/templates/observability/tenant-neo4j-servicemonitor.yaml
 apiVersion: monitoring.coreos.com/v1
