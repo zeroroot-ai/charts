@@ -32,9 +32,14 @@
 
 admin:
   address:
-    # Bind to 0.0.0.0 so the kubelet liveness/readiness probes (which
-    # connect from the pod IP, not localhost) can reach /ready.
-    socket_address: { address: 0.0.0.0, port_value: 9901 }
+    # Loopback only. The admin interface serves /config_dump,
+    # /runtime_modify and /quitquitquit with no authentication, so nothing
+    # outside the pod may reach it. The kubelet probes and the metrics
+    # scraper connect from the pod IP; they reach the admin_probe listener on
+    # :9901 below, which forwards exactly /ready and /stats/prometheus here
+    # and answers 404 to everything else.
+    # scripts/check-envoy-admin-loopback.py keeps this shape.
+    socket_address: { address: 127.0.0.1, port_value: 9902 }
 
 static_resources:
   listeners:
@@ -1285,6 +1290,37 @@ static_resources:
   # Upstream clusters.
   # ===========================================================================
 
+    # -------------------------------------------------------------------------
+    # admin_probe on :9901 — the only pod-IP surface of the admin interface.
+    # Two routes, both to the loopback admin cluster: /ready for the kubelet
+    # probes and /stats/prometheus for the scraper. Every other path is 404,
+    # so /config_dump, /runtime_modify and /quitquitquit stay on loopback.
+    # -------------------------------------------------------------------------
+    - name: admin_probe
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9901 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: admin_probe
+                codec_type: AUTO
+                route_config:
+                  name: admin_probe
+                  virtual_hosts:
+                    - name: admin_probe
+                      domains: ["*"]
+                      routes:
+                        - match: { path: "/ready" }
+                          route: { cluster: envoy_admin_loopback }
+                        - match: { path: "/stats/prometheus" }
+                          route: { cluster: envoy_admin_loopback }
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
   clusters:
     # SPIRE Workload API over the agent UDS — Envoy uses SDS against this
     # cluster to fetch its own SVID (name: "default") and the trust bundle
@@ -1770,3 +1806,15 @@ static_resources:
                       # the ext_authz failure_mode_allow:false path.
                       address: "gibson-ext-authz"
                       port_value: {{ .extAuthzGrpcPort }}
+
+    # The admin interface on loopback, for the admin_probe listener only.
+    - name: envoy_admin_loopback
+      type: STATIC
+      connect_timeout: 0.25s
+      load_assignment:
+        cluster_name: envoy_admin_loopback
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: 127.0.0.1, port_value: 9902 }
