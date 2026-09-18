@@ -123,7 +123,7 @@ _Avoid_: pull secret setup, image auth
 - `zeroroot.ai` was used to mean both the SPIFFE **trust domain** and the SaaS
   **serving domain**. Resolved: these are distinct concepts. The trust domain
   ships in the public chart and is fixed. The serving domain is `global.domain`
-  and every customer replaces it. `scripts/check-no-hardcoded-hostnames.py`
+  and every customer replaces it. `scripts/check-hostnames.py`
   polices the serving-domain plane only, which is what its "SECOND addressing
   plane" comment means.
 - `observability.provider` read as a choice between two working shapes. It was

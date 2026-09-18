@@ -48,7 +48,7 @@ Helm applies a release in kind order: the kinds in its own InstallOrder
 first, then every kind it does not know, alphabetically. Both webhook
 configuration kinds are unknown kinds, so a custom resource is refused
 exactly when its kind sorts at or after the configuration of a webhook that
-admits it. `scripts/check-webhook-ordering.py` derives that set from the
+admits it. `scripts/check-webhooks.py` derives that set from the
 render and Helm's sorter, and fails the build on a resource that needs the
 gate and does not carry it — or carries it and does not need it. Today the
 set is `SandboxClass` and `ScheduledBackup`; a rename moves the boundary and
