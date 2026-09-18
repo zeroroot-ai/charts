@@ -102,6 +102,10 @@ zitadel-lockstep: ## The ZITADEL server tag and the login fork pin name the same
 	@python3 scripts/check-zitadel-lockstep.py --selftest
 	@python3 scripts/check-zitadel-lockstep.py
 
+exec-rbac-scoped: ## The postgres-exec Role names its Secrets, grants get only, and nothing is kept past uninstall
+	@python3 scripts/check-exec-rbac-scoped.py --selftest
+	@python3 scripts/check-exec-rbac-scoped.py
+
 tool-image: ## No template names the alpine-k8s tool image by hand; it renders gibson.toolImage
 	@python3 scripts/check-no-literal-tool-image.py --selftest
 	@python3 scripts/check-no-literal-tool-image.py
@@ -109,7 +113,7 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
+check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image exec-rbac-scoped postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context
