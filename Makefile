@@ -149,6 +149,10 @@ servicemonitor-tls: ## Every https ServiceMonitor scrape names its CA and none s
 	@python3 scripts/check-servicemonitor-tls.py --selftest
 	@python3 scripts/check-servicemonitor-tls.py
 
+envoy-admin-loopback: ## Envoy admin binds 127.0.0.1; the pod-IP listener on :9901 serves /ready and /stats/prometheus only
+	@python3 scripts/check-envoy-admin-loopback.py --selftest
+	@python3 scripts/check-envoy-admin-loopback.py
+
 workload-rbac: ## Every grant to a ServiceAccount is on helm/gibson/rbac-allowlist.yaml with its rules digest (charts#17)
 	@python3 scripts/check-workload-rbac.py --selftest
 	@python3 scripts/check-workload-rbac.py
@@ -179,7 +183,7 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free substrate-overlays subchart-overrides zitadel-lockstep login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls workload-rbac daemon-sa-binding webhooks edge-config-identical hook-jobs-sh kubeconform image-registry orphan-templates probes netpol-coverage hostnames reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
+check: golden attribution cloud-free substrate-overlays subchart-overrides zitadel-lockstep login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac daemon-sa-binding webhooks edge-config-identical hook-jobs-sh kubeconform image-registry orphan-templates probes netpol-coverage hostnames reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context
