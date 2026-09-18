@@ -157,6 +157,9 @@ hook-jobs-sh: ## A hook Job that runs under sh is POSIX sh (shellcheck sh mode, 
 	@python3 scripts/check-hook-jobs-sh.py --selftest
 	@python3 scripts/check-hook-jobs-sh.py
 
+kubeconform: ## The umbrella and velero renders validate against the Kubernetes and CRD schemas (charts#17)
+	@./scripts/check-kubeconform.sh --selftest
+
 tool-image: ## No template names the alpine-k8s tool image by hand; it renders gibson.toolImage
 	@python3 scripts/check-no-literal-tool-image.py --selftest
 	@python3 scripts/check-no-literal-tool-image.py
@@ -164,7 +167,7 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image secret-plumbing backup-coverage extauthz-transport workload-rbac webhooks edge-config-identical hook-jobs-sh image-registry orphan-templates probes netpol-coverage hostnames reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
+check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image secret-plumbing backup-coverage extauthz-transport workload-rbac webhooks edge-config-identical hook-jobs-sh kubeconform image-registry orphan-templates probes netpol-coverage hostnames reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context

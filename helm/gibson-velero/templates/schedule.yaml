@@ -83,17 +83,13 @@ metadata:
     # recovered on retry, which hid the defect behind a retry that a plain
     # helm install does not have. See charts#2.
     argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/sync-wave: "20"
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "20"
     helm.sh/hook-delete-policy: before-hook-creation
-  namespace: {{ .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: velero
-    app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/component: schedule
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
-  annotations:
+    # One annotations map. This object used to carry two, and YAML keeps
+    # the last: the hook barriers above were silently dropped and kubeconform
+    # refused the render (duplicate key). The sync wave below is the Argo
+    # ordering; the helm hooks are the plain-install ordering.
     # With the BackupStorageLocation (wave 10): a Schedule the server cannot
     # reconcile against an Available location yet would log errors on every
     # tick.
@@ -114,6 +110,12 @@ metadata:
     # desired state. It rides to every Backup through the same copy, and it is
     # a no-op on this Schedule itself, which IS in the desired state.
     argocd.argoproj.io/compare-options: IgnoreExtraneous
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: schedule
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:
   schedule: {{ .Values.schedule.cron | quote }}
   # The first backup waits for the first cron tick. An install-time backup

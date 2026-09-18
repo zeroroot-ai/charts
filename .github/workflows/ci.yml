@@ -56,6 +56,15 @@ jobs:
           curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${ver}/actionlint_${ver}_linux_amd64.tar.gz" \
             | sudo tar -xz -C /usr/local/bin actionlint
           actionlint --version
+          # kubeconform, for `make check`'s kubeconform gate: the render must
+          # validate against the Kubernetes and CRD schemas. Pinned by version
+          # and by the checksum of the release archive.
+          kc=v0.8.0
+          kc_sha=9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${kc}/kubeconform-linux-amd64.tar.gz" -o /tmp/kubeconform.tgz
+          echo "${kc_sha}  /tmp/kubeconform.tgz" | sha256sum -c -
+          sudo tar -xzf /tmp/kubeconform.tgz -C /usr/local/bin kubeconform
+          kubeconform -v
 
       # `make check` runs `chart-deps`, which pulls subcharts from ghcr. The
       # packages are public, but an unauthenticated pull is rate-limited by IP
