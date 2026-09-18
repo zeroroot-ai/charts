@@ -57,15 +57,6 @@ rules:
       either direction.
 
   - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get"]
-    justification: |
-      Read agent-enrollment bootstrap-token Secrets whose names are
-      dynamic (secretRef on the Tenant CRD). LLM provider credentials
-      are NOT in Kubernetes Secrets — they live in the daemon's
-      encrypted credential store (spec 25-daemon-driven-provider-config).
-
-  - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "watch"]
     justification: |

@@ -7864,15 +7864,13 @@ rules:
   - apiGroups: ["gibson.zeroroot.ai"]
     resources: ["tenantmembers", "agentenrollments", "componentgrants"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Read Secrets in tenant-* namespaces for bootstrap-token display only.
-  # LLM provider credentials are NOT stored in Kubernetes Secrets by the
-  # dashboard — they are managed exclusively by the daemon's encrypted
-  # credential store (spec 25-daemon-driven-provider-config). This rule
-  # exists solely for reading agent-enrollment bootstrap-token Secrets
-  # whose names are dynamic (secretRef on the Tenant CRD).
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get"]
+  # No Secret access. The rule that stood here granted `get` on every
+  # Secret in the cluster "for reading agent-enrollment bootstrap-token
+  # Secrets", and nothing in the dashboard reads a Secret through the
+  # Kubernetes API any more: the bootstrap token arrives in the
+  # AgentIdentity / PluginAdmin RPC responses. The dashboard is the
+  # internet-facing workload; one server-side request flaw in it must not
+  # become `get secret gibson-openbao-keys`.
   # Read namespaces for tenant aggregate views.
   - apiGroups: [""]
     resources: ["namespaces"]
