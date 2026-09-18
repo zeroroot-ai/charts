@@ -7448,10 +7448,13 @@ rules:
   # operator reference the named ClusterRole from a RoleBinding even
   # though the operator itself doesn't hold every verb in that
   # ClusterRole's rules. Scoped via resourceNames so the operator can
-  # bind ONLY this one ClusterRole — not arbitrary cluster-admin etc.
+  # bind ONLY these two ClusterRoles — not arbitrary cluster-admin etc.
+  # gibson-connector-creds is the daemon's Secret grant (gibson-workloads
+  # connector-rbac.yaml); the operator binds it into each tenant namespace
+  # so the daemon's Secret access is bounded to tenant namespaces.
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
-    resourceNames: ["gibson-tenant-operator-tenant-namespace"]
+    resourceNames: ["gibson-tenant-operator-tenant-namespace", "gibson-connector-creds"]
     verbs: ["bind"]
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/tenant-namespace-cluster-role.yaml
@@ -7877,18 +7880,21 @@ rules:
 # #1562: the daemon materializes the connector credential Secret
 # (<connector>-connector-cred, a "Bearer <token>" the ToolHive proxy forwards)
 # into each tenant namespace from its connector-token loop. The Secret is
-# namespaced and lives in every tenant namespace, so the grant is a ClusterRole
-# — the same shape as the connectorinstances grant above.
+# namespaced and lives in every tenant namespace.
 #
-# Scope note: a ClusterRole cannot bound Secret access to the tenant namespaces
-# only; the per-tenant-namespace hardening (the tenant-operator binding the
-# daemon SA to a namespace-local secrets Role) is a follow-up. The daemon
-# already holds every tenant credential in-process (it resolves them from the
-# vault broker), so k8s Secret write is a comparable trust level.
+# This ClusterRole carries the rules only. There is no ClusterRoleBinding:
+# the tenant-operator binds it into each tenant namespace with a RoleBinding
+# when it provisions the namespace (gibson#137, operator v0.137.0), so the
+# daemon reads and writes Secrets in tenant namespaces and nowhere else. The
+# name is fixed because the operator binds it by name; its own ClusterRole
+# may `bind` exactly this name (gibson-operators tenant-operator/cluster-role).
+# The operator learns the daemon's ServiceAccount from
+# DAEMON_SERVICE_ACCOUNT_NAME, and scripts/check-daemon-sa-binding.py keeps
+# that value equal to the ServiceAccount the daemon StatefulSet runs as.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: gibson-gibson-workloads-connector-creds
+  name: gibson-connector-creds
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
@@ -9391,26 +9397,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: gibson-gibson-workloads-connectorinstances
-subjects:
-  - kind: ServiceAccount
-    name: gibson
-    namespace: gibson
----
-# Source: gibson/charts/gibson-workloads/templates/gibson/connector-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: gibson-gibson-workloads-connector-creds
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.137.0"
-    app.kubernetes.io/managed-by: Helm
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: gibson-gibson-workloads-connector-creds
 subjects:
   - kind: ServiceAccount
     name: gibson
@@ -13614,6 +13600,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            # The daemon's ServiceAccount, the subject of the per-tenant
+            # RoleBinding to ClusterRole gibson-connector-creds (gibson#137).
+            # It is the workloads release's gibson.serviceAccount.name;
+            # scripts/check-daemon-sa-binding.py fails the render when the
+            # two disagree, because a wrong name is a 403 on every connector
+            # credential write.
+            - name: DAEMON_SERVICE_ACCOUNT_NAME
+              value: "gibson"
             # Dashboard base URL the operator's entitlements client posts to
             # (/api/admin/provisioning/entitlements/upsert-quota etc.). SPIFFE
             # JWT-SVIDs handle auth — no shared secret. Without this the
