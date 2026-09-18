@@ -46,18 +46,24 @@ both rendered by the subchart:
      cluster-wide. Cluster-wide `pods: create` is a cluster-admin path on
      its own. Reads stay cluster-wide for the controller-runtime cache.
 
-WHAT IT DOES NOT DO
+WHAT CLOSES THE hostNetwork GAP
 
-It does not set Pod Security Admission labels, and that is deliberate
-rather than an oversight. PSA is the only control that reaches a
-`hostNetwork: true` Pod, which runs in the node network namespace and is
-outside NetworkPolicy enforcement entirely. But the legitimate Sandbox Pod
-adds NET_RAW and NET_ADMIN (setec: internal/podspec/builder.go,
-sandboxCapabilities), and the PSA `baseline` level permits neither. Setting
-`enforce: baseline` here would reject every real Sandbox while blocking the
-hostNetwork case. Closing that gap needs an admission policy that can gate
-hostNetwork without gating capabilities — Kyverno, Gatekeeper or a
-ValidatingAdmissionPolicy — which this chart does not own.
+It does not set Pod Security Admission labels, and that is deliberate.
+PSA is the only namespace-level control that reaches a `hostNetwork: true`
+Pod, which runs in the node network namespace and is outside NetworkPolicy
+enforcement entirely. But the legitimate Sandbox Pod adds NET_RAW and
+NET_ADMIN (setec: internal/podspec/builder.go, sandboxCapabilities), and
+the PSA `baseline` level permits neither, so `enforce: baseline` would
+reject every real Sandbox to block the hostNetwork one.
+
+The control that does reach it is the setec subchart's
+ValidatingAdmissionPolicy `setec-sandbox-host-guard`
+(templates/sandbox-namespace-host-guard.yaml), bound to every namespace
+named here: it refuses hostNetwork, hostPID, hostIPC, hostPort, hostPath
+volumes and privileged containers on every Pod CREATE and UPDATE, and
+gates nothing else, so NET_RAW and NET_ADMIN pass. The umbrella's helm
+test 10-sandbox-host-namespaces-denied proves it is enforced on the
+cluster with a server-side dry run.
 
 Sync-wave -10 puts the Namespace ahead of the RoleBinding and the
 NetworkPolicy that target it. Argo's default kind ordering already places

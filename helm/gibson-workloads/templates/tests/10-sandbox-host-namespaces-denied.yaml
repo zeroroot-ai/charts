@@ -1,0 +1,126 @@
+{{/*
+helm-test pod: sandbox-host-namespaces-denied
+
+The failing fixture for the setec subchart's sandbox host guard
+(setec: templates/sandbox-namespace-host-guard.yaml, the
+ValidatingAdmissionPolicy setec-sandbox-host-guard bound to every namespace
+in setec.sandboxNamespaces). That policy is the only control that reaches
+a hostNetwork Pod, which runs outside every NetworkPolicy, and until this
+test nothing in the umbrella proved it was enforced on a live cluster.
+For each sandbox namespace the test asks the apiserver, with a server-side
+dry run, to admit a hostNetwork, hostPID, hostPath and privileged Pod. A
+dry run runs admission for real and writes nothing. Each must be refused,
+and refused by that policy, not by anything else; a plain Pod must be
+admitted, so the test cannot pass by the namespace being unwritable.
+
+The test ServiceAccount holds `pods: create` in the sandbox namespaces and
+nothing else: dry-run admission still needs the verb. The policy applies to
+this ServiceAccount exactly as to any other creator.
+*/}}
+{{- if .Values.setec.enabled }}
+{{- if (.Values.setec.sandboxNamespaces | default list) }}
+{{- $sa := printf "%s-test-sandbox-admission" (include "gibson.fullname" .) }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa | quote }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson-workloads.tests.labels" . | nindent 4 }}
+    app.kubernetes.io/component: helm-test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "-10"
+{{- range $ns := .Values.setec.sandboxNamespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $sa | quote }}
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "gibson-workloads.tests.labels" $ | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "-10"
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $sa | quote }}
+  namespace: {{ $ns | quote }}
+  labels:
+    {{- include "gibson-workloads.tests.labels" $ | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "-10"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $sa | quote }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa | quote }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "gibson.fullname" . }}-test-sandbox-host-denied"
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson-workloads.tests.labels" . | nindent 4 }}
+    app.kubernetes.io/component: helm-test
+  annotations:
+    {{- include "gibson-workloads.tests.annotations" . | nindent 4 }}
+    "helm.sh/hook-weight": "0"
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ $sa | quote }}
+  containers:
+    - name: probe
+      image: "{{ include "gibson-workloads.tests.kubectlImage" . }}"
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          ERR='{{ include "gibson-workloads.tests.errorPrefix" . }}'
+          POLICY=setec-sandbox-host-guard
+          fail=0
+          pod() { # <name> <spec fragment json>
+            printf '{"apiVersion":"v1","kind":"Pod","metadata":{"name":"%s"},"spec":{"containers":[{"name":"c","image":"busybox"}]%s}}' "$1" "$2"
+          }
+          try() { # <ns> <label> <spec fragment> <want: denied|admitted>
+            out="$(pod "vap-probe-$2" "$3" | kubectl -n "$1" create --dry-run=server -f - 2>&1)" && rc=0 || rc=$?
+            case "$4:$rc" in
+              admitted:0) echo "  ok  $1: a plain Pod is admitted" ;;
+              denied:0)   echo "$ERR $1: a $2 Pod was ADMITTED; the sandbox admission policy is not enforced"; fail=1 ;;
+              denied:*)
+                if printf '%s' "$out" | grep -q "$POLICY"; then echo "  ok  $1: $2 refused by $POLICY"
+                else echo "$ERR $1: $2 was refused, but not by $POLICY: $out"; fail=1; fi ;;
+              admitted:*) echo "$ERR $1: a plain Pod was refused, so this test proves nothing here: $out"; fail=1 ;;
+            esac
+          }
+          {{- range $ns := .Values.setec.sandboxNamespaces }}
+          try {{ $ns | quote }} plain '' admitted
+          try {{ $ns | quote }} hostnetwork ',"hostNetwork":true' denied
+          try {{ $ns | quote }} hostpid ',"hostPID":true' denied
+          try {{ $ns | quote }} hostpath ',"volumes":[{"name":"h","hostPath":{"path":"/"}}]' denied
+          {{- end }}
+          # privileged is gated on the container, not the pod spec fragment
+          {{- range $ns := .Values.setec.sandboxNamespaces }}
+          out="$(printf '{"apiVersion":"v1","kind":"Pod","metadata":{"name":"vap-probe-priv"},"spec":{"containers":[{"name":"c","image":"busybox","securityContext":{"privileged":true}}]}}' | kubectl -n {{ $ns | quote }} create --dry-run=server -f - 2>&1)" && { echo "$ERR {{ $ns }}: a privileged container was ADMITTED"; fail=1; } || { printf '%s' "$out" | grep -q "$POLICY" && echo "  ok  {{ $ns }}: privileged refused by $POLICY" || { echo "$ERR {{ $ns }}: privileged refused, but not by $POLICY: $out"; fail=1; }; }
+          {{- end }}
+          exit "$fail"
+{{- end }}
+{{- end }}

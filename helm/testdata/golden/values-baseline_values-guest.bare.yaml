@@ -19853,6 +19853,25 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
     "helm.sh/hook-weight": "-10"
 ---
+# Source: gibson/charts/gibson-workloads/templates/tests/10-sandbox-host-namespaces-denied.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: "gibson-gibson-workloads-test-sandbox-admission"
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.132.0"
+    app.kubernetes.io/managed-by: Helm
+    helm-test/keep: "false"
+    app.kubernetes.io/component: helm-test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "-10"
+---
 # Source: gibson/templates/jobs/gibson-workloads-first-admin.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -20203,6 +20222,28 @@ rules:
     resources: ["configmaps"]
     verbs: ["get", "list"]
 ---
+# Source: gibson/charts/gibson-workloads/templates/tests/10-sandbox-host-namespaces-denied.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: "gibson-gibson-workloads-test-sandbox-admission"
+  namespace: "setec-sandboxes"
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.132.0"
+    app.kubernetes.io/managed-by: Helm
+    helm-test/keep: "false"
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "-10"
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create"]
+---
 # Source: gibson/templates/jobs/gibson-workloads-first-admin.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -20422,6 +20463,32 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: "gibson-gibson-workloads-test-bootstrap-reader"
+    namespace: gibson
+---
+# Source: gibson/charts/gibson-workloads/templates/tests/10-sandbox-host-namespaces-denied.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: "gibson-gibson-workloads-test-sandbox-admission"
+  namespace: "setec-sandboxes"
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.132.0"
+    app.kubernetes.io/managed-by: Helm
+    helm-test/keep: "false"
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "-10"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: "gibson-gibson-workloads-test-sandbox-admission"
+subjects:
+  - kind: ServiceAccount
+    name: "gibson-gibson-workloads-test-sandbox-admission"
     namespace: gibson
 ---
 # Source: gibson/templates/jobs/gibson-workloads-first-admin.yaml
@@ -21738,6 +21805,60 @@ spec:
       emptyDir: {}
   imagePullSecrets:
     - name: ghcr-credentials
+---
+# Source: gibson/charts/gibson-workloads/templates/tests/10-sandbox-host-namespaces-denied.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "gibson-gibson-workloads-test-sandbox-host-denied"
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.132.0"
+    app.kubernetes.io/managed-by: Helm
+    helm-test/keep: "false"
+    app.kubernetes.io/component: helm-test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "0"
+spec:
+  restartPolicy: Never
+  serviceAccountName: "gibson-gibson-workloads-test-sandbox-admission"
+  containers:
+    - name: probe
+      image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+      imagePullPolicy: IfNotPresent
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          ERR='::error file=helm-test::'
+          POLICY=setec-sandbox-host-guard
+          fail=0
+          pod() { # <name> <spec fragment json>
+            printf '{"apiVersion":"v1","kind":"Pod","metadata":{"name":"%s"},"spec":{"containers":[{"name":"c","image":"busybox"}]%s}}' "$1" "$2"
+          }
+          try() { # <ns> <label> <spec fragment> <want: denied|admitted>
+            out="$(pod "vap-probe-$2" "$3" | kubectl -n "$1" create --dry-run=server -f - 2>&1)" && rc=0 || rc=$?
+            case "$4:$rc" in
+              admitted:0) echo "  ok  $1: a plain Pod is admitted" ;;
+              denied:0)   echo "$ERR $1: a $2 Pod was ADMITTED; the sandbox admission policy is not enforced"; fail=1 ;;
+              denied:*)
+                if printf '%s' "$out" | grep -q "$POLICY"; then echo "  ok  $1: $2 refused by $POLICY"
+                else echo "$ERR $1: $2 was refused, but not by $POLICY: $out"; fail=1; fi ;;
+              admitted:*) echo "$ERR $1: a plain Pod was refused, so this test proves nothing here: $out"; fail=1 ;;
+            esac
+          }
+          try "setec-sandboxes" plain '' admitted
+          try "setec-sandboxes" hostnetwork ',"hostNetwork":true' denied
+          try "setec-sandboxes" hostpid ',"hostPID":true' denied
+          try "setec-sandboxes" hostpath ',"volumes":[{"name":"h","hostPath":{"path":"/"}}]' denied
+          # privileged is gated on the container, not the pod spec fragment
+          out="$(printf '{"apiVersion":"v1","kind":"Pod","metadata":{"name":"vap-probe-priv"},"spec":{"containers":[{"name":"c","image":"busybox","securityContext":{"privileged":true}}]}}' | kubectl -n "setec-sandboxes" create --dry-run=server -f - 2>&1)" && { echo "$ERR setec-sandboxes: a privileged container was ADMITTED"; fail=1; } || { printf '%s' "$out" | grep -q "$POLICY" && echo "  ok  setec-sandboxes: privileged refused by $POLICY" || { echo "$ERR setec-sandboxes: privileged refused, but not by $POLICY: $out"; fail=1; }; }
+          exit "$fail"
 ---
 # Source: gibson/charts/openfga/templates/tests/test-connection.yaml
 apiVersion: v1
