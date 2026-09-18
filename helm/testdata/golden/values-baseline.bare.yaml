@@ -15674,7 +15674,7 @@ spec:
             # from silently fetching in the clear). So this value and the
             # ext-authz image pin move TOGETHER: an older image cannot speak
             # mTLS here, and a post-#1401 image will not boot against http.
-            # scripts/check-extauthz-trust-transport.py enforces the pairing
+            # scripts/check-extauthz-transport.py enforces the pairing
             # from the other side — it fails if this becomes https while a
             # waiver line for it survives in
             # scripts/.extauthz-transport-waivers.txt, and vice versa.
@@ -15717,7 +15717,7 @@ spec:
               # here rather than left to `global.scheme` defaulting to https.
               # An overlay that pointed this at http:// would put the
               # verification keys for every user session on an unauthenticated
-              # hop. scripts/check-extauthz-trust-transport.py cannot read the
+              # hop. scripts/check-extauthz-transport.py cannot read the
               # resolved value out of the template (it is one Helm expression),
               # so this render-time check is the control it defers to.
               value: "https://app.selfhosted.example.com"
@@ -27849,7 +27849,7 @@ metadata:
     # and is refused on a fresh install unless it is ordered behind the gate.
     # Both axes: hook weight for a plain `helm install`, which has no barrier
     # inside its main phase, and sync-wave for Argo, which orders hooks and
-    # ordinary resources together. scripts/check-webhook-ordering.py computes
+    # ordinary resources together. scripts/check-webhooks.py computes
     # which kinds need this from Helm's own install order and fails the build
     # on one that is missing it, or one that carries it without needing it.
     argocd.argoproj.io/hook: Sync

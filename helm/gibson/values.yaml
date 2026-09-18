@@ -729,7 +729,7 @@ zitadel:
     #. The upstream chart requires
     # exactly one of masterkey / masterkeySecretName and `fail`s otherwise
     # (secret_zitadel-masterkey.yaml), so re-adding a literal here is a hard
-    # render failure; scripts/check-chart-secret-plumbing.py catches it first.
+    # render failure; scripts/check-secret-plumbing.py catches it first.
     #
     # There is deliberately no kind-only literal either — kind reads the same
     # backend as every other profile (one code path).
@@ -1307,7 +1307,7 @@ cnpg:
   # disabled until cert-manager wave -20 is Healthy" — but no setting ever
   # followed it, so nothing was disabled and the claim was false. The CNPG
   # webhooks DO render, at `failurePolicy: Fail`, which is the posture we
-  # want; `scripts/check-teardown-webhook-coverage.py` pins that against the
+  # want; `scripts/check-webhooks.py` pins that against the
   # render.
 
 # =============================================================================
@@ -1324,7 +1324,7 @@ cnpg:
 # is deferred.
 #
 # `probes` is the list the gate walks. It is not decoration:
-# `scripts/check-webhook-ordering.py` renders the umbrella per profile and
+# `scripts/check-webhooks.py` renders the umbrella per profile and
 # fails the build when a `failurePolicy: Fail` webhook exists in the render
 # with no probe here, when a probe names a webhook the render does not
 # install, or when a probe's service, port or path disagrees with the

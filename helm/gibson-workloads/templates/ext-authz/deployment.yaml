@@ -206,7 +206,7 @@ spec:
                   helm/gibson/values.yaml `openfga.http.tls`). The Check
                   response on this hop is the allow/deny answer for every
                   authenticated request — transport is its only integrity
-                  control (scripts/check-extauthz-trust-transport.py reads
+                  control (scripts/check-extauthz-transport.py reads
                   the literal scheme here; the #1187-era waiver line is
                   deleted in the same change). SSL_CERT_DIR below adds the
                   issuing CA without displacing the system bundle. */}}
@@ -337,7 +337,7 @@ spec:
             # from silently fetching in the clear). So this value and the
             # ext-authz image pin move TOGETHER: an older image cannot speak
             # mTLS here, and a post-#1401 image will not boot against http.
-            # scripts/check-extauthz-trust-transport.py enforces the pairing
+            # scripts/check-extauthz-transport.py enforces the pairing
             # from the other side — it fails if this becomes https while a
             # waiver line for it survives in
             # scripts/.extauthz-transport-waivers.txt, and vice versa.
@@ -380,7 +380,7 @@ spec:
               # here rather than left to `global.scheme` defaulting to https.
               # An overlay that pointed this at http:// would put the
               # verification keys for every user session on an unauthenticated
-              # hop. scripts/check-extauthz-trust-transport.py cannot read the
+              # hop. scripts/check-extauthz-transport.py cannot read the
               # resolved value out of the template (it is one Helm expression),
               # so this render-time check is the control it defers to.
               {{- $zitadelIssuer := .Values.extAuthz.issuer | default (include "gibson.oidcIssuer" .) }}
