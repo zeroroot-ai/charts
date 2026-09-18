@@ -15718,6 +15718,7 @@ spec:
         checksum/registry: 07eb277806f305ecb287bd16a5f4cdd71c254a626973d8d2161b3dd645b3b322
         checksum/daemon-registry: 5dff04344ece5f6050c2746258a6b1063b884193977189ab4c5102fa7332b02b
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
+        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc"
     spec:
       
       imagePullSecrets:
@@ -15928,6 +15929,21 @@ spec:
             # scripts/.extauthz-transport-waivers.txt, and vice versa.
             - name: EXT_AUTHZ_CGJWT_KEYS_URL
               value: "https://gibson-gibson-workloads:8086/capabilitygrant/v1/keys"
+            # gibson#133: the OIDC client ids of the human sign-in flows. A
+            # token issued to any other client is a machine credential and
+            # skips the session gate; without this every machine user's
+            # client_credentials token (client_id = its name, sub = its
+            # numeric id) read as a person and was denied. The dashboard
+            # application is the one human client; the platform-operator
+            # mints its id into gibson-dashboard-oidc, so the key is read
+            # optionally (ext-authz starts before that Secret exists) and
+            # the reload annotation restarts ext-authz when it lands.
+            - name: EXT_AUTHZ_HUMAN_CLIENT_IDS
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-dashboard-oidc
+                  key: client_id
+                  optional: true
             - name: EXT_AUTHZ_ZITADEL_ISSUER
               # MUST equal the `iss` claim Zitadel writes into JWTs. Zitadel
               # constructs iss from {ExternalScheme}://{ExternalDomain}[:{ExternalPort}],
