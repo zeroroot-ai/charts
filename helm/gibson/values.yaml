@@ -263,19 +263,23 @@ platformPostgres:
   # Three keys are the seam `make recreate` fills from substrate.env
   # (deploy#1737): destinationPath (BUCKET_NAME), endpointURL
   # (BUCKET_ENDPOINT) and the two credential Secret refs below, which the
-  # bringup writes into the release namespace from the keyring. The defaults
-  # are kind's stage 0 (kind/substrate/substrate.sh).
+  # bringup writes into the release namespace from the keyring.
+  #
+  # THERE IS NO DEFAULT BUCKET. The defaults used to be kind's stage 0
+  # (s3://gibson-kind on the kind MinIO address), so the supported
+  # self-hosted profile archived a customer's WAL to the vendor's own dev
+  # bucket address, the documented restore path recovered nothing, and the
+  # `required` guard in the Cluster template could never fire. The kind
+  # values now live in the developer and CI rungs, which are kind's.
   backup:
-    # s3://<durable-bucket>/backups/postgres/. REQUIRED, and the render fails
-    # unless the path sits under backups/, the prefix the lifecycle rule
-    # covers. gibson-kind is the bucket kind's stage 0 creates.
-    destinationPath: "s3://gibson-kind/backups/postgres/"
+    # s3://<durable-bucket>/backups/postgres/. REQUIRED: the render fails
+    # without it, and fails unless the path sits under backups/, the prefix
+    # the lifecycle rule covers.
+    destinationPath: ""
 
-    # The S3 API endpoint. Empty means AWS S3 for the bucket's region. kind's
-    # MinIO listens on the last-but-two address of the kind Docker subnet,
-    # which substrate.sh pins (http://172.18.255.250:9000 on the default
-    # subnet). recreate overrides it from substrate.env BUCKET_ENDPOINT.
-    endpointURL: "http://172.18.255.250:9000"
+    # The S3 API endpoint. Empty means AWS S3 for the bucket's region. A
+    # MinIO or other S3-compatible store sets its address here.
+    endpointURL: ""
 
     # Which instance serves the base backup. `prefer-standby` keeps the load
     # off the primary on the three-instance profiles and degrades to the

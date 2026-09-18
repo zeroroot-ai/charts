@@ -19,7 +19,10 @@ CHART_DIR="${CHART_DIR:-helm/gibson}"
 RENDER="$(mktemp)"
 trap 'rm -f "$RENDER"' EXIT
 
-helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" \
+# The installer's inputs (the archive bucket) come from the render fixture;
+# the baseline profile itself has none, on purpose.
+INPUTS="${INPUTS:-$(dirname "$CHART_DIR")/testdata/render-inputs/gibson.yaml}"
+helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" -f "$INPUTS" \
   --namespace gibson > "$RENDER"
 
 # Patterns that mean "this only works on a cloud". Deliberately narrow: they
@@ -55,6 +58,8 @@ check 'service: *SecretsManager' \
 #   range. The range of valid IPs is 10.96.0.0/16
 # That is deploy#1627: the profile was extracted from the EKS one and carried
 # the address across. No AWS name appears in it, so every check above passed.
+check 'gibson-kind|172\.18\.255\.250' \
+  "kind's stage-0 bucket or MinIO address in the baseline render — a customer install would archive to the vendor's dev bucket and restore nothing. kind's values belong in the developer and CI rungs."
 check 'clusterIP: *"?172\.20\.' \
   "A ClusterIP from the EKS Service CIDR (172.20.0.0/16) in the baseline render — kind and kubeadm use 10.96.0.0/12 and will refuse to allocate it. Pin one inside the target cluster's Service CIDR."
 

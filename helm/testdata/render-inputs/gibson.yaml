@@ -1,0 +1,10 @@
+# render-inputs/gibson.yaml — what an installer supplies, for the offline guards.
+#
+# The umbrella has no default archive bucket (helm/gibson/values.yaml
+# platformPostgres.backup): the render fails without one, on purpose. Every
+# guard that renders the chart without a cluster passes this file so the
+# render has a bucket the way a real install does. It is a render FIXTURE,
+# not a profile: nothing installs it, and the name is chosen to be nobody's.
+platformPostgres:
+  backup:
+    destinationPath: "s3://example-durable-bucket/backups/postgres/"

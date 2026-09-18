@@ -76,23 +76,22 @@ FACTOR_DEFAULT=445
 # render without a profile, and a failed render gzips to twenty bytes, which
 # would read as a chart comfortably under the cap. That is the exact shape of
 # the bug this file exists to catch, so it is a hard failure here.
-record_bytes() {
-  local out
-  if [ -n "${2:-}" ]; then
-    out="$(helm template release "$1" -f "$2")" || return 1
-  else
-    out="$(helm template release "$1")" || return 1
-  fi
+record_bytes() { # <chart dir> [values file...]
+  local out chart="$1"; shift
+  local args=() f
+  for f in "$@"; do args+=(-f "$f"); done
+  out="$(helm template release "$chart" "${args[@]}")" || return 1
   [ -n "$out" ] || return 1
   printf '%s' "$out" | gzip -9 | wc -c | awk '{printf "%d", $1 * 4 / 3}'
 }
 
 # values_for <chart> — the profile a chart needs to render at all. Only the
 # umbrella has required values; the CRD charts render bare.
-values_for() {
+values_for() { # one path per line: the profile, then the installer inputs the render needs
   case "$1" in
-    gibson) printf '%s/helm/gibson/values-baseline.yaml' "$ROOT" ;;
-    *)      printf '' ;;
+    gibson)        printf '%s/helm/gibson/values-baseline.yaml\n%s/helm/testdata/render-inputs/gibson.yaml\n' "$ROOT" "$ROOT" ;;
+    gibson-velero) printf '%s/helm/testdata/render-inputs/gibson-velero.yaml\n' "$ROOT" ;;
+    *)             printf '' ;;
   esac
 }
 
@@ -101,7 +100,8 @@ printf '  %-24s %10s %8s\n' CHART RECORD "OF CAP"
 for chart in "${CHARTS[@]}"; do
   dir="$ROOT/helm/$chart"
   [ -d "$dir" ] || { echo "✗ check-helm-record-size: no chart at helm/$chart" >&2; exit 2; }
-  if ! bytes="$(record_bytes "$dir" "$(values_for "$chart")")"; then
+  mapfile -t vfiles < <(values_for "$chart")
+  if ! bytes="$(record_bytes "$dir" "${vfiles[@]}")"; then
     echo "✗ check-helm-record-size: helm template failed for $chart, so its record size is unknown" >&2
     exit 2
   fi

@@ -39,15 +39,19 @@ repack() {
   make -C "$ROOT" chart-deps >/dev/null
 }
 
+# The installer's inputs (the archive bucket) come from the render fixture
+# helm/testdata/render-inputs; no profile carries a default bucket.
 render() { # $1=profile $2=variant $3=dest
-  local args=(--namespace gibson) f
+  local args=(--namespace gibson -f "$ROOT/helm/testdata/render-inputs/gibson.yaml") f
   for f in ${1//+/ }; do args+=(-f "$ROOT/helm/gibson/$f"); done
   [ "$2" = withcaps ] && args+=(--api-versions "$CAPS")
   helm template gibson "$ROOT/helm/gibson" "${args[@]}" >"$3"
 }
 
 render_standalone() { # $1=chart $2=dest
-  helm template "$1" "$ROOT/helm/$1" --namespace gibson --include-crds >"$2"
+  local args=()
+  [ -r "$ROOT/helm/testdata/render-inputs/$1.yaml" ] && args+=(-f "$ROOT/helm/testdata/render-inputs/$1.yaml")
+  helm template "$1" "$ROOT/helm/$1" "${args[@]}" --namespace gibson --include-crds >"$2"
 }
 
 name_of() { echo "$1" | tr '/+' '__' | sed 's/\.yaml//g'; }
