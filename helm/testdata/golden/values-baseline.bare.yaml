@@ -9750,6 +9750,23 @@ rules:
       - gibson-tenant-operator
       - gibson-platform-operator
 ---
+# Source: gibson/charts/gibson-workloads/templates/dashboard/init-secrets-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gibson-dashboard-init-secrets
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: gibson-dashboard
+    app.kubernetes.io/part-of: gibson
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames:
+      - gibson-zitadel-signup-bot-pat
+      - "gibson-gibson-workloads-db-secrets"
+---
 # Source: gibson/charts/gibson-workloads/templates/databases/redis-rotation-controller.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -10356,6 +10373,24 @@ subjects:
   - kind: ServiceAccount
     name: gibson-openbao
     namespace: gibson
+---
+# Source: gibson/charts/gibson-workloads/templates/dashboard/init-secrets-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gibson-dashboard-init-secrets
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: gibson-dashboard
+    app.kubernetes.io/part-of: gibson
+subjects:
+  - kind: ServiceAccount
+    name: gibson-dashboard
+    namespace: gibson
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gibson-dashboard-init-secrets
 ---
 # Source: gibson/charts/gibson-workloads/templates/databases/redis-rotation-controller.yaml
 apiVersion: rbac.authorization.k8s.io/v1
