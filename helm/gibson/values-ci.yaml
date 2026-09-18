@@ -176,6 +176,14 @@ gibson-operators:
 # are created by the operator, not by a Deployment — the first draft of the
 # budget guard missed it, and it was the pod that sat Pending.
 platformPostgres:
+  # kind's stage 0 (bootstrap/kind/substrate/substrate.sh in hosted): the
+  # gibson-kind bucket on the MinIO that listens on the last-but-two address
+  # of the kind Docker subnet. These are kind's values, so they live in
+  # kind's rungs and never in the baseline, which has no bucket at all.
+  # `make recreate ENV=kind` still overrides both from substrate.env.
+  backup:
+    destinationPath: "s3://gibson-kind/backups/postgres/"
+    endpointURL: "http://172.18.255.250:9000"
   # kind keeps one instance as a profile value (ADR-0015, deploy#1729). The
   # shipped default is three with synchronous replication; the budget guard
   # multiplies the requests by the instance count, so this line is what keeps

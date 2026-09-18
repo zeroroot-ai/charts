@@ -52,7 +52,7 @@ bad="$(table_violations < "$TABLE" || true)"
 [ -z "$bad" ] || fail "a seeded password is not kind pw (argument-safe): $bad"
 
 # ---- 2. the generator, sampled --------------------------------------------
-helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" --namespace gibson \
+helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" -f "$CHART_DIR/../testdata/render-inputs/gibson.yaml" --namespace gibson \
   > "$WORK/render.yaml" 2> "$WORK/render.err" || die "helm template failed: $(tail -n1 "$WORK/render.err")"
 python3 - "$WORK/render.yaml" "$WORK/gen_pw.sh" <<'PY'
 import re, sys, yaml

@@ -63,7 +63,9 @@ PY
 
 render() {  # render <out> [extra values file]
   local out="$1"; shift
-  local args=(-f "$BASE")
+  # The installer inputs sit between the baseline and the rung, so a rung
+  # that carries its own (kind's bucket) still wins.
+  local args=(-f "$BASE" -f "$ROOT/helm/testdata/render-inputs/gibson.yaml")
   [ $# -gt 0 ] && args+=(-f "$1")
   helm template gibson "$CHART" "${args[@]}" --namespace gibson > "$out" 2>"$out.err" \
     || { echo "✗ check-rungs: the render failed: $(tail -n2 "$out.err")" >&2; return 1; }

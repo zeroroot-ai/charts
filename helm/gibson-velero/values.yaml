@@ -12,12 +12,13 @@
 # platformPostgres.backup.* for the CNPG Cluster (deploy#1730).
 # ---------------------------------------------------------------------------
 bucket:
-  # The bucket stage 0 created. gibson-kind is kind's.
-  name: "gibson-kind"
-  # The S3 API endpoint. EMPTY means AWS S3 for the region below. kind's
-  # MinIO listens on the last-but-two address of the kind Docker subnet,
-  # which kind/substrate/substrate.sh pins.
-  endpoint: "http://172.18.255.250:9000"
+  # The bucket stage 0 created. REQUIRED: there is no default that is safe
+  # to invent, and the render fails without one. kind's (gibson-kind on the
+  # kind MinIO address) lives in the developer and CI rungs.
+  name: ""
+  # The S3 API endpoint. EMPTY means AWS S3 for the region below. A MinIO or
+  # other S3-compatible store sets its address here.
+  endpoint: ""
   region: "us-east-1"
   # The prefix under the bucket. It MUST sit under backups/, the prefix the
   # bucket lifecycle rule covers; the render fails otherwise. Retention is

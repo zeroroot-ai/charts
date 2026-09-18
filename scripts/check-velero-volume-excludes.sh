@@ -23,7 +23,7 @@ set -euo pipefail
 CHART_DIR="${CHART_DIR:-helm/gibson}"
 RENDER="$(mktemp)"
 trap 'rm -f "$RENDER"' EXIT
-helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" --namespace gibson > "$RENDER"
+helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" -f "$CHART_DIR/../testdata/render-inputs/gibson.yaml" --namespace gibson > "$RENDER"
 
 python3 - "$RENDER" <<'PY'
 import sys, yaml, copy

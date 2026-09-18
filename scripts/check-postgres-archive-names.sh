@@ -25,7 +25,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 render() {  # render <label> <extra --set args...>; stdout = rendered Cluster, rc = helm rc
   local label="$1"; shift
-  helm template gibson "$CHART_DIR" -f "$VALUES" --namespace gibson "$@" \
+  helm template gibson "$CHART_DIR" -f "$VALUES" -f "$CHART_DIR/../testdata/render-inputs/gibson.yaml" --namespace gibson "$@" \
     > "$WORK/$label.yaml" 2> "$WORK/$label.err"
 }
 cluster_field() {  # cluster_field <label> <python expr on the Cluster dict d>
