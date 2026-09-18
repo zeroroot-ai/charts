@@ -650,7 +650,7 @@ spec:
             # refuses to write a degraded config and fails the saga
             # loudly per feedback_no_skippable_steps_for_required_artifacts.
             - name: GIBSON_VAULT_JWT_BOUND_ISSUER
-              value: {{ required "vault.jwtAuth.spireOidcIssuer is REQUIRED (tenant-operator#189). The per-tenant auth/jwt/config writer mirrors the root namespace's bound_issuer set by openbao-jwt-auth-init in gibson-workloads. Both kind and prod overlays set https://oidc-discovery.zeroroot.ai." ((.Values.vault).jwtAuth).spireOidcIssuer | quote }}
+              value: {{ required "vault.jwtAuth.spireOidcIssuer is REQUIRED (tenant-operator#189). The per-tenant auth/jwt/config writer mirrors the root namespace's bound_issuer set by openbao-jwt-auth-init in gibson-workloads. The baseline sets the in-cluster provider; staging and prod set their public discovery host." ((.Values.vault).jwtAuth).spireOidcIssuer | quote }}
             {{- if ((.Values.vault).jwtAuth).spireOidcJwksURL }}
             - name: GIBSON_VAULT_JWKS_URL
               value: {{ ((.Values.vault).jwtAuth).spireOidcJwksURL | quote }}
