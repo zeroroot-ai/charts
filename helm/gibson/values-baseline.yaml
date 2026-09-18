@@ -22,8 +22,10 @@
 # WHAT AN OPERATOR MUST SUPPLY (only what only they can know):
 #   - global.domain
 #   - a TLS issuer, or accept the self-signed one below for a private install
-#   - the registry credential, as the GHCR_PULL_TOKEN keyring member. The
-#     chart materialises the pull Secret from it; do not create one by hand.
+#   - only when the images come from your own registry (global.registry): the
+#     registry credential, as the GHCR_PULL_TOKEN keyring member. The chart
+#     materialises the pull Secret from it; do not create one by hand. Every
+#     image on ghcr.io/zeroroot-ai is public and pulls with no credential.
 #   - the bringup keyring Secret: `bringup-keyring`, key `openbao-seal-key`,
 #     in the release namespace, holding the 32-byte OpenBao seal key
 #     (deploy#1731). The chart renders no Secret for it. Create it

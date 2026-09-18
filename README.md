@@ -32,16 +32,20 @@ lowers *requests* only, never limits, so every pod still bursts as it would.
 | `values-developer.yaml` | layered on baseline, sized to fit ONE local node (kind or k3d). The rung a developer installs. |
 | `values-ci.yaml` | layered on baseline, the same content as `developer` under its own name so either may change later |
 
-## The images are private
+## The images are public
 
-The chart is Apache-2.0. The images it references are not, and they are not
-public. An install needs a registry credential, supplied as a member of the
-bringup keyring before the chart installs. There is exactly one credential
-path and the chart documents it in `values-baseline.yaml`.
+The chart is Apache-2.0. Every image it references is a public package on
+`ghcr.io/zeroroot-ai`, the first-party ones under their own names and the
+third-party ones under `mirror/`. A plain `helm install` pulls them with no
+credential. The one private package in the org, `billing`, belongs to the
+hosted SaaS overlay and is not part of this chart.
 
-`global.registry` repoints every first-party image at your own registry in one
-value. An image whose *path* also changes is repointed by its own `repository`
-key, which still wins.
+A registry credential is needed only when you serve the images from your own
+registry. `global.registry` repoints every first-party image at that registry
+in one value, and `global.imagePullSecrets` names the Secret the kubelet pulls
+with. The bringup keyring carries that credential as `GHCR_PULL_TOKEN`, and
+`values-baseline.yaml` documents the one path it takes. An image whose *path*
+also changes is repointed by its own `repository` key, which still wins.
 
 ## Tests
 
