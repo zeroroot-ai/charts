@@ -14,8 +14,9 @@ upstream Helm chart as a dependency so the gibson-operators chart stays
 self-contained — same shape as cert-manager / SPIRE / OpenFGA, which the
 chart also assumes are present in the cluster but doesn't bundle.
 
-Scope: --namespace=gibson watch-only. The controller's RBAC is scoped to
-the workload namespace; no cross-namespace authority.
+Scope: KUBERNETES_NAMESPACE names this namespace, so Reloader's informers
+watch it and nothing else, and its RBAC is a Role here; no cross-namespace
+authority.
 
 References:
   - https://github.com/stakater/Reloader
@@ -36,19 +37,19 @@ metadata:
     app.kubernetes.io/name: reloader
     app.kubernetes.io/component: reloader
 ---
-# Reloader v1.4.6 issues a cluster-scoped LIST on its Secret and ConfigMap
-# informers at startup — the client-go reflector does not accept a namespace
-# filter at the informer level. A namespace-scoped Role is therefore
-# insufficient; the informer fails with "cannot list resource at cluster scope"
-# and Reloader never watches anything (deploy#555).
-#
-# Fix: ClusterRole + ClusterRoleBinding for read-only discovery of secrets and
-# configmaps across the cluster. Workload patch rights stay namespace-scoped
-# (Role + RoleBinding below) — Reloader only ever restarts workloads in $ns.
+# Reloader reads Secrets and ConfigMaps through informers, and it scopes
+# those informers to KUBERNETES_NAMESPACE (internal/pkg/cmd/reloader.go:
+# unset means v1.NamespaceAll, "will detect changes in all namespaces").
+# deploy#555 saw "cannot list resource at cluster scope" because that
+# variable was unset, and answered with a ClusterRole over every Secret in
+# the cluster. The variable is set below, so the read grant is a Role in
+# this namespace: the chart annotates workloads here and nowhere else, and
+# a third-party controller holds no tenant Secret.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
-  name: reloader
+  name: reloader-read
+  namespace: {{ $ns }}
   labels:
     app.kubernetes.io/name: reloader
     app.kubernetes.io/component: reloader
@@ -58,16 +59,17 @@ rules:
     verbs: ["list", "get", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
-  name: reloader
+  name: reloader-read
+  namespace: {{ $ns }}
   labels:
     app.kubernetes.io/name: reloader
     app.kubernetes.io/component: reloader
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: reloader
+  kind: Role
+  name: reloader-read
 subjects:
   - kind: ServiceAccount
     name: reloader
@@ -152,6 +154,13 @@ spec:
         - name: reloader
           image: "{{ $repo }}:{{ $tag }}"
           imagePullPolicy: {{ $pullPolicy }}
+          env:
+            # Scopes every informer to this namespace. Unset, Reloader
+            # watches every namespace and needs a ClusterRole to do it.
+            - name: KUBERNETES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           args:
             # Reloader's actual namespace-scope flag is `--namespace-selector`
             # (key:value label selector), not `--namespaces`. v1.4.6 rejects
