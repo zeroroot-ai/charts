@@ -89,7 +89,7 @@ BASELINE = "helm/gibson/values-baseline.yaml"
 # bucket, and the render refuses to go without one.
 INPUTS = "helm/testdata/render-inputs/gibson.yaml"
 PROFILES = [
-    ("self-hosted", [BASELINE]),
+    ("self-hosted", [BASELINE, INPUTS]),
     ("eks", [BASELINE, INPUTS, "helm/gibson/values-eks.yaml"]),
     ("gke", [BASELINE, INPUTS, "helm/gibson/values-gke.yaml"]),
     ("aks", [BASELINE, INPUTS, "helm/gibson/values-aks.yaml"]),
