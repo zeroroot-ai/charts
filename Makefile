@@ -109,6 +109,18 @@ reloader-namespaced: ## Reloader reads Secrets in its own namespace only: KUBERN
 	@python3 scripts/check-reloader-namespaced.py --selftest
 	@python3 scripts/check-reloader-namespaced.py
 
+image-registry: ## Every image this repository names is on ghcr.io (charts#17: check-image-registry + check-no-docker-io)
+	@python3 scripts/check-image-registry.py --selftest
+	@python3 scripts/check-image-registry.py
+
+orphan-templates: ## No Helm named template that nothing invokes (charts#17)
+	@python3 scripts/check-orphan-templates.py --selftest
+	@python3 scripts/check-orphan-templates.py
+
+probes: ## No smoke or verify probe whose failure is swallowed by || true (charts#17)
+	@python3 scripts/check-probes.py --selftest
+	@python3 scripts/check-probes.py
+
 tool-image: ## No template names the alpine-k8s tool image by hand; it renders gibson.toolImage
 	@python3 scripts/check-no-literal-tool-image.py --selftest
 	@python3 scripts/check-no-literal-tool-image.py
@@ -116,7 +128,7 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
+check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image image-registry orphan-templates probes reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context

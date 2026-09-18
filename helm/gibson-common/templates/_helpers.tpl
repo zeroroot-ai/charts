@@ -419,10 +419,6 @@ imagePullSecrets:
 {{- toYaml . -}}
 {{- end }}
 
-{{- define "gibson.jaeger.host" -}}
-{{- printf "%s-jaeger" .Release.Name }}
-{{- end }}
-
 {{- define "gibson.labels" -}}
 helm.sh/chart: {{ include "gibson.chart" . }}
 {{ include "gibson.selectorLabels" . }}
@@ -536,10 +532,6 @@ gibson-platform
 {{- else -}}
 {{- /* Empty — caller can omit the key. */ -}}
 {{- end -}}
-{{- end }}
-
-{{- define "gibson.prometheus.host" -}}
-{{- printf "%s-prometheus" .Release.Name }}
 {{- end }}
 
 {{- define "gibson.redisPasswordSecretKey" -}}
