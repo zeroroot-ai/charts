@@ -2825,9 +2825,10 @@ zitadelServiceAccounts:
 # the registry to silently drift behind the deployed daemon and default-deny
 # newly-added RPCs.
 #
-# The `sdk.version` / `sdk.registry` / `sdk.allowPublicFallback` /
-# `sdk.imagePullSecret` fields are now UNUSED in the default path and retained
-# only so existing overlays that still set them render without error. The
+# The `sdk.version` / `sdk.registry` / `sdk.imagePullSecret` fields are now
+# UNUSED in the default path and retained only so existing overlays that still
+# set them render without error. `sdk.allowPublicFallback` is gone: no template
+# read it, and a reader took it for a live fallback to a public registry. The
 # air-gapped install path still uses `sdk.bypassRegistryValidation` +
 # `sdk.embeddedRegistry` (ConfigMap-mounted registry, no daemon dependency).
 sdk:
@@ -2877,13 +2878,6 @@ sdk:
   # Set to empty string only if `sdk.registry` is publicly pullable.
   # Spec: zero-trust-hardening follow-up (private GHCR auth in init container).
   imagePullSecret: "ghcr-credentials"
-  # One-cycle migration bridge (private-authz-registry Requirement 5.3).
-  # When true AND the private OCI pull fails with 401/404, the init
-  # container falls back to the legacy public sdk-registry artifact and
-  # logs a warning. DEFAULT FALSE — opt in only during the migration window.
-  # Remove this flag and the bridge logic after one minor release cycle.
-  # TODO(private-authz-registry): remove allowPublicFallback after v0.86.x.
-  allowPublicFallback: false
   # Set true to bypass validateRegistryFromSDK — the operator commits to
   # supplying a baked-in registry on a custom ext-authz image. Discouraged
   # outside fully air-gapped installs; drift between the daemon's compiled
