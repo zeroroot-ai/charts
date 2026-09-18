@@ -24918,13 +24918,14 @@ spec:
               ;;
           esac
 
-          # Sibling-application services: OpenFGA, Zitadel, Neo4j.
-          # These deploy via separate Argo Applications; their Services are
-          # well-known. We just verify reachability — deep contract checks
-          # live in their dedicated test pods.
-          probe_http "openfga"       "https://gibson-openfga:8080/healthz" "200" || true
-          probe_http "zitadel"       "http://gibson-zitadel:8080/debug/ready" "200" || true
-          probe_tcp  "neo4j-bolt"    "gibson-neo4j" "7687" || true
+          # Sibling-application services: OpenFGA, Zitadel, Neo4j. They are
+          # structural on every profile (ADR-0015), so an unreachable one is a
+          # failed install, not a soft warning. These three used to end in
+          # `|| true`, which made this test unable to fail on them. Deep
+          # contract checks live in their dedicated test pods.
+          probe_http "openfga"       "https://gibson-openfga:8080/healthz" "200"
+          probe_http "zitadel"       "http://gibson-zitadel:8080/debug/ready" "200"
+          probe_tcp  "neo4j-bolt"    "gibson-neo4j" "7687"
 
           echo ""
           echo "[svc-probe] all first-party probes PASSED"
