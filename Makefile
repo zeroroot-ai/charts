@@ -48,6 +48,9 @@ cloud-free: ## The baseline profile assumes no cloud
 postgres-archive-names: ## A recovered Postgres reads the old archive and writes a new one, never the same
 	@./scripts/check-postgres-archive-names.sh
 
+reaper-fails-closed: ## The orphan reaper deletes nothing when it cannot prove who created a user
+	@./scripts/check-orphan-reaper-fails-closed.sh
+
 seed-passwords: ## Every password the OpenBao seeder mints is argument-safe (letters and digits, no leading '-')
 	@./scripts/check-seed-passwords.sh
 
@@ -106,7 +109,7 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
+check: golden attribution cloud-free subchart-overrides zitadel-lockstep login-brand tool-image postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context
