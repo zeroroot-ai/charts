@@ -1591,7 +1591,7 @@ redis:
     # deploy#1170 — mirrored to ghcr; Docker Hub is rate-limited per NAT IP.
     registry: ghcr.io
     repository: zeroroot-ai/mirror/redis-stack-server
-    tag: "7.4.0-v1"
+    tag: "7.4.0-v1@sha256:72035434f455ecd897090d3dd83ec357d34857287f159378b965a7006312a797"
     pullPolicy: IfNotPresent
 
   auth:
@@ -1667,9 +1667,9 @@ redis:
     # IRSA-annotated ServiceAccount; never set this to `default`.
     serviceAccountName: ""
     # Stage 1 (init container) — MUST ship redis-cli.
-    redisImage: "ghcr.io/zeroroot-ai/mirror/redis:7.4.1-alpine"
+    redisImage: "ghcr.io/zeroroot-ai/mirror/redis:7.4.1-alpine@sha256:c1e88455c85225310bbea54816e9c3f4b5295815e6dbf80c34d40afc6df28275"
     # Stage 2 (main container) — MUST ship the aws CLI.
-    awsCliImage: "ghcr.io/zeroroot-ai/mirror/aws-cli:2.17.50"
+    awsCliImage: "ghcr.io/zeroroot-ai/mirror/aws-cli:2.17.50@sha256:ac68e76ae4bbb804b0c36d56c6fdc8e6800adb46d29867ac2b73280225a7b719"
 
   # Spec 3 §3 R9 — PDB defaults: omitted for 1-replica Redis-Stack.
   podDisruptionBudget:
@@ -1691,7 +1691,7 @@ redis:
     enabled: false
     exporter:
       repository: ghcr.io/zeroroot-ai/mirror/redis-exporter
-      tag: "v1.63.0"
+      tag: "v1.63.0@sha256:8dde0136b66ec4dfb25802283fe89852a405368b095b3893841d90499a8d4e17"
       pullPolicy: IfNotPresent
 
   # Ordered restart controller CronJob schedule (deploy#517).
@@ -1834,7 +1834,7 @@ dashboard-postgresql:
     repository: zeroroot-ai/mirror/bitnami-postgresql
     # Spec 2 R13 — pin every Bitnami Postgres alias to a concrete tag.
     # Bumped together; CI's chart-audit gate fails if any tag resolves to :latest.
-    tag: "16.4.0-debian-12-r0"
+    tag: "16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
 
   auth:
     username: dashboard
@@ -1884,7 +1884,7 @@ tenant-postgresql:
     repository: zeroroot-ai/mirror/bitnami-postgresql
     # Spec 2 R13 — pin every Bitnami Postgres alias to a concrete tag.
     # Bumped together; CI's chart-audit gate fails if any tag resolves to :latest.
-    tag: "16.4.0-debian-12-r0"
+    tag: "16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
 
   auth:
     # gibson_admin must hold CREATEDB; granted via the Bitnami init-script
@@ -1980,7 +1980,7 @@ fga-postgresql:
     repository: zeroroot-ai/mirror/bitnami-postgresql
     # Spec 2 R13 — pin every Bitnami Postgres alias to a concrete tag.
     # Bumped together; CI's chart-audit gate fails if any tag resolves to :latest.
-    tag: "16.4.0-debian-12-r0"
+    tag: "16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
 
   auth:
     username: openfga
@@ -2069,7 +2069,7 @@ zitadel-postgresql:
     repository: zeroroot-ai/mirror/bitnami-postgresql
     # Spec 2 R13 — pin every Bitnami Postgres alias to a concrete tag.
     # Bumped together; CI's chart-audit gate fails if any tag resolves to :latest.
-    tag: "16.4.0-debian-12-r0"
+    tag: "16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
 
   auth:
     username: zitadel
@@ -2252,7 +2252,7 @@ envoy:
 
   image:
     repository: ghcr.io/zeroroot-ai/mirror/envoy
-    tag: "v1.34.0"
+    tag: "v1.34.0@sha256:45d37d848802f98a5647cb7522b4c1c42e0e0e775913d8e253ef3a5856bef986"
     pullPolicy: IfNotPresent
   # ---------------------------------------------------------------------------
   # waf — the Edge WAF (CONTEXT.md § Edge WAF, deploy#1658).
@@ -2272,7 +2272,7 @@ envoy:
     image:
       repository: ghcr.io/zeroroot-ai/mirror/coraza-proxy-wasm
       # The -busybox variant carries /bin/cp for the init container.
-      tag: "0.6.0-busybox"
+      tag: "0.6.0-busybox@sha256:6ac95e71ef11c3ae55d094e7e2da65c75d4539e233ea5e55a4bedc7b4e6a7acd"
       pullPolicy: IfNotPresent
     # CRS paranoia level for the browser chain. 1 is the CRS default: the
     # rules with the fewest false positives. Raise per chain, never globally,
@@ -2718,7 +2718,7 @@ stripeMock:
 
   image:
     repository: ghcr.io/zeroroot-ai/mirror/stripe-mock
-    tag: "v0.200.0"
+    tag: "v0.200.0@sha256:037b48935aad08cff2f692d3b62770437b9d17a4315ed44b3774ff5e4de68d78"
     pullPolicy: IfNotPresent
 
   resources:
@@ -2758,7 +2758,7 @@ mailpit:
 
   image:
     repository: ghcr.io/zeroroot-ai/mirror/mailpit
-    tag: "v1.28.3"
+    tag: "v1.28.3@sha256:27cfb8893806ed676042a00f4db70325a0d57cc5217349d210b6dd903e1a7e67"
     pullPolicy: IfNotPresent
 
   ports:
@@ -3139,7 +3139,7 @@ openbao:
 
   image:
     repository: ghcr.io/zeroroot-ai/mirror/openbao
-    tag: "2.5.3"
+    tag: "2.5.3@sha256:fdc6da21ca6963560c32336fd7feb9cf2d5e52668f1a1647205a4b41171f0806"
     pullPolicy: IfNotPresent
 
   replicas: 1
@@ -3278,10 +3278,10 @@ openbao:
     # is Alpine/BusyBox and does.
     snapshotImage:
       repository: ghcr.io/zeroroot-ai/mirror/openbao
-      tag: "2.5.3"
+      tag: "2.5.3@sha256:fdc6da21ca6963560c32336fd7feb9cf2d5e52668f1a1647205a4b41171f0806"
       pullPolicy: IfNotPresent
     # Stage 2 (main container) — MUST ship the aws CLI.
-    awsCliImage: "ghcr.io/zeroroot-ai/mirror/aws-cli:2.17.50"
+    awsCliImage: "ghcr.io/zeroroot-ai/mirror/aws-cli:2.17.50@sha256:ac68e76ae4bbb804b0c36d56c6fdc8e6800adb46d29867ac2b73280225a7b719"
     # Override only if the StatefulSet claim is not the ordinal-0 default
     # (data-<release>-openbao-0).
     pvcName: ""
@@ -3303,7 +3303,7 @@ openbao:
     # all three.
     initImage:
       repository: ghcr.io/zeroroot-ai/mirror/openbao
-      tag: "2.5.3"
+      tag: "2.5.3@sha256:fdc6da21ca6963560c32336fd7feb9cf2d5e52668f1a1647205a4b41171f0806"
       pullPolicy: IfNotPresent
 
   persistence:
@@ -3429,7 +3429,7 @@ ratelimit:
     # Docker Hub carries commit-sha tags only. 8fe6ea42 = master 2026-08-24.
     # Mirrored by zeroroot-ai/.github mirror-list.yaml.
     repository: ghcr.io/zeroroot-ai/mirror/ratelimit
-    tag: "8fe6ea42"
+    tag: "8fe6ea42@sha256:a61547259607d40aff153050c2a87873ca1676d1d9f5f06937d412000dcc2df1"
     pullPolicy: IfNotPresent
   logLevel: info
   ports:
@@ -4177,7 +4177,7 @@ setec:
   # hook takes down the whole gibson Argo sync (deploy#1113). Pin the public
   # org mirror every other kubectl-running pod in this chart already uses.
   kubectl:
-    image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+    image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
 
   # Operator + runtime-agent images: the vendored chart defaults both tags to
   # .Chart.AppVersion, which setec CI has not always published (setec#131 —
@@ -4960,17 +4960,17 @@ tests:
   # (alpine + curl, ~6 MB). Override to an internal mirror.
   image:
     repository: "ghcr.io/zeroroot-ai/mirror/curl"
-    tag: "8.10.1"
+    tag: "8.10.1@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b"
   # psql-bearing image for the data-plane test pod's Postgres probe.
   # Default = the same Bitnami Postgres mirror the platform-postgres
   # subchart uses, so a `kind load docker-image` already has it cached.
   psqlImage:
     repository: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql"
-    tag: "16.4.0-debian-12-r0"
+    tag: "16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
   # redis-cli-bearing image for the data-plane Redis probe.
   redisImage:
     repository: "ghcr.io/zeroroot-ai/mirror/redis"
-    tag: "7.4.1-alpine"
+    tag: "7.4.1-alpine@sha256:c1e88455c85225310bbea54816e9c3f4b5295815e6dbf80c34d40afc6df28275"
   # kubectl-bearing image for Secret / ConfigMap inspection probes. The
   # alpine/k8s image ships curl + jq + openssl + kubectl in a single
   # image, so we reuse it for the FGA/Zitadel/Envoy/bootstrap-secret pods.

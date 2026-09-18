@@ -12989,7 +12989,7 @@ spec:
       # until the socket is present (deploy#201).
       initContainers:
         - name: wait-for-spire-socket
-          image: ghcr.io/zeroroot-ai/mirror/busybox:1.36
+          image: ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
           command: ['sh', '-c']
           args:
             - |
@@ -13497,7 +13497,7 @@ spec:
       # surfaces as `kubectl describe pod`, not a silent boot.
       initContainers:
         - name: wait-for-spire-socket
-          image: ghcr.io/zeroroot-ai/mirror/busybox:1.36
+          image: ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
           command: ['sh', '-c']
           args:
             - |
@@ -13536,7 +13536,7 @@ spec:
               mountPath: /run/spire/agent
               readOnly: true
         - name: wait-for-fga-config
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
           command: ['/bin/bash', '-c']
           args:
             - |
@@ -13571,7 +13571,7 @@ spec:
               cpu: 100m
               memory: 64Mi
         - name: wait-for-redis-secret
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
           command: ['/bin/bash', '-c']
           args:
             - |
@@ -14462,7 +14462,7 @@ spec:
             - "docs.selfhosted.example.com"
       initContainers:
         - name: wait-for-spire-socket
-          image: ghcr.io/zeroroot-ai/mirror/busybox:1.36
+          image: ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
           command: ['sh', '-c']
           args:
             - |
@@ -14501,7 +14501,7 @@ spec:
               mountPath: /run/spire/agent
               readOnly: true
         - name: wait-for-gibson
-          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           command:
             - sh
             - -c
@@ -14540,7 +14540,7 @@ spec:
         # for ZITADEL_CLIENT_SECRET was flipped from `optional: true` to
         # required.
         - name: wait-for-zitadel-client
-          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           command:
             - sh
             - -c
@@ -14566,7 +14566,7 @@ spec:
         # ZITADEL_SIGNUP_BOT_PAT env entry was flipped from
         # `optional: true` to required.
         - name: wait-for-signup-bot-pat
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
           command: ['/bin/bash', '-c']
           args:
             - |
@@ -14603,7 +14603,7 @@ spec:
         # NEO4J_PASSWORD env entry was flipped from `optional: true` to
         # required.
         - name: wait-for-db-secrets
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
           command: ['/bin/bash', '-c']
           args:
             - |
@@ -14656,7 +14656,7 @@ spec:
         # Fail-fast on any "<unset>" value so the kubelet retries until the
         # post-install Job has populated the map.
         - name: resolve-sa-identity-map
-          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           command:
             - sh
             - -c
@@ -15524,7 +15524,7 @@ spec:
         # pod start, so air-gapped installs work, and the CRS version is the
         # image tag. Fails loud on a missing or empty module.
         - name: copy-coraza-wasm
-          image: "ghcr.io/zeroroot-ai/mirror/coraza-proxy-wasm:0.6.0-busybox"
+          image: "ghcr.io/zeroroot-ai/mirror/coraza-proxy-wasm:0.6.0-busybox@sha256:6ac95e71ef11c3ae55d094e7e2da65c75d4539e233ea5e55a4bedc7b4e6a7acd"
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
@@ -15551,7 +15551,7 @@ spec:
             - name: wasm
               mountPath: /wasm
         - name: render-envoy-config
-          image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+          image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
@@ -15622,7 +15622,7 @@ spec:
               memory: 64Mi
       containers:
         - name: envoy
-          image: "ghcr.io/zeroroot-ai/mirror/envoy:v1.34.0"
+          image: "ghcr.io/zeroroot-ai/mirror/envoy:v1.34.0@sha256:45d37d848802f98a5647cb7522b4c1c42e0e0e775913d8e253ef3a5856bef986"
           imagePullPolicy: IfNotPresent
           args:
             - "-c"
@@ -15842,7 +15842,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: wait-for-spire-socket
-          image: ghcr.io/zeroroot-ai/mirror/busybox:1.36
+          image: ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
           command: ['sh', '-c']
           args:
             - |
@@ -15881,7 +15881,7 @@ spec:
               mountPath: /run/spire/agent
               readOnly: true
         - name: wait-for-fga-config
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
           command: ['/bin/bash', '-c']
           args:
             - |
@@ -16271,7 +16271,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: wait-for-spire-socket
-          image: ghcr.io/zeroroot-ai/mirror/busybox:1.36
+          image: ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
           command: ['sh', '-c']
           args:
             - |
@@ -16311,7 +16311,7 @@ spec:
               readOnly: true
       containers:
         - name: ratelimit
-          image: "ghcr.io/zeroroot-ai/mirror/ratelimit:8fe6ea42"
+          image: "ghcr.io/zeroroot-ai/mirror/ratelimit:8fe6ea42@sha256:a61547259607d40aff153050c2a87873ca1676d1d9f5f06937d412000dcc2df1"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -16399,7 +16399,7 @@ spec:
               mountPath: /data/ratelimit/config
               readOnly: true
         - name: envoy
-          image: "ghcr.io/zeroroot-ai/mirror/envoy:v1.34.0"
+          image: "ghcr.io/zeroroot-ai/mirror/envoy:v1.34.0@sha256:45d37d848802f98a5647cb7522b4c1c42e0e0e775913d8e253ef3a5856bef986"
           imagePullPolicy: IfNotPresent
           args:
             - "-c"
@@ -16505,7 +16505,7 @@ spec:
         - name: openfga
           securityContext:
             {}
-          image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.20.0"
+          image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.20.0@sha256:d53ce5c48413d01e75ecf375f3f74eb35c50f155fc028c41d03dbc7c9838fb38"
           imagePullPolicy: Always
           args: ["run"]
           ports:
@@ -16840,7 +16840,7 @@ spec:
         # OK status. The `--insecure-skip-tls-verify` flag is included to support
         # environments that use self-signed certificates for internal TLS.
         - name: wait-for-zitadel
-          image: ghcr.io/zeroroot-ai/mirror/wait4x:3.7.1
+          image: ghcr.io/zeroroot-ai/mirror/wait4x:3.7.1@sha256:4168ec1328e4fa51b82f7d601c18813b5e4aa85d0eda237cf3501b4ddd70d2c5
           imagePullPolicy: 'IfNotPresent'
           command:
             - wait4x
@@ -17058,7 +17058,7 @@ spec:
         runAsGroup: 1000
       containers:
         - name: openbao
-          image: "ghcr.io/zeroroot-ai/mirror/openbao:2.5.3"
+          image: "ghcr.io/zeroroot-ai/mirror/openbao:2.5.3@sha256:fdc6da21ca6963560c32336fd7feb9cf2d5e52668f1a1647205a4b41171f0806"
           imagePullPolicy: IfNotPresent
           command:
             - bao
@@ -17184,7 +17184,7 @@ spec:
         # use. It ships curl, jq and a sane CA bundle so the K8s apiserver
         # TLS handshake works for the gibson-platform-operator-vault write.
         - name: openbao-auto-init
-          image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+          image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
           imagePullPolicy: IfNotPresent
           command:
             - sh
@@ -18281,7 +18281,7 @@ spec:
         runAsNonRoot: false
       initContainers:
         - name: init-permissions
-          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           command: ['sh', '-c']
           args:
             - |
@@ -18296,7 +18296,7 @@ spec:
         # the previous password in-memory during the rolling-restart window
         # via `ACL SETUSER`, so it never appears on disk.
         - name: init-acl
-          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           command: ['sh', '-c']
           args:
             - |
@@ -18316,7 +18316,7 @@ spec:
             allowPrivilegeEscalation: false
       containers:
         - name: redis-stack
-          image: "ghcr.io/zeroroot-ai/mirror/redis-stack-server:7.4.0-v1"
+          image: "ghcr.io/zeroroot-ai/mirror/redis-stack-server:7.4.0-v1@sha256:72035434f455ecd897090d3dd83ec357d34857287f159378b965a7006312a797"
           imagePullPolicy: IfNotPresent
           # Redis auth is always on (one-code-path epic / deploy#199);
           # `redis.auth.enabled` was deleted as a configuration toggle.
@@ -18472,7 +18472,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: wait-for-spire-socket
-          image: ghcr.io/zeroroot-ai/mirror/busybox:1.36
+          image: ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
           command: ['sh', '-c']
           args:
             - |
@@ -18525,7 +18525,7 @@ spec:
           # kubectl image (bitnamilegacy mirror) ships kubectl + bash —
           # the only two things this step needs. Pinned to the chart-wide
           # kubectl version used by other hooks.
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
           command: ['/bin/bash', '-c']
           args:
             - |
@@ -18565,7 +18565,7 @@ spec:
         # nonroot user has no $HOME; HOME=/var/lib/gibson is exported in the
         # daemon container env.
         - name: setup-config
-          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           command: ['sh', '-c']
           args:
             - |
@@ -18598,7 +18598,7 @@ spec:
         # missing prerequisite surfaces as `kubectl describe pod` output,
         # not a silent boot with degraded behavior.
         - name: wait-for-prerequisites
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
           command: ['/bin/bash', '-c']
           args:
             - |
@@ -18641,7 +18641,7 @@ spec:
               memory: 64Mi
         # Wait for Redis
         - name: wait-for-redis
-          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           command: ['sh', '-c']
           args:
             - |
@@ -19427,10 +19427,10 @@ spec:
           volumeMounts:
           - mountPath: /plugins
             name: neo4j-plugins
-          image: "ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community"            
+          image: "ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community@sha256:5a015e53de1895e7eee1574ae0325cf8c4b89587222778108c594bdd45a474b5"            
       containers:
         - name: "neo4j"
-          image: "ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community"
+          image: "ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community@sha256:5a015e53de1895e7eee1574ae0325cf8c4b89587222778108c594bdd45a474b5"
           imagePullPolicy: "IfNotPresent"
           envFrom:
             - configMapRef:
@@ -19796,7 +19796,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: wait-for-vault
-          image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+          image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
           command: ['sh', '-c']
           args:
             - |
@@ -19825,7 +19825,7 @@ spec:
               drop: ["ALL"]
       containers:
         - name: jwt-auth-init
-          image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+          image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
           command: ['sh', '-c']
           args:
             - |
@@ -20051,7 +20051,7 @@ spec:
             - name: model
               mountPath: /model
         - name: wait-for-fga
-          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           command: ['sh', '-c']
           args:
             - |
@@ -20085,7 +20085,7 @@ spec:
         # for air-gapped operators with a different mirror. deploy#322
         # finding 4 (previous mirror image 404ed on first install).
         - name: fga-init
-          image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+          image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
           imagePullPolicy: IfNotPresent
           command: ['sh', '-c']
           args:
@@ -20423,7 +20423,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: wait-for-fga-config
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
           command: ['/bin/bash', '-c']
           args:
             - |
@@ -20651,7 +20651,7 @@ spec:
             - name: ghcr-credentials
           containers:
             - name: rotation-controller
-              image: "ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4"
+              image: "ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48"
               imagePullPolicy: IfNotPresent
               command:
                 - /bin/bash
@@ -25652,7 +25652,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: probe
-      image: "ghcr.io/zeroroot-ai/mirror/curl:8.10.1"
+      image: "ghcr.io/zeroroot-ai/mirror/curl:8.10.1@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b"
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
@@ -25820,7 +25820,7 @@ spec:
   serviceAccountName: "gibson-gibson-workloads-test-bootstrap-reader"
   containers:
     - name: probe
-      image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+      image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
@@ -25962,7 +25962,7 @@ spec:
   serviceAccountName: "gibson-gibson-workloads-test-bootstrap-reader"
   containers:
     - name: probe
-      image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+      image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
@@ -26065,7 +26065,7 @@ spec:
   serviceAccountName: "gibson-gibson-workloads-test-bootstrap-reader"
   containers:
     - name: probe
-      image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+      image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
@@ -26316,7 +26316,7 @@ spec:
   serviceAccountName: "gibson-gibson-workloads-test-bootstrap-reader"
   containers:
     - name: probe
-      image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+      image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
@@ -26460,7 +26460,7 @@ spec:
   serviceAccountName: "gibson-gibson-workloads-test-bootstrap-reader"
   containers:
     - name: probe
-      image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+      image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
@@ -26582,7 +26582,7 @@ spec:
   serviceAccountName: "gibson-gibson-workloads-test-bootstrap-reader"
   containers:
     - name: postgres-probe
-      image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0"
+      image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
@@ -26643,7 +26643,7 @@ spec:
         - name: tmp
           mountPath: /tmp
     - name: redis-probe
-      image: "ghcr.io/zeroroot-ai/mirror/redis:7.4.1-alpine"
+      image: "ghcr.io/zeroroot-ai/mirror/redis:7.4.1-alpine@sha256:c1e88455c85225310bbea54816e9c3f4b5295815e6dbf80c34d40afc6df28275"
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
@@ -26702,7 +26702,7 @@ spec:
         - name: tmp
           mountPath: /tmp
     - name: neo4j-probe
-      image: "ghcr.io/zeroroot-ai/mirror/curl:8.10.1"
+      image: "ghcr.io/zeroroot-ai/mirror/curl:8.10.1@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b"
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
@@ -26842,7 +26842,7 @@ spec:
   serviceAccountName: "gibson-gibson-workloads-test-sandbox-admission"
   containers:
     - name: probe
-      image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+      image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
@@ -26891,7 +26891,7 @@ metadata:
 spec:
   containers:
     - name: grpc-health-probe
-      image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.20.0"
+      image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.20.0@sha256:d53ce5c48413d01e75ecf375f3f74eb35c50f155fc028c41d03dbc7c9838fb38"
       imagePullPolicy: Always
       command: ["grpc_health_probe", '-addr=gibson-openfga:8081']
   restartPolicy: Never
@@ -27114,7 +27114,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: runtime-check
-          image: "ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4"
+          image: "ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48"
           command: ["/bin/sh", "/scripts/check.sh"]
           env:
             - name: ENABLED_BACKENDS
@@ -27195,7 +27195,7 @@ spec:
         - name: migrate-database
           securityContext:
             {}
-          image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.20.0"
+          image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.20.0@sha256:d53ce5c48413d01e75ecf375f3f74eb35c50f155fc028c41d03dbc7c9838fb38"
           args: ["migrate"]
           env:
             - name: OPENFGA_DATASTORE_ENGINE
@@ -27267,7 +27267,7 @@ spec:
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
-          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0
+          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
           imagePullPolicy: 'IfNotPresent'
           command:
             - sh
@@ -27484,7 +27484,7 @@ spec:
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
-          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0
+          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
           imagePullPolicy: 'IfNotPresent'
           command:
             - sh
@@ -27526,7 +27526,7 @@ spec:
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
-          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0
+          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
           imagePullPolicy: 'IfNotPresent'
           command:
             - sh
@@ -27568,7 +27568,7 @@ spec:
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
-          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0
+          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
           imagePullPolicy: 'IfNotPresent'
           command:
             - sh
@@ -27807,7 +27807,7 @@ spec:
       serviceAccountName: iam-admin-pat-escrow
       containers:
       - name: escrow
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
         env:
         - name: BAO_ADDR
           value: "http://gibson-openbao:8200"
@@ -27929,7 +27929,7 @@ spec:
       serviceAccountName: postgres-exec
       containers:
       - name: setup
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
         command:
         - bash
         - -ec
@@ -27984,7 +27984,7 @@ spec:
       serviceAccountName: signup-bot-pat-minter
       containers:
       - name: minter
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
         command:
         - bash
         - -ec
@@ -28042,7 +28042,7 @@ spec:
       serviceAccountName: postgres-exec
       containers:
       - name: setup
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
         env:
         - name: ROLE
           value: openfga
@@ -28108,7 +28108,7 @@ spec:
       serviceAccountName: postgres-exec
       containers:
       - name: setup
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
         env:
         - name: ROLE
           value: spire
@@ -28149,7 +28149,7 @@ spec:
       serviceAccountName: zitadel-login-branding
       containers:
       - name: brand
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
         env:
         - name: ZITADEL_EXTERNAL_DOMAIN
           value: "app.selfhosted.example.com"
@@ -28473,7 +28473,7 @@ spec:
       serviceAccountName: postgres-exec
       containers:
       - name: setup
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
         env:
         - name: ROLE
           value: zitadel
@@ -28520,7 +28520,7 @@ spec:
       automountServiceAccountToken: false
       containers:
       - name: gate
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0"
+        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
         # busybox ash: no `set -o pipefail` (deploy#603-605). `set -e` only.
         command:
         - sh

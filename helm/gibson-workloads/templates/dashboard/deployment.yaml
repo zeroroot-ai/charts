@@ -102,7 +102,7 @@ spec:
         {{- include "gibson.waitForSpireSocket" . | nindent 8 }}
         {{- if .Values.dashboard.initContainers.waitForGibson }}
         - name: wait-for-gibson
-          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           command:
             - sh
             - -c
@@ -142,7 +142,7 @@ spec:
         # for ZITADEL_CLIENT_SECRET was flipped from `optional: true` to
         # required.
         - name: wait-for-zitadel-client
-          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           command:
             - sh
             - -c
@@ -168,7 +168,7 @@ spec:
         # ZITADEL_SIGNUP_BOT_PAT env entry was flipped from
         # `optional: true` to required.
         - name: wait-for-signup-bot-pat
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
           command: ['/bin/bash', '-c']
           args:
             - |
@@ -205,7 +205,7 @@ spec:
         # NEO4J_PASSWORD env entry was flipped from `optional: true` to
         # required.
         - name: wait-for-db-secrets
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
           command: ['/bin/bash', '-c']
           args:
             - |
@@ -249,7 +249,7 @@ spec:
         {{- with .Values.dashboard.billing }}
         {{- if or .stripeSecretKeySecretRef .stripeWebhookSecretSecretRef }}
         - name: wait-for-stripe-secrets
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4
+          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
           command: ['/bin/bash', '-c']
           args:
             - |
@@ -332,7 +332,7 @@ spec:
         # Fail-fast on any "<unset>" value so the kubelet retries until the
         # post-install Job has populated the map.
         - name: resolve-sa-identity-map
-          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           command:
             - sh
             - -c
