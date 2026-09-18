@@ -18831,8 +18831,14 @@ spec:
               containerPort: 8087
               protocol: TCP
           env:
+            # The sidecar shares the daemon's pod network namespace and the
+            # daemon reaches it on 127.0.0.1 (GIBSON_BELIEF_SIDECAR_URL above).
+            # /score has no authentication, so the bind is loopback and the
+            # port is reachable from inside the pod only. The probes below
+            # exec inside the container for the same reason: kubelet cannot
+            # reach a loopback bind over HTTP.
             - name: BELIEF_HOST
-              value: "0.0.0.0"
+              value: "127.0.0.1"
             - name: BELIEF_PORT
               value: "8087"
             - name: BELIEF_MODELS_DIR
@@ -18843,16 +18849,20 @@ spec:
             # model has up to ~5min to load before kubelet SIGKILLs it. The tight
             # liveness (5 + 3*10 = 35s) was killing it mid-load, looping it out of
             # the daemon Service endpoints (deploy#971-adjacent).
-            httpGet:
-              path: /healthz
-              port: belief
+            exec:
+              command:
+                - /usr/bin/python3
+                - -c
+                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8087/healthz', timeout=2)"
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 60
           livenessProbe:
-            httpGet:
-              path: /healthz
-              port: belief
+            exec:
+              command:
+                - /usr/bin/python3
+                - -c
+                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8087/healthz', timeout=2)"
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 3
@@ -18861,9 +18871,11 @@ spec:
             # /healthz returns 200 only once a model artifact is loaded, so it
             # doubles as readiness (the daemon should not POST /score before a
             # model is available).
-            httpGet:
-              path: /healthz
-              port: belief
+            exec:
+              command:
+                - /usr/bin/python3
+                - -c
+                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8087/healthz', timeout=2)"
             initialDelaySeconds: 3
             periodSeconds: 5
             timeoutSeconds: 3
