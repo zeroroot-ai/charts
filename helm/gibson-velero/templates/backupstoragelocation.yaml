@@ -33,20 +33,22 @@ metadata:
     # recovered on retry, which hid the defect behind a retry that a plain
     # helm install does not have. See charts#2.
     argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/sync-wave: "20"
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-weight: "20"
     helm.sh/hook-delete-policy: before-hook-creation
+    # One annotations map. This object used to carry two, and YAML keeps
+    # the last: the hook barriers above were silently dropped and kubeconform
+    # refused the render (duplicate key). The sync wave below is the Argo
+    # ordering; the helm hooks are the plain-install ordering.
+    # After the server Deployment: a location the controller cannot reconcile
+    # yet reports its phase as empty, which reads as a failure.
+    argocd.argoproj.io/sync-wave: "10"
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: velero
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/component: backup-storage-location
     app.kubernetes.io/managed-by: {{ .Release.Service }}
-  annotations:
-    # After the server Deployment: a location the controller cannot reconcile
-    # yet reports its phase as empty, which reads as a failure.
-    argocd.argoproj.io/sync-wave: "10"
 spec:
   provider: aws
   default: true
