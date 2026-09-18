@@ -7350,28 +7350,6 @@ rules:
     resources: ["events"]
     verbs: ["create", "patch"]
 ---
-# Source: gibson/charts/gibson-operators/templates/reloader/reloader.yaml
-# Reloader v1.4.6 issues a cluster-scoped LIST on its Secret and ConfigMap
-# informers at startup — the client-go reflector does not accept a namespace
-# filter at the informer level. A namespace-scoped Role is therefore
-# insufficient; the informer fails with "cannot list resource at cluster scope"
-# and Reloader never watches anything (deploy#555).
-#
-# Fix: ClusterRole + ClusterRoleBinding for read-only discovery of secrets and
-# configmaps across the cluster. Workload patch rights stay namespace-scoped
-# (Role + RoleBinding below) — Reloader only ever restarts workloads in $ns.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: reloader
-  labels:
-    app.kubernetes.io/name: reloader
-    app.kubernetes.io/component: reloader
-rules:
-  - apiGroups: [""]
-    resources: ["secrets", "configmaps"]
-    verbs: ["list", "get", "watch"]
----
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/cluster-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -9260,23 +9238,6 @@ roleRef:
   kind: ClusterRole
   name: gibson-platform-operator
 ---
-# Source: gibson/charts/gibson-operators/templates/reloader/reloader.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: reloader
-  labels:
-    app.kubernetes.io/name: reloader
-    app.kubernetes.io/component: reloader
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: reloader
-subjects:
-  - kind: ServiceAccount
-    name: reloader
-    namespace: gibson
----
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/cluster-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -9881,6 +9842,28 @@ rules:
     resourceNames:
       - iam-admin-pat
     verbs: ["get", "list", "watch"]
+---
+# Source: gibson/charts/gibson-operators/templates/reloader/reloader.yaml
+# Reloader reads Secrets and ConfigMaps through informers, and it scopes
+# those informers to KUBERNETES_NAMESPACE (internal/pkg/cmd/reloader.go:
+# unset means v1.NamespaceAll, "will detect changes in all namespaces").
+# deploy#555 saw "cannot list resource at cluster scope" because that
+# variable was unset, and answered with a ClusterRole over every Secret in
+# the cluster. The variable is set below, so the read grant is a Role in
+# this namespace: the chart annotates workloads here and nowhere else, and
+# a third-party controller holds no tenant Secret.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: reloader-read
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: reloader
+    app.kubernetes.io/component: reloader
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps"]
+    verbs: ["list", "get", "watch"]
 ---
 # Source: gibson/charts/gibson-operators/templates/reloader/reloader.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -10489,6 +10472,24 @@ subjects:
   - kind: ServiceAccount
     name: gibson-zitadel-admin-reader
     namespace: zitadel
+---
+# Source: gibson/charts/gibson-operators/templates/reloader/reloader.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: reloader-read
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: reloader
+    app.kubernetes.io/component: reloader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: reloader-read
+subjects:
+  - kind: ServiceAccount
+    name: reloader
+    namespace: gibson
 ---
 # Source: gibson/charts/gibson-operators/templates/reloader/reloader.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -13297,6 +13298,13 @@ spec:
         - name: reloader
           image: "ghcr.io/stakater/reloader:v1.4.6"
           imagePullPolicy: IfNotPresent
+          env:
+            # Scopes every informer to this namespace. Unset, Reloader
+            # watches every namespace and needs a ClusterRole to do it.
+            - name: KUBERNETES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           args:
             # Reloader's actual namespace-scope flag is `--namespace-selector`
             # (key:value label selector), not `--namespaces`. v1.4.6 rejects
