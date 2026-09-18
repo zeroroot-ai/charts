@@ -85,12 +85,15 @@ DEP_CHARTS = ["helm/gibson-operators", "helm/gibson-workloads", "helm/gibson"]
 # The substrate and guest files are overlays: they render only on top of
 # values-baseline.yaml, the way the README installs them.
 BASELINE = "helm/gibson/values-baseline.yaml"
+# The installer's inputs (the archive bucket): no profile carries a default
+# bucket, and the render refuses to go without one.
+INPUTS = "helm/testdata/render-inputs/gibson.yaml"
 PROFILES = [
     ("self-hosted", [BASELINE]),
-    ("eks", [BASELINE, "helm/gibson/values-eks.yaml"]),
-    ("gke", [BASELINE, "helm/gibson/values-gke.yaml"]),
-    ("aks", [BASELINE, "helm/gibson/values-aks.yaml"]),
-    ("guest", [BASELINE, "helm/gibson/values-guest.yaml"]),
+    ("eks", [BASELINE, INPUTS, "helm/gibson/values-eks.yaml"]),
+    ("gke", [BASELINE, INPUTS, "helm/gibson/values-gke.yaml"]),
+    ("aks", [BASELINE, INPUTS, "helm/gibson/values-aks.yaml"]),
+    ("guest", [BASELINE, INPUTS, "helm/gibson/values-guest.yaml"]),
 ]
 
 IMAGE_LINE_RX = re.compile(r'^\s+(?:image|customImage):\s*"?([^"\s]+)"?\s*$')
