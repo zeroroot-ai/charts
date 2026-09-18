@@ -132,16 +132,6 @@ echo "    signup_bot_user_id=${SIGNUP_BOT_USER_ID}"
 # versions, so we do the date comparison client-side with `date -d`.
 # ---------------------------------------------------------------------------
 echo ">>> listing human users created by signup-bot"
-search_body=$(jq -nc \
-  --arg bot_id "$SIGNUP_BOT_USER_ID" \
-  '{
-    queries: [
-      { typeQuery: { type: "TYPE_HUMAN" } },
-      { creationDateQuery: {} }
-    ],
-    sortingColumn: "USER_FIELD_NAME_CREATION_DATE",
-    asc: true
-  }')
 
 # Note: Zitadel v2 does not expose a "creator" filter server-side in the
 # /v2/users search endpoint. We list all human users and cross-check each
@@ -242,7 +232,7 @@ while IFS=$'\t' read -r user_id email creation_date; do
   creation_epoch=$(date -d "$creation_ts_clean" +%s 2>/dev/null || true)
 
   if [ -z "$creation_epoch" ]; then
-    echo "    [warn] could not parse creationDate '${creation_date}' for user ${user_id} (${email}) — skipping"
+    echo "    [warn] could not parse creationDate '${creation_date}' for user ${user_id} — skipping"
     SKIP_COUNT=$(( SKIP_COUNT + 1 ))
     continue
   fi
@@ -285,7 +275,7 @@ while IFS=$'\t' read -r user_id email creation_date; do
   detail_body=$(echo "$resp_detail" | cut -d' ' -f2-)
 
   if [ "$detail_code" != "200" ]; then
-    echo "    [warn] could not fetch detail for user ${user_id} (${email}) — HTTP ${detail_code} — skipping"
+    echo "    [warn] could not fetch detail for user ${user_id} — HTTP ${detail_code} — skipping"
     SKIP_COUNT=$(( SKIP_COUNT + 1 ))
     continue
   fi
@@ -331,9 +321,9 @@ while IFS=$'\t' read -r user_id email creation_date; do
   # ------------------------------------------------------------------
   # All checks passed — this user is an orphan. Delete them.
   # ------------------------------------------------------------------
+  # The user id, never the address: this line lands in cluster logs.
   log_json \
     "action=reap_orphan_zitadel_user" \
-    "email=$email" \
     "zitadelUserId=$user_id" \
     "creationDate=$creation_date" \
     "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
