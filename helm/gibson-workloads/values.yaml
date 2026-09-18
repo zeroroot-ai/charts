@@ -38,8 +38,11 @@ global:
   # helpers (gibson.appHost / gibson.externalOrigin / gibson.oidcIssuer /
   # gibson.zitadelExternalDomain / gibson.tlsSans) derive everything from
   # this — no template, chart, or service hardcodes a hostname (deploy#630).
-  # Override in environment overlays.
-  domain: "zeroroot.ai"
+  # There is no default. The profile or the environment overlay sets it, and
+  # gibson.domain fails the render when it is empty, so an install cannot
+  # claim the OIDC issuer, the TLS SANs and the app hosts of a domain the
+  # installer does not own.
+  domain: ""
   # URL scheme for the external origin. Default https; rarely overridden.
   scheme: "https"
   # External port appended to the public origin when non-default. In kind

@@ -97,7 +97,11 @@ global:
   toolImage:
     repository: ghcr.io/zeroroot-ai/mirror/alpine-k8s
     tag: "1.33.0"
-  domain: zeroroot.ai
+  # No default domain. Every profile (values-baseline.yaml and the overlays
+  # in hosted/gitops) sets it, and gibson.domain fails the render when it is
+  # empty. An install with no serving domain of its own must not claim
+  # zeroroot.ai in its OIDC issuer, TLS SANs and app hosts.
+  domain: ""
   networkPolicy:
     # CIDRs the kube-apiserver answers from, for the few policies that
     # narrow egress (OpenBao).
