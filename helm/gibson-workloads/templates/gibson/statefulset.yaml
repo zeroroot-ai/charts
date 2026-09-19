@@ -454,6 +454,19 @@ spec:
             - name: GIBSON_PLATFORM_TENANT
               value: {{ . | quote }}
             {{- end }}
+            {{- /* The exit-test profile is one toggle. gibson.e2eRunner.enabled
+                   renders the runner's ServiceAccount and SPIFFE identity, and
+                   it turns the daemon's runtime fixture flag on here. The flag
+                   is the second of the daemon's two gates: a production image
+                   has no test_fixtures build tag and ignores it, and a fixture
+                   image without it registers no mock LLM and seeds no runner
+                   tenancy (gibson#14). The workflows set this through a
+                   gibson.extraEnv key the chart never had, so the flag never
+                   reached the daemon. */}}
+            {{- if (.Values.gibson.e2eRunner).enabled }}
+            - name: GIBSON_TEST_FIXTURES_ENABLED
+              value: "true"
+            {{- end }}
             - name: GIBSON_EMAIL_PROVIDER
               value: {{ (((.Values.gibson).email).provider) | default "log" | quote }}
             - name: GIBSON_EMAIL_FROM
