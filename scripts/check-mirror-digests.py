@@ -25,7 +25,14 @@ PROFILES = [
     ["-f", "helm/gibson/values-baseline.yaml", "-f", "helm/gibson/values-eks.yaml"],
     ["-f", "helm/gibson/values-baseline.yaml", "-f", "helm/gibson/values-guest.yaml"],
 ]
-MIRROR = re.compile(r'(?:ghcr\.io/)?zeroroot-ai/mirror/[a-z0-9-]+:[^"\s@]+(@sha256:[0-9a-f]{64})?')
+# A mirror reference as it appears in a rendered image field: repository,
+# tag, and everything after the tag up to the end of the value.
+MIRROR = re.compile(r'(?:ghcr\.io/)?zeroroot-ai/mirror/[a-z0-9-]+:[^"\s]+')
+# The one shape a pinned reference may take. A digest appended twice
+# (charts#140 rendered kubectl:1.31.4@sha256:…@sha256:… and every pod with
+# that init container sat in Init:InvalidImageName) fails here, as does any
+# other suffix the kubelet would refuse.
+PINNED = re.compile(r'^[a-z0-9.\-/]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$')
 
 
 def render(profile: list[str]) -> str:
@@ -43,8 +50,11 @@ def judge(text: str, name: str) -> list[str]:
         if ln.lstrip().startswith("#"):
             continue
         for m in MIRROR.finditer(ln):
-            if not m.group(1):
-                out.append(f"{name}:{i}: {m.group(0)} carries no digest")
+            ref = m.group(0)
+            if "@sha256:" not in ref:
+                out.append(f"{name}:{i}: {ref} carries no digest")
+            elif not PINNED.match(ref):
+                out.append(f"{name}:{i}: {ref} is not a valid pinned reference (one tag, one digest)")
     return sorted(set(out))
 
 
@@ -58,11 +68,17 @@ def selftest() -> int:
     if judge(good, "fixture"):
         print(f"SELFTEST FAIL: a pinned ref and a comment must pass, got {judge(good, 'fixture')}")
         return 1
+    # THE FIXTURE charts#140 NEEDED: a digest appended twice is not a reference.
+    doubled = 'image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:' + "b" * 64 + '@sha256:' + "b" * 64 + '\n'
+    got = judge(doubled, "fixture")
+    if len(got) != 1 or "not a valid pinned reference" not in got[0]:
+        print(f"SELFTEST FAIL: a doubled digest must fail, got {got}")
+        return 1
     live = judge(render(PROFILES[0]), "baseline")
     if live:
         print("SELFTEST FAIL: the baseline render must pass:\n  " + "\n  ".join(live))
         return 1
-    print("OK: bare refs fail, a pinned ref passes, the baseline render is pinned")
+    print("OK: bare refs and a doubled digest fail, a pinned ref passes, the baseline render is pinned")
     return 0
 
 
