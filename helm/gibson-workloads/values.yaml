@@ -733,6 +733,10 @@ gibson:
   # test_fixtures build tag. A production daemon has no policy for this
   # identity and refuses it at boot, so enabling this against production fails
   # loud rather than granting quiet access.
+  #
+  # It also sets GIBSON_TEST_FIXTURES_ENABLED=true on the daemon: the runtime
+  # gate the fixture build reads before it registers the mock LLM or seeds the
+  # runner's tenant membership (gibson#14). The exit-test profile is one toggle.
   e2eRunner:
     enabled: false
 
