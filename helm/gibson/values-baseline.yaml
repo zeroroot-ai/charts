@@ -443,6 +443,15 @@ gibson-workloads:
         - 100.64.0.0/10
         - 127.0.0.0/8
         - 224.0.0.0/4
+        # IPv6: a reserved prefix subtracts only from a block of its own
+        # family, so a list with no IPv6 entry leaves every IPv6
+        # destination unrestricted. setec 0.115.0 refuses to render
+        # without one. This list overrides the subchart's whole list, so
+        # the entries live here too.
+        - "::1/128"
+        - fc00::/7
+        - fe80::/10
+        - ff00::/8
       resolvers:
         - 1.1.1.1
         - 8.8.8.8
