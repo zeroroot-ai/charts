@@ -4416,6 +4416,15 @@ setec:
       - 100.64.0.0/10  # CGNAT
       - 127.0.0.0/8
       - 224.0.0.0/4  # multicast
+      # IPv6. A reserved prefix subtracts only from a block of its own
+      # family, and an allow-list entry can carry an IPv6 block (a literal
+      # host, or a resolver answer), so a list with no IPv6 entry leaves
+      # every IPv6 destination unrestricted. setec 0.115.0 refuses to render
+      # without one. These are setec's own defaults.
+      - "::1/128"  # loopback
+      - fc00::/7  # unique local
+      - fe80::/10  # link-local
+      - ff00::/8  # multicast
     # resolvers are the DNS servers Sandbox Pods query. The same list is
     # written into each Pod's dnsConfig with dnsPolicy None, so Sandboxes
     # do not use CoreDNS and cannot enumerate in-cluster Services by name.
