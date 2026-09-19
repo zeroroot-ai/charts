@@ -4235,13 +4235,30 @@ setec:
   # and the vendored chart (the setec chart, whose CRD carries the field)
   # move together: a 0.113.0 CRD over a 0.111.0 operator accepts the block
   # and ignores it, and an idle bank member reserves its whole limit again.
+  # The setec images follow the setec chart version above, by hand: no
+  # version-link fans a setec release into this file. A chart ahead of its
+  # operator image hands the operator a flag it does not know and it
+  # crash-loops at boot (0.115.0's --session-keepalive-image against the
+  # sha-cc37bdb operator, gibson run 35472500731). Bump the six pins with
+  # the chart: setec, runtime-agent, node-agent, installer, frontend,
+  # keepalive. Digests from
+  #   gh api orgs/zeroroot-ai/packages/container/<pkg>/versions
+  # for the entry tagged v<chart version>.
   image:
     repository: ghcr.io/zeroroot-ai/setec
-    tag: "sha-cc37bdb@sha256:406caa641ecf67f94bcd764bcc8bccc3817ff9f1184fff9bbe4b797a7f0f23d6"
+    tag: "v0.115.0@sha256:dc8b7a0b251f575f07cb52e94ac59c2243b122ee587b918d62557ae2e00a117d"
+  # sessionKeepalive is the image the operator injects into a session
+  # Sandbox with no spec.command (setec#7). It is an operator argument, not
+  # a container in this chart, so the render-based image guards never see
+  # it: pin it here by digest like the others.
+  sessionKeepalive:
+    image:
+      repository: ghcr.io/zeroroot-ai/setec-keepalive
+      tag: "v0.115.0@sha256:ba885d4bb9c45355ebdc8064740ad2506b25c986b2ce8ca8272abe4b1d544e33"
   runtimeAgent:
     image:
       repository: ghcr.io/zeroroot-ai/setec-runtime-agent
-      tag: "sha-cc37bdb@sha256:1405efe741ed89572ba3888d7aee30e07af97d169cb1ddf06538f972ede987e3"
+      tag: "v0.115.0@sha256:4c2909643c20880aaa7cac1d5c08f18755b3225c7e1ba637888af4d73246f9b7"
     # Published runtime-agent images are amd64-only (setec#132): without this
     # constraint the tolerate-everything DaemonSet ImagePullBackOffs forever
     # on arm64 (Graviton system) nodes and the release never converges. Drop
@@ -4262,7 +4279,7 @@ setec:
   nodeAgent:
     image:
       repository: ghcr.io/zeroroot-ai/setec-node-agent
-      tag: "sha-cc37bdb@sha256:8850c692aa09a43852926b09b5a7d062c2b03e3539c26dd81b29da277f9f224a"
+      tag: "v0.115.0@sha256:0a7bfdbd0f55cc1486f72abfa8100da0a1cae2add9d21292af4bc1e188ba35f2"
 
   # installer — the portable node-prep DaemonSet (setec#187). It
   # lays the bundled Kata+Firecracker release onto any x86 KVM node and
@@ -4284,7 +4301,7 @@ setec:
     enabled: true
     image:
       repository: ghcr.io/zeroroot-ai/setec-installer
-      tag: "sha-cc37bdb@sha256:c4274121eec50e1e201d29d68856331d74de280d2ecdf30d829aa81d8f175a98"
+      tag: "v0.115.0@sha256:9b71dbf33389affc6c6c9fd69c3e2f80de772fd4dda931065e62b6a9a887bfea"
 
   # ---------------------------------------------------------------------
   # ISOLATION BACKENDS (deploy#1105)
@@ -4688,7 +4705,7 @@ setec:
       # v0.113.0 release build as the operator and runtime-agent above, so
       # the setec images never skew across a breaking release.
       # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/setec-frontend/versions
-      tag: "sha-cc37bdb@sha256:0a3afb4202fb3b0cdcb965a0dd079f1d237536a492edf612012cab1043a7eb25"
+      tag: "v0.115.0@sha256:645c0d16b98ca7561710dae9a69af941e6d7c8cb129c8e1cd033a524389d100e"
       pullPolicy: IfNotPresent
     # sandboxNamespace (setec#158, chart v0.110.0) renders --sandbox-namespace
     # onto the frontend: every Sandbox lands in this one fixed namespace
