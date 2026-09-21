@@ -12250,7 +12250,7 @@ spec:
         checksum/registry: a8ba7cdf98995ec933e295b83baf2c69d6f9150cb1fe2eff7fcd26316a46a653
         checksum/daemon-registry: 73ee15e2365849c18502f6903ace8c1f23399b28de1336de3968e489feda1c3c
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
-        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc"
+        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc"
     spec:
       
       imagePullSecrets:
@@ -12465,17 +12465,31 @@ spec:
             # token issued to any other client is a machine credential and
             # skips the session gate; without this every machine user's
             # client_credentials token (client_id = its name, sub = its
-            # numeric id) read as a person and was denied. The dashboard
-            # application is the one human client; the platform-operator
-            # mints its id into gibson-dashboard-oidc, so the key is read
-            # optionally (ext-authz starts before that Secret exists) and
-            # the reload annotation restarts ext-authz when it lands.
-            - name: EXT_AUTHZ_HUMAN_CLIENT_IDS
+            # numeric id) read as a person and was denied. The human clients
+            # are the dashboard application and the native-login (device
+            # grant) client that `gibson login` uses (charts#148: with only
+            # the dashboard named, the CLI's token was classed SERVICE and
+            # denied every USER-only RPC). The platform-operator mints both
+            # ids at runtime, so each is read optionally into its own var and
+            # the list is built by $(VAR) expansion, which Kubernetes
+            # resolves from env entries defined earlier in this container.
+            # A Secret not yet minted leaves its $(VAR) literal, which never
+            # matches a client id; the reload annotation restarts ext-authz
+            # when either Secret lands.
+            - name: EXT_AUTHZ_DASHBOARD_CLIENT_ID
               valueFrom:
                 secretKeyRef:
                   name: gibson-dashboard-oidc
                   key: client_id
                   optional: true
+            - name: EXT_AUTHZ_NATIVE_LOGIN_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-native-login-oidc
+                  key: client_id
+                  optional: true
+            - name: EXT_AUTHZ_HUMAN_CLIENT_IDS
+              value: "$(EXT_AUTHZ_DASHBOARD_CLIENT_ID),$(EXT_AUTHZ_NATIVE_LOGIN_CLIENT_ID)"
             - name: EXT_AUTHZ_ZITADEL_ISSUER
               # MUST equal the `iss` claim Zitadel writes into JWTs. Zitadel
               # constructs iss from {ExternalScheme}://{ExternalDomain}[:{ExternalPort}],
