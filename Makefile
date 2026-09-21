@@ -9,7 +9,7 @@
 GREEN := \033[0;32m
 NC    := \033[0m
 
-.PHONY: help chart-deps golden golden-update render-diff baseline-up baseline-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords login-brand \
+.PHONY: help chart-deps chart-deps-retry golden golden-update render-diff baseline-up baseline-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow seed-passwords login-brand \
         check attribution vendor-operators cloud-free
 
 help: ## Show available targets
@@ -24,11 +24,13 @@ help: ## Show available targets
 	@echo "  baseline-up        install onto the CURRENT kube context"
 	@echo "  baseline-verify    prove the install came up"
 
-chart-deps: ## Vendor sub-chart tarballs
-	@./scripts/helm-dep-update.sh 2>/dev/null || { \
-	  for c in helm/gibson-operator-crds helm/gibson-crds helm/gibson-operators helm/gibson-workloads helm/gibson-velero helm/gibson; do \
-	    helm dependency update $$c >/dev/null || exit 1; done; }
+chart-deps: ## Vendor sub-chart tarballs, with retries (hosted#147)
+	@for c in helm/gibson-operator-crds helm/gibson-crds helm/gibson-operators helm/gibson-workloads helm/gibson-velero helm/gibson; do \
+	  ./scripts/helm-dep-update.sh $$c || exit 1; done
 	@printf "$(GREEN)  ✓$(NC) chart-deps: vendored sub-charts are current\n"
+
+chart-deps-retry: ## chart-deps retries a failed download and fails after the last attempt
+	@./scripts/check-chart-deps-retry.sh
 
 golden: ## Snapshot test
 	@./scripts/golden.sh check
@@ -191,7 +193,7 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free substrate-overlays subchart-overrides zitadel-lockstep login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates probes netpol-coverage hostnames reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
+check: golden attribution cloud-free chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates probes netpol-coverage hostnames reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context
