@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.130.0](https://github.com/zeroroot-ai/charts/compare/v0.129.0...v0.130.0) (2026-09-23)
+
+
+### Features
+
+* **ci:** kind and k3d are separate workflows, from one definition ([#105](https://github.com/zeroroot-ai/charts/issues/105)) ([1329196](https://github.com/zeroroot-ai/charts/commit/132919687d6343bf81eb91ab53d70446cf19eb09))
+* **ci:** the published-install exit test moves here, and k3d comes back ([#101](https://github.com/zeroroot-ai/charts/issues/101)) ([a173e53](https://github.com/zeroroot-ai/charts/commit/a173e5350d2022b9a54f631d29fe63ac857bdb15))
+* **ext-authz:** name the human sign-in client so machine tokens are machine credentials ([#118](https://github.com/zeroroot-ai/charts/issues/118)) ([2cdbadd](https://github.com/zeroroot-ai/charts/commit/2cdbaddf69acf83ec2b7d615df99c6e8bfd9d0de))
+* **guards:** backup coverage, ext-authz transport and workload RBAC are contracts again ([#122](https://github.com/zeroroot-ai/charts/issues/122)) ([7369e5c](https://github.com/zeroroot-ai/charts/commit/7369e5c215fdeef8073d49ff3a6076909c380710)), closes [#17](https://github.com/zeroroot-ai/charts/issues/17)
+* **guards:** image registry, orphan templates and swallowed probes are contracts again ([#119](https://github.com/zeroroot-ai/charts/issues/119)) ([7b87d5b](https://github.com/zeroroot-ai/charts/commit/7b87d5b12a907939a42ecfea64b61b5c81ca452e)), closes [#17](https://github.com/zeroroot-ai/charts/issues/17)
+* **guards:** NetworkPolicy coverage and no literal platform hostname are contracts again ([#120](https://github.com/zeroroot-ai/charts/issues/120)) ([0289d7a](https://github.com/zeroroot-ai/charts/commit/0289d7a59dd994f22de409141a5101de72fd66a0)), closes [#17](https://github.com/zeroroot-ai/charts/issues/17)
+* **guards:** no dangling Secret reference in the render is a contract again ([#121](https://github.com/zeroroot-ai/charts/issues/121)) ([bc9a290](https://github.com/zeroroot-ai/charts/commit/bc9a290a82f9bfb46df4aed8ee0bac64bf978025)), closes [#17](https://github.com/zeroroot-ai/charts/issues/17)
+* **guards:** the render validates against the Kubernetes and CRD schemas, and it found a defect ([#124](https://github.com/zeroroot-ai/charts/issues/124)) ([59006d5](https://github.com/zeroroot-ai/charts/commit/59006d5680bf2943b67d21700518a425df658ec7)), closes [#17](https://github.com/zeroroot-ai/charts/issues/17)
+* **guards:** webhook ordering and sweepability, one edge, and POSIX hook scripts are contracts again ([#123](https://github.com/zeroroot-ai/charts/issues/123)) ([60769d9](https://github.com/zeroroot-ai/charts/commit/60769d947ab671afac5c514789dea9927f4d11eb)), closes [#17](https://github.com/zeroroot-ai/charts/issues/17)
+* **tenant-neo4j:** the chart delivers the per-tier sizing it always claimed to own ([#99](https://github.com/zeroroot-ai/charts/issues/99)) ([b86bb35](https://github.com/zeroroot-ai/charts/commit/b86bb35703756a3c778dc0318eeb55d24a29af87))
+
+
+### Bug Fixes
+
+* **chart-deps:** the retry runs, and a 504 on a sub-chart download no longer fails the job ([#147](https://github.com/zeroroot-ai/charts/issues/147)) ([6059700](https://github.com/zeroroot-ai/charts/commit/6059700497b1e891e26b21d83e2088f1d1230569))
+* **ci:** pin every zeroroot-ai/.github reference to v0.5.1 ([#109](https://github.com/zeroroot-ai/charts/issues/109)) ([038d1cb](https://github.com/zeroroot-ai/charts/commit/038d1cbc5d1b36f71530bbefb47484ee49bcf616))
+* **ci:** the k3d diagnostics survive the pod being reaped ([#104](https://github.com/zeroroot-ai/charts/issues/104)) ([5ab762c](https://github.com/zeroroot-ai/charts/commit/5ab762c45ffaa87acb0c528e927171ec1dfc83c7))
+* **ci:** the published-install job names why the hosted token failed ([#102](https://github.com/zeroroot-ai/charts/issues/102)) ([e5cc6a8](https://github.com/zeroroot-ai/charts/commit/e5cc6a8fbf1b7e069280fa2f7e23afb8bf4c077e))
+* **deps:** pin the gibson images to v0.137.0 ([#128](https://github.com/zeroroot-ai/charts/issues/128)) ([405abda](https://github.com/zeroroot-ai/charts/commit/405abdaa3e93d0465ac6cf8815c1e5e7635e330a))
+* **deps:** pin the gibson images to v0.138.0 ([#150](https://github.com/zeroroot-ai/charts/issues/150)) ([21bd05a](https://github.com/zeroroot-ai/charts/commit/21bd05aed41806853b97d82035e68e6eef1b3e5e))
+* **deps:** setec 0.115.0, and the reserved list carries IPv6 ([#143](https://github.com/zeroroot-ai/charts/issues/143)) ([927a4a8](https://github.com/zeroroot-ai/charts/commit/927a4a87ccf5fc5dedc29ba01211eee61b9952fb))
+* **docs:** every guard a comment names exists ([#126](https://github.com/zeroroot-ai/charts/issues/126)) ([5eef840](https://github.com/zeroroot-ai/charts/commit/5eef840fe9e9b5048a1f52aebc9d4a7609d016f4))
+* **envoy:** the admin interface binds loopback behind a two-route listener ([#139](https://github.com/zeroroot-ai/charts/issues/139)) ([6b91d26](https://github.com/zeroroot-ai/charts/commit/6b91d261565d4c764728216d3b6805c043e916d5))
+* **ext-authz:** the native-login (device grant) client is a human sign-in client ([#149](https://github.com/zeroroot-ai/charts/issues/149)) ([b6eadee](https://github.com/zeroroot-ai/charts/commit/b6eadeebfa7421d30a43d40ba0fd35dcf0683476))
+* **gibson-workloads:** the daemon's fixture flag follows the e2e runner toggle ([#142](https://github.com/zeroroot-ai/charts/issues/142)) ([9dc8392](https://github.com/zeroroot-ai/charts/commit/9dc83925d15221223b4068de6aa34cf075e84d52))
+* **gibson:** the belief sidecar binds loopback and probes exec in-container ([#127](https://github.com/zeroroot-ai/charts/issues/127)) ([7f861fd](https://github.com/zeroroot-ai/charts/commit/7f861fdb9b8ffddeef6c55fed4fe08a6c9f0097e))
+* **images:** every mirror image runs by digest ([#140](https://github.com/zeroroot-ai/charts/issues/140)) ([ca7691d](https://github.com/zeroroot-ai/charts/commit/ca7691d8e415f72701e3b3999e3f6608c0f62c1a))
+* **images:** pin the dashboard to v0.121.0 ([#130](https://github.com/zeroroot-ai/charts/issues/130)) ([d5d025f](https://github.com/zeroroot-ai/charts/commit/d5d025ff9add8a5654d010de0b8a569b5a561a04))
+* **install:** the operators subchart never got the discovered Envoy anchor ([#106](https://github.com/zeroroot-ai/charts/issues/106)) ([ba94742](https://github.com/zeroroot-ai/charts/commit/ba947429bdff6abb4db508a956315e9e9ca26452))
+* **jobs:** the postgres setup quotes the password as a sql literal ([#135](https://github.com/zeroroot-ai/charts/issues/135)) ([97bad0b](https://github.com/zeroroot-ai/charts/commit/97bad0b3e1735f30582d2ed8f737f3de0c48cfe2))
+* **netpol:** promote the daemon operator ingress rules into the chart ([#153](https://github.com/zeroroot-ai/charts/issues/153)) ([c2c1f13](https://github.com/zeroroot-ai/charts/commit/c2c1f13c0d8277c1032a0a24ffeec9fe10cca00c))
+* **netpol:** the dashboard scraper rule admits port 3000 only ([#134](https://github.com/zeroroot-ai/charts/issues/134)) ([a8d0146](https://github.com/zeroroot-ai/charts/commit/a8d014615feacafa591596a0208e8d24fe7a1e80))
+* **observability:** the daemon metrics scrape verifies the certificate ([#136](https://github.com/zeroroot-ai/charts/issues/136)) ([0105d8e](https://github.com/zeroroot-ai/charts/commit/0105d8eeb1ddced33827be93dd2ee2cbee2ec1bb))
+* point NOTICE at the real vendored-CRD directory ([#103](https://github.com/zeroroot-ai/charts/issues/103)) ([fd97a74](https://github.com/zeroroot-ai/charts/commit/fd97a741e10eeb1014db78cc3da1ddeb7996cd10))
+* **rbac:** postgres-exec names its Secrets, grants get only, and is not kept past uninstall ([#112](https://github.com/zeroroot-ai/charts/issues/112)) ([998a6f1](https://github.com/zeroroot-ai/charts/commit/998a6f179994ce44e090056573aaeabec215a425))
+* **rbac:** the daemon reads and writes Secrets in tenant namespaces only ([#129](https://github.com/zeroroot-ai/charts/issues/129)) ([a9a7b2a](https://github.com/zeroroot-ai/charts/commit/a9a7b2a9e237441df4e6f6d9932b567892c6cb80))
+* **rbac:** the dashboard init containers may read the Secrets they wait on ([#131](https://github.com/zeroroot-ai/charts/issues/131)) ([f5b2f04](https://github.com/zeroroot-ai/charts/commit/f5b2f0494c3402d0d2716e6e361a09a8d22d6c46))
+* **rbac:** the dashboard ServiceAccount reads no Secret ([#116](https://github.com/zeroroot-ai/charts/issues/116)) ([beea1d4](https://github.com/zeroroot-ai/charts/commit/beea1d4342a9255560b34599639f158cbba853f8))
+* **reaper:** delete the dead search body and keep addresses out of logs ([#133](https://github.com/zeroroot-ai/charts/issues/133)) ([c88e571](https://github.com/zeroroot-ai/charts/commit/c88e571bb90fdb0ca4e79f4192d8bbdb3681a6b8))
+* **reaper:** the orphan reaper deletes nothing when it cannot prove who created a user ([#111](https://github.com/zeroroot-ai/charts/issues/111)) ([b7880e4](https://github.com/zeroroot-ai/charts/commit/b7880e4f406c29038a75c3b4c5a7fae00dbba316))
+* **reloader:** Reloader reads Secrets in its own namespace only ([#115](https://github.com/zeroroot-ai/charts/issues/115)) ([e73bb87](https://github.com/zeroroot-ai/charts/commit/e73bb879b516aa980227e4361768781a27f6d2f1))
+* **rework:** one digest on the kubectl init image ([#141](https://github.com/zeroroot-ai/charts/issues/141)) ([5697d3e](https://github.com/zeroroot-ai/charts/commit/5697d3e564c7cd037d1736bd457c3ea3e4dedad3))
+* **rework:** the setec images follow the setec chart to v0.115.0 ([#144](https://github.com/zeroroot-ai/charts/issues/144)) ([d2fc9d2](https://github.com/zeroroot-ai/charts/commit/d2fc9d2cb9aa030e0296c820f7c359e92f328938))
+* **scripts:** baseline-set-secret.sh never turns the operator's value into shell text ([#110](https://github.com/zeroroot-ai/charts/issues/110)) ([38c5114](https://github.com/zeroroot-ai/charts/commit/38c51142d78decd59e3c6328f4930e9f4ff46040))
+* **security:** the secret scanner reads the goldens ([#138](https://github.com/zeroroot-ai/charts/issues/138)) ([575a269](https://github.com/zeroroot-ai/charts/commit/575a269b747648bb29c01d85bcfd73bbce8d5347))
+* **values:** delete the dead allowPublicFallback flag ([#132](https://github.com/zeroroot-ai/charts/issues/132)) ([610acd8](https://github.com/zeroroot-ai/charts/commit/610acd87f068c6edc4774b99786b9b9f0be86e49))
+* **values:** no default serving domain ([#137](https://github.com/zeroroot-ai/charts/issues/137)) ([6bb460e](https://github.com/zeroroot-ai/charts/commit/6bb460ee7e08404404956ef664c7c1b1c1d21890))
+* **values:** no profile ships a default archive bucket ([#113](https://github.com/zeroroot-ai/charts/issues/113)) ([8288c3c](https://github.com/zeroroot-ai/charts/commit/8288c3cafc1632eb37843e1579d6dd7fed586e87))
+* **zitadel:** bump to v4.18.0 ([#146](https://github.com/zeroroot-ai/charts/issues/146)) ([10870a1](https://github.com/zeroroot-ai/charts/commit/10870a174d5be01d8e014751d6d4b393f8809835))
+
 ## [0.129.0](https://github.com/zeroroot-ai/charts/compare/v0.128.0...v0.129.0) (2026-09-15)
 
 
