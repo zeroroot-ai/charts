@@ -5,8 +5,11 @@ Spec: unified-identity-and-authorization Phase H/8.5 (Requirements 3.5, 3.7).
 
 Restricts ingress to the daemon's Service ports so that the gRPC API surface
 is only reachable from:
-  - Envoy gateway pods (the sole external path post-cutover) —
+  - Envoy gateway pods (the sole EXTERNAL path post-cutover) —
     podSelector matches `app.kubernetes.io/component: envoy`
+  - the tenant-operator (an in-cluster control-plane caller, not an
+    external one) — podSelector matches
+    `app.kubernetes.io/component: tenant-operator`
   - Prometheus (metrics scrape on the metrics port) —
     podSelector matches `app.kubernetes.io/component: prometheus`
 Everything else is denied by Kubernetes' default-deny-when-policy-applies
@@ -99,6 +102,39 @@ spec:
           port: 8085
         - protocol: TCP
           port: {{ .Values.gibson.service.authzRegistry.port | default 8086 }}
+    # tenant-operator → daemon gRPC (operator-pull tenant provisioning).
+    #
+    # The operator drains three daemon queues over this port: the pending
+    # tenant-provisioning queue, the admin tenant-op queue, and the
+    # first-tenant seed enqueue. It is an in-cluster control-plane caller,
+    # so it does not go through Envoy and needs its own rule.
+    #
+    # Measured on staging 2026-09-23: without this rule every pass failed with
+    #   subsystem unreachable: entitlements: enqueue-tenant-provisioning:
+    #   dial tcp <daemon>:50051: connect: connection refused
+    # so the `primary` tenant was never created and the first-admin Job waited
+    # out its activeDeadlineSeconds. k3s enforces NetworkPolicy through
+    # kube-router, whose KUBE-POD-FW chain ends in
+    # `REJECT --reject-with icmp-port-unreachable` — that is why this reads as
+    # "connection refused" rather than the i/o timeout a dropping CNI gives.
+    # It stayed hidden until staging because kind's kindnet implements no
+    # NetworkPolicy at all, so the whole chart's policy set is inert there.
+    #
+    # The pods carry `app.kubernetes.io/name: gibson-tenant-operator`, NOT
+    # gibson.selectorLabels — the deploy#1365 lesson: a selector naming labels
+    # the pods do not carry never matches. These are the labels the sibling
+    # policy (gibson-operators/templates/tenant-operator) selects on.
+    #
+    # mTLS is unaffected: the gRPC listener still requires an attested SVID.
+    # This only stops the packets being rejected before the handshake.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: gibson-tenant-operator
+              app.kubernetes.io/component: tenant-operator
+      ports:
+        - protocol: TCP
+          port: {{ include "gibson.grpc.port" . }}
     {{- if (.Values.gibson.e2eRunner).enabled }}
     # e2e-runner → daemon gRPC (TEST PROFILES ONLY, gated on the same flag as
     # the runner's ServiceAccount and ClusterSPIFFEID).
