@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.130.1](https://github.com/zeroroot-ai/charts/compare/v0.130.0...v0.130.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* **rework:** the publish render passes the installer inputs ([#154](https://github.com/zeroroot-ai/charts/issues/154)) ([5eea0f2](https://github.com/zeroroot-ai/charts/commit/5eea0f2d15bcdca0cbd404024a6272826f7dba6d))
+* **tenant:** the first-tenant seed names its plan ([#157](https://github.com/zeroroot-ai/charts/issues/157)) ([7b98311](https://github.com/zeroroot-ai/charts/commit/7b983110f6af916934b8724588e687638220b1ee))
+
 ## [0.130.0](https://github.com/zeroroot-ai/charts/compare/v0.129.0...v0.130.0) (2026-09-23)
 
 
