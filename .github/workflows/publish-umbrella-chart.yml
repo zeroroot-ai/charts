@@ -202,7 +202,13 @@ jobs:
             -f helm/testdata/render-inputs/gibson.yaml >/dev/null
           helm template gibson-crds "/tmp/pulled/gibson-crds-$ver.tgz" >/dev/null
           helm template gibson-operator-crds "/tmp/pulled/gibson-operator-crds-$ver.tgz" >/dev/null
-          helm template gibson-velero "/tmp/pulled/gibson-velero-$ver.tgz" >/dev/null
+          # gibson-velero takes installer inputs for the same reason the umbrella
+          # does: charts#113 removed the default durable bucket, so bucket.name
+          # is `required` with no default and the standalone render fails
+          # without it. charts#154 fixed the umbrella and stopped at the first
+          # error the run reported; this is the same defect one chart along.
+          helm template gibson-velero "/tmp/pulled/gibson-velero-$ver.tgz" \
+            -f helm/testdata/render-inputs/gibson-velero.yaml >/dev/null
           echo "✓ all four published charts pull and render clean"
 
       # THE PULL ABOVE CARRIES THIS WORKFLOW'S TOKEN, so it cannot answer the
