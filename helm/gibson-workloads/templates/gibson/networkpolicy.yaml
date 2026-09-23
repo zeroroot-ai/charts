@@ -102,12 +102,22 @@ spec:
           port: 8085
         - protocol: TCP
           port: {{ .Values.gibson.service.authzRegistry.port | default 8086 }}
-    # tenant-operator → daemon gRPC (operator-pull tenant provisioning).
+    # The operators → daemon gRPC (in-cluster control-plane callers).
     #
-    # The operator drains three daemon queues over this port: the pending
-    # tenant-provisioning queue, the admin tenant-op queue, and the
-    # first-tenant seed enqueue. It is an in-cluster control-plane caller,
-    # so it does not go through Envoy and needs its own rule.
+    # The tenant-operator drains three daemon queues over this port: the
+    # pending tenant-provisioning queue, the admin tenant-op queue, and the
+    # first-tenant seed enqueue. The connector-operator's finalizer dials the
+    # same port to revoke a connector grant on delete. Neither goes through
+    # Envoy, so "Envoy is the sole ingress" holds for EXTERNAL traffic only
+    # and both need their own rule here.
+    #
+    # These two rules used to live in helm/gibson/values-baseline.yaml, passed
+    # through the networkPolicy.additionalIngressFrom escape hatch. That made
+    # them a property of one profile rather than of the chart, so every profile
+    # that did not copy them shipped a daemon no operator could reach. Staging
+    # was such a profile. They belong in the template, which is the promotion
+    # tenant-operator#76 Module 6 called for. The escape hatch stays a seam for
+    # genuine operator-specific additions; it is no longer load-bearing.
     #
     # Measured on staging 2026-09-23: without this rule every pass failed with
     #   subsystem unreachable: entitlements: enqueue-tenant-provisioning:
@@ -132,6 +142,10 @@ spec:
             matchLabels:
               app.kubernetes.io/name: gibson-tenant-operator
               app.kubernetes.io/component: tenant-operator
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: gibson-connector-operator
+              app.kubernetes.io/component: connector-operator
       ports:
         - protocol: TCP
           port: {{ include "gibson.grpc.port" . }}
