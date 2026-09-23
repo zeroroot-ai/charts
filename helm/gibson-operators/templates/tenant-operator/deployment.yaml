@@ -257,6 +257,14 @@ spec:
               value: {{ .Values.global.firstTenant.displayName | default "Default Workspace" | quote }}
             - name: FIRST_TENANT_OWNER_EMAIL
               value: {{ required "global.firstTenant.ownerEmail is REQUIRED when global.firstTenant.enabled (gibson#1496)." .Values.global.firstTenant.ownerEmail | quote }}
+            # The operator has always read FIRST_TENANT_TIER; the chart never
+            # rendered it, so every seed enqueued an empty tier and the daemon
+            # defaulted it to a PAID plan. On a cluster that enforces billing
+            # the daemon then withheld the tenant from the provisioning drain
+            # for ever, and the first-admin Job waited on a tenant that could
+            # never arrive. See global.firstTenant.tier in values.yaml.
+            - name: FIRST_TENANT_TIER
+              value: {{ required "global.firstTenant.tier is REQUIRED when global.firstTenant.enabled: an empty tier is withheld from the provisioning drain." .Values.global.firstTenant.tier | quote }}
             {{- end }}
             # One-code-path slice deploy#195: FGA is a hard dependency.
             # FGA_URL must be set in the chart values; render fails loud when empty.

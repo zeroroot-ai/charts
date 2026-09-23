@@ -13529,6 +13529,14 @@ spec:
               value: "Primary Workspace"
             - name: FIRST_TENANT_OWNER_EMAIL
               value: "admin@selfhosted.example.com"
+            # The operator has always read FIRST_TENANT_TIER; the chart never
+            # rendered it, so every seed enqueued an empty tier and the daemon
+            # defaulted it to a PAID plan. On a cluster that enforces billing
+            # the daemon then withheld the tenant from the provisioning drain
+            # for ever, and the first-admin Job waited on a tenant that could
+            # never arrive. See global.firstTenant.tier in values.yaml.
+            - name: FIRST_TENANT_TIER
+              value: "enterprise-deploy"
             # One-code-path slice deploy#195: FGA is a hard dependency.
             # FGA_URL must be set in the chart values; render fails loud when empty.
             # FGA_STORE_ID / FGA_MODEL_ID are mounted from gibson-fga-config.
