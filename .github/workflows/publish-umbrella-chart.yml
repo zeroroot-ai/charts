@@ -191,8 +191,15 @@ jobs:
           # The comment goes ABOVE the command: a comment between a trailing \
           # and its argument breaks the continuation, and helm then runs with no
           # values file at all.
+          # render-inputs/gibson.yaml is the second file for the same reason every
+          # offline guard passes it: charts#113 removed the default archive
+          # bucket from every profile, so values-baseline alone no longer
+          # renders — platformPostgres.backup.destinationPath is `required`.
+          # This step runs only on a release, so it went red on the first
+          # release after that change (v0.130.0) rather than on the PR.
           helm template gibson "/tmp/pulled/gibson-$ver.tgz" \
-            -f helm/gibson/values-baseline.yaml >/dev/null
+            -f helm/gibson/values-baseline.yaml \
+            -f helm/testdata/render-inputs/gibson.yaml >/dev/null
           helm template gibson-crds "/tmp/pulled/gibson-crds-$ver.tgz" >/dev/null
           helm template gibson-operator-crds "/tmp/pulled/gibson-operator-crds-$ver.tgz" >/dev/null
           helm template gibson-velero "/tmp/pulled/gibson-velero-$ver.tgz" >/dev/null
