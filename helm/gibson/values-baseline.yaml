@@ -201,35 +201,6 @@ gibson-workloads:
       create: true
       name: "gibson"
       annotations: {}
-    # The tenant-operator dials the daemon DIRECTLY on :50051 over SPIFFE mTLS
-    # for operator-pull provisioning — ListPendingTenantProvisioning,
-    # AckTenantProvisioned, and EnqueueTenantProvisioning (the first-tenant seed,
-    # gibson#1496). The daemon's default NetworkPolicy admits only Envoy on :50051
-    # ("Envoy is the sole ingress"), so without this the operator's dial is DROPPED
-    # (i/o timeout) and NO tenant is ever provisioned — the whole seam had only ever
-    # been render-tested. Mirrors values-kind.yaml's escape-hatch rule; the baseline
-    # profile was missing it. (Promotion to a first-class chart helper is
-    # tenant-operator#76 Module 6.)
-    networkPolicy:
-      additionalIngressFrom:
-        - from:
-            - podSelector:
-                matchLabels:
-                  app.kubernetes.io/component: tenant-operator
-                  app.kubernetes.io/name: gibson-tenant-operator
-          ports:
-            - protocol: TCP
-              port: 50051
-        # The connector-operator's finalizer dials the daemon on :50051 over
-        # SPIFFE mTLS to revoke the connector grant on delete.
-        - from:
-            - podSelector:
-                matchLabels:
-                  app.kubernetes.io/component: connector-operator
-                  app.kubernetes.io/name: gibson-connector-operator
-          ports:
-            - protocol: TCP
-              port: 50051
     persistence:
       enabled: true
       storageClassName: ""   # cluster default
