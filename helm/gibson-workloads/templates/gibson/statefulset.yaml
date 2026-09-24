@@ -74,7 +74,6 @@ mTLS stays ON in every overlay, with no debugging shortcuts permitted.
 {{- /* Spec tier-2-host-aliases-cluster-dns Req 2 — validate the optional
        in-cluster IdP discovery URL knob (allow-list: *.svc.cluster.local,
        *.svc, localhost, or exactly equal to idp.zitadel.issuer). */ -}}
-{{- include "gibson.validateIdpDiscoveryURL" . }}
 {{- /*
   gibson daemon is structural infrastructure (one-code-path /
   deploy#188). The previous outer `.Values.gibson.enabled` gate has
@@ -136,26 +135,8 @@ spec:
     spec:
       serviceAccountName: {{ include "gibson.serviceAccountName" . }}
       {{- include "gibson.imagePullSecrets" . | nindent 6 }}
-      {{- /*
-        Spec tier-2-host-aliases-cluster-dns originally deleted the
-        hostAliases block on the daemon and routed OIDC discovery
-        through cluster DNS to envoy. That works for the *discovery
-        doc fetch*, but Zitadel emits absolute URLs in the response
-        keyed on its ExternalDomain — so the `token_endpoint`,
-        `jwks_uri`, etc. that the daemon then dials all point at
-        `https://app.<global.domain>:<port>` (the `auth.` subdomain is
-        retired). Without a hostAlias the
-        daemon can't resolve that hostname and falls over on the
-        client_credentials grant.
-
-        Restored via the gibson-common library helper (deploy#179),
-        gated on `envoy.service.clusterIP` being explicitly pinned (the
-        chart's envoy/service.yaml exposes that knob). Pinning makes the
-        ClusterIP-rotation concern that motivated the original cut a
-        non-issue: an operator who wants the cluster-DNS path leaves
-        clusterIP empty and the alias is omitted.
-      */}}
-      {{- include "gibson.hostAliases" . | nindent 6 }}
+      {{- /* No hostAliases: the daemon reaches Zitadel by Service name and
+             claims the public host by header (ADR-0092). */}}
       # Gibson binary respects HOME via os.UserHomeDir(); HOME is set
       # explicitly in the container env below.
       # Spec 3 R3 — daemon runs as non-root (uid 65532, distroless nonroot).
@@ -611,33 +592,14 @@ spec:
             # ---------------------------------------------------------------
             - name: GIBSON_IDP_PROVIDER
               value: {{ .Values.idp.provider | quote }}
-            {{- /* Two-plane addressing contract (deploy#630 / S2 #632):
-                   the daemon's IdP admin issuer is an EXTERNAL-IDENTITY
-                   value — Zitadel routes the Management API by the request
-                   Host, so this MUST be the instance's external issuer
-                   (e.g. https://app.zeroroot.ai:30443), reached in-cluster
-                   via the hostAliases pin. It is NOT a connection address
-                   and is NOT a credential, so it comes from config
-                   (idp.zitadel.issuer), NOT from the admin-credentials
-                   secret. The secret previously carried an in-cluster
-                   `issuer` (gibson-zitadel:8080) seeded by the OIDCClient
-                   operator; reading it there sent Management API calls to
-                   the wrong instance, so user lookups 404'd and the
-                   Members/roster fell back to raw user UUIDs. Sourcing from
-                   idp.zitadel.issuer (already equal to discoveryURL) keeps
-                   discovery, token, and Management API on one consistent
-                   Host. */}}
+            {{- /* The claimed issuer: a string for logs and claims, never
+                   dialed (ADR-0092). It comes from config, not from the
+                   admin-credentials Secret, whose in-cluster `issuer` once
+                   sent Management calls to the wrong instance (deploy#632). */}}
             - name: GIBSON_IDP_ADMIN_ISSUER
               value: {{ (((.Values.idp).zitadel).issuer) | default (include "gibson.oidcIssuer" .) | quote }}
-            {{- /* Spec tier-2-host-aliases-cluster-dns: optional in-cluster
-                   discovery URL. When idp.zitadel.discoveryURL is empty the
-                   daemon falls back to GIBSON_IDP_ADMIN_ISSUER for OIDC
-                   discovery (cluster DNS, no /etc/hosts override). When
-                   set, the daemon dials this URL for the discovery doc +
-                   JWKS instead — gating it on the chart value being non-
-                   empty keeps the env-var off the pod when not in use. */}}
-            - name: GIBSON_IDP_ADMIN_DISCOVERY_URL
-              value: {{ (((.Values.idp).zitadel).discoveryURL) | default (include "gibson.externalOrigin" .) | quote }}
+            {{- /* Where to connect and which instance to claim (ADR-0092). */}}
+            {{- include "gibson.zitadel.env" . | nindent 12 }}
             - name: GIBSON_IDP_ADMIN_CLIENT_ID
               valueFrom:
                 secretKeyRef:

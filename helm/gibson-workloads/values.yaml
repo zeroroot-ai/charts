@@ -362,7 +362,7 @@ gibson:
     # on the SPIRE socket — so the fga-init Job hangs in dump-model until
     # its deadline and the whole install wedges. Verified on this digest:
     # `gibson dump-fga-model` exits 0 in under a second with the model.
-    tag: "v0.138.2@sha256:f32540e9aa997c6c62db4b63bcfe585799ea762529c67731ab7e02376d583655"
+    tag: "v0.138.3@sha256:db5b8ce1adb7063718cc02b06ef382ac327ade8207f4a7165926d2fc81c21e51"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     # Empty by default: first-party pins are hand-committed in the combined
@@ -921,37 +921,6 @@ idp:
     # Numeric Zitadel project ID inside which agent service accounts are
     # created. REQUIRED.
     projectId: ""
-
-    # In-cluster OIDC discovery URL — spec tier-2-host-aliases-cluster-dns.
-    #
-    # When set, the daemon's IdP admin client fetches
-    # /.well-known/openid-configuration from this URL instead of from
-    # `issuer`. The issuer claim used for token validation is unchanged
-    # — only the network path to the discovery doc + JWKS is moved off
-    # the externally-routable hostname. This replaces the old daemon-pod
-    # `hostAliases` ClusterIP pin (deleted in this spec) with a stable
-    # cluster-DNS path that survives Envoy Service recreate events.
-    #
-    # Default: empty. With `discoveryURL` empty, the daemon falls back
-    # to `issuer` for the discovery doc — relying on cluster DNS
-    # reaching the issuer through Envoy in-namespace. Recommended
-    # in-cluster value:
-    #
-    #   https://gibson-envoy.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.envoy.service.httpsPort }}
-    #
-    # SECURITY (requirements.md NFR Security): MUST be empty OR a
-    # hostname inside the cluster, OR exactly equal to `issuer`. The
-    # validator `gibson.validateIdpDiscoveryURL` (templates/_validators.tpl)
-    # fails the render with an arbitrary external URL — without this
-    # rail an operator typo or a malicious values override could redirect
-    # the daemon's IdP admin client at an attacker-controlled discovery
-    # document. Allow-list (matched render-side):
-    #   - matches `*.svc.cluster.local`
-    #   - matches `*.svc`
-    #   - is exactly `localhost`     (or `localhost:<port>`)
-    #   - is exactly equal to `issuer` (operator-deliberate disable of
-    #     the in-cluster split)
-    discoveryURL: ""
 
 # -----------------------------------------------------------------------------
 # SPIFFE identity inputs the daemon needs at runtime
@@ -2182,7 +2151,7 @@ extAuthz:
     # EXT_AUTHZ_CGJWT_KEYS_URL. It moves in lockstep with the daemon pin above
     # and with the https/:8086 value in ext-authz/deployment.yaml (deploy#1386)
     # — the three are one change, in both directions.
-    tag: "v0.138.2@sha256:3ad748c8b881f329f521a93750d0b14d72e955b75e7eaa214541ff0cfc79a5e9"
+    tag: "v0.138.3@sha256:ee05154e7fb99118ebeb4d58bf361b967731035e5468f69017e752cd7a23d39f"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -2306,8 +2275,9 @@ envoy:
   # In-cluster OIDC filter chain (deploy#1204).
   #
   # envoy.yaml carries a filter chain selected on the SNI
-  # `gibson-envoy.<ns>.svc.cluster.local`, used by the daemon's IdP admin
-  # client (idp.zitadel.discoveryURL) to reach OIDC discovery over cluster DNS.
+  # `gibson-envoy.<ns>.svc.cluster.local`, once used by the daemon's IdP admin
+  # client to reach OIDC discovery over cluster DNS. Since ADR-0092 no client
+  # uses it (they dial Zitadel by Service name); charts#163 deletes it.
   # That chain is deliberately pre-auth — no jwt_authn, no ext_authz — because
   # the endpoints on it exist to bootstrap auth.
   #
@@ -3732,7 +3702,7 @@ tenantOperator:
     # Tenant CR never reached Ready (deploy#1766, run 33600876035). The
     # package publishes main/latest/sha-* only, so the commit sha tag is the
     # honest provenance.
-    tag: "v0.138.2@sha256:12a6167ff0789cff040c0bbb90ed3cf9a1f21880a3497cb10949da5d9e808894"
+    tag: "v0.138.3@sha256:4160cdaae5920e196af941d52aa554159b0b4a75c729c866fb372dd93eb2c752"
     pullPolicy: IfNotPresent
   # ServiceAccount — IRSA annotations injected via serviceAccount.annotations
   # in the prod overlay. The SA name is fixed to "gibson-tenant-operator"
@@ -4825,16 +4795,17 @@ bootstrap:
     # The digest below is the current `latest`. kind keeps a moving :latest tag
     # (bootstrap.image.tag in values-kind.yaml), exempt from the guard.
     # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/gibson-bootstrap-runner/versions
-    # sha-080d9e8 is the v0.134.0 release commit (gibson#1513) — the package
-    # publishes main/latest/sha-* only, so the release commit's sha- tag is
-    # the honest provenance, same as the ext-authz pin. The digest MUST be at
-    # or past gibson#1561 (2026-08-26): before it, bootstrap-tenant-owner's
-    # admin client called the Zitadel Management API through the public
-    # gateway, Zitadel answered "admin client lacks permission:
-    # CreateHumanUser", every first-admin attempt exited 1, and the install
-    # died at the hook deadline with the whole platform Ready (deploy#1766,
-    # measured live 2026-09-02). The previous pin was built 2026-08-21.
-    tag: "sha-ff1cd19@sha256:9b6df8d38f04e0c4ece33505fd746c8556052a95a1a78fdfcbf691580d3d9064"
+    # sha-c48813c is the v0.138.3 release commit. The package publishes
+    # main/latest/sha-* only, so the release commit's sha- tag is the honest
+    # provenance, same as the ext-authz pin. The digest MUST be at or past
+    # gibson#224 (2026-09-24): before it, bootstrap-tenant-owner's admin
+    # client dialed the public issuer host, hostAliases sent it to the Envoy
+    # edge, the edge's auth chain rejected the owner creation with 403
+    # ("admin client lacks permission: CreateHumanUser"), and the install
+    # reached Ready with no first admin (staging, 2026-09-23). Since
+    # gibson#224 it dials Zitadel by Service name and claims the host by
+    # header (ADR-0092), and it needs ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN.
+    tag: "sha-c48813c@sha256:d398d678db8dc1882a91859f8b417d001db3ca319e156191083ed21f52b4bbea"
     pullPolicy: IfNotPresent
 
   # activeDeadlineSeconds caps the Job runtime. 10 min covers a fresh

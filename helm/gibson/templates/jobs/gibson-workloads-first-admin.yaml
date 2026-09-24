@@ -33,11 +33,12 @@ self-serve signup and never renders this.
 {{- $ns := .Release.Namespace -}}
 {{- /* The shared gibson.* helpers read a subchart-shaped context. imagePullSecrets
        lives at gibson-workloads.global.imagePullSecrets (NOT the umbrella top-level
-       global), and hostAliases reads .Values.envoy + .Values.global.domain. Forward a
+       global), and the identity helpers read .Values.global.domain. Forward a
        context whose global = umbrella global overlaid with the gibson-workloads global
        (so imagePullSecrets is present) and whose envoy = the gibson-workloads envoy. */ -}}
 {{- $fwdGlobal := mergeOverwrite (deepCopy .Values.global) (default dict $wl.global) -}}
 {{- $ctx := dict "Values" (dict "global" $fwdGlobal "envoy" $wl.envoy) -}}
+{{- $zctx := dict "Release" .Release "Values" (dict "global" $fwdGlobal) -}}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -233,11 +234,6 @@ spec:
              secret the kubelet falls back to an anonymous pull and GHCR 401s,
              so the Job never starts and first-admin times out (deploy#1631). */}}
       {{- include "gibson.imagePullSecrets" $ctx | nindent 6 }}
-      {{- /* bootstrap-tenant-owner does OIDC discovery against the external
-             issuer host (app.<domain>); in-cluster that host has no DNS. The
-             same hostAliases the daemon carries pin the platform hostnames to
-             the Envoy ClusterIP so discovery + token both resolve. */}}
-      {{- include "gibson.hostAliases" $ctx | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -255,17 +251,9 @@ spec:
               value: {{ $ft.displayName | default "Default Workspace" | quote }}
             - name: GIBSON_IDP_ADMIN_ISSUER
               value: {{ ((($wl.idp).zitadel).issuer) | default (include "gibson.oidcIssuer" $ctx) | quote }}
-            {{- /* bootstrap-tenant-owner shares the daemon's admin client (gibson#1561:
-                   DiscoveryURL||Issuer). The daemon statefulset already gets
-                   GIBSON_IDP_ADMIN_DISCOVERY_URL (deploy#1689) so its OIDC discovery
-                   goes to the in-cluster Envoy listener; the first-admin Job was left
-                   on the external issuer host, which the edge does not serve
-                   in-cluster, so discovery timed out. Forward the same in-cluster URL
-                   when set; empty (non-baseline) keeps the issuer-host fallback. */}}
-            {{- with ((($wl.idp).zitadel).discoveryURL) }}
-            - name: GIBSON_IDP_ADMIN_DISCOVERY_URL
-              value: {{ . | quote }}
-            {{- end }}
+            {{- /* Connect to the Zitadel Service and claim the public host by
+                   header, exactly as the daemon does (ADR-0092). */}}
+            {{- include "gibson.zitadel.env" $zctx | nindent 12 }}
             - name: GIBSON_IDP_ADMIN_CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -298,12 +286,9 @@ spec:
                 configMapKeyRef:
                   name: gibson-fga-config
                   key: model_id
-            # bootstrap-tenant-owner does OIDC discovery over https against the
-            # external issuer (resolved to Envoy by the hostAliases above). Envoy
-            # serves the platform cert signed by the in-cluster CA, so the CA
-            # bundle must be on the trust path — same envoy-ca the daemon mounts.
+            # OpenFGA's HTTP API serves TLS signed by the in-cluster CA.
             - name: SSL_CERT_DIR
-              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/fga-ca"
           command:
             - /bin/bash
             - -c
@@ -335,9 +320,6 @@ spec:
                 -credential-secret "{{ $fa.credentialSecret | default "gibson-first-admin" }}" \
                 -credential-namespace "${NS}"
           volumeMounts:
-            - name: envoy-ca
-              mountPath: /etc/ssl/envoy-ca
-              readOnly: true
             - name: fga-ca
               mountPath: /etc/ssl/fga-ca
               readOnly: true
@@ -349,12 +331,6 @@ spec:
               cpu: 500m
               memory: 256Mi
       volumes:
-        # The Envoy serving cert's CA, so the OIDC discovery TLS handshake to
-        # the external issuer (pinned to Envoy by hostAliases) verifies.
-        - name: envoy-ca
-          secret:
-            secretName: {{ ($wl.gibson).envoyTLSSecretName | default "gibson-envoy-tls" }}
-            defaultMode: 0o444
         # OpenFGA's HTTP API serves TLS; bootstrap's FGA client must trust its CA.
         - name: fga-ca
           secret:

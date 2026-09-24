@@ -282,18 +282,6 @@ gibson-workloads:
   idp:
     zitadel:
       issuer: ""
-      # Route the daemon's Zitadel admin client IN-CLUSTER, at the Envoy edge
-      # Service, so its OIDC discovery AND its Management API writes bypass the
-      # public gateway's jwt_authn/ext_authz (which 403s admin writes — the
-      # audience is `zitadel`, not `gibson-platform`). Without this the
-      # founding-owner bootstrap fails with "admin client lacks permission:
-      # CreateHumanUser" and no one can log in (gibson#1560). The gibson daemon
-      # fix (gibson#1561) sends all admin API calls to this base; the in-cluster
-      # Envoy listener host-rewrites to app.<domain>, so instance routing stays
-      # correct. Namespace is `gibson` (this profile installs there); an install
-      # into another namespace must change it. Validated by
-      # gibson.validateIdpDiscoveryURL (must be an in-cluster host).
-      discoveryURL: "https://gibson-envoy.gibson.svc.cluster.local:443"
   redis:
     master:
       persistence:

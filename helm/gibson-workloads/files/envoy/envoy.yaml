@@ -1187,10 +1187,10 @@ static_resources:
 
         # =====================================================================
         # gibson-envoy.<ns>.svc.cluster.local — in-cluster OIDC discovery hop.
-        # Spec tier-2-host-aliases-cluster-dns. The daemon's IdP admin client
-        # uses idp.zitadel.discoveryURL to dial envoy by its Service FQDN so
-        # cluster DNS (not a fragile hostAlias to a rotating ClusterIP) is the
-        # rendezvous. The Zitadel instance router only matches its registered
+        # Spec tier-2-host-aliases-cluster-dns. NO LONGER USED BY THE DAEMON
+        # OR THE FIRST-ADMIN JOB: both dial Zitadel by Service name and claim
+        # the host by header (ADR-0092). This chain is deleted by charts#163
+        # once no client uses it. The Zitadel instance router only matches its registered
         # ExternalDomain in the Host header, so we rewrite Host to the public
         # app.<domain> name before proxying upstream.
         #
@@ -1270,10 +1270,8 @@ static_resources:
                       # deploy#1204 — was ["*"]. An auth-free wildcard vhost
                       # matches every :authority, so any route added here later
                       # becomes reachable by anything that reaches the chain.
-                      # Pinned to the in-cluster Service names the daemon's IdP
-                      # admin client actually dials (idp.zitadel.discoveryURL,
-                      # recommended value
-                      # https://gibson-envoy.<ns>.svc.cluster.local:<httpsPort>),
+                      # Pinned to the in-cluster Service names
+                      # (https://gibson-envoy.<ns>.svc.cluster.local:<httpsPort>),
                       # with and without the explicit port, since a non-443
                       # httpsPort (kind uses 30443) is carried in the Host
                       # header and Envoy does not strip it. Anything else gets
