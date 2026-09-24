@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.130.2](https://github.com/zeroroot-ai/charts/compare/v0.130.1...v0.130.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **edge:** the Envoy edge never forwards a client's instance-selection headers ([#164](https://github.com/zeroroot-ai/charts/issues/164)) ([22921f1](https://github.com/zeroroot-ai/charts/commit/22921f180ec46a38faca472756ba9d1a4925b7b2))
+* **idp:** the daemon and first-admin Job reach Zitadel by Service name ([#165](https://github.com/zeroroot-ai/charts/issues/165)) ([f9a67ba](https://github.com/zeroroot-ai/charts/commit/f9a67ba5a40e057d6c93ca2bb9501d15530fbe22))
+* **rework:** the velero render passes its installer inputs too ([#158](https://github.com/zeroroot-ai/charts/issues/158)) ([4404770](https://github.com/zeroroot-ai/charts/commit/4404770f89db30b5e6c2ac958551d5b25b3c66de))
+
 ## [0.130.1](https://github.com/zeroroot-ai/charts/compare/v0.130.0...v0.130.1) (2026-09-23)
 
 
