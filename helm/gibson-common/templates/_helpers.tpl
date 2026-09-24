@@ -123,6 +123,38 @@ hostAliases:
 {{- end -}}
 
 {{/*
+  Identity-provider addressing (ADR-0092). Every in-cluster Zitadel client
+  CONNECTS to the Zitadel Service by Kubernetes DNS and CLAIMS the public
+  host in the x-zitadel-instance-host header. Zitadel selects its instance
+  from that header, so no pod needs hostAliases and no identity request meets
+  the public edge. These two values are the only names for the two facts.
+  Both derive from what an install already has: the release and
+  global.domain. No environment sets them.
+
+  gibson.zitadel.url             where to connect: the Zitadel Service
+  gibson.zitadel.externalDomain  what to claim: the bare app host. It never
+                                 carries a port, because Zitadel stamps a
+                                 port in the claimed host into the issuer.
+  gibson.zitadel.env             both, as container env entries.
+
+  The context needs .Release and .Values.global.domain.
+*/}}
+{{- define "gibson.zitadel.url" -}}
+{{- printf "http://%s-zitadel.%s.svc.cluster.local:8080" .Release.Name .Release.Namespace -}}
+{{- end -}}
+
+{{- define "gibson.zitadel.externalDomain" -}}
+{{- include "gibson.appHost" . -}}
+{{- end -}}
+
+{{- define "gibson.zitadel.env" -}}
+- name: ZITADEL_URL
+  value: {{ include "gibson.zitadel.url" . | quote }}
+- name: ZITADEL_EXTERNAL_DOMAIN
+  value: {{ include "gibson.zitadel.externalDomain" . | quote }}
+{{- end -}}
+
+{{/*
   ─────────────────────────────────────────────────────────────────────
   Domain derivation helpers (deploy#630 / ADR two-plane addressing).
 

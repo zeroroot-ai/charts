@@ -99,7 +99,7 @@ spec:
      + OIDC routes), zitadel-login (Login V2 UI), ext-authz (JWKS),
      daemon (IdP admin), dashboard (server-action token exchange), both
      operators (OIDC app provisioning), and the umbrella bringup Jobs
-     signup-bot-pat-minter / zitadel-login-branding.
+     signup-bot-pat-minter / zitadel-login-branding / first-admin.
 --------------------------------------------------------------------- */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -145,6 +145,11 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: zitadel-login-branding
+        # The first-admin Job creates the founding owner through the
+        # Management API, dialing Zitadel by Service name (ADR-0092).
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: first-admin
       ports:
         - protocol: TCP
           port: 8080
