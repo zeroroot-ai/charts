@@ -68,6 +68,15 @@ item whose `-` and whose filter_chain_match the CALLER writes.
                 xff_num_trusted_hops: 0
                 route_config:
                   name: public_routes
+                  # The edge owns the headers that select a Zitadel instance
+                  # (ADR-0092, charts#161). Zitadel trusts them, so a client on
+                  # the internet must never supply them. This runs in the router,
+                  # after ext_authz, which adds none of these four.
+                  request_headers_to_remove:
+                    - x-zitadel-instance-host
+                    - x-zitadel-public-host
+                    - x-forwarded-host
+                    - forwarded
                   virtual_hosts:
                     - name: app
                       domains: ["{{ .domains.app }}", "{{ .domains.app }}:{{ .envoyHttpsPort }}"]

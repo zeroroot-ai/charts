@@ -202,6 +202,15 @@ static_resources:
                   # OkHttpResponse.headers default action overwrites any
                   # client-supplied versions, which is the protection
                   # this strip was trying to provide.
+                  # The edge owns the headers that select a Zitadel instance
+                  # (ADR-0092, charts#161). Zitadel trusts them, so a client on
+                  # the internet must never supply them. This runs in the router,
+                  # after ext_authz, which adds none of these four.
+                  request_headers_to_remove:
+                    - x-zitadel-instance-host
+                    - x-zitadel-public-host
+                    - x-forwarded-host
+                    - forwarded
                   virtual_hosts:
                     - name: api
                       # Both port-less and port-ful Host headers, since
@@ -1247,6 +1256,15 @@ static_resources:
                 xff_num_trusted_hops: 0
                 route_config:
                   name: cluster_oidc_routes
+                  # The edge owns the headers that select a Zitadel instance
+                  # (ADR-0092, charts#161). Zitadel trusts them, so a client on
+                  # the internet must never supply them. This runs in the router,
+                  # after ext_authz, which adds none of these four.
+                  request_headers_to_remove:
+                    - x-zitadel-instance-host
+                    - x-zitadel-public-host
+                    - x-forwarded-host
+                    - forwarded
                   virtual_hosts:
                     - name: cluster_oidc
                       # deploy#1204 — was ["*"]. An auth-free wildcard vhost
@@ -1308,6 +1326,15 @@ static_resources:
                 codec_type: AUTO
                 route_config:
                   name: admin_probe
+                  # The edge owns the headers that select a Zitadel instance
+                  # (ADR-0092, charts#161). Zitadel trusts them, so a client on
+                  # the internet must never supply them. This runs in the router,
+                  # after ext_authz, which adds none of these four.
+                  request_headers_to_remove:
+                    - x-zitadel-instance-host
+                    - x-zitadel-public-host
+                    - x-forwarded-host
+                    - forwarded
                   virtual_hosts:
                     - name: admin_probe
                       domains: ["*"]

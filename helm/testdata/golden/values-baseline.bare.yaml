@@ -3428,6 +3428,15 @@ data:
                       # OkHttpResponse.headers default action overwrites any
                       # client-supplied versions, which is the protection
                       # this strip was trying to provide.
+                      # The edge owns the headers that select a Zitadel instance
+                      # (ADR-0092, charts#161). Zitadel trusts them, so a client on
+                      # the internet must never supply them. This runs in the router,
+                      # after ext_authz, which adds none of these four.
+                      request_headers_to_remove:
+                        - x-zitadel-instance-host
+                        - x-zitadel-public-host
+                        - x-forwarded-host
+                        - forwarded
                       virtual_hosts:
                         - name: api
                           # Both port-less and port-ful Host headers, since
@@ -4441,6 +4450,15 @@ data:
                     xff_num_trusted_hops: 0
                     route_config:
                       name: public_routes
+                      # The edge owns the headers that select a Zitadel instance
+                      # (ADR-0092, charts#161). Zitadel trusts them, so a client on
+                      # the internet must never supply them. This runs in the router,
+                      # after ext_authz, which adds none of these four.
+                      request_headers_to_remove:
+                        - x-zitadel-instance-host
+                        - x-zitadel-public-host
+                        - x-forwarded-host
+                        - forwarded
                       virtual_hosts:
                         - name: app
                           domains: ["app.selfhosted.example.com", "app.selfhosted.example.com:443"]
@@ -4931,6 +4949,15 @@ data:
                     xff_num_trusted_hops: 0
                     route_config:
                       name: cluster_oidc_routes
+                      # The edge owns the headers that select a Zitadel instance
+                      # (ADR-0092, charts#161). Zitadel trusts them, so a client on
+                      # the internet must never supply them. This runs in the router,
+                      # after ext_authz, which adds none of these four.
+                      request_headers_to_remove:
+                        - x-zitadel-instance-host
+                        - x-zitadel-public-host
+                        - x-forwarded-host
+                        - forwarded
                       virtual_hosts:
                         - name: cluster_oidc
                           # deploy#1204 — was ["*"]. An auth-free wildcard vhost
@@ -4992,6 +5019,15 @@ data:
                     codec_type: AUTO
                     route_config:
                       name: admin_probe
+                      # The edge owns the headers that select a Zitadel instance
+                      # (ADR-0092, charts#161). Zitadel trusts them, so a client on
+                      # the internet must never supply them. This runs in the router,
+                      # after ext_authz, which adds none of these four.
+                      request_headers_to_remove:
+                        - x-zitadel-instance-host
+                        - x-zitadel-public-host
+                        - x-forwarded-host
+                        - forwarded
                       virtual_hosts:
                         - name: admin_probe
                           domains: ["*"]
@@ -15218,7 +15254,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: da366818197993b517a1f534dbdd046c6a82708c9271b424934e153b92337dc6
+        checksum/config: 38c0d3912507891288a7a5a2857bcccf10f473ea01bdf01558c444042e94ce08
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
