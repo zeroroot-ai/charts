@@ -609,18 +609,34 @@ gibson-operators:
           patSecretRef:
             name: "gibson-zitadel-signup-bot-pat"
             key: "pat"
+    # Every entry below declares `roles` explicitly (hosted#191). gibson's
+    # OIDCClient reconciler grants a machine user EXACTLY this set and
+    # revokes anything not listed; an empty list means no Zitadel
+    # administrator role at all. There is no default any more — an
+    # omitted `roles` key is a chart-authoring mistake, not "use the old
+    # default", and check-oidcclient-roles-explicit.py fails the build on
+    # a missing key so that mistake can't ship silently.
     oidcClients:
       - name: gibson-daemon
         applicationType: MACHINE_USER
+        # Keeps its current instance-owner rights explicitly for now; its
+        # own least-privilege slice (hosted#199) narrows this later.
+        roles: ["IAM_OWNER"]
         secretRef:
           name: idp-admin-credentials
           key: client_secret
       - name: gibson-tenant-operator
         applicationType: MACHINE_USER
+        # Keeps its current instance-owner rights explicitly for now; its
+        # own least-privilege slice (hosted#200) narrows this later.
+        roles: ["IAM_OWNER"]
         secretRef:
           name: gibson-zitadel-tenant-operator
           key: ZITADEL_CLIENT_SECRET
       - name: gibson-dashboard
+        # OIDC-app type (WEB): roles is ignored by the reconciler for
+        # non-MACHINE_USER entries. Declared for the guard, not for effect.
+        roles: []
         redirectURIs: []
         postLogoutRedirectURIs: []
         secretRef:
@@ -628,11 +644,22 @@ gibson-operators:
           key: client_secret
       - name: gibson-dashboard-service
         applicationType: MACHINE_USER
+        # No Zitadel administrator role. The dashboard's own service
+        # identity calls only pre-auth/signup RPCs (SignupService,
+        # UserService.*SignupProgress, TenantProvisioningService, and
+        # MembershipService invite flows) and needs no elevated role for
+        # any of them — confirmed hosted#191. It previously inherited
+        # IAM_OWNER from the (now-removed) empty-roles default although it
+        # is internet-facing.
+        roles: []
         secretRef:
           name: gibson-zitadel-dashboard
           key: ZITADEL_CLIENT_SECRET
       - name: gibson-native-login
         applicationType: NATIVE
+        # OIDC-app type: roles is ignored by the reconciler. Declared for
+        # the guard, not for effect.
+        roles: []
         grantTypes:
           - DEVICE_CODE
           - AUTHORIZATION_CODE
