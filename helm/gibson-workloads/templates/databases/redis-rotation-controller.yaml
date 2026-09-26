@@ -53,9 +53,13 @@ metadata:
     app.kubernetes.io/component: redis-rotation
 rules:
   # Read the redis password Secret to detect rotation and retrieve passwords.
+  # Every read in the script is a named `kubectl get secret`, so the rule
+  # names the Secret. A namespace-wide read would also reach the Zitadel
+  # owner credentials (scripts/check-owner-credential-readers.py).
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list"]
+    resourceNames: [{{ $redisSecret | quote }}]
+    verbs: ["get"]
   # Manage the rotation-state Secret (stores last-processed version +
   # last-known password for the dual-password ACL window).
   # K8s ignores resourceNames for `create` (no name exists yet at create time),

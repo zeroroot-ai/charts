@@ -10,13 +10,13 @@ time (internal/saga/flows/tenant_namespace_rbac.go).
 
 What's in here:
 
-  Secrets        — chart-rendered Secrets the operator reads at startup
-                   (gibson-zitadel-tenant-operator client_id/secret) and
-                   the post-install bootstrap Job's writes (gibson-zitadel-
-                   dashboard-client, gibson-zitadel-signup-bot-pat, etc.).
-                   Full CRUD because the operator both reads existing
-                   chart-rendered Secrets and writes new ones during
-                   bootstrap.
+  Secrets        — none. The operator gets every Secret in this namespace
+                   from the kubelet (secretKeyRef and secret volumes), and
+                   its code reads Secrets only in tenant namespaces, through
+                   the per-tenant ClusterRole it binds there. A namespace-
+                   wide read here would also reach the Zitadel owner
+                   credentials, which only bootstrap may read
+                   (scripts/check-owner-credential-readers.py).
 
   ConfigMaps     — read-only for chart configmaps (FGA model staging,
                    SPIFFE bundle config, dataplane templates).
@@ -46,9 +46,6 @@ metadata:
     app.kubernetes.io/name: gibson-tenant-operator
     app.kubernetes.io/part-of: gibson
 rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list", "watch"]

@@ -13,13 +13,17 @@ metadata:
   labels:
     {{- include "gibson.labels" . | nindent 4 }}
 rules:
-  # secrets get/list/watch — used by daemon Pod init containers
-  # (wait-for-idp-admin-secret) to poll for
-  # ESO-materialised Secrets before the daemon container starts.
-  # NOT used by daemon Go code — forbids daemon-side K8s API.
+  # secrets get, on one name. The init container wait-for-idp-admin-secret
+  # polls that Secret with `kubectl get secret <name>` before the daemon
+  # container starts. The daemon's Go code reads no Secret in this
+  # namespace through the API. No list and no watch: a namespace-wide
+  # read would also reach the Zitadel owner credentials (iam-admin-pat,
+  # iam-admin, the System API key), which only bootstrap may read
+  # (scripts/check-owner-credential-readers.py).
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list", "watch"]
+    resourceNames: [{{ .Values.idp.adminCredentialsSecret | quote }}]
+    verbs: ["get"]
   # pods get/list/watch — used by the wait-for-prerequisites init
   # container to poll for tenant-operator Pod Ready before the daemon
   # container starts.

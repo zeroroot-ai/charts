@@ -171,6 +171,14 @@ workload-rbac: ## Every grant to a ServiceAccount is on helm/gibson/rbac-allowli
 	@python3 scripts/check-workload-rbac.py --selftest
 	@python3 scripts/check-workload-rbac.py
 
+.PHONY: owner-credential-readers owner-credential-readers-live
+owner-credential-readers: ## Only bootstrap reads the Zitadel owner credentials: no new mount, env or RBAC read of iam-admin-pat, iam-admin or the System API key
+	@python3 scripts/check-owner-credential-readers.py --selftest
+	@python3 scripts/check-owner-credential-readers.py
+
+owner-credential-readers-live: ## The same check against the current kube context, with kubectl auth can-i for every ServiceAccount
+	@python3 scripts/check-owner-credential-readers.py --live
+
 daemon-sa-binding: ## The tenant-operator binds the daemon's real ServiceAccount to gibson-connector-creds, per tenant namespace only (gibson#137)
 	@python3 scripts/check-daemon-sa-binding.py --selftest
 	@python3 scripts/check-daemon-sa-binding.py
@@ -201,7 +209,7 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates probes netpol-coverage daemon-netpol-admits-callers edge-strips-instance-headers hostnames reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
+check: golden attribution cloud-free chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates probes netpol-coverage daemon-netpol-admits-callers edge-strips-instance-headers hostnames reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context

@@ -54,7 +54,7 @@ spec:
           declarative here rather than a kubectl restart at rotation time
           (deploy#1144).
         */}}
-        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-zitadel-signup-bot-pat,gibson-workloads-dashboard-secrets,gibson-workloads-redis-stack,{{ (((.Values.dashboard.billing).stripeSecretKeySecretRef)) | default "gibson-stripe-credentials" }}"
+        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-workloads-dashboard-secrets,gibson-workloads-redis-stack,{{ (((.Values.dashboard.billing).stripeSecretKeySecretRef)) | default "gibson-stripe-credentials" }}"
     spec:
       {{- include "gibson.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ .Values.dashboard.serviceAccount.name | default "gibson-dashboard" }}
@@ -162,44 +162,6 @@ spec:
             - name: zitadel-client
               mountPath: /var/run/zitadel-client
               readOnly: true
-        # one-code-path #203: wait-for-signup-bot-pat blocks pod start
-        # until the gibson-zitadel-signup-bot-pat Secret has been minted
-        # by the post-install bootstrap Job + materialised via ESO. The
-        # ZITADEL_SIGNUP_BOT_PAT env entry was flipped from
-        # `optional: true` to required.
-        - name: wait-for-signup-bot-pat
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
-          command: ['/bin/bash', '-c']
-          args:
-            - |
-              set -eu
-              ns={{ .Release.Namespace | quote }}
-              echo "[wait-for-signup-bot-pat] waiting for Secret ${ns}/gibson-zitadel-signup-bot-pat key=pat..."
-              for i in $(seq 1 30); do
-                if kubectl get secret -n "${ns}" gibson-zitadel-signup-bot-pat \
-                    -o jsonpath='{.data.pat}' 2>/dev/null \
-                    | base64 -d 2>/dev/null | grep -q .; then
-                  echo "[wait-for-signup-bot-pat] ok"
-                  exit 0
-                fi
-                sleep 2
-              done
-              echo "[wait-for-signup-bot-pat] timed out after 60s -- the gibson-zitadel-signup-bot-pat Secret was not materialised. Check: kubectl get externalsecret,secret -n ${ns} | grep signup-bot" >&2
-              exit 1
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 1001
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
         # one-code-path #203: wait-for-db-secrets blocks pod start until
         # the Secret backing NEO4J_PASSWORD has been materialised. The
         # NEO4J_PASSWORD env entry was flipped from `optional: true` to
@@ -622,22 +584,6 @@ spec:
                 secretKeyRef:
                   name: gibson-zitadel-dashboard
                   key: ZITADEL_CLIENT_SECRET
-            # Scoped Zitadel PAT for the dashboard-native signupAction
-            # (spec: dashboard-native-signup). Belongs to the `signup-bot`
-            # machine user which has IAM_USER_MANAGER only — it can create
-            # humans + read password policy, NOT touch orgs or admin the
-            # instance. This is INTENTIONALLY NOT the iam-admin-pat; a
-            # build-time guard at scripts/check-no-iam-admin-pat-in-dashboard.mjs
-            # keeps that separation enforced.
-            # one-code-path #203: was `optional: true`. The
-            # wait-for-signup-bot-pat init container above blocks pod
-            # start until the Secret has been minted by the post-install
-            # bootstrap Job + materialised via ESO.
-            - name: ZITADEL_SIGNUP_BOT_PAT
-              valueFrom:
-                secretKeyRef:
-                  name: gibson-zitadel-signup-bot-pat
-                  key: pat
             # The signupAction also needs the external domain to forge
             # Host headers when the admin-client's apiUrl points at the
             # in-cluster Zitadel Service (same trick as Envoy routing).
