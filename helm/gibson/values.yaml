@@ -200,10 +200,12 @@ global:
     # otherwise, naming both keys, so a cluster can never be left unable to
     # reach the one person who can sign in and set everything else up.
     offlineSetup: false
-    # setupSecretRef names the Secret the operator writes the offline link
-    # into. Required when offlineSetup is true; ignored otherwise.
+    # setupSecretRef names the Secret (and the key within it, required by
+    # the CRD's shared SecretKeyRef type) the operator writes the offline
+    # link into. Required when offlineSetup is true; ignored otherwise.
     setupSecretRef:
       name: "gibson-platform-owner-setup"
+      key: "setup-link"
     # setupGeneration is the Platform owner's reset (ADR-0093 decision 12):
     # raising this integer clears every second factor on file and sends a
     # new setup link. A reviewed change to this value, committed and

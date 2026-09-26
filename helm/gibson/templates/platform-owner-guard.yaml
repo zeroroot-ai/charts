@@ -37,6 +37,11 @@ This template renders no resource: it exists to run these checks on every
 {{- if and (not $mailConfigured) (not $po.offlineSetup) -}}
 {{- fail "global.platformOwner.email has no way to reach its owner: gibson-workloads.gibson.email.provider is not \"smtp\" (no delivering mail transport) and global.platformOwner.offlineSetup is not true. Configure real mail, or set global.platformOwner.offlineSetup: true so the platform-operator writes a one-time setup link to global.platformOwner.setupSecretRef instead (ADR-0093 decision 8)." -}}
 {{- end -}}
-{{- if and $po.offlineSetup (not (($po.setupSecretRef | default dict).name)) -}}
+{{- if $po.offlineSetup -}}
+{{- if not (($po.setupSecretRef | default dict).name) -}}
 {{- fail "global.platformOwner.offlineSetup is true but global.platformOwner.setupSecretRef.name is empty — the platform-operator needs a Secret name to write the one-time setup link into." -}}
+{{- end -}}
+{{- if not (($po.setupSecretRef | default dict).key) -}}
+{{- fail "global.platformOwner.offlineSetup is true but global.platformOwner.setupSecretRef.key is empty — the CRD's SecretKeyRef type requires it (e.g. \"setup-link\")." -}}
+{{- end -}}
 {{- end -}}

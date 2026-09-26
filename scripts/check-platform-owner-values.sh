@@ -75,5 +75,13 @@ must_fail "offlineSetup=true with no setupSecretRef.name" \
   "setupSecretRef.name is empty" \
   --set global.platformOwner.setupSecretRef.name=
 
+# offlineSetup=true with no key must fail too: the CRD's shared
+# SecretKeyRef type requires key, so a values file that omits it would
+# render clean here and then be refused at apply time. Catch it at render
+# time instead.
+must_fail "offlineSetup=true with no setupSecretRef.key" \
+  "setupSecretRef.key is empty" \
+  --set global.platformOwner.setupSecretRef.key=
+
 [ "$fail" -eq 0 ] && echo "✓ platform-owner-values: required, must-differ and mail/offline rules all fire, and the baseline satisfies every one of them"
 exit "$fail"
