@@ -9972,6 +9972,10 @@ metadata:
     app.kubernetes.io/part-of: gibson
 rules:
   - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["gibson-redis-stack"]
+    verbs: ["get"]
+  - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["networking.k8s.io"]
@@ -25772,26 +25776,6 @@ spec:
             secret_has_key "$NS" "$DASH_PAT_SECRET" "$DASH_PAT_KEY"
           else
             echo "[bootstrap-secrets] SKIP $DASH_PAT_SECRET (no dashboard MACHINE_USER configured in overlay)"
-          fi
-
-          # ESO credential backend Secrets (deploy#567 S4: per-credential
-          # individual Secrets replaced the deleted flat gibson-secrets-backend
-          # Secret). Verify one representative credential from each logical group.
-          ESO_NS="external-secrets-backend"
-          if kubectl get namespace "$ESO_NS" >/dev/null 2>&1 ; then
-            secret_has_key "$ESO_NS" "gibson-dashboard-postgres-password" "password"
-            secret_has_key "$ESO_NS" "gibson-impersonation-key"           "value"
-            secret_has_key "$ESO_NS" "gibson-vault-admin-token"           "token"
-            # Capability-Grant signing key (GHSA-3957). Both keys checked, not
-            # one: with the seed present and the kid missing the daemon errors
-            # out of the Minter and disables capability grants; with neither it
-            # silently falls back to deriving from the master KEK, which is the
-            # unrotatable posture this secret exists to end. The fallback is
-            # non-fatal by design, so nothing else in a bringup goes red.
-            secret_has_key "$ESO_NS" "gibson-cg-signing-key"              "kid"
-            secret_has_key "$ESO_NS" "gibson-cg-signing-key"              "key"
-          else
-            echo "[bootstrap-secrets] SKIP ESO backend namespace missing (external SecretStore overlay)"
           fi
 
           echo ""

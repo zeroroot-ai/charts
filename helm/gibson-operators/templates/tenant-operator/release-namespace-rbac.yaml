@@ -10,13 +10,18 @@ time (internal/saga/flows/tenant_namespace_rbac.go).
 
 What's in here:
 
-  Secrets        — none. The operator gets every Secret in this namespace
-                   from the kubelet (secretKeyRef and secret volumes), and
-                   its code reads Secrets only in tenant namespaces, through
+  Secrets        — `get` on the Redis password Secret, by name, and
+                   nothing else. The init container wait-for-redis-secret
+                   reads it with kubectl before the operator starts. The
+                   operator gets every other Secret in this namespace from
+                   the kubelet (secretKeyRef and secret volumes), and its
+                   code reads Secrets only in tenant namespaces, through
                    the per-tenant ClusterRole it binds there. A namespace-
                    wide read here would also reach the Zitadel owner
                    credentials, which only bootstrap may read
                    (scripts/check-owner-credential-readers.py).
+                   scripts/check-secret-reads-granted.py fails the render
+                   when a kubectl Secret read here loses its grant.
 
   ConfigMaps     — read-only for chart configmaps (FGA model staging,
                    SPIFFE bundle config, dataplane templates).
@@ -46,6 +51,10 @@ metadata:
     app.kubernetes.io/name: gibson-tenant-operator
     app.kubernetes.io/part-of: gibson
 rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ include "gibson.redisPasswordSecretName" . | quote }}]
+    verbs: ["get"]
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list", "watch"]
