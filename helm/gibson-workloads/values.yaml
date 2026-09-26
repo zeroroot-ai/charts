@@ -4903,14 +4903,6 @@ bootstrap:
     - key: openfga_postgres_password
       generator: "rand32"
 
-    # ---- Signup-bot PAT (deploy-simplification-bringup W4) ----
-    # Depends on the `zitadel_mint_user_pat` generator implemented in
-    # gibson-bootstrap v1.1.0+. The chart's bootstrap script invokes:
-    #   gibson-bootstrap zitadel-mint-user-pat gibson-signup-bot \
-    #     --roles=IAM_USER_MANAGER
-    # and captures the resulting JSON `{user_id, pat, rotated}`.
-    - key: gibson_idp_signup_bot_pat
-      generator: "zitadel_mint_user_pat gibson-signup-bot --roles=IAM_USER_MANAGER"
 
 # =============================================================================
 # External Secrets Operator (ESO) ClusterSecretStore configuration
@@ -4985,8 +4977,6 @@ tests:
   # the materialized Secrets/ConfigMaps.
   bootstrap:
     masterKeySecret: "gibson-master-key"
-    zitadelAdminPatSecret: "iam-admin-pat"
-    zitadelAdminPatKey: "pat"
     dashboardPatSecret: "gibson-zitadel-dashboard"
     dashboardPatKey: "pat"
     # If unset the chart derives `<release>-fga-model` from gibson.fullname.

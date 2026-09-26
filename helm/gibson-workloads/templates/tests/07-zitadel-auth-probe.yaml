@@ -15,10 +15,10 @@ Zitadel reconcile depend on:
 
 Conditional execution:
 
-  - The PAT Secret comes from platformBootstrap.zitadel.serviceUsers[0].patSecretRef.
-  - If that Secret is missing in the namespace (e.g. an overlay disables
-    serviceUsers — currently forbidden by design but defensive coding),
-    the test logs `SKIPPED` and exits 0.
+  - The Secret is the dashboard MACHINE_USER's (tests.zitadel.dashboardPatSecret,
+    default gibson-zitadel-dashboard).
+  - If that Secret is missing in the namespace, the test logs `SKIPPED`
+    and exits 0.
 
 Provenance: deploy#355 (slice 5.10 of production-readiness epic).
 Related: deploy#132/#133 (Envoy JWT vhost + audience), platform-operator#21

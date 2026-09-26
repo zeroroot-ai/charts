@@ -593,22 +593,6 @@ gibson-operators:
       systemClient:
         systemUserName: "gibson-system-bot"
         trustedClusterDomain: "gibson-zitadel.gibson.svc.cluster.local"
-      serviceUsers:
-        - name: "gibson-iam-admin"
-          roles: ["IAM_OWNER"]
-          patSecretRef:
-            name: "gibson-iam-admin-pat"
-            key: "pat"
-        - name: "gibson-tenant-operator"
-          roles: ["IAM_USER_MANAGER"]
-          patSecretRef:
-            name: "gibson-zitadel-tenant-operator-pat"
-            key: "pat"
-        - name: "gibson-signup-bot"
-          roles: ["IAM_USER_MANAGER"]
-          patSecretRef:
-            name: "gibson-zitadel-signup-bot-pat"
-            key: "pat"
     # Every entry below declares `roles` explicitly (hosted#191). gibson's
     # OIDCClient reconciler grants a machine user EXACTLY this set and
     # revokes anything not listed; an empty list means no Zitadel

@@ -106,22 +106,6 @@ spec:
       apiURL: {{ . | quote }}
       {{- end }}
     {{- end }}
-    {{- if .Values.platformBootstrap.zitadel.serviceUsers }}
-    serviceUsers:
-      {{- range .Values.platformBootstrap.zitadel.serviceUsers }}
-      - name: {{ .name | quote }}
-        roles:
-          {{- range .roles }}
-          - {{ . | quote }}
-          {{- end }}
-        patSecretRef:
-          name: {{ .patSecretRef.name | quote }}
-          key: {{ .patSecretRef.key | default "pat" | quote }}
-          {{- if .patSecretRef.namespace }}
-          namespace: {{ .patSecretRef.namespace | quote }}
-          {{- end }}
-      {{- end }}
-    {{- end }}
   {{- if .Values.platformBootstrap.oidcClients }}
   oidcClients:
     {{- range .Values.platformBootstrap.oidcClients }}

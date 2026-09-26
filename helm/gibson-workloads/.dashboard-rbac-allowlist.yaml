@@ -68,8 +68,8 @@ rules:
     resources: ["secrets"]
     verbs: ["get"]
     justification: |
-      The init containers wait-for-signup-bot-pat, wait-for-db-secrets and
-      wait-for-stripe-secrets run `kubectl get secret` before the app starts.
+      The init containers wait-for-db-secrets and wait-for-stripe-secrets
+      run `kubectl get secret` before the app starts.
       The grant is a namespaced Role (gibson-dashboard-init-secrets) with
       resourceNames on exactly those Secrets: no list, no watch, no other
       name. charts#116 removed the cluster-wide read that carried this and
