@@ -129,6 +129,19 @@ spec:
       {{- if .applicationType }}
       applicationType: {{ .applicationType | quote }}
       {{- end }}
+      {{- /* hosted#191: the operator grants a machine user exactly these
+             Zitadel roles and revokes any other. An empty list means no
+             role, so the key is always rendered, never dropped. */}}
+      {{- if hasKey . "roles" }}
+      {{- if .roles }}
+      roles:
+        {{- range .roles }}
+        - {{ . | quote }}
+        {{- end }}
+      {{- else }}
+      roles: []
+      {{- end }}
+      {{- end }}
       {{- /* The gibson-dashboard client's URIs derive from global.domain
              (deploy#682): when an overlay leaves them empty, default to the
              helper-built callback + origin so they always match the values the
