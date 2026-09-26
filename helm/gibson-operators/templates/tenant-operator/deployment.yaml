@@ -430,10 +430,10 @@ spec:
             # .Values.tenantOperator.zitadelURL.
             - name: ZITADEL_URL
               value: {{ ((.Values.tenantOperator).zitadelURL) | default (printf "http://%s-zitadel:8080" .Release.Name) | quote }}
-            - name: ZITADEL_PAT_PATH
-              value: "/etc/zitadel/pat"
-            # OAuth2 client_credentials used by the operator's provisioning
-            # client to call dashboard admin endpoints (Entitlements, etc.).
+            # OAuth2 client_credentials of the operator's own machine user
+            # (the gibson-tenant-operator OIDCClient). The operator uses them
+            # for the daemon's admin endpoints and for the Zitadel API. It
+            # never mounts the Zitadel owner PAT.
             # Secret is materialized by templates/auth/zitadel-service-accounts-secret.yaml
             # and populated with real Zitadel-minted creds by the
             # post-install bootstrap Job (replacing REPLACE_ME_* placeholders).
@@ -719,13 +719,6 @@ spec:
               mountPath: /var/run/webhook-serving-certs
               readOnly: true
             {{- end }}
-            # zitadel-pat mount — unconditional per epic one-code-path
-            # (deploy#186), slice deploy#196. The operator binary refuses
-            # to boot when /etc/zitadel/pat is unreadable, so mounting the
-            # Secret is part of the structural contract, not an opt-in.
-            - name: zitadel-pat
-              mountPath: /etc/zitadel
-              readOnly: true
             # CA for the OpenFGA HTTP-listener cert (deploy#1382).
             - name: fga-http-ca
               mountPath: /etc/ssl/fga-ca
@@ -765,39 +758,6 @@ spec:
             # (deadlock). The operator reads the KEK lazily at reconcile time and
             # requeues until the kubelet projects the file (the WriteTenantBroker-
             # Config step), so no restart is needed once the Secret appears.
-            optional: true
-        # IAM admin PAT for Zitadel Management API (used by EnsureZitadelOrg
-        # + TenantMember reconcilers). Secret is created by the Zitadel
-        # setup Job; this is the ONE component that legitimately needs the
-        # elevated (IAM_OWNER) token — dashboard uses a scoped signup-bot
-        # PAT instead. Mounted at /etc/zitadel/pat (matches ZITADEL_PAT_PATH
-        # env + the operator's file-reader expectations).
-        #
-        # Per epic one-code-path (deploy#186), slice deploy#196: the
-        # previous `.Values.zitadel.enabled` if-gate is gone — the
-        # operator pod refuses to boot when /etc/zitadel/pat is unreadable,
-        # so mounting the Secret is the structural contract. `optional: true`
-        # stays only as the kubelet's projection contract during the
-        # bootstrap-Job window (the Secret is minted by an in-cluster Job,
-        # not pre-seeded); once the Job runs the file populates. If the
-        # Job never runs, the operator pod CrashLoops with a clear error
-        # message instead of silently no-opping the Zitadel saga.
-        #
-        # TODO(deploy#203): remove `optional: true` after the bootstrap-Job
-        # sequencing is converted to a hard pre-install dependency.
-        - name: zitadel-pat
-          secret:
-            secretName: {{ .Values.zitadel.adminPatSecretName | default "iam-admin-pat" | quote }}
-            items:
-              - key: pat
-                path: pat
-            defaultMode: 0400
-            # allowlist (one-code-path #203): VOLUME-level optional, not
-            # env-level. Slice #203 scope is env `valueFrom.*Ref` only;
-            # this Secret is minted by the post-install Zitadel bootstrap
-            # Job, the operator graceful-degrades when the file is missing
-            # at start and the controller-manager reconciles once kubelet
-            # propagates the mount.
             optional: true
         {{- if .Values.envoy.tls.secretName }}
         - name: envoy-ca

@@ -1,54 +1,41 @@
 #!/usr/bin/env python3
-"""check-login-brand.py — the login-branding Job applies the brand it declares,
-and re-applies it when the brand changes.
+"""check-login-brand.py: the chart hands the platform-operator the declared login brand.
 
 WHY THIS GUARD EXISTS
 ---------------------
-On 2026-09-14 the staging login page was still serving the retired violet
-brand: primaryColor #894fee on #0e0f15, THEME_MODE_DARK, and the violet CRT
-mark. ADR-0064 replaced all of it with one light "acid concrete" brand months
-earlier. Two separate reasons it never arrived, and the second is the one that
-would have kept arriving:
+On 2026-09-14 the staging login page still served the retired violet brand:
+primaryColor #894fee on #0e0f15, THEME_MODE_DARK, and the violet CRT mark.
+ADR-0064 had replaced it months earlier. The palette in files/branding/ was
+stale, and the mark upload was keyed by presence, so an instance that had been
+branded once could never be re-branded.
 
-  1. files/branding/ still held the old palette. A value edit fixes that once.
-  2. The Job uploaded marks only when the policy's dark-logo slot was EMPTY.
-     Any instance branded once could never be re-branded: editing an SVG
-     changed nothing, and the documented remedy was a hand-run DELETE against
-     the admin API. A declarative platform cannot have a rebrand that needs a
-     human to run a DELETE first.
+The brand is now applied by the platform-operator as a bootstrap step
+(PlatformBootstrap spec.zitadel.loginBranding, condition LoginBrandingReady).
+Writing the instance label policy needs IAM_OWNER, so no Job reads the owner
+PAT for it. The operator compares by content, and its tests in gibson prove
+that a stale mark is replaced and a current one is left alone. This guard
+proves the chart half, on the baseline render:
 
-So the marks are keyed by CONTENT now, and this proves it: a stale mark is
-replaced, an identical one is left alone.
-
-WHAT IT MEASURES
-----------------
-The Job script, EXACTLY as the chart renders it, driven against a stub Zitadel
-and a stub kubectl. Three runs, one assertion each:
-
-  1. bare instance      — every slot uploaded, policy applied, marks verified
-  2. stale marks        — served bytes differ, so every slot is replaced
-  3. steady state       — served bytes match, so nothing is uploaded and the
-                          Job reports no change (the property that keeps a
-                          no-op Sync from rolling the login pod)
-
-It also asserts the declared palette is the brand's: a policy that drifts back
-to a hex the brand does not define fails here, not on a screenshot.
+  1. The zitadel-login-branding ConfigMap carries label-policy.json, logo.svg
+     and icon.svg byte-for-byte from files/branding/, plus a branding-hash
+     over the three.
+  2. The PlatformBootstrap names that ConfigMap in spec.zitadel.loginBranding.
+  3. The login Deployment reloads on that ConfigMap, so a rebrand rolls the
+     pod that caches the policy.
+  4. The declared palette is the brand's: a hex the brand does not define
+     fails here, not on a screenshot.
+  5. No workload renders that reads the owner PAT to brand (the old Job).
 
 Usage: scripts/check-login-brand.py            # the guard
        scripts/check-login-brand.py --selftest # prove it can fail
-Exit:  0 the Job applies the brand · 1 it does not · 2 could not run
+Exit:  0 the chart hands over the brand, 1 it does not
 """
 from __future__ import annotations
 
-import http.server
+import copy
+import hashlib
 import json
-import os
-import re
-import subprocess
 import sys
-import tempfile
-import threading
-from hashlib import sha256
 from pathlib import Path
 
 import yaml
@@ -56,7 +43,8 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 BRANDING = ROOT / "helm/gibson/files/branding"
 GOLDEN = ROOT / "helm/testdata/golden/values-baseline.bare.yaml"
-JOB_NAME = "zitadel-login-branding"
+CONFIGMAP = "zitadel-login-branding"
+FILES = ("label-policy.json", "logo.svg", "icon.svg")
 
 # @zeroroot-ai/brand, the one light brand (ADR-0064). Kept here so a policy
 # that drifts back to a colour the brand does not define fails the guard.
@@ -69,304 +57,109 @@ BRAND_HEX = {
 }
 
 
-class Zitadel(http.server.BaseHTTPRequestHandler):
-    """Enough of the admin + assets API for the Job to run end to end."""
-
-    # Per-server state, set by serve().
-    assets: dict[str, bytes]
-    policy: dict
-    uploads: list[str]
-    deletes: list[str]
-    seq: int
-
-    def log_message(self, *_args):  # keep the harness quiet
-        pass
-
-    def _send(self, code: int, body: bytes = b"{}", ctype="application/json"):
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _read(self) -> bytes:
-        return self.rfile.read(int(self.headers.get("Content-Length") or 0))
-
-    def do_GET(self):
-        if self.path == "/debug/ready":
-            return self._send(200)
-        if self.path == "/admin/v1/policies/label":
-            return self._send(200, json.dumps({"policy": self.policy}).encode())
-        if self.path.startswith("/assets/v1/"):
-            blob = self.assets.get(self.path)
-            if blob is None:
-                return self._send(404, b'{"error":"no such asset"}')
-            return self._send(200, blob, "image/svg+xml")
-        return self._send(404, b'{"error":"unrouted"}')
-
-    def do_PUT(self):
-        if self.path != "/admin/v1/policies/label":
-            return self._send(404, b'{"error":"unrouted"}')
-        want = json.loads(self._read() or b"{}")
-        if all(self.policy.get(k) == v for k, v in want.items()):
-            # Zitadel answers 400 "Object Details has not been changed" on a
-            # second write with no diff. The Job reads that as its no-op.
-            return self._send(400, b'{"message":"Object Details has not been changed"}')
-        self.policy.update(want)
-        return self._send(200)
-
-    def do_DELETE(self):
-        slot = {
-            "/admin/v1/policies/label/logo": "logoUrl",
-            "/admin/v1/policies/label/logo_dark": "logoUrlDark",
-            "/admin/v1/policies/label/icon": "iconUrl",
-            "/admin/v1/policies/label/icon_dark": "iconUrlDark",
-        }.get(self.path)
-        if slot is None:
-            return self._send(404, b'{"error":"unrouted"}')
-        self.deletes.append(self.path)
-        url = self.policy.pop(slot, "")
-        self.assets.pop("/" + url.split("/", 3)[-1] if url else "", None)
-        return self._send(200)
-
-    def do_POST(self):
-        if self.path == "/admin/v1/policies/label/_activate":
-            self._read()
-            return self._send(200)
-        slot = {
-            "/assets/v1/instance/policy/label/logo": ("logoUrl", "logo"),
-            "/assets/v1/instance/policy/label/logo/dark": ("logoUrlDark", "logo-dark"),
-            "/assets/v1/instance/policy/label/icon": ("iconUrl", "icon"),
-            "/assets/v1/instance/policy/label/icon/dark": ("iconUrlDark", "icon-dark"),
-        }.get(self.path)
-        if slot is None:
-            return self._send(404, b'{"error":"unrouted"}')
-        field, stem = slot
-        body = self._read()
-        # Zitadel stores the uploaded bytes verbatim and serves them back
-        # verbatim (internal/api/assets/asset.go); the harness does the same.
-        blob = multipart_file(body)
-        # Every upload mints a fresh object name, so a URL never identifies
-        # content — which is exactly why the Job compares bytes.
-        type(self).seq += 1
-        obj = f"/assets/v1/inst/policy/label/{stem}-{type(self).seq}"
-        self.assets[obj] = blob
-        self.policy[field] = f"https://app.example.test{obj}"
-        self.uploads.append(self.path)
-        return self._send(200)
+def load(path: Path) -> list[dict]:
+    return [d for d in yaml.safe_load_all(path.read_text()) if isinstance(d, dict)]
 
 
-def multipart_file(body: bytes) -> bytes:
-    """The one part's payload, without re-implementing a MIME parser."""
-    start = body.find(b"\r\n\r\n")
-    if start < 0:
-        raise ValueError("upload carried no multipart body")
-    rest = body[start + 4 :]
-    end = rest.rfind(b"\r\n--")
-    return rest[:end] if end >= 0 else rest
+def files(branding: Path) -> dict[str, str]:
+    return {f: (branding / f).read_text() for f in FILES}
 
 
-def job_script(golden: Path) -> str:
-    """The Job's script exactly as the chart renders it."""
-    for doc in yaml.safe_load_all(golden.read_text()):
-        if doc and doc.get("kind") == "Job" and doc["metadata"]["name"] == JOB_NAME:
-            return doc["spec"]["template"]["spec"]["containers"][0]["args"][0]
-    raise LookupError(f"no {JOB_NAME} Job in {golden}")
+def audit(docs: list[dict], declared: dict[str, str]) -> list[str]:
+    out = []
+    cms = [d for d in docs if d.get("kind") == "ConfigMap" and d["metadata"]["name"] == CONFIGMAP]
+    if len(cms) != 1:
+        return [f"want one ConfigMap {CONFIGMAP}, the render has {len(cms)}"]
+    data = cms[0].get("data") or {}
+    annotations = cms[0]["metadata"].get("annotations") or {}
+    if any(k.startswith("helm.sh/hook") or k.startswith("argocd.argoproj.io/hook") for k in annotations):
+        out.append(f"{CONFIGMAP} is a hook; the operator and Reloader watch it, so it must be a standing resource")
+    for f, want in declared.items():
+        # `|` block scalars add one trailing newline to content that lacks one.
+        if data.get(f, "").rstrip("\n") != want.rstrip("\n"):
+            out.append(f"{CONFIGMAP}.{f} is not files/branding/{f}")
+    want_hash = hashlib.sha256("".join(declared[f] for f in FILES).encode()).hexdigest()
+    if data.get("branding-hash") != want_hash:
+        out.append(f"{CONFIGMAP}.branding-hash is not the sha256 of the three brand files")
 
+    pbs = [d for d in docs if d.get("kind") == "PlatformBootstrap"]
+    names = [((pb.get("spec") or {}).get("zitadel") or {}).get("loginBranding", {}).get("configMap") for pb in pbs]
+    if names != [CONFIGMAP]:
+        out.append(f"PlatformBootstrap spec.zitadel.loginBranding.configMap = {names}, want [{CONFIGMAP!r}]")
 
-def run_job(script: str, policy: dict, assets: dict[str, bytes], branding: Path):
-    """Run the Job against a fresh stub. Returns (result, uploads, deletes)."""
-    uploads: list[str] = []
-    deletes: list[str] = []
-    handler = type("Stub", (Zitadel,), {})
-    handler.assets, handler.policy = assets, policy
-    handler.uploads, handler.deletes, handler.seq = uploads, deletes, 0
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    logins = [d for d in docs if d.get("kind") == "Deployment" and d["metadata"]["name"].endswith("zitadel-login")]
+    for dep in logins:
+        ann = dep["metadata"].get("annotations") or {}
+        reload = ann.get("configmap.reloader.stakater.com/reload", "")
+        if CONFIGMAP not in [x.strip() for x in reload.split(",")]:
+            out.append(f"Deployment {dep['metadata']['name']} does not reload on {CONFIGMAP} (got {reload!r})")
+    if not logins:
+        out.append("no zitadel-login Deployment in the render")
+
     try:
-        with tempfile.TemporaryDirectory() as tmp:
-            bin_dir = Path(tmp) / "bin"
-            bin_dir.mkdir()
-            # The Job reads the IAM PAT through kubectl; stub it.
-            kubectl = bin_dir / "kubectl"
-            kubectl.write_text("#!/bin/sh\necho c3R1Yi1wYXQ=\n")
-            kubectl.chmod(0o755)
-            env = dict(os.environ)
-            env["PATH"] = f"{bin_dir}:{env['PATH']}"
-            env["ZITADEL_EXTERNAL_DOMAIN"] = "app.example.test"
-            env["ZITADEL_API_URL"] = f"http://127.0.0.1:{server.server_port}"
-            # The Job reads its brand from /branding; bind it by symlink.
-            link = Path(tmp) / "branding"
-            link.symlink_to(branding)
-            script_here = script.replace("/branding/", f"{link}/")
-            result = subprocess.run(
-                ["bash", "-c", script_here],
-                env=env, capture_output=True, text=True, timeout=120,
-            )
-    finally:
-        server.shutdown()
-        server.server_close()
-    return result, uploads, deletes
-
-
-def bare_policy() -> dict:
-    return {"themeMode": "THEME_MODE_UNSPECIFIED"}
-
-
-def declared() -> dict:
-    return json.loads((BRANDING / "label-policy.json").read_text())
-
-
-def stale_state(branding: Path) -> tuple[dict, dict[str, bytes]]:
-    """A branded instance whose marks are NOT the declared ones."""
-    policy = declared() | {
-        "logoUrl": "https://app.example.test/assets/v1/inst/policy/label/logo-1",
-        "logoUrlDark": "https://app.example.test/assets/v1/inst/policy/label/logo-dark-2",
-        "iconUrl": "https://app.example.test/assets/v1/inst/policy/label/icon-3",
-        "iconUrlDark": "https://app.example.test/assets/v1/inst/policy/label/icon-dark-4",
-    }
-    retired = (branding / "logo.svg").read_bytes().replace(b"#0e0d09", b"#894fee")
-    assets = {
-        "/assets/v1/inst/policy/label/logo-1": retired,
-        "/assets/v1/inst/policy/label/logo-dark-2": retired,
-        "/assets/v1/inst/policy/label/icon-3": retired,
-        "/assets/v1/inst/policy/label/icon-dark-4": retired,
-    }
-    return policy, assets
-
-
-def current_state(branding: Path) -> tuple[dict, dict[str, bytes]]:
-    """A branded instance already serving exactly the declared marks."""
-    policy = declared() | {
-        "logoUrl": "https://app.example.test/assets/v1/inst/policy/label/logo-1",
-        "logoUrlDark": "https://app.example.test/assets/v1/inst/policy/label/logo-dark-2",
-        "iconUrl": "https://app.example.test/assets/v1/inst/policy/label/icon-3",
-        "iconUrlDark": "https://app.example.test/assets/v1/inst/policy/label/icon-dark-4",
-    }
-    logo = (branding / "logo.svg").read_bytes()
-    icon = (branding / "icon.svg").read_bytes()
-    assets = {
-        "/assets/v1/inst/policy/label/logo-1": logo,
-        "/assets/v1/inst/policy/label/logo-dark-2": logo,
-        "/assets/v1/inst/policy/label/icon-3": icon,
-        "/assets/v1/inst/policy/label/icon-dark-4": icon,
-    }
-    return policy, assets
-
-
-def audit(branding: Path, golden: Path) -> list[str]:
-    failures: list[str] = []
-    policy = json.loads((branding / "label-policy.json").read_text())
-
-    for field, want in BRAND_HEX.items():
-        for key in (field, field.replace("Color", "ColorDark")):
-            got = policy.get(key)
-            if got != want:
-                failures.append(
-                    f"label-policy.json: {key}={got!r}, expected {want!r} "
-                    f"(@zeroroot-ai/brand, ADR-0064)"
-                )
+        policy = json.loads(declared["label-policy.json"])
+    except json.JSONDecodeError as e:
+        return out + [f"files/branding/label-policy.json is not JSON: {e}"]
+    for field, hexv in BRAND_HEX.items():
+        for f in (field, field + "Dark"):
+            if str(policy.get(f, "")).lower() != hexv:
+                out.append(f"label-policy.json {f} = {policy.get(f)!r}, the brand's is {hexv}")
     if policy.get("themeMode") != "THEME_MODE_LIGHT":
-        failures.append(
-            f"label-policy.json: themeMode={policy.get('themeMode')!r}, "
-            f"expected 'THEME_MODE_LIGHT' (ADR-0064: one light brand)"
-        )
+        out.append(f"label-policy.json themeMode = {policy.get('themeMode')!r}, the brand is THEME_MODE_LIGHT")
 
-    script = job_script(golden)
-    all_slots = 4
-
-    # 1. A bare instance takes the whole brand.
-    result, uploads, _ = run_job(script, bare_policy(), {}, branding)
-    if result.returncode != 0:
-        failures.append(f"bare instance: Job failed\n{tail(result)}")
-    elif len(uploads) != all_slots:
-        failures.append(f"bare instance: uploaded {len(uploads)} slots, expected {all_slots}")
-
-    # 2. A branded instance whose marks are stale takes the new ones.
-    policy2, assets2 = stale_state(branding)
-    result, uploads, deletes = run_job(script, policy2, assets2, branding)
-    if result.returncode != 0:
-        failures.append(f"stale marks: Job failed\n{tail(result)}")
-    elif len(uploads) != all_slots or len(deletes) != all_slots:
-        failures.append(
-            f"stale marks: {len(uploads)} uploads / {len(deletes)} deletes, "
-            f"expected {all_slots} of each — a rebrand did not reach the instance"
-        )
-
-    # 3. An instance already serving them is left alone.
-    policy3, assets3 = current_state(branding)
-    result, uploads, deletes = run_job(script, policy3, assets3, branding)
-    if result.returncode != 0:
-        failures.append(f"steady state: Job failed\n{tail(result)}")
-    elif uploads or deletes:
-        failures.append(
-            f"steady state: {len(uploads)} uploads / {len(deletes)} deletes, "
-            f"expected none — a no-op Sync would roll the login pod"
-        )
-    elif "policy unchanged; nothing to roll" not in result.stdout:
-        failures.append("steady state: Job did not report an unchanged policy")
-
-    return failures
-
-
-def tail(result: subprocess.CompletedProcess) -> str:
-    out = (result.stdout + result.stderr).strip().splitlines()
-    return "\n".join(f"    {line}" for line in out[-15:])
+    for d in docs:
+        if d.get("kind") in ("Job", "CronJob") and "branding" in d["metadata"]["name"]:
+            out.append(f"{d['kind']} {d['metadata']['name']} renders; the platform-operator applies the brand")
+    return out
 
 
 def selftest() -> int:
-    """Prove the guard fails on the brand that reached staging: the retired
-    violet palette, and the presence-keyed upload that could not replace it."""
-    script = job_script(GOLDEN)
-    with tempfile.TemporaryDirectory() as tmp:
-        branding = Path(tmp) / "branding"
-        branding.mkdir()
-        for name in ("logo.svg", "icon.svg"):
-            branding.joinpath(name).write_bytes(
-                (BRANDING / name).read_bytes().replace(b"#0e0d09", b"#894fee")
-            )
-        branding.joinpath("label-policy.json").write_text(json.dumps({
-            "primaryColor": "#894fee",
-            "warnColor": "#cc1331",
-            "backgroundColor": "#0e0f15",
-            "fontColor": "#f0f1f7",
-            "primaryColorDark": "#894fee",
-            "warnColorDark": "#cc1331",
-            "backgroundColorDark": "#0e0f15",
-            "fontColorDark": "#f0f1f7",
-            "hideLoginNameSuffix": True,
-            "disableWatermark": True,
-            "themeMode": "THEME_MODE_DARK",
-        }, indent=2))
-        failures = audit(branding, GOLDEN)
-    if not failures:
-        print("SELFTEST BROKEN: the retired brand was accepted", file=sys.stderr)
-        return 2
-    if not any("themeMode" in f for f in failures):
-        print("SELFTEST BROKEN: a dark themeMode was accepted", file=sys.stderr)
-        return 2
-    print("OK: check-login-brand self-test: the retired violet brand is rejected")
+    docs = load(GOLDEN)
+    declared = files(BRANDING)
+    if got := audit(docs, declared):
+        print("SELFTEST FAIL: the committed render must pass:\n  " + "\n  ".join(got))
+        return 1
+
+    def mutate(fn) -> list[str]:
+        d2, f2 = copy.deepcopy(docs), dict(declared)
+        fn(d2, f2)
+        return audit(d2, f2)
+
+    def cm(d2):
+        return next(d for d in d2 if d.get("kind") == "ConfigMap" and d["metadata"]["name"] == CONFIGMAP)
+
+    def pb(d2):
+        return next(d for d in d2 if d.get("kind") == "PlatformBootstrap")
+
+    cases = {
+        "the retired violet palette": lambda d2, f2: f2.update(
+            {"label-policy.json": declared["label-policy.json"].replace("#346000", "#894fee")}),
+        "a stale logo in the ConfigMap": lambda d2, f2: cm(d2)["data"].update({"logo.svg": "<svg>old</svg>"}),
+        "a branding-hash that ignores a file": lambda d2, f2: cm(d2)["data"].update({"branding-hash": "0" * 64}),
+        "a PlatformBootstrap with no loginBranding": lambda d2, f2: pb(d2)["spec"]["zitadel"].pop("loginBranding"),
+        "the ConfigMap as a hook": lambda d2, f2: cm(d2)["metadata"].setdefault("annotations", {}).update(
+            {"helm.sh/hook": "post-install"}),
+        "the old branding Job": lambda d2, f2: d2.append(
+            {"kind": "Job", "metadata": {"name": "zitadel-login-branding"}}),
+    }
+    for what, fn in cases.items():
+        if not mutate(fn):
+            print(f"SELFTEST FAIL: {what} passed the guard")
+            return 1
+    print(f"OK: {len(cases)} broken hand-overs fail; the committed render hands the brand to the operator")
     return 0
 
 
 def main(argv: list[str]) -> int:
-    if argv[1:] == ["--selftest"]:
+    if "--selftest" in argv:
         return selftest()
-    if argv[1:]:
-        print(f"usage: {argv[0]} [--selftest]", file=sys.stderr)
-        return 2
-    if not GOLDEN.is_file():
-        print(f"could not run: no {GOLDEN} (run `make golden-update`)", file=sys.stderr)
-        return 2
-    failures = audit(BRANDING, GOLDEN)
-    for line in failures:
-        print(f"FAIL: {line}", file=sys.stderr)
-    if failures:
+    got = audit(load(GOLDEN), files(BRANDING))
+    if got:
+        print("FAIL: the chart does not hand the declared login brand to the platform-operator:\n  " + "\n  ".join(got))
         return 1
-    print("OK: the Job applies the declared brand and re-applies a changed one")
+    print("OK: the platform-operator gets the declared brand, and the login pod reloads on it")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main(sys.argv[1:]))

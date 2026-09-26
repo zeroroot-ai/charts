@@ -1,0 +1,36 @@
+{{/*
+The login pages' brand (ADR-0064). files/branding/ is the declared source; its
+README maps the dashboard tokens to these values.
+
+The platform-operator applies this ConfigMap to the Zitadel instance label
+policy (PlatformBootstrap spec.zitadel.loginBranding, condition
+LoginBrandingReady). It compares by content: the policy fields and the sha256
+of each served mark. A steady-state reconcile writes nothing, and an edited
+file here reaches the login pages without a manual step. Writing the instance
+label policy needs IAM_OWNER, so bootstrap does it and no Job reads the owner
+PAT for it (scripts/check-owner-credential-readers.py).
+
+The login UI caches the policy in process memory. Its Deployment reloads on
+this ConfigMap (zitadel.login.annotations in values.yaml), and branding-hash
+changes whenever any brand file changes, so a rebrand also rolls the login pod.
+
+A standing resource, not a hook: the operator and Reloader both watch it.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zitadel-login-branding
+  namespace: gibson
+  labels:
+    app.kubernetes.io/component: zitadel-login-branding
+data:
+  branding-hash: {{ printf "%s%s%s"
+    (.Files.Get "files/branding/label-policy.json")
+    (.Files.Get "files/branding/logo.svg")
+    (.Files.Get "files/branding/icon.svg") | sha256sum | quote }}
+  label-policy.json: |
+{{ .Files.Get "files/branding/label-policy.json" | indent 4 }}
+  logo.svg: |
+{{ .Files.Get "files/branding/logo.svg" | indent 4 }}
+  icon.svg: |
+{{ .Files.Get "files/branding/icon.svg" | indent 4 }}

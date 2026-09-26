@@ -50,6 +50,15 @@ spec:
     project:
       name: {{ .Values.platformBootstrap.zitadel.project.name | default "gibson" | quote }}
       ensureExists: {{ include "gibson.trueUnlessSet" ((.Values.platformBootstrap.zitadel.project).ensureExists) }}
+    {{- with (.Values.platformBootstrap.zitadel.loginBranding).configMap }}
+    {{- /*
+      The login pages' brand. The platform-operator (bootstrap) keeps the
+      Zitadel instance label policy equal to this ConfigMap. Writing that
+      policy needs IAM_OWNER, so no other workload does it.
+    */}}
+    loginBranding:
+      configMap: {{ . | quote }}
+    {{- end }}
     {{- with .Values.platformBootstrap.zitadel.systemClient }}
     {{- /*
       systemClient activates the TrustedDomainReady reconcile step

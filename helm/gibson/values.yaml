@@ -408,6 +408,13 @@ platformPostgres:
 gibson-operators:
   tenantOperator:
     daemonGrpcAddress: "gibson-gibson-workloads:50051"
+  # The login brand. templates/zitadel-login-branding.yaml renders this
+  # ConfigMap from files/branding, and the platform-operator applies it to
+  # the Zitadel instance label policy (a bootstrap step, LoginBrandingReady).
+  platformBootstrap:
+    zitadel:
+      loginBranding:
+        configMap: zitadel-login-branding
 
 # The umbrella installs everything in ONE Argo Application/sync, so the
 # secret-provisioning chain (ClusterSecretStore + ExternalSecrets) must be
@@ -1104,15 +1111,12 @@ zitadel:
       tag: "v4.18.0@sha256:d010a637f0458a1bbcd8bf0e59eda81e57ffd966d60067828cbaeb7424f0ba69"
     # deploy#943: declarative, Reloader-driven cache-bust. The login UI caches
     # the Zitadel label policy in process memory, so a rebrand needs a pod
-    # restart. Instead of the old imperative `kubectl patch deployment` poked
-    # by the branding Job, the upstream login Deployment opts into Stakater
-    # Reloader keyed on the chart-rendered zitadel-login-branding-marker
-    # ConfigMap (its branding-hash = sha256 of files/branding/*). Reloader
-    # (gibson-operators, namespace-scoped to gibson) rolls this Deployment when
-    # the brand source changes and leaves it alone otherwise. The login
-    # Deployment renders in the gibson namespace, within Reloader's watch.
+    # restart. The login Deployment opts into Stakater Reloader keyed on the
+    # zitadel-login-branding ConfigMap, the brand source the platform-operator
+    # applies. Reloader rolls this Deployment when the brand changes and
+    # leaves it alone otherwise.
     annotations:
-      configmap.reloader.stakater.com/reload: "zitadel-login-branding-marker"
+      configmap.reloader.stakater.com/reload: "zitadel-login-branding"
     configMap:
       annotations:
         helm.sh/hook: null
