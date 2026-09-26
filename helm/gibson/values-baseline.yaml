@@ -699,6 +699,17 @@ global:
     tenantId: "primary"
     displayName: "Primary Workspace"
     ownerEmail: "admin@selfhosted.example.com"
+  # Platform owner (ADR-0093 decision 6/8, hosted#201). A different address
+  # from firstTenant.ownerEmail above — the render fails otherwise. This
+  # profile ships gibson-workloads.email.provider: "log" below (no
+  # delivering mail transport), so offlineSetup is explicit: the
+  # platform-operator writes a one-time setup link to the named Secret
+  # instead of emailing it.
+  platformOwner:
+    email: "owner@selfhosted.example.com"
+    offlineSetup: true
+    setupSecretRef:
+      name: "gibson-platform-owner-setup"
 # TLS to Postgres, kept on for a customer install (deploy#1197 / deploy#1239).
 # These were inherited from the EKS profile, where RDS force_ssl=1 requires
 # them. They are kept here rather than dropped: CNPG generates its own server
