@@ -790,11 +790,23 @@ zitadel:
       # The controlled signup creates users via the admin API
       # (POST /v2/users/human), which does NOT consult allowRegister, so
       # this does not affect /signup.
+      #
+      # The same first-instance window also carries the sign-in policy: MFA for
+      # every account (passkey or authenticator app, no SMS or email codes), no
+      # external identity providers, and usernames unique across the install.
+      # The platform-operator reconciles the same policy on every install.
       DefaultInstance:
         LoginPolicy:
           AllowUsernamePassword: true
-          AllowExternalIDP: true
+          AllowExternalIDP: false
           AllowRegister: false
+          ForceMFA: true
+          ForceMFALocalOnly: false
+          PasswordlessType: 1
+          AllowDomainDiscovery: false
+          MfaInitSkipLifetime: 0s
+        DomainPolicy:
+          UserLoginMustBeDomain: false
       Database:
         Postgres:
           Host: platform-postgres-rw.gibson.svc.cluster.local
