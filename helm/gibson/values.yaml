@@ -155,6 +155,12 @@ global:
     enabled: false
     tenantId: ""
     displayName: ""
+    # Required whenever firstTenant.enabled is true (ADR-0093 decision 8,
+    # hosted#201): the render fails, naming the missing value, if it is
+    # empty. Must differ from global.platformOwner.email — see that value's
+    # comment. Ignored, and left empty on purpose, on every profile that
+    # creates its first tenant through self-serve signup instead
+    # (firstTenant.enabled: false — SaaS/staging/prod).
     ownerEmail: ""
     # The plan the seeded tenant lands on. It must be a canonical plan id
     # (internal/platform/plans), and on any cluster that enforces billing it
@@ -170,6 +176,39 @@ global:
     # enterprise-deploy: the administrator-provisioned on-prem plan, which is
     # exactly what a headless first-admin seed is.
     tier: "enterprise-deploy"
+
+  # Platform owner (ADR-0093 decision 6/8, hosted#201): the ONE human
+  # Zitadel administrator this install creates. No password is ever
+  # generated — Zitadel emails a one-time setup link built on its own
+  # invite-code flow, and the person sets a password and enrolls MFA in
+  # that same flow. Required on EVERY profile, with no exceptions: unlike
+  # firstTenant, there is no self-serve path that creates this account —
+  # every install, SaaS included, needs exactly one Zitadel administrator.
+  platformOwner:
+    # Required (ADR-0093 decision 8): the render fails, naming this key,
+    # if it is empty. Must differ from global.firstTenant.ownerEmail
+    # (case-insensitively) — the Platform owner administers Zitadel and
+    # belongs to no tenant; the first tenant's Owner is a tenant user with
+    # no Zitadel administrator role. The two can never be the same person
+    # on the same install.
+    email: ""
+    # offlineSetup: true skips emailing the setup link and instead writes a
+    # one-time, expiring link to a Secret readable only by cluster
+    # administrators (ADR-0093 decision 8). Set this explicitly on a
+    # profile with no delivering mail transport
+    # (gibson-workloads.email.provider != "smtp") — the render fails
+    # otherwise, naming both keys, so a cluster can never be left unable to
+    # reach the one person who can sign in and set everything else up.
+    offlineSetup: false
+    # setupSecretRef names the Secret the operator writes the offline link
+    # into. Required when offlineSetup is true; ignored otherwise.
+    setupSecretRef:
+      name: "gibson-platform-owner-setup"
+    # setupGeneration is the Platform owner's reset (ADR-0093 decision 12):
+    # raising this integer clears every second factor on file and sends a
+    # new setup link. A reviewed change to this value, committed and
+    # rolled out like any other — never a live-cluster action.
+    setupGeneration: 1
 
 # In-cluster CNPG `Cluster` shape (deploy#1389), rendered by
 # templates/postgres/platform-postgres-cluster.yaml on EVERY profile

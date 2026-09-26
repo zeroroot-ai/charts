@@ -1,0 +1,42 @@
+{{- /*
+Platform owner install-value guard (ADR-0093 decisions 6/8, hosted#201).
+
+Two required values name the two humans this install creates on day one:
+global.platformOwner.email (the one Zitadel administrator every install has,
+no exceptions) and global.firstTenant.ownerEmail (the seeded first tenant's
+Owner, required only when global.firstTenant.enabled is true — SaaS/staging/
+prod create their first tenant through self-serve signup instead and leave
+that value empty on purpose). `required` fails the render with a clear
+message when a value that must be set is empty; the checks below cover what
+`required` cannot: two DIFFERENT addresses, and a working way to reach the
+Platform owner.
+
+MAIL. Zitadel emails the setup link through its own invite-code flow. A
+profile that ships no delivering transport
+(gibson-workloads.gibson.email.provider != "smtp") must say so on purpose
+with global.platformOwner.offlineSetup: true, or the platform-operator would
+try to send a link nothing can deliver and the Platform owner could never
+sign in. Offline mode instead writes a one-time, expiring link to
+global.platformOwner.setupSecretRef (readable only by cluster
+administrators) — see operators/platform in zeroroot-ai/gibson.
+
+This template renders no resource: it exists to run these checks on every
+`helm template` / `helm install` / `helm upgrade`, unconditionally.
+*/ -}}
+{{- $po := .Values.global.platformOwner | default dict -}}
+{{- $ft := .Values.global.firstTenant | default dict -}}
+{{- $ownerEmail := required "global.platformOwner.email is REQUIRED — it is the address that becomes the one Zitadel administrator this install creates (ADR-0093 decision 6, hosted#201)." $po.email -}}
+{{- if $ft.enabled -}}
+{{- $tenantOwnerEmail := required "global.firstTenant.ownerEmail is REQUIRED when global.firstTenant.enabled is true — it is the address of the seeded first tenant's Owner (ADR-0093)." $ft.ownerEmail -}}
+{{- if eq (lower $ownerEmail) (lower $tenantOwnerEmail) -}}
+{{- fail (printf "global.platformOwner.email and global.firstTenant.ownerEmail are both %q. They must be different addresses: the Platform owner administers Zitadel and belongs to no tenant, and the first tenant's Owner is a tenant user with no Zitadel administrator role (ADR-0093 decision 6)." $ownerEmail) -}}
+{{- end -}}
+{{- end -}}
+{{- $wl := index .Values "gibson-workloads" | default dict -}}
+{{- $mailConfigured := eq ((($wl.gibson | default dict).email | default dict).provider | default "log") "smtp" -}}
+{{- if and (not $mailConfigured) (not $po.offlineSetup) -}}
+{{- fail "global.platformOwner.email has no way to reach its owner: gibson-workloads.gibson.email.provider is not \"smtp\" (no delivering mail transport) and global.platformOwner.offlineSetup is not true. Configure real mail, or set global.platformOwner.offlineSetup: true so the platform-operator writes a one-time setup link to global.platformOwner.setupSecretRef instead (ADR-0093 decision 8)." -}}
+{{- end -}}
+{{- if and $po.offlineSetup (not (($po.setupSecretRef | default dict).name)) -}}
+{{- fail "global.platformOwner.offlineSetup is true but global.platformOwner.setupSecretRef.name is empty — the platform-operator needs a Secret name to write the one-time setup link into." -}}
+{{- end -}}
