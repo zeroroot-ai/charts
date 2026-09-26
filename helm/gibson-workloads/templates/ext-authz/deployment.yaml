@@ -343,6 +343,13 @@ spec:
             # scripts/.extauthz-transport-waivers.txt, and vice versa.
             - name: EXT_AUTHZ_CGJWT_KEYS_URL
               value: "https://{{ include "gibson.fullname" . }}:{{ .Values.gibson.service.authzRegistry.port | default 8086 }}/capabilitygrant/v1/keys"
+            # ADR-0093 decision 4: a person's tenant comes from the Zitadel org
+            # in their verified token. ext-authz maps the org to the tenant
+            # through the daemon's mTLS authz-registry listener. The value must
+            # be https and end with a slash (the org id is appended). ext-authz
+            # refuses to start without it.
+            - name: EXT_AUTHZ_ORG_TENANT_URL
+              value: "https://{{ include "gibson.fullname" . }}:{{ .Values.gibson.service.authzRegistry.port | default 8086 }}/identity/v1/org-tenant/"
             # gibson#133: the OIDC client ids of the human sign-in flows. A
             # token issued to any other client is a machine credential and
             # skips the session gate; without this every machine user's
