@@ -74,21 +74,6 @@ description: >
   Per-tenant Neo4j StatefulSet pods. Used by gibson-tenant-neo4j-cap
   ResourceQuota to scope the kind memory cap (Task 33 / Req 10.4).
 ---
-# Source: gibson/charts/gibson-operators/templates/cross-namespace-eso-rbac.yaml
-# Ensure the zitadel ns exists — this chart drops RBAC into it, but
-# zitadel itself is installed by a sibling Application (cnpg-operator's
-# zitadel sub-app in apps/<env>/zitadel.yaml). In kind dev where that
-# sibling isn't yet present, this template creates the ns so the
-# RBAC has somewhere to land.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: zitadel
-  labels:
-    app.kubernetes.io/managed-by: Helm
-  annotations:
-    "helm.sh/resource-policy": keep
----
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/namespace.yaml
 apiVersion: v1
 kind: Namespace
@@ -1125,9 +1110,6 @@ spec:
               app.kubernetes.io/component: platform-operator
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: signup-bot-pat-minter
-        - podSelector:
-            matchLabels:
               app.kubernetes.io/component: zitadel-login-branding
         # The first-admin Job creates the founding owner through the
         # Management API, dialing Zitadel by Service name (ADR-0092).
@@ -1426,7 +1408,6 @@ spec:
         operator: In
         values:
           - postgres-exec
-          - signup-bot-pat-minter
           - zitadel-login-branding
           # deploy#1631: the first-admin Job. Under the namespace default-deny,
           # a component label absent from THIS list means the pod cannot even
@@ -1962,17 +1943,6 @@ metadata:
   namespace: gibson
   labels:
     app.kubernetes.io/name: gibson-connector-operator
-    app.kubernetes.io/part-of: gibson
-    app.kubernetes.io/managed-by: Helm
----
-# Source: gibson/charts/gibson-operators/templates/cross-namespace-eso-rbac.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: gibson-zitadel-admin-reader
-  namespace: zitadel
-  labels:
-    app.kubernetes.io/name: gibson-zitadel-admin-reader
     app.kubernetes.io/part-of: gibson
     app.kubernetes.io/managed-by: Helm
 ---
@@ -7128,12 +7098,13 @@ metadata:
     app.kubernetes.io/name: gibson-connector-operator
     app.kubernetes.io/part-of: gibson
 rules:
-  # ConfigMaps + Secrets alongside each connector (permission-profile
-  # ConfigMaps, and the daemon-written credential Secret the operator reads).
-  # The operator never authors Secret manifests in the chart; this grant is
-  # the runtime read/patch surface only.
+  # ConfigMaps alongside each connector (the egress-profile ConfigMap). No
+  # Secrets: the operator only puts the credential Secret's NAME into the
+  # MCPRemoteProxy spec. The daemon writes that Secret and ToolHive reads
+  # it. A cluster-wide Secret read would also reach the Zitadel owner
+  # credentials (scripts/check-owner-credential-readers.py).
   - apiGroups: [""]
-    resources: ["configmaps", "secrets"]
+    resources: ["configmaps"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
 
   # ConnectorInstance — the CR this operator owns end to end, cluster-wide
@@ -9679,22 +9650,6 @@ rules:
     resources: ["events"]
     verbs: ["create", "patch"]
 ---
-# Source: gibson/charts/gibson-operators/templates/cross-namespace-eso-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: gibson-zitadel-admin-reader
-  namespace: zitadel
-  labels:
-    app.kubernetes.io/name: gibson-zitadel-admin-reader
-    app.kubernetes.io/part-of: gibson
-rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames:
-      - iam-admin-pat
-    verbs: ["get", "list", "watch"]
----
 # Source: gibson/charts/gibson-operators/templates/reloader/reloader.yaml
 # Reloader reads Secrets and ConfigMaps through informers, and it scopes
 # those informers to KUBERNETES_NAMESPACE (internal/pkg/cmd/reloader.go:
@@ -9760,9 +9715,6 @@ metadata:
     app.kubernetes.io/name: gibson-tenant-operator
     app.kubernetes.io/part-of: gibson
 rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list", "watch"]
@@ -9886,7 +9838,6 @@ rules:
     resources: ["secrets"]
     verbs: ["get"]
     resourceNames:
-      - gibson-zitadel-signup-bot-pat
       - "gibson-gibson-workloads-db-secrets"
 ---
 # Source: gibson/charts/gibson-workloads/templates/databases/redis-rotation-controller.yaml
@@ -9904,9 +9855,13 @@ metadata:
     app.kubernetes.io/component: redis-rotation
 rules:
   # Read the redis password Secret to detect rotation and retrieve passwords.
+  # Every read in the script is a named `kubectl get secret`, so the rule
+  # names the Secret. A namespace-wide read would also reach the Zitadel
+  # owner credentials (scripts/check-owner-credential-readers.py).
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list"]
+    resourceNames: ["gibson-redis-stack"]
+    verbs: ["get"]
   # Manage the rotation-state Secret (stores last-processed version +
   # last-known password for the dual-password ACL window).
   # K8s ignores resourceNames for `create` (no name exists yet at create time),
@@ -10020,13 +9975,17 @@ metadata:
     app.kubernetes.io/version: "0.138.3"
     app.kubernetes.io/managed-by: Helm
 rules:
-  # secrets get/list/watch — used by daemon Pod init containers
-  # (wait-for-idp-admin-secret) to poll for
-  # ESO-materialised Secrets before the daemon container starts.
-  # NOT used by daemon Go code — forbids daemon-side K8s API.
+  # secrets get, on one name. The init container wait-for-idp-admin-secret
+  # polls that Secret with `kubectl get secret <name>` before the daemon
+  # container starts. The daemon's Go code reads no Secret in this
+  # namespace through the API. No list and no watch: a namespace-wide
+  # read would also reach the Zitadel owner credentials (iam-admin-pat,
+  # iam-admin, the System API key), which only bootstrap may read
+  # (scripts/check-owner-credential-readers.py).
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list", "watch"]
+    resourceNames: ["idp-admin-credentials"]
+    verbs: ["get"]
   # pods get/list/watch — used by the wait-for-prerequisites init
   # container to poll for tenant-operator Pod Ready before the daemon
   # container starts.
@@ -10323,24 +10282,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: gibson-connector-operator-leader-election
----
-# Source: gibson/charts/gibson-operators/templates/cross-namespace-eso-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: gibson-zitadel-admin-reader
-  namespace: zitadel
-  labels:
-    app.kubernetes.io/name: gibson-zitadel-admin-reader
-    app.kubernetes.io/part-of: gibson
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: gibson-zitadel-admin-reader
-subjects:
-  - kind: ServiceAccount
-    name: gibson-zitadel-admin-reader
-    namespace: zitadel
 ---
 # Source: gibson/charts/gibson-operators/templates/reloader/reloader.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -14269,7 +14210,7 @@ spec:
         # rotated. Reloader runs cluster-wide and watches the explicitly-
         # named Secrets below; when any of them changes, Reloader triggers
         # a rolling restart of this Deployment.
-        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-zitadel-signup-bot-pat,gibson-workloads-dashboard-secrets,gibson-workloads-redis-stack,gibson-stripe-credentials"
+        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-workloads-dashboard-secrets,gibson-workloads-redis-stack,gibson-stripe-credentials"
     spec:
       
       imagePullSecrets:
@@ -14403,44 +14344,6 @@ spec:
             - name: zitadel-client
               mountPath: /var/run/zitadel-client
               readOnly: true
-        # one-code-path #203: wait-for-signup-bot-pat blocks pod start
-        # until the gibson-zitadel-signup-bot-pat Secret has been minted
-        # by the post-install bootstrap Job + materialised via ESO. The
-        # ZITADEL_SIGNUP_BOT_PAT env entry was flipped from
-        # `optional: true` to required.
-        - name: wait-for-signup-bot-pat
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
-          command: ['/bin/bash', '-c']
-          args:
-            - |
-              set -eu
-              ns="gibson"
-              echo "[wait-for-signup-bot-pat] waiting for Secret ${ns}/gibson-zitadel-signup-bot-pat key=pat..."
-              for i in $(seq 1 30); do
-                if kubectl get secret -n "${ns}" gibson-zitadel-signup-bot-pat \
-                    -o jsonpath='{.data.pat}' 2>/dev/null \
-                    | base64 -d 2>/dev/null | grep -q .; then
-                  echo "[wait-for-signup-bot-pat] ok"
-                  exit 0
-                fi
-                sleep 2
-              done
-              echo "[wait-for-signup-bot-pat] timed out after 60s -- the gibson-zitadel-signup-bot-pat Secret was not materialised. Check: kubectl get externalsecret,secret -n ${ns} | grep signup-bot" >&2
-              exit 1
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 1001
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
         # one-code-path #203: wait-for-db-secrets blocks pod start until
         # the Secret backing NEO4J_PASSWORD has been materialised. The
         # NEO4J_PASSWORD env entry was flipped from `optional: true` to
@@ -14773,22 +14676,6 @@ spec:
                 secretKeyRef:
                   name: gibson-zitadel-dashboard
                   key: ZITADEL_CLIENT_SECRET
-            # Scoped Zitadel PAT for the dashboard-native signupAction
-            # (spec: dashboard-native-signup). Belongs to the `signup-bot`
-            # machine user which has IAM_USER_MANAGER only — it can create
-            # humans + read password policy, NOT touch orgs or admin the
-            # instance. This is INTENTIONALLY NOT the iam-admin-pat; a
-            # build-time guard at scripts/check-no-iam-admin-pat-in-dashboard.mjs
-            # keeps that separation enforced.
-            # one-code-path #203: was `optional: true`. The
-            # wait-for-signup-bot-pat init container above blocks pod
-            # start until the Secret has been minted by the post-install
-            # bootstrap Job + materialised via ESO.
-            - name: ZITADEL_SIGNUP_BOT_PAT
-              valueFrom:
-                secretKeyRef:
-                  name: gibson-zitadel-signup-bot-pat
-                  key: pat
             # The signupAction also needs the external domain to forge
             # Host headers when the admin-client's apiUrl points at the
             # in-cluster Zitadel Service (same trick as Envoy routing).
@@ -21821,32 +21708,6 @@ spec:
       - spire-server
       - spire-system
 ---
-# Source: gibson/charts/gibson-operators/templates/cross-namespace-eso-rbac.yaml
-# ESO is required infrastructure (one-code-path #203); the chart-wide
-# on/off conditional that used to wrap this ClusterSecretStore was
-# deleted along with the toggle.
-apiVersion: external-secrets.io/v1
-kind: ClusterSecretStore
-metadata:
-  name: gibson-cross-ns-zitadel
-  labels:
-    app.kubernetes.io/name: gibson-cross-ns-zitadel
-    app.kubernetes.io/part-of: gibson
-spec:
-  provider:
-    kubernetes:
-      remoteNamespace: zitadel
-      server:
-        caProvider:
-          type: ConfigMap
-          name: kube-root-ca.crt
-          key: ca.crt
-          namespace: gibson
-      auth:
-        serviceAccount:
-          name: gibson-zitadel-admin-reader
-          namespace: zitadel
----
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/cluster-secret-store.yaml
 apiVersion: external-secrets.io/v1
 kind: ClusterSecretStore
@@ -21872,6 +21733,9 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: external-secrets
 spec:
+  conditions:
+    - namespaces:
+        - "gibson"
   provider:
     vault:
       server: "http://gibson-openbao.gibson.svc.cluster.local:8200"
@@ -23120,25 +22984,6 @@ spec:
       systemUserName: "gibson-system-bot"
       trustedClusterDomain: "gibson-zitadel.gibson.svc.cluster.local"
       apiURL: "http://gibson-zitadel.gibson.svc.cluster.local:8080"
-    serviceUsers:
-      - name: "gibson-iam-admin"
-        roles:
-          - "IAM_OWNER"
-        patSecretRef:
-          name: "gibson-iam-admin-pat"
-          key: "pat"
-      - name: "gibson-tenant-operator"
-        roles:
-          - "IAM_USER_MANAGER"
-        patSecretRef:
-          name: "gibson-zitadel-tenant-operator-pat"
-          key: "pat"
-      - name: "gibson-signup-bot"
-        roles:
-          - "IAM_USER_MANAGER"
-        patSecretRef:
-          name: "gibson-zitadel-signup-bot-pat"
-          key: "pat"
   oidcClients:
     - name: "gibson-daemon"
       applicationType: "MACHINE_USER"
@@ -24241,29 +24086,6 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     argocd.argoproj.io/sync-wave: "-2"
 ---
-# Source: gibson/templates/jobs/gibson-workloads-signup-bot-pat-minter.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: signup-bot-pat-minter
-  namespace: gibson
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: '3'
-    helm.sh/hook-delete-policy: before-hook-creation
-    # Argo: Sync-phase at wave 0, NOT PostSync. In the single umbrella
-    # Application PostSync only fires once the app is Healthy — but the
-    # dashboard's wait-for-signup-bot-pat init NEEDS this Job's output to
-    # become Ready, so PostSync deadlocks (same class as the openfga
-    # migrate, gitops#140 / deploy#820). The Job self-waits in-pod for
-    # iam-admin-pat + Zitadel, so running concurrently with the wave-0
-    # batch is safe, and it is idempotent (re-validates the existing PAT).
-    # SA/Role/RoleBinding ride the same wave; kind-ordering applies them
-    # before the Job. helm.sh hooks kept for plain-helm installs.
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
----
 # Source: gibson/templates/jobs/platform-primitives-exec-rbac.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -24550,9 +24372,16 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
     "helm.sh/hook-weight": "-10"
 rules:
+  # Exactly the Secrets tests 02 and 07 read: named gets, no list.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list"]
+    resourceNames:
+      - gibson-openbao-keys
+      - "gibson-master-key"
+      - gibson-dashboard-oidc
+      - "gibson-zitadel-dashboard"
+      - "gibson-zitadel-dashboard"
+    verbs: ["get"]
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list"]
@@ -24639,54 +24468,6 @@ rules:
   # "waiting for iam-admin" with the Secret present and this list naming
   # the PAT alone. The Job now refuses to wait on a Secret it may not read.
   resourceNames: [iam-admin-pat, iam-admin, login-client]
----
-# Source: gibson/templates/jobs/gibson-workloads-signup-bot-pat-minter.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: signup-bot-pat-minter
-  namespace: gibson
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: '3'
-    helm.sh/hook-delete-policy: before-hook-creation
-    # Argo: Sync-phase at wave 0, NOT PostSync. In the single umbrella
-    # Application PostSync only fires once the app is Healthy — but the
-    # dashboard's wait-for-signup-bot-pat init NEEDS this Job's output to
-    # become Ready, so PostSync deadlocks (same class as the openfga
-    # migrate, gitops#140 / deploy#820). The Job self-waits in-pod for
-    # iam-admin-pat + Zitadel, so running concurrently with the wave-0
-    # batch is safe, and it is idempotent (re-validates the existing PAT).
-    # SA/Role/RoleBinding ride the same wave; kind-ordering applies them
-    # before the Job. helm.sh hooks kept for plain-helm installs.
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
-rules:
-- apiGroups:
-  - ''
-  resources:
-  - secrets
-  verbs:
-  - get
-  resourceNames:
-  - iam-admin-pat
-- apiGroups:
-  - ''
-  resources:
-  - secrets
-  verbs:
-  - create
-- apiGroups:
-  - ''
-  resources:
-  - secrets
-  verbs:
-  - get
-  - update
-  - patch
-  resourceNames:
-  - gibson-zitadel-signup-bot-pat
 ---
 # Source: gibson/templates/jobs/platform-primitives-exec-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -24889,37 +24670,6 @@ subjects:
 roleRef:
   kind: Role
   name: iam-admin-pat-escrow
-  apiGroup: rbac.authorization.k8s.io
----
-# Source: gibson/templates/jobs/gibson-workloads-signup-bot-pat-minter.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: signup-bot-pat-minter
-  namespace: gibson
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: '3'
-    helm.sh/hook-delete-policy: before-hook-creation
-    # Argo: Sync-phase at wave 0, NOT PostSync. In the single umbrella
-    # Application PostSync only fires once the app is Healthy — but the
-    # dashboard's wait-for-signup-bot-pat init NEEDS this Job's output to
-    # become Ready, so PostSync deadlocks (same class as the openfga
-    # migrate, gitops#140 / deploy#820). The Job self-waits in-pod for
-    # iam-admin-pat + Zitadel, so running concurrently with the wave-0
-    # batch is safe, and it is idempotent (re-validates the existing PAT).
-    # SA/Role/RoleBinding ride the same wave; kind-ordering applies them
-    # before the Job. helm.sh hooks kept for plain-helm installs.
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
-subjects:
-- kind: ServiceAccount
-  name: signup-bot-pat-minter
-  namespace: gibson
-roleRef:
-  kind: Role
-  name: signup-bot-pat-minter
   apiGroup: rbac.authorization.k8s.io
 ---
 # Source: gibson/templates/jobs/platform-primitives-exec-rbac.yaml
@@ -25209,12 +24959,11 @@ spec:
           secret_has_key "$NS" "gibson-dashboard-oidc" "client_id"
           secret_has_key "$NS" "gibson-dashboard-oidc" "client_secret"
 
-          # Zitadel admin PAT — Secret referenced by PlatformBootstrap.zitadel.adminTokenRef.
-          # Default name `iam-admin-pat` matches the gibson-operators default;
-          # overlays can override via .tests.bootstrap.zitadelAdminPatSecret.
-          ADMIN_PAT_SECRET='iam-admin-pat'
-          ADMIN_PAT_KEY='pat'
-          secret_has_key "$NS" "$ADMIN_PAT_SECRET" "$ADMIN_PAT_KEY"
+          # The Zitadel owner credentials (iam-admin-pat, iam-admin, the System
+          # API key) are not checked here. Only bootstrap may read them
+          # (scripts/check-owner-credential-readers.py), and a test that
+          # reads them would be one more reader. The platform-operator's
+          # PlatformBootstrap conditions prove the owner PAT works.
 
           # Dashboard MACHINE_USER PAT.
           # Default `gibson-zitadel-dashboard` matches gibson-operators
@@ -27257,61 +27006,6 @@ spec:
         args:
         - "# Wait for primary pod\necho \"waiting for platform-postgres primary...\"\n# Source the primary instance name from CNPG's authoritative\n# Cluster.status.currentPrimary field instead of pod labels.\n# The `role=primary` label is applied by CNPG AFTER promotion,\n# which races this hook at sync-wave -5. Cluster status is set\n# by CNPG the moment the primary is elected. deploy#322\n# finding 9.\nPOD=\"\"\nfor i in $(seq 1 90); do\n  P=$(kubectl -n gibson get cluster.postgresql.cnpg.io platform-postgres \\\n      -o jsonpath='{.status.currentPrimary}' 2>/dev/null || true)\n  if [ -n \"$P\" ] && \\\n     kubectl -n gibson get pod \"$P\" \\\n      -o jsonpath='{.status.phase}' 2>/dev/null | grep -q Running; then\n    POD=$P\n    break\n  fi\n  sleep 2\ndone\nif [ -z \"$POD\" ]; then\n  echo \"ERROR: platform-postgres has no Running currentPrimary after 180s \u2014 Argo will retry\"\n  exit 1\nfi\necho \"primary pod: $POD\"\n\nEXEC=\"kubectl exec -n gibson $POD -c postgres --\"\nEXEC_I=\"kubectl exec -i -n gibson $POD -c postgres --\"\n\n# role:db:role_opts:secret_name\n#\n# gitops#99: tenant_admin needs CREATEROLE in addition to\n# CREATEDB. The tenant-operator's per-tenant Postgres\n# provisioner creates BOTH the per-tenant database AND a\n# per-tenant `<tenant>_app` role inside it. Without\n# CREATEROLE the saga step \"Postgres\" fails at the role-\n# creation stage with SQLSTATE 42501.\nENTRIES=(\n  \"gibson_platform:gibson_platform:LOGIN:gibson-platform-postgres-credentials\"\n  \"dashboard:dashboard:LOGIN:dashboard-postgres-credentials\"\n  \"tenant_admin:tenant_admin:LOGIN CREATEDB CREATEROLE:tenant-admin-postgres-credentials\"\n)\n\nfor entry in \"${ENTRIES[@]}\"; do\n  IFS=\":\" read -r ROLE DB ROLE_OPTS SECRET_NAME <<< \"$entry\"\n  echo \"[$ROLE] starting setup...\"\n\n  # Wait for Secret\n  until PW=$(kubectl -n gibson get secret \"$SECRET_NAME\" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d) && [ -n \"$PW\" ]; do\n    echo \"[$ROLE] waiting for Secret $SECRET_NAME...\"\n    sleep 2\n  done\n  echo \"[$ROLE] secret materialised\"\n\n  # CREATE ROLE if new, then ALWAYS apply the declared\n  # ROLE_OPTS via ALTER ROLE \u2014 this makes the setup Job\n  # idempotent on attribute changes too, not just on\n  # role-presence. Previously, an existing role's options\n  # could drift from the declared set forever (the case\n  # that caused gitops#99: tenant_admin's CREATEROLE flag\n  # was missing on a cluster created before the update).\n  cat <<SQL | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1\n  DO \\$\\$\n  BEGIN\n    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '$ROLE') THEN\n      EXECUTE 'CREATE ROLE \"' || '$ROLE' || '\" WITH $ROLE_OPTS';\n    ELSE\n      EXECUTE 'ALTER ROLE \"' || '$ROLE' || '\" WITH $ROLE_OPTS';\n    END IF;\n  END\n  \\$\\$;\nSQL\n\n  # CREATE DATABASE (no IF NOT EXISTS)\n  if ! $EXEC psql -U postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='$DB'\" | grep -q '^1$'; then\n    $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"CREATE DATABASE \\\"$DB\\\" OWNER \\\"$ROLE\\\";\"\n  else\n    $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"ALTER DATABASE \\\"$DB\\\" OWNER TO \\\"$ROLE\\\";\"\n  fi\n\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"GRANT ALL PRIVILEGES ON DATABASE \\\"$DB\\\" TO \\\"$ROLE\\\";\"\n  # The password is a SQL string literal: double every single quote.\nPW_SQL=$(printf '%s' \"$PW\" | sed \"s/'/''/g\")\nprintf \"%s\\n\" \"ALTER ROLE \\\"$ROLE\\\" WITH PASSWORD '$PW_SQL';\" | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1 -d postgres\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d \"$DB\" -c \"ALTER SCHEMA public OWNER TO \\\"$ROLE\\\"; GRANT ALL ON SCHEMA public TO \\\"$ROLE\\\";\"\n\n  echo \"[$ROLE] setup complete\"\ndone\n\n# gitops#101: per-tenant DBs require pg_trgm for the\n# missions_name_trgm_idx GIN index in migration 003.\n# CREATE DATABASE doesn't carry extensions over from\n# template1 unless they're installed there. Seed it in\n# template1 so every NEW per-tenant DB inherits it;\n# backfill any existing tenant_* DBs in-place so the\n# current cluster recovers without manual operator work.\necho \"\
           [pg_trgm] installing in template1...\"\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d template1 \\\n  -c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\"\necho \"[pg_trgm] template1 done.\"\n\necho \"[pg_trgm] backfilling existing per-tenant DBs...\"\nfor tdb in $($EXEC psql -U postgres -tAc \\\n    \"SELECT datname FROM pg_database WHERE datname LIKE 'tenant\\\\_%' ESCAPE '\\\\\\\\' AND datname <> 'tenant_admin'\"); do\n  echo \"  [pg_trgm] $tdb\"\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d \"$tdb\" \\\n    -c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\"\ndone\necho \"[pg_trgm] backfill complete.\"\n\n# tenant-operator#69: the operator's Neo4j data-plane step\n# writes one row per tenant into the tenant_neo4j_endpoints\n# registry table (bolt URI + secret name + tier). The table\n# lives in the platform postgres `postgres` database that\n# `tenant_admin` connects to via DATAPLANE_PG_ADMIN_DSN.\n# The CREATE TABLE migration ships in\n# tenant-operator/migrations/001_create_tenant_neo4j_endpoints.up.sql\n# but the operator never runs it on startup, so every\n# signup's Neo4j step failed at registry-insert with\n# SQLSTATE 42P01 (\"relation does not exist\"). This bash\n# CREATE is the gitops-side counterpart of that migration\n# so signup works on a fresh cluster; tenant-operator#69\n# tracks moving this to a proper embed.FS + golang-migrate\n# pass at operator startup.\n# D1-G (deploy#256): tenant-operator's DATAPLANE_PG_ADMIN_DSN\n# connects as `tenant_admin` to the BUILT-IN `postgres` DB,\n# NOT the `tenant_admin` DB. The operator's platform-db\n# migrations try CREATE TABLE in `public` of `postgres` and\n# fail with `permission denied for schema public`\n# (SQLSTATE 42501) because PostgreSQL 15+ owns `public` in\n# the `postgres` DB as `pg_database_owner` and revoked\n# default CREATE for non-owners. The other DBs (gibson_platform,\n# tenant_admin) get the ownership flip via the loop above\n# (line 94), but `postgres` is not in ENTRIES \u2014 it's the\n# cluster's built-in DB.\n#\n# Fix: explicit GRANT CREATE,USAGE on the postgres-DB public\n# schema for tenant_admin. Idempotent \u2014 re-running with\n# privileges already granted is a no-op.\necho \"[postgres-db] granting tenant_admin CREATE on public schema of postgres DB...\"\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres \\\n  -c \"GRANT CREATE, USAGE ON SCHEMA public TO tenant_admin;\"\necho \"[postgres-db] grant complete.\"\n\necho \"[neo4j-registry] ensuring tenant_neo4j_endpoints exists...\"\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"\n  CREATE TABLE IF NOT EXISTS tenant_neo4j_endpoints (\n      tenant_id   TEXT        PRIMARY KEY,\n      bolt_uri    TEXT        NOT NULL,\n      secret_name TEXT        NOT NULL,\n      tier        TEXT        NOT NULL,\n      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n      ready_at    TIMESTAMPTZ,\n      version     INT         NOT NULL DEFAULT 1\n  );\n  GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_neo4j_endpoints TO tenant_admin;\n\"\necho \"[neo4j-registry] table ready.\"\n\necho \"ALL_ROLES_SETUP_OK\"\n"
----
-# Source: gibson/templates/jobs/gibson-workloads-signup-bot-pat-minter.yaml
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: signup-bot-pat-minter
-  namespace: gibson
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    # Weight 3, directly after zitadel-setup (weight 2) which mints the
-    # iam-admin-pat this Job self-waits for — and BEFORE first-admin
-    # (weight 10). Helm runs post-install hooks serially by weight, so at
-    # the old weight 100 this Job could not run until first-admin
-    # finished, while the dashboard's wait-for-signup-bot-pat init
-    # blocked on this Job's output for first-admin's whole deadline.
-    # On a fresh install the dashboard could not become Ready before the
-    # hook that installs the owner had already timed out (deploy#1766).
-    # Producers run before consumers; the Argo path is unchanged
-    # (Sync wave 0, concurrent, self-waiting).
-    helm.sh/hook-weight: '3'
-    helm.sh/hook-delete-policy: before-hook-creation
-    # Argo: Sync-phase at wave 0, NOT PostSync. In the single umbrella
-    # Application PostSync only fires once the app is Healthy — but the
-    # dashboard's wait-for-signup-bot-pat init NEEDS this Job's output to
-    # become Ready, so PostSync deadlocks (same class as the openfga
-    # migrate, gitops#140 / deploy#820). The Job self-waits in-pod for
-    # iam-admin-pat + Zitadel, so running concurrently with the wave-0
-    # batch is safe, and it is idempotent (re-validates the existing PAT).
-    # SA/Role/RoleBinding ride the same wave; kind-ordering applies them
-    # before the Job. helm.sh hooks kept for plain-helm installs.
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
-spec:
-  backoffLimit: 10
-  ttlSecondsAfterFinished: 600
-  template:
-    metadata:
-      labels:
-        # deploy#1365: pod-template label so the bringup-jobs
-        # NetworkPolicy can select this Job's pods under the
-        # gibson namespace default-deny (unlabelled = severed).
-        app.kubernetes.io/component: signup-bot-pat-minter
-    spec:
-      restartPolicy: OnFailure
-      serviceAccountName: signup-bot-pat-minter
-      containers:
-      - name: minter
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
-        command:
-        - bash
-        - -ec
-        args:
-        - "set -euo pipefail\n\n# Wait for iam-admin-pat Secret to be available (may not exist yet\n# on a fresh cluster while Zitadel + PlatformBootstrap reconcile for\n# the first time). 180\xD75s = 15m tolerates a cold-start Zitadel on a\n# loaded host; the old 5m window exhausted before iam-admin-pat\n# appeared and churned the hook through its backoffLimit (deploy#773).\necho \"waiting for iam-admin-pat...\"\nfor i in $(seq 1 180); do\n  if kubectl -n gibson get secret iam-admin-pat > /dev/null 2>&1; then\n    echo \"iam-admin-pat ready\"\n    break\n  fi\n  echo \"  attempt $i/180...\"\n  sleep 5\ndone\n\nPAT=$(kubectl -n gibson get secret iam-admin-pat -o jsonpath='{.data.pat}' | base64 -d | tr -d '\\r\\n')\nZH=\"app.selfhosted.example.com\"\nZ=\"http://gibson-zitadel:8080\"\nROLES_JSON='[\"IAM_USER_MANAGER\",\"IAM_LOGIN_CLIENT\"]'\n\n# --- Step 1: look up or create the machine user ---\necho \"looking up gibson-signup-bot...\"\nRESP=$(curl -sS -X POST \\\n  -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"queries\":[{\"userNameQuery\":{\"userName\":\"gibson-signup-bot\"}}]}' \\\n  \"$Z/v2/users\")\nUSER_ID=$(echo \"$RESP\" | jq -r '.result[0].userId // empty')\n\nif [ -z \"$USER_ID\" ]; then\n  echo \"creating gibson-signup-bot machine user...\"\n  CREATE=$(curl -sS -X POST \\\n    -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n    -H \"Content-Type: application/json\" \\\n    -d '{\"userName\":\"gibson-signup-bot\",\"name\":\"Gibson Signup Bot\",\"description\":\"IAM_USER_MANAGER + IAM_LOGIN_CLIENT for dashboard signup flow\",\"accessTokenType\":\"ACCESS_TOKEN_TYPE_BEARER\"}' \\\n    \"$Z/management/v1/users/machine\")\n  USER_ID=$(echo \"$CREATE\" | jq -r '.userId // empty')\n  if [ -z \"$USER_ID\" ]; then\n    echo \"ERROR: machine user create failed: $CREATE\"; exit 1\n  fi\n  echo \"created user: $USER_ID\"\nelse\n  echo \"signup-bot user exists: $USER_ID\"\nfi\n\n# --- Step 2: reconcile IAM roles (idempotent) ---\necho \"reconciling IAM roles: $ROLES_JSON...\"\nGRANT=$(curl -sS -w \"%{http_code}\" -o /tmp/grant.out -X POST \\\n  -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\\\"userId\\\":\\\"$USER_ID\\\",\\\"roles\\\":$ROLES_JSON}\" \\\n  \"$Z/admin/v1/members\")\nif [ \"$GRANT\" = \"200\" ]; then\n  echo \"IAM member created with roles $ROLES_JSON\"\nelif [ \"$GRANT\" = \"409\" ] || grep -qi \"already exist\" /tmp/grant.out; then\n  echo \"IAM member exists; updating role set to $ROLES_JSON...\"\n  UPDATE=$(curl -sS -w \"%{http_code}\" -o /tmp/update.out -X PUT \\\n    -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"roles\\\":$ROLES_JSON}\" \\\n    \"$Z/admin/v1/members/$USER_ID\")\n  if [ \"$UPDATE\" != \"200\" ]; then\n    echo \"ERROR: IAM member update returned HTTP $UPDATE: $(cat /tmp/update.out)\"; exit 1\n  fi\n  echo \"IAM member roles updated to $ROLES_JSON\"\nelse\n  echo \"ERROR: IAM member grant returned HTTP $GRANT: $(cat /tmp/grant.out)\"; exit 1\nfi\n\n# --- Step 3: validate existing PAT against Zitadel ---\n# The old minter used a length-only check that accepted\n# the invalid 8_ZQ\u2026 format. Validate live instead.\nEXISTING=$(kubectl -n gibson get secret gibson-zitadel-signup-bot-pat \\\n  -o jsonpath='{.data.pat}' 2>/dev/null | base64 -d 2>/dev/null \\\n  | tr -d '\\r\\n' || true)\n\nif [ -n \"$EXISTING\" ] && [ ${#EXISTING} -gt 20 ]; then\n  STATUS=$(curl -sS -o /dev/null -w \"%{http_code}\" \\\n    -H \"Host: $ZH\" -H \"Authorization: Bearer $EXISTING\" \\\n    \"$Z/auth/v1/policies/passwords/complexity\")\n  if [ \"$STATUS\" = \"200\" ]; then\n    echo \"Existing PAT valid (HTTP 200) \u2014 skipping re-mint.\"\n    echo \"SIGNUP_BOT_ROLES_RECONCILED user_id=$USER_ID\"\n    exit 0\n  fi\n  echo \"Existing PAT invalid (HTTP $STATUS) \u2014 re-minting.\"\nelse\n  echo \"No existing PAT found \u2014 minting fresh.\"\nfi\n\n# --- Step 4: mint a new PAT ---\necho \"minting PAT (5-year expiry)...\"\nMINT=$(curl\
-          \ -sS -X POST \\\n  -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"expirationDate\":\"2031-01-01T00:00:00Z\"}' \\\n  \"$Z/management/v1/users/$USER_ID/pats\")\nNEW_PAT=$(echo \"$MINT\" | jq -r '.token // empty')\nif [ -z \"$NEW_PAT\" ]; then\n  echo \"ERROR: PAT mint failed: $MINT\"; exit 1\nfi\n\n# --- Step 5: write to Secret ---\necho \"writing gibson-zitadel-signup-bot-pat Secret...\"\nkubectl -n gibson create secret generic gibson-zitadel-signup-bot-pat \\\n  --from-literal=pat=\"$NEW_PAT\" \\\n  --dry-run=client -o yaml | kubectl apply -f -\n\necho \"SIGNUP_BOT_PAT_MINTED user_id=$USER_ID pat_len=${#NEW_PAT} roles=$ROLES_JSON\"\n"
 ---
 # Source: gibson/templates/jobs/openfga-postgres-setup-job.yaml
 apiVersion: batch/v1

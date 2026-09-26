@@ -267,18 +267,6 @@ connectorOperator:
   # when the trust domain differs.
   daemonSpiffeID: "spiffe://zeroroot.ai/platform/daemon"
 
-# Cross-namespace ESO bridge — zitadel ns reader RBAC consumed by ESO to
-# pull the iam-admin-pat Secret from zitadel ns into gibson ns. Required
-# infrastructure (one-code-path epic / deploy#187); the previous
-# `.enabled` toggle was a degradation surface and has been deleted. The
-# sub-keys below are substitution selectors for namespaces / SA / Secret
-# name only.
-crossNamespaceESO:
-  zitadelNamespace: zitadel
-  workloadNamespace: gibson
-  serviceAccountName: gibson-zitadel-admin-reader
-  patSecretName: iam-admin-pat
-
 # Image pull secret for ghcr.io private images. Materialised by ESO.
 imagePullSecrets:
   - name: ghcr-credentials
@@ -583,17 +571,6 @@ platformBootstrap:
       # Leave empty: the template derives http://<trustedClusterDomain>:8080.
       # Set it only for a non-8080 port or an off-chart Zitadel.
       apiURL: ""
-    serviceUsers:
-      - name: "gibson-iam-admin"
-        roles: ["IAM_OWNER"]
-        patSecretRef:
-          name: "gibson-iam-admin-pat"
-          key: "pat"
-      - name: "gibson-tenant-operator"
-        roles: ["IAM_USER_MANAGER"]
-        patSecretRef:
-          name: "gibson-zitadel-tenant-operator-pat"
-          key: "pat"
 
   # OIDC clients to reconcile as child OIDCClient CRs.
   oidcClients: []
