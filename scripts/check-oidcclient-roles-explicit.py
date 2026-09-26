@@ -14,11 +14,17 @@ which is safer but still not what anyone meant to write. This guard makes
 "I forgot to think about this identity's roles" a build failure instead of a
 silent gap, on every entry, every time.
 
-WHAT IT CHECKS, on helm/gibson/values-baseline.yaml
-  platformBootstrap.oidcClients[] — every entry must have a literal `roles`
-  key present (any value, including an empty list). A missing key is the
-  failure; an empty list is a legitimate, deliberate answer ("this identity
-  gets no Zitadel role") and passes.
+WHAT IT CHECKS
+  helm/gibson/values-baseline.yaml, platformBootstrap.oidcClients[] — every
+  entry must have a literal `roles` key present (any value, including an
+  empty list). A missing key is the failure; an empty list is a legitimate,
+  deliberate answer ("this identity gets no Zitadel role") and passes.
+
+  helm/testdata/golden/*.yaml, every rendered PlatformBootstrap — every
+  spec.oidcClients[] entry must carry `roles` too. The values alone are not
+  enough: on 2026-09-26 the values declared roles but the template dropped
+  the key, so on kind the daemon and the tenant-operator reconciled to NO
+  Zitadel role. Checking the render is what catches that.
 
 USAGE
   scripts/check-oidcclient-roles-explicit.py            check helm/gibson/values-baseline.yaml
@@ -48,6 +54,19 @@ def check(path: str) -> list[str]:
                 f"oidcClients[{label}] has no `roles` key — declare it explicitly "
                 "(use `roles: []` for none, never omit the field)"
             )
+    return problems
+
+
+def check_rendered(path: str) -> list[str]:
+    problems: list[str] = []
+    with open(path, encoding="utf-8") as f:
+        for doc in yaml.safe_load_all(f):
+            if not isinstance(doc, dict) or doc.get("kind") != "PlatformBootstrap":
+                continue
+            for i, client in enumerate(((doc.get("spec") or {}).get("oidcClients")) or []):
+                label = (client or {}).get("name") or f"entry #{i}"
+                if not isinstance(client, dict) or "roles" not in client:
+                    problems.append(f"{path}: rendered oidcClients[{label}] has no `roles` — the template dropped it")
     return problems
 
 
@@ -87,7 +106,22 @@ def selftest() -> int:
             if got_ok != want_ok:
                 print(f"GUARD BROKEN: fixture {name} expected {'pass' if want_ok else 'fail'}", file=sys.stderr)
                 return 2
-    print("✅ self-test: an OIDCClient missing `roles` is rejected")
+    rendered = {
+        "rendered_with_roles": ([{"name": "gibson-daemon", "roles": ["IAM_OWNER"]},
+                                 {"name": "gibson-dashboard-service", "roles": []}], True),
+        "rendered_roles_dropped": ([{"name": "gibson-daemon", "applicationType": "MACHINE_USER"}], False),
+    }
+    with tempfile.TemporaryDirectory() as d:
+        for name, (clients, want_ok) in rendered.items():
+            p = os.path.join(d, name + ".yaml")
+            with open(p, "w", encoding="utf-8") as f:
+                yaml.safe_dump_all([{"kind": "ConfigMap"},
+                                    {"kind": "PlatformBootstrap", "spec": {"oidcClients": clients}}], f)
+            got_ok = not check_rendered(p)
+            if got_ok != want_ok:
+                print(f"GUARD BROKEN: rendered fixture {name} expected {'pass' if want_ok else 'fail'}", file=sys.stderr)
+                return 2
+    print("✅ self-test: an OIDCClient missing `roles` is rejected, in the values and in the render")
     return 0
 
 
@@ -96,6 +130,13 @@ def main(argv: list[str]) -> int:
         return selftest()
     path = argv[1] if len(argv) > 1 else "helm/gibson/values-baseline.yaml"
     problems = check(path)
+    if len(argv) == 1:
+        import glob
+        goldens = sorted(glob.glob("helm/testdata/golden/*.yaml"))
+        if not goldens:
+            problems.append("no rendered snapshots under helm/testdata/golden to check")
+        for g in goldens:
+            problems += check_rendered(g)
     if problems:
         print(f"❌ {path}: not every OIDCClient declares its roles")
         for p in problems:

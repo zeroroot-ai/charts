@@ -23422,15 +23422,20 @@ spec:
   oidcClients:
     - name: "gibson-daemon"
       applicationType: "MACHINE_USER"
+      roles:
+        - "IAM_OWNER"
       secretRef:
         name: "idp-admin-credentials"
         key: "client_secret"
     - name: "gibson-tenant-operator"
       applicationType: "MACHINE_USER"
+      roles:
+        - "IAM_OWNER"
       secretRef:
         name: "gibson-zitadel-tenant-operator"
         key: "ZITADEL_CLIENT_SECRET"
     - name: "gibson-dashboard"
+      roles: []
       redirectURIs:
         - "https://app.selfhosted.example.com/api/auth/callback/zitadel"
       postLogoutRedirectURIs:
@@ -23440,11 +23445,13 @@ spec:
         key: "client_secret"
     - name: "gibson-dashboard-service"
       applicationType: "MACHINE_USER"
+      roles: []
       secretRef:
         name: "gibson-zitadel-dashboard"
         key: "ZITADEL_CLIENT_SECRET"
     - name: "gibson-native-login"
       applicationType: "NATIVE"
+      roles: []
       grantTypes:
         - "DEVICE_CODE"
         - "AUTHORIZATION_CODE"
