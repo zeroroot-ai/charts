@@ -56,9 +56,13 @@ spec:
             description: OIDCClientSpec is the desired state of one Zitadel OIDC client.
             properties:
               accessTokenLifetimeSeconds:
-                description: AccessTokenLifetimeSeconds sets the Zitadel app's
-                  per-application access-token lifetime (e.g. 900 for the CLI
-                  device-grant app). 0/unset leaves the Zitadel instance default.
+                description: |-
+                  AccessTokenLifetimeSeconds overrides the per-application access-token
+                  lifetime (Zitadel OIDC app config `accessTokenLifetime`). 0 / unset
+                  leaves the instance default. Set to 900 (15m) for the gibson CLI
+                  device-grant app so the gibson#622 session-revocation window is bounded:
+                  revoking blocks new tokens immediately and the target's current stateless
+                  access JWT ages out within this lifetime.
                 format: int32
                 minimum: 0
                 type: integer

@@ -269,6 +269,13 @@ spec:
                 secretKeyRef:
                   name: {{ $wl.idp.adminCredentialsSecret | quote }}
                   key: org_id
+            # ADR-0093 decision 2: the Owner's role is a grant on this
+            # project. The Job fails without it.
+            - name: GIBSON_IDP_ZITADEL_PROJECT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $wl.idp.adminCredentialsSecret | quote }}
+                  key: project_id
             - name: EXT_AUTHZ_FGA_ADDR
               # OpenFGA's HTTP API is https on :8080 (:8081 is gRPC). bootstrap
               # speaks HTTP, so :8081 hangs. Same value ext-authz uses.

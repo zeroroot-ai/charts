@@ -98,8 +98,8 @@ spec:
      the single HTTP/2 listener (OIDC + gRPC APIs). Callers: Envoy (login
      + OIDC routes), zitadel-login (Login V2 UI), ext-authz (JWKS),
      daemon (IdP admin), dashboard (server-action token exchange), both
-     operators (OIDC app provisioning), and the umbrella bringup Jobs
-     zitadel-login-branding / first-admin.
+     operators (OIDC app provisioning, and the platform-operator's login
+     branding), and the umbrella bringup Job first-admin.
 --------------------------------------------------------------------- */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -139,9 +139,6 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/component: platform-operator
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: zitadel-login-branding
         # The first-admin Job creates the founding owner through the
         # Management API, dialing Zitadel by Service name (ADR-0092).
         - podSelector:
