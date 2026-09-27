@@ -21356,6 +21356,10 @@ spec:
     initdb:
       database: postgres
       owner: postgres
+      # The owner is `postgres`, so its Secret is the superuser Secret (see
+      # ONE SECRET FOR THE ROLE `postgres` in the header).
+      secret:
+        name: platform-postgres-superuser
   # Continuous backup to the durable bucket (deploy#1496,
   # deploy#1730). Setting barmanObjectStore is what turns on WAL archiving:
   # CNPG rewrites archive_command to ship every completed segment here. A
