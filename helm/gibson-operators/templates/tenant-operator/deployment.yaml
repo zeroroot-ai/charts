@@ -414,10 +414,10 @@ spec:
             not at "user signs up" time.
             */}}
             # Zitadel Management API — the EnsureZitadelOrg + TenantMember
-            # saga steps call this with the IAM admin PAT. The operator
-            # is the one component that legitimately needs the elevated
-            # iam-admin-pat (creating orgs + adding members requires
-            # IAM_OWNER; the signup-bot's IAM_USER_MANAGER is not enough).
+            # saga steps call this as the operator's own machine user
+            # (gibson-tenant-operator, client credentials). It holds only
+            # the Zitadel roles its OIDCClient declares; it never reads the
+            # owner credentials (hosted#192).
             # In-cluster HTTP to gibson-zitadel:8080 is fine here — Zitadel
             # accepts the forged Host header the operator client already
             # sends, and TLS is terminated further up (Envoy) for
