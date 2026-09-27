@@ -71,7 +71,10 @@ must_fail "no mail transport and offlineSetup=false" \
 must_pass "smtp transport and offlineSetup=false" \
   --set global.platformOwner.offlineSetup=false \
   --set gibson-workloads.gibson.email.provider=smtp \
-  --set gibson-workloads.gibson.email.smtp.host=smtp.example.com
+  --set gibson-workloads.gibson.email.smtp.host=smtp.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@selfhosted.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=Gibson
 
 # offlineSetup=true with no place to write the link must fail.
 must_fail "offlineSetup=true with no setupSecretRef.name" \
@@ -97,7 +100,10 @@ must_fail "firstTenant: no mail transport and offlineSetup=false" \
 must_pass "firstTenant: smtp transport and offlineSetup=false" \
   --set global.firstTenant.offlineSetup=false \
   --set gibson-workloads.gibson.email.provider=smtp \
-  --set gibson-workloads.gibson.email.smtp.host=smtp.example.com
+  --set gibson-workloads.gibson.email.smtp.host=smtp.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@selfhosted.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=Gibson
 
 must_fail "firstTenant: offlineSetup=true with no setupSecretRef.name" \
   "global.firstTenant.setupSecretRef.name is empty" \
@@ -113,6 +119,43 @@ must_pass "firstTenant disabled: no mail transport and offlineSetup=false is fin
   --set global.firstTenant.enabled=false \
   --set global.firstTenant.ownerEmail= \
   --set global.firstTenant.offlineSetup=false
+
+
+# --- Zitadel's own SMTP provider (hosted#189, helm/gibson/templates/zitadel-smtp-guard.yaml) --
+# The daemon can send mail while Zitadel cannot: two separate transports, one
+# render guard for the gap. must_pass above already proves the fixture that
+# sets BOTH sides passes; these prove a render that sets only the daemon's
+# side fails, on each field the guard names.
+must_fail "gibson-workloads smtp on, gibson-operators smtp.host empty" \
+  "gibson-operators.platformBootstrap.zitadel.smtp.host is empty" \
+  --set global.platformOwner.offlineSetup=false \
+  --set gibson-workloads.gibson.email.provider=smtp \
+  --set gibson-workloads.gibson.email.smtp.host=smtp.example.com
+
+# The internal completeness of the smtp block (once .host is set) is
+# platformbootstrap.yaml's own `required` calls, not this guard's job — see
+# zitadel-smtp-guard.yaml's own comment. These two prove THOSE checks fire.
+must_fail "gibson-operators smtp.host set but .fromAddress empty" \
+  "platformBootstrap.zitadel.smtp.fromAddress is required" \
+  --set global.platformOwner.offlineSetup=false \
+  --set gibson-workloads.gibson.email.provider=smtp \
+  --set gibson-workloads.gibson.email.smtp.host=smtp.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress= \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=Gibson
+
+must_fail "gibson-operators smtp.host set but .fromName empty" \
+  "platformBootstrap.zitadel.smtp.fromName is required" \
+  --set global.platformOwner.offlineSetup=false \
+  --set gibson-workloads.gibson.email.provider=smtp \
+  --set gibson-workloads.gibson.email.smtp.host=smtp.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@selfhosted.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=
+
+# The daemon's mail off (provider=log, the baseline) never requires Zitadel's
+# SMTP block at all — the baseline itself is the fixture.
+must_pass "gibson-workloads mail off: gibson-operators smtp may stay unset"
 
 [ "$fail" -eq 0 ] && echo "✓ platform-owner-values: required, must-differ and mail/offline rules all fire for both the Platform owner and the first tenant's Owner, and the baseline satisfies every one of them"
 exit "$fail"
