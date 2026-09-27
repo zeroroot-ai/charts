@@ -603,17 +603,22 @@ gibson-operators:
     oidcClients:
       - name: gibson-daemon
         applicationType: MACHINE_USER
-        # Keeps its current instance-owner rights explicitly for now; its
-        # own least-privilege slice (hosted#199) narrows this later.
-        roles: ["IAM_OWNER"]
+        # IAM_ORG_MANAGER, not IAM_OWNER (hosted#199). Every call the
+        # daemon makes to Zitadel is org/user/session/project-grant scoped;
+        # none needs an iam.* permission. IAM_ORG_MANAGER is the smallest
+        # built-in role that covers the full call list recorded on
+        # hosted#199, with citations against the Zitadel v4.18.0 source.
+        roles: ["IAM_ORG_MANAGER"]
         secretRef:
           name: idp-admin-credentials
           key: client_secret
       - name: gibson-tenant-operator
         applicationType: MACHINE_USER
-        # Keeps its current instance-owner rights explicitly for now; its
-        # own least-privilege slice (hosted#200) narrows this later.
-        roles: ["IAM_OWNER"]
+        # IAM_ORG_MANAGER, not IAM_OWNER (hosted#200). The tenant-operator's
+        # org/user/project-grant calls are all covered by IAM_ORG_MANAGER;
+        # none needs an iam.* permission. See hosted#200 for the call list
+        # and Zitadel v4.18.0 source citations.
+        roles: ["IAM_ORG_MANAGER"]
         secretRef:
           name: gibson-zitadel-tenant-operator
           key: ZITADEL_CLIENT_SECRET
