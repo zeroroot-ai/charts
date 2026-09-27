@@ -5622,6 +5622,10 @@ data:
       storage: "200Gi"
       cpu: "1"
       memory: "8Gi"
+    enterprise-deploy:
+      storage: "10Gi"
+      cpu: "100m"
+      memory: "1Gi"
     org:
       storage: "50Gi"
       cpu: "500m"
@@ -19531,14 +19535,14 @@ spec:
     - name: "gibson-daemon"
       applicationType: "MACHINE_USER"
       roles:
-        - "IAM_OWNER"
+        - "IAM_ORG_MANAGER"
       secretRef:
         name: "idp-admin-credentials"
         key: "client_secret"
     - name: "gibson-tenant-operator"
       applicationType: "MACHINE_USER"
       roles:
-        - "IAM_OWNER"
+        - "IAM_ORG_MANAGER"
       secretRef:
         name: "gibson-zitadel-tenant-operator"
         key: "ZITADEL_CLIENT_SECRET"

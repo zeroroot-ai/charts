@@ -4024,6 +4024,17 @@ tenantNeo4j:
       storage: 200Gi
       cpu: "1"
       memory: 8Gi
+    # enterprise-deploy is the plan of the first tenant that every self-hosted
+    # install seeds (global.firstTenant.tier in the umbrella). It starts at the
+    # measured floor, the same as team, so a fresh install fits one small node.
+    # Before charts#157 that tenant was team and ran at this size. With no row
+    # here the operator fell back to its built-in 1 CPU / 8Gi, the tenant Neo4j
+    # pod stayed Pending with "Insufficient cpu", and the tenant never reached
+    # Ready. A production install raises this tier in its own values.
+    enterprise-deploy:
+      storage: 10Gi
+      cpu: 100m
+      memory: 1Gi
 
 # =============================================================================
 # reservedNames — chart-managed denylist consumed by:
