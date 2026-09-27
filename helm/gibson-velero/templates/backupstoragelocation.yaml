@@ -20,26 +20,19 @@ kind: BackupStorageLocation
 metadata:
   name: default
   annotations:
-    # This is a CR of a kind the velero sub-chart in THIS SAME RELEASE
-    # registers. Helm cannot order a CRD and a CR of it within one release, and
-    # it sorts kinds it does not recognise alphabetically — so without this the
-    # CR is applied before its CRD exists and the apply is refused.
+    # NOT a hook (charts#190). As an Argo Sync hook this object never updated
+    # after the first sync: Argo leaves hooks out of the diff, so a chart bump
+    # that changed only this object left the Application Synced, and auto-sync
+    # never ran the hook again. Staging kept a stale Schedule for hours after
+    # 0.132.1 shipped the k3s excludes.
     #
-    # Both barriers, because there are two orderings to satisfy:
-    #   helm.sh/hook      a plain `helm install` has no barrier in its main phase
-    #   argocd sync-wave  Argo orders hooks and ordinary resources together
-    #
-    # Observed before this: Argo reported a controller sync timeout and
-    # recovered on retry, which hid the defect behind a retry that a plain
-    # helm install does not have. See charts#2.
-    argocd.argoproj.io/hook: Sync
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: "20"
-    helm.sh/hook-delete-policy: before-hook-creation
-    # One annotations map. This object used to carry two, and YAML keeps
-    # the last: the hook barriers above were silently dropped and kubeconform
-    # refused the render (duplicate key). The sync wave below is the Argo
-    # ordering; the helm hooks are the plain-install ordering.
+    # The CRD ordering the hook used to provide comes from elsewhere now:
+    #   plain helm  the velero sub-chart ships its CRDs in crds/, which Helm
+    #               applies and waits for before it renders any template
+    #   Argo        the sync wave below runs after the CRDs, and
+    #               SkipDryRunOnMissingResource stops the dry run from
+    #               refusing a kind the same sync is about to register
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
     # After the server Deployment: a location the controller cannot reconcile
     # yet reports its phase as empty, which reads as a failure.
     argocd.argoproj.io/sync-wave: "10"
