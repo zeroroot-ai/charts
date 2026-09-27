@@ -11,6 +11,25 @@
 preconditions:
   requireCRDs: true
 
+# Product-surface origin (app.<domain>). This chart's own copy of the same
+# override key gibson-workloads.gibson.appUrl exists for
+# (helm/gibson-workloads/values.yaml) — it is per-chart, not a Helm global,
+# so each subchart resolves its own value independently. Empty (the
+# default) in both charts, they compute the SAME address anyway, because
+# both fall back to the gibson.externalOrigin helper, which derives from
+# the shared global.domain. An install only needs to set this explicitly
+# under BOTH gibson-workloads.gibson.appUrl and gibson-operators.gibson.appUrl
+# (e.g. in the umbrella's values.yaml) when the product surface is served
+# from a non-standard host.
+#
+# The tenant-operator reads this (as GIBSON_APP_URL,
+# templates/tenant-operator/deployment.yaml) to build the two human-facing
+# links it emails: the tenant-member invitation accept-link and the new
+# tenant's welcome-email link. Both must resolve in a human's browser, so
+# neither may point at an in-cluster Service address or the API-plane host.
+gibson:
+  appUrl: ""
+
 # tenant-operator is structural infrastructure (one-code-path /
 # deploy#188): it reconciles Tenant / TenantMember / AgentEnrollment /
 # ComponentGrant CRs that the platform cannot run without. The previous
@@ -102,7 +121,6 @@ tenantOperator:
   # tenant-operator#70 documented the older legacy-release default
   # ("gibson:50051").
   daemonGrpcAddress: "gibson-workloads:50051"
-  dashboardUrl: "http://gibson-dashboard:3000"
   # Zitadel in-cluster Service URL. Overlays set per-environment.
   zitadelURL: ""
   # Billing controls. devAutoConfirm skips payment confirmation in dev

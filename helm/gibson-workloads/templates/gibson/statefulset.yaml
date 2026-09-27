@@ -401,6 +401,15 @@ spec:
             # (api.<domain>), and it serves no product routes — a verification
             # link built from it resolves to nothing. The fallback
             # (gibson.externalOrigin) is unconditional, so this always resolves.
+            #
+            # The daemon is not the only reader. The tenant-operator
+            # (gibson-operators/templates/tenant-operator/deployment.yaml)
+            # reads the same env var name, wired from its own
+            # gibson.appUrl value, to build its two human-facing email
+            # links: the tenant-member invitation accept-link and the new
+            # tenant's welcome-email link. Both consumers exist because a
+            # link a human's browser must open can never point at an
+            # API-plane or in-cluster address.
             - name: GIBSON_APP_URL
               value: {{ .Values.gibson.appUrl | default (include "gibson.externalOrigin" .) | quote }}
             # gibson#632 — invitation accept-link email transport; ALSO, as of

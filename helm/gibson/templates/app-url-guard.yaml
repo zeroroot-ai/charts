@@ -1,0 +1,47 @@
+{{- /*
+App URL link guard.
+
+Two subcharts read gibson.appUrl to build the PRODUCT-surface origin
+(app.<domain>) that a human's browser must be able to open:
+
+  - gibson-workloads (the daemon's self-serve signup email verification
+    link, GIBSON_APP_URL — templates/gibson/statefulset.yaml)
+  - gibson-operators (the tenant-operator's invitation accept-link and
+    welcome-email link, GIBSON_APP_URL —
+    templates/tenant-operator/deployment.yaml)
+
+Left empty (the default in both charts), the value is unconditionally safe:
+the chart derives it from gibson.externalOrigin ("<scheme>://app.<domain>
+[:port]"), the same origin the dashboard, the OIDC issuer and the
+redirect-URI prefix already use.
+
+An explicit override is checked here, because a value that fails these
+checks builds a link nothing can open:
+
+  (a) the API-plane host (api.<domain>) — it serves no product routes, so a
+      link built from it resolves to nothing.
+  (b) an in-cluster address (a Kubernetes Service DNS name, or a bare
+      hostname with no public domain) — a human's browser cannot reach the
+      cluster network.
+
+This template renders no resource: it exists to run these checks on every
+`helm template` / `helm install` / `helm upgrade`, unconditionally.
+*/ -}}
+{{- $apiHost := include "gibson.apiHost" . -}}
+{{- $checks := list
+      (dict "label" "gibson-workloads.gibson.appUrl" "value" ((((index .Values "gibson-workloads") | default dict).gibson | default dict).appUrl | default ""))
+      (dict "label" "gibson-operators.gibson.appUrl" "value" ((((index .Values "gibson-operators") | default dict).gibson | default dict).appUrl | default ""))
+-}}
+{{- range $checks }}
+{{- $label := .label -}}
+{{- $value := .value -}}
+{{- if ne $value "" -}}
+{{- $lower := lower $value -}}
+{{- if or (contains (printf "//%s" (lower $apiHost)) $lower) (hasSuffix (lower $apiHost) $lower) -}}
+{{- fail (printf "%s is set to %q, which is the API-plane host (%s). The API plane serves no product routes, so a link built from it resolves to nothing. Point this at the product-surface host (app.<domain>) instead, or leave it empty so the chart derives it automatically." $label $value $apiHost) -}}
+{{- end -}}
+{{- if or (contains ".svc" $lower) (contains "svc.cluster.local" $lower) (regexMatch "^https?://[a-z0-9-]+(:[0-9]+)?/?$" $lower) -}}
+{{- fail (printf "%s is set to %q, which looks like an in-cluster address. A human's browser cannot reach the cluster network. Point this at the public product-surface origin (https://app.<domain>) instead, or leave it empty so the chart derives it automatically." $label $value) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

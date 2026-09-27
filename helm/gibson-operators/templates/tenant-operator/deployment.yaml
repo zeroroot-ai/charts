@@ -217,13 +217,20 @@ spec:
             # credential write.
             - name: DAEMON_SERVICE_ACCOUNT_NAME
               value: {{ .Values.tenantOperator.daemonServiceAccountName | quote }}
-            # Dashboard base URL the operator's entitlements client posts to
-            # (/api/admin/provisioning/entitlements/upsert-quota etc.). SPIFFE
-            # JWT-SVIDs handle auth — no shared secret. Without this the
-            # entitlements step fails with `unsupported protocol scheme ""`
-            # because the client builds the request URL relative to "".
-            - name: DASHBOARD_URL
-              value: {{ (.Values.tenantOperator.dashboardUrl) | default "http://gibson-dashboard:3000" | quote }}
+            # GIBSON_APP_URL — the PRODUCT-surface origin (app.<domain>) the
+            # tenant-operator reads to build the two human-facing links it
+            # emails: the tenant-member invitation accept-link and the new
+            # tenant's welcome-email link. Same pattern as the daemon's
+            # GIBSON_APP_URL (gibson-workloads/templates/gibson/
+            # statefulset.yaml): an explicit override, defaulting to the
+            # product-surface origin via gibson.externalOrigin, so a link a
+            # human's browser must open never resolves to nothing.
+            #
+            # Replaces the former DASHBOARD_URL var, an in-cluster Service
+            # address (http://gibson-dashboard:3000) that the same two links
+            # were wrongly built from: a human's browser cannot reach it.
+            - name: GIBSON_APP_URL
+              value: {{ .Values.gibson.appUrl | default (include "gibson.externalOrigin" .) | quote }}
             # Phase 5.1 of spec tenant-provisioning-unification-phase2:
             # when GIBSON_DAEMON_GRPC_ADDRESS is set, the operator uses
             # Connect-RPC against the daemon's PlatformOperatorService
