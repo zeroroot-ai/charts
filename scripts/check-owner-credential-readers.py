@@ -659,7 +659,10 @@ def rules_review(sa: str, ns: str) -> list[dict]:
     sns, name = sa.split("/", 1)
     body = json.dumps({"apiVersion": "authorization.k8s.io/v1", "kind": "SelfSubjectRulesReview",
                        "spec": {"namespace": ns}})
-    r = subprocess.run(["kubectl", "create", "-f", "-", "-o", "json",
+    # --validate=false: a SelfSubjectRulesReview is never stored, and client
+    # validation would list CRDs as the impersonated account, which most
+    # ServiceAccounts may not do.
+    r = subprocess.run(["kubectl", "create", "--validate=false", "-f", "-", "-o", "json",
                         f"--as=system:serviceaccount:{sns}:{name}"],
                        input=body, capture_output=True, text=True)
     if r.returncode != 0:
