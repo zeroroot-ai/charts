@@ -121,6 +121,10 @@ oidcclient-roles: ## Every OIDCClient declares its Zitadel roles explicitly — 
 	@python3 scripts/check-oidcclient-roles-explicit.py --selftest
 	@python3 scripts/check-oidcclient-roles-explicit.py
 
+instance-admin-roles-scoped: ## No OIDCClient outside the bootstrap identity holds an instance-administrator role (hosted#207)
+	@python3 scripts/check-instance-admin-roles-scoped.py --selftest
+	@python3 scripts/check-instance-admin-roles-scoped.py
+
 signin-policy: ## The first Zitadel instance starts with MFA forced, no external IdPs, no self-registration (ADR-0093)
 	@python3 scripts/check-signin-policy.py --selftest
 	@python3 scripts/check-signin-policy.py
@@ -239,7 +243,7 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
 
-check: golden attribution cloud-free chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates probes netpol-coverage daemon-netpol-admits-callers edge-strips-instance-headers edge-zitadel-routes hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor platform-owner-values no-owner-password-secret ## Everything that runs without a cluster
+check: golden attribution cloud-free chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates probes netpol-coverage daemon-netpol-admits-callers edge-strips-instance-headers edge-zitadel-routes hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor platform-owner-values no-owner-password-secret instance-admin-roles-scoped ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context
