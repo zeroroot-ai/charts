@@ -3739,6 +3739,12 @@ data:
                     # trusted-hop count, which is only correct behind an ALB.
                     use_remote_address: true
                     xff_num_trusted_hops: 0
+                    # Route on the path the upstream will see. Envoy resolves dot
+                    # segments and merges repeated slashes before it matches a
+                    # route, so /zitadel.user.v2.UserService//SetEmail or a
+                    # /../ detour cannot pass the 403 routes below.
+                    normalize_path: true
+                    merge_slashes: true
                     route_config:
                       name: public_routes
                       # The edge owns the headers that select a Zitadel instance
@@ -3804,6 +3810,13 @@ data:
                                       - masked_remote_address:
                                           v4_prefix_mask_len: 32
                                           v6_prefix_mask_len: 64
+                            # The Zitadel console, where the Platform owner
+                            # administers Zitadel (ADR-0093 decision 6). Zitadel
+                            # core serves it, not the login container, so it MUST
+                            # precede the broad /ui/ rule below. Its API calls use
+                            # the Zitadel API routes further down.
+                            - match: { prefix: "/ui/console" }
+                              route: { cluster: zitadel_upstream, timeout: 30s }
                             # Zitadel v4 Login V2 UI (separate Next.js app,
                             # gibson-zitadel-login). /oauth/v2/authorize 302s the
                             # browser here.
@@ -3845,6 +3858,97 @@ data:
                               route: { cluster: zitadel_upstream, timeout: 30s }
                             - match: { prefix: "/saml/" }
                               route: { cluster: zitadel_upstream, timeout: 30s }
+                            # -------------------------------------------------------
+                            # A user's email address and username do not change
+                            # through the public edge. One email address belongs to
+                            # one account in the whole install (ADR-0093 decision
+                            # 1), and a rename would free the old address for a
+                            # second account. Zitadel lets a user change their own
+                            # email and username through the auth API (/users/me)
+                            # and the v2 UserService (self-management is allowed
+                            # for the caller's own user ID), and it has no setting
+                            # that turns this off. So the edge answers 403 for
+                            # these methods, for every caller, the Platform owner
+                            # included: the v2 methods take a user ID, and the
+                            # edge cannot read a gRPC body to tell "self" from
+                            # "other". The console keeps every other call, so
+                            # the Platform owner still administers Zitadel there.
+                            #
+                            # These routes MUST precede the Zitadel API routes
+                            # below. The guard is scripts/check-edge-zitadel-routes.py,
+                            # which plays each request against the rendered
+                            # routes and fails when one reaches Zitadel.
+                            #
+                            # 1. A percent sign in a Zitadel API path. Zitadel's
+                            #    router matches on the decoded path, so
+                            #    /zitadel.user.v2.UserService/Set%45mail would miss
+                            #    the exact matches below and still reach SetEmail.
+                            #    No Zitadel API path the platform or the console
+                            #    sends carries one.
+                            - match:
+                                safe_regex: { regex: "^/(?:auth/v1/|v2/|v2beta/|zitadel\\.).*%.*$" }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            # 2. A method override header. grpc-gateway turns a form
+                            #    POST with X-HTTP-Method-Override into that method,
+                            #    which would slip a PATCH past the method matches
+                            #    below.
+                            - match:
+                                safe_regex: { regex: "^/(?:auth/v1/|v2/|v2beta/).*$" }
+                                headers:
+                                  - name: x-http-method-override
+                                    present_match: true
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            # 3. gRPC, gRPC-web and Connect use the same path. One
+                            #    exact path per method: Envoy caps the size of a
+                            #    regex, and an exact path reads plainly.
+                            - match: { path: "/zitadel.auth.v1.AuthService/UpdateMyUserName" }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            - match: { path: "/zitadel.auth.v1.AuthService/SetMyEmail" }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            - match: { path: "/zitadel.user.v2.UserService/SetEmail" }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            - match: { path: "/zitadel.user.v2.UserService/UpdateHumanUser" }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            - match: { path: "/zitadel.user.v2.UserService/UpdateUser" }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            - match: { path: "/zitadel.user.v2beta.UserService/SetEmail" }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            - match: { path: "/zitadel.user.v2beta.UserService/UpdateHumanUser" }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            - match: { path: "/zitadel.resources.user.v3alpha.ZITADELUsers/PatchUser" }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            - match: { path: "/zitadel.resources.user.v3alpha.ZITADELUsers/SetContactEmail" }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            - match: { path: "/zitadel.resources.user.v3alpha.ZITADELUsers/AddUsername" }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            - match: { path: "/zitadel.resources.user.v3alpha.ZITADELUsers/RemoveUsername" }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            # 4. REST. The GET on /auth/v1/users/me/email (read your
+                            #    own email) still routes.
+                            - match:
+                                safe_regex: { regex: "^/auth/v1/users/me/(?:username|email)/?$" }
+                                headers:
+                                  - name: ":method"
+                                    string_match: { exact: "GET" }
+                                    invert_match: true
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            - match:
+                                safe_regex: { regex: "^/(?:v2|v2beta)/users/[^/]+/email/?$" }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            - match:
+                                safe_regex: { regex: "^/v2/users/human/[^/]+/?$" }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
+                            # PATCH /v2/users/{id} is UpdateUser and PUT
+                            # /v2beta/users/{id} is the v2beta UpdateHumanUser. GET
+                            # and DELETE on the same paths, and POST
+                            # /v2/users/human (create a user, used by signup),
+                            # still route.
+                            - match:
+                                safe_regex: { regex: "^/(?:v2|v2beta)/users/[^/]+/?$" }
+                                headers:
+                                  - name: ":method"
+                                    string_match: { safe_regex: { regex: "(?i)^(?:PATCH|PUT)$" } }
+                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
                             # Zitadel REST + gRPC management/admin/auth/system APIs.
                             # The dashboard (server-side) and operators call these
                             # via the app host (ZITADEL_INTERNAL_ISSUER=app.<domain>):
@@ -3887,7 +3991,9 @@ data:
                             # dashboard, CLI, SDK or operator outside the pod
                             # network ever reads it.
                             #
-                            # Guarded by tests/envoy-edge-exposure.bats.
+                            # Guarded by scripts/check-edge-zitadel-routes.py: a
+                            # route to Zitadel that its allowlist does not name
+                            # fails the build.
                             - match: { prefix: "/v2/" }
                               route: { cluster: zitadel_upstream, timeout: 30s }
                             - match: { prefix: "/v2beta/" }
@@ -11621,7 +11727,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 04eff9283ad09f1a25445c433b778c93fd2c5676e4898ce03565ce525fd034f6
+        checksum/config: f8f7ead79c0469a921bfdeffe6a5130870d9b0148acec8fb355e0f8b919ccd6f
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
