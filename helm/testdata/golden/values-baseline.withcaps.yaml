@@ -1404,7 +1404,7 @@ spec:
       - key: app.kubernetes.io/component
         operator: In
         values:
-          - postgres-exec
+          - postgres-setup
           # deploy#1631: the first-admin Job. Under the namespace default-deny,
           # a component label absent from THIS list means the pod cannot even
           # reach CoreDNS — seed-first-admin then fails with an i/o timeout to
@@ -9256,12 +9256,6 @@ rules:
 - apiGroups:
   - ''
   resources:
-  - serviceaccounts/token
-  verbs:
-  - create
-- apiGroups:
-  - ''
-  resources:
   - events
   verbs:
   - create
@@ -10098,22 +10092,37 @@ metadata:
     app.kubernetes.io/name: reloader
     app.kubernetes.io/component: reloader
 rules:
-  # update+patch on a workload's pod template is a platform-identity grant,
-  # not a restart button: Kubernetes has no `serviceaccounts/use` verb, so
-  # whoever can rewrite `.spec.template` can set `serviceAccountName` to any
-  # SA in this namespace and take that workload's SVID (deploy#1210). RBAC
-  # cannot restrict a patch to one field path, so the narrowing available
-  # here is the resource list, and it is kept to what the chart actually
-  # annotates.
+  # patch on a workload's pod template is a platform-identity grant, not a
+  # restart button: Kubernetes has no `serviceaccounts/use` verb, so whoever
+  # can rewrite `.spec.template` can set the image, the command and
+  # `serviceAccountName`, and so become that workload (deploy#1210). RBAC
+  # cannot restrict a patch to one field path, so the narrowing available is
+  # the object name. The write rule names exactly the workloads that carry a
+  # `*.reloader.stakater.com/reload` annotation (values.yaml
+  # reloader.rollouts), and scripts/check-reloader-namespaced.py fails the
+  # build when the two lists differ, in either direction.
   #
-  # `daemonsets` is NOT in that list. No DaemonSet in any of the three
-  # charts carries a `*.reloader.stakater.com/reload` annotation — the
-  # annotated set is the envoy / ext-authz / dashboard / tenant-operator
-  # Deployments and the daemon / redis-stack StatefulSets. Re-add it only
-  # together with the DaemonSet that needs it.
+  # `patch` only. Reloader v1.4.6 rolls a Deployment or StatefulSet with a
+  # strategic-merge patch of the pod template annotation
+  # (internal/pkg/handler/upgrade.go: SupportsPatch is true for both), so
+  # `update` is never used. get, list and watch cannot be limited by name:
+  # the informers list every Deployment and StatefulSet to find the
+  # annotated ones.
+  #
+  # `daemonsets` is NOT here. No DaemonSet in any of the three charts carries
+  # a reload annotation. Re-add it only together with the DaemonSet that
+  # needs it.
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]
-    verbs: ["list", "get", "update", "patch"]
+    verbs: ["list", "get", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["gibson-dashboard","gibson-envoy","gibson-ext-authz","gibson-openfga","gibson-tenant-operator","gibson-zitadel","gibson-zitadel-login"]
+    verbs: ["patch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    resourceNames: ["gibson-gibson-workloads","gibson-redis-stack"]
+    verbs: ["patch"]
   - apiGroups: ["batch"]
     resources: ["cronjobs"]
     verbs: ["list", "get"]
@@ -10141,9 +10150,6 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["get", "list", "watch"]
-  - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: ["roles", "rolebindings"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -10191,18 +10197,25 @@ rules:
       - patch
 ---
 # Source: gibson/charts/gibson-workloads/templates/auth/openbao-deployment.yaml
-# openbao-auto-init RBAC. The sidecar manages ONE Secret:
-#   gibson-platform-operator-vault — the renewable service token consumed by
-#   the platform-operator and tenant-operator (deploy#454). Writing a
-#   non-renewable root token into the operator Secret causes
-#   VaultTransitReady=False because vaulttoken.Renewer calls renew-self
-#   which OpenBao rejects with 400 "lease is not renewable".
+# openbao-auto-init RBAC. The sidecar manages TWO Secrets, the renewable
+# service tokens of the two operators (deploy#454):
+#   gibson-platform-operator-vault — policy platform-admin
+#   gibson-tenant-operator-vault   — policy tenant-operator
+# A non-renewable root token in either would cause VaultTransitReady=False,
+# because vaulttoken.Renewer calls renew-self and OpenBao rejects it with
+# 400 "lease is not renewable".
 #
 # The unseal-keys Secret and the delete verb that went with it are gone
 # (deploy#1731): under the static seal nothing is minted into a Secret, so
-# the sidecar needs no delete and no second resourceName. The unscoped
-# `create` verb is required because POST /secrets does not allow
-# resourceName pinning (Kubernetes RBAC has no create + resourceNames).
+# the sidecar needs no delete. The unscoped `create` verb is required because
+# POST /secrets does not allow resourceName pinning (Kubernetes RBAC has no
+# create + resourceNames).
+#
+# No verb on Deployments. The sidecar used to roll both operators after a
+# re-mint, which needed `patch` on their Deployments, and a patch of a pod
+# template can change the image and the ServiceAccount. Reloader rolls each
+# operator when its token Secret changes instead (the reload annotation on
+# each Deployment).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -10236,13 +10249,7 @@ rules:
     verbs: ["get", "update", "patch"]
     resourceNames:
       - gibson-platform-operator-vault
-  # Patch deployments to trigger rollout restart after re-mint (token ID changes).
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    verbs: ["patch"]
-    resourceNames:
-      - gibson-tenant-operator
-      - gibson-platform-operator
+      - gibson-tenant-operator-vault
 ---
 # Source: gibson/charts/gibson-workloads/templates/dashboard/init-secrets-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -10462,6 +10469,30 @@ rules:
     resourceNames:
       - setec-daemon-client-tls
     verbs: ["get", "list", "watch"]
+---
+# Source: gibson/charts/gibson-workloads/templates/setec/daemon-client-secret.yaml
+# The External Secrets controller logs in to this store by minting a token
+# for $readerSA. The controller's own ClusterRole no longer grants
+# `create serviceaccounts/token` cluster-wide (scripts/vendor-operator-rbac.py
+# REMOVED_RULES), so this Role grants that one name, in this namespace, to
+# the controller's ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gibson-setec-cert-reader-token
+  namespace: setec-system
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.142.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: setec-cert-bridge
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: ["gibson-setec-cert-reader"]
+    verbs: ["create"]
 ---
 # Source: gibson/charts/openfga/templates/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -10684,6 +10715,24 @@ rules:
   - create
   - update
   - patch
+---
+# Source: gibson/templates/operators/external-secrets-token-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: external-secrets-store-token
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: external-secrets
+    app.kubernetes.io/instance: gibson
+  annotations:
+    # The wave of the rest of the controller's RBAC (external-secrets-rbac.yaml).
+    argocd.argoproj.io/sync-wave: '-20'
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: ["external-secrets"]
+    verbs: ["create"]
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -11010,6 +11059,28 @@ subjects:
     name: gibson-setec-cert-reader
     namespace: setec-system
 ---
+# Source: gibson/charts/gibson-workloads/templates/setec/daemon-client-secret.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gibson-setec-cert-reader-token
+  namespace: setec-system
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.142.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: setec-cert-bridge
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gibson-setec-cert-reader-token
+subjects:
+  - kind: ServiceAccount
+    name: external-secrets
+    namespace: gibson
+---
 # Source: gibson/charts/openfga/templates/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -11182,6 +11253,26 @@ subjects:
 - kind: ServiceAccount
   name: external-secrets
   namespace: gibson
+---
+# Source: gibson/templates/operators/external-secrets-token-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: external-secrets-store-token
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: external-secrets
+    app.kubernetes.io/instance: gibson
+  annotations:
+    argocd.argoproj.io/sync-wave: '-20'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: external-secrets-store-token
+subjects:
+  - kind: ServiceAccount
+    name: external-secrets
+    namespace: gibson
 ---
 # Source: gibson/charts/cert-manager/templates/cainjector-service.yaml
 apiVersion: v1
@@ -13618,7 +13709,7 @@ spec:
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket"
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
-        secret.reloader.stakater.com/reload: "gibson-stripe-credentials"
+        secret.reloader.stakater.com/reload: "gibson-stripe-credentials,gibson-tenant-operator-vault"
     spec:
       
       imagePullSecrets:
@@ -14126,31 +14217,30 @@ spec:
             # GIBSON_VAULT_ADDR points at the Vault Service — in-chart in
             # kind (set via values-kind.yaml) or an external Vault in
             # prod (set per-environment overlay).
-            # GIBSON_VAULT_AUTH_TOKEN is the periodic admin token the
-            # operator presents on every request — sourced from
-            # <release>-vault-keys (kind: dev-root materialised by the
-            # vault-dev-token-secret template; production: pre-existing
-            # Secret per chart NOTES.txt).
+            # GIBSON_VAULT_AUTH_TOKEN (transit KEK derivation) and
+            # GIBSON_VAULT_ADMIN_TOKEN (tenant namespaces) are the operator's
+            # own periodic OpenBao token, policy `tenant-operator`. The
+            # openbao-auto-init sidecar mints it into
+            # gibson-tenant-operator-vault and keeps it renewed
+            # (gibson-workloads templates/auth/openbao-deployment.yaml). The
+            # policy reaches tenant-<id> namespaces, sys/namespaces/tenant-*,
+            # transit/hmac and the root jwt mount's config, and nothing in
+            # the root kv store, where the escrowed Zitadel owner
+            # credentials live. The platform-admin token stays with the
+            # platform-operator.
             # GIBSON_VAULT_TRANSIT_KEY names the transit key the
-            # operator uses for HMAC-SHA256 KEK derivation; the chart's
-            # vault-transit-bootstrap Job creates the key on
-            # post-install/upgrade.
+            # operator uses for HMAC-SHA256 KEK derivation.
             - name: GIBSON_VAULT_ADDR
               value: "http://gibson-openbao.gibson.svc:8200"
             - name: GIBSON_VAULT_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: gibson-openbao-keys
+                  name: gibson-tenant-operator-vault
                   key: VAULT_ADMIN_TOKEN
-            # buildVaultAdminClient (cmd/main.go) reads GIBSON_VAULT_ADMIN_TOKEN
-            # while buildKEKDeriver reads GIBSON_VAULT_AUTH_TOKEN. Same Secret
-            # source for both — admin token doubles as auth token in dev/single-token
-            # deployments. The operator's two Vault clients are still separate Go
-            # constructions; this only unifies their env wiring.
             - name: GIBSON_VAULT_ADMIN_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: gibson-openbao-keys
+                  name: gibson-tenant-operator-vault
                   key: VAULT_ADMIN_TOKEN
             - name: GIBSON_VAULT_TRANSIT_KEY
               value: "master-kek"
@@ -17279,7 +17369,7 @@ spec:
         #    initial root token is held in memory for this one pass. It
         #    mounts kv v2 and transit, writes the two policies and the two
         #    kubernetes-auth roles, proves that this sidecar can log in with
-        #    its OWN ServiceAccount, mints the platform service token, seeds
+        #    its OWN ServiceAccount, mints the two operator tokens, seeds
         #    every key in files/openbao-seed-keys.txt, and is then REVOKED.
         #    The recovery keys in the init response are discarded unread
         #    (see vault_init).
@@ -17338,6 +17428,10 @@ spec:
               AUTH_MOUNT="kubernetes"
               SEEDER_ROLE="openbao-seeder"
               ADMIN_POLICY="platform-admin"
+              # The two operator tokens, each in its own Secret (vault_mint_token).
+              PLATFORM_TOKEN_SECRET="gibson-platform-operator-vault"
+              TENANT_OP_TOKEN_SECRET="gibson-tenant-operator-vault"
+              TENANT_OP_POLICY="tenant-operator"
               ESO_ROLE="eso-reader"
               ESO_POLICY="eso-reader"
               ESO_SA_NAME="external-secrets"
@@ -17570,7 +17664,9 @@ spec:
                 echo "[openbao-auto-init] seeder role login OK: ServiceAccount ${OWN_SA} -> auth/${AUTH_MOUNT} role ${SEEDER_ROLE} (policy ${ADMIN_POLICY})"
               }
 
-              vault_mint_renewable_service_token() {
+              vault_mint_token() {
+                # $1 minter token, $2 policy, $3 the Secret that receives it.
+                #
                 # Mint a RENEWABLE service token for operator runtime use.
                 # The initial root token is non-renewable by design, and it is
                 # revoked at the end of bootstrap; the platform-operator's
@@ -17585,28 +17681,27 @@ spec:
                 # revocation of whatever minted it (the initial root at init,
                 # a seeder login token on a re-mint).
                 #
-                # The policy is platform-admin, never root (deploy#1732). The
-                # operators create tenant namespaces, policies, transit keys
-                # and auth mounts, so the policy is `path "*"` with every
-                # capability including sudo; what it is NOT is a root token,
-                # so no root-policy token exists after bootstrap, and the
-                # openbao-seeder role (same policy) can mint a replacement.
+                # Two tokens, one per operator:
+                #   gibson-platform-operator-vault  policy platform-admin, the
+                #     platform-operator's (through the ESO copy
+                #     gibson-openbao-keys, see seed key gibson-vault-admin-token)
+                #   gibson-tenant-operator-vault    policy tenant-operator, the
+                #     tenant-operator's, read from this Secret directly
+                # The tenant-operator's token reaches tenant namespaces, the
+                # KEK HMAC and nothing in the root namespace's kv store, where
+                # the escrowed Zitadel owner credentials live.
                 #
-                # The resulting client_token is written into the
-                # `gibson-platform-operator-vault` Secret under key
-                # VAULT_ADMIN_TOKEN. The platform-operator and tenant-operator
-                # deployments are wired to this Secret (via
-                # platformOperator.vaultTokenSecretRef and
-                # dataPlane.vault.adminTokenSecretRef in values-kind.yaml) so
-                # they receive a token that renew-self can actually extend.
-                minter="$1"
-                body=$(jq -nc --arg p "$ADMIN_POLICY" '{"policies":[$p],"period":"1h","renewable":true,"no_parent":true}')
+                # Nothing here restarts a workload. Reloader rolls each
+                # operator when the Secret it reads changes (the
+                # secret.reloader.stakater.com/reload annotation on each).
+                minter="$1"; policy="$2"; secret="$3"
+                body=$(jq -nc --arg p "$policy" '{"policies":[$p],"period":"1h","renewable":true,"no_parent":true}')
                 code=$(curl -sS -o ${TMPD}/svc_tok.json -w '%{http_code}' \
                   -X POST -H "X-Vault-Token: ${minter}" -H "Content-Type: application/json" \
                   -d "$body" \
                   "${BAO_ADDR_LOCAL}/v1/auth/token/create")
                 if [ "$code" != "200" ]; then
-                  echo "[openbao-auto-init] FATAL: mint renewable service token returned HTTP $code: $(cat ${TMPD}/svc_tok.json)" >&2
+                  echo "[openbao-auto-init] FATAL: mint renewable service token (policy=${policy}) returned HTTP $code: $(cat ${TMPD}/svc_tok.json)" >&2
                   rm -f ${TMPD}/svc_tok.json
                   return 1
                 fi
@@ -17616,20 +17711,19 @@ spec:
                   echo "[openbao-auto-init] FATAL: renewable service token response missing client_token" >&2
                   return 1
                 fi
-                echo "[openbao-auto-init] minted renewable service token (policy=${ADMIN_POLICY}, period=1h, renewable=true)"
-                # Write the renewable token into the gibson-platform-operator-vault Secret.
-                # Idempotent: tries POST first (create); on 409 (already exists) falls back
-                # to PATCH (update). This Secret is consumed by the platform-operator and
-                # tenant-operator via vaultTokenSecretRef / adminTokenSecretRef.
+                echo "[openbao-auto-init] minted renewable service token (policy=${policy}, period=1h, renewable=true) for Secret ${secret}"
+                # Idempotent: tries POST first (create); on 409 (already
+                # exists) falls back to PATCH (update).
                 svc_tok_b64=$(printf '%s' "$svc_token" | base64 | tr -d '\n')
                 op_secret_body=$(jq -nc \
                   --arg ns "$NAMESPACE" \
+                  --arg name "$secret" \
                   --arg b64 "$svc_tok_b64" \
                   '{
                     "apiVersion":"v1",
                     "kind":"Secret",
                     "metadata":{
-                      "name":"gibson-platform-operator-vault",
+                      "name":$name,
                       "namespace":$ns,
                       "labels":{
                         "app.kubernetes.io/managed-by":"openbao-auto-init",
@@ -17645,61 +17739,33 @@ spec:
                   --data-binary "$op_secret_body" \
                   "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets")
                 if [ "$op_code" = "201" ]; then
-                  echo "[openbao-auto-init] created gibson-platform-operator-vault Secret"
-                  kube_rollout_restart_deployments
+                  echo "[openbao-auto-init] created ${secret} Secret"
                   return 0
                 fi
                 if [ "$op_code" = "409" ]; then
-                  # Secret already exists — patch the VAULT_ADMIN_TOKEN field.
                   patch_body=$(jq -nc --arg b64 "$svc_tok_b64" \
                     '{"data":{"VAULT_ADMIN_TOKEN":$b64}}')
                   patch_code=$(kube_curl -o ${TMPD}/op_patch.json -w '%{http_code}' \
                     -H "Content-Type: application/strategic-merge-patch+json" \
                     -X PATCH \
                     --data-binary "$patch_body" \
-                    "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/gibson-platform-operator-vault")
+                    "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/${secret}")
                   if [ "$patch_code" = "200" ]; then
-                    echo "[openbao-auto-init] patched gibson-platform-operator-vault Secret (token refresh)"
-                    kube_rollout_restart_deployments
+                    echo "[openbao-auto-init] patched ${secret} Secret (token refresh)"
                     return 0
                   fi
-                  echo "[openbao-auto-init] FATAL: patch gibson-platform-operator-vault returned HTTP $patch_code: $(cat ${TMPD}/op_patch.json)" >&2
+                  echo "[openbao-auto-init] FATAL: patch ${secret} returned HTTP $patch_code: $(cat ${TMPD}/op_patch.json)" >&2
                   return 1
                 fi
-                echo "[openbao-auto-init] FATAL: create gibson-platform-operator-vault returned HTTP $op_code: $(cat ${TMPD}/op_sec.json)" >&2
+                echo "[openbao-auto-init] FATAL: create ${secret} returned HTTP $op_code: $(cat ${TMPD}/op_sec.json)" >&2
                 return 1
               }
 
-              kube_rollout_restart_deployments() {
-                # Trigger rollout restart of the operator Deployments after a
-                # re-mint. Re-minting changes the token ID; running pods have
-                # the old ID as an env var and will keep getting 403 until they
-                # restart. Proactive renewal (vault_ensure_service_token) avoids
-                # re-mint in steady state, so this path fires only when the token
-                # was already expired (e.g., after an extended Vault downtime).
-                ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-                patch=$(jq -nc --arg ts "$ts" \
-                  '{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":$ts}}}}}')
-                for dep in gibson-tenant-operator gibson-platform-operator; do
-                  rc=$(kube_curl -o /dev/null -w '%{http_code}' \
-                    -H "Content-Type: application/strategic-merge-patch+json" \
-                    -X PATCH \
-                    --data-binary "$patch" \
-                    "${KUBE_API}/apis/apps/v1/namespaces/${NAMESPACE}/deployments/${dep}")
-                  if [ "$rc" = "200" ]; then
-                    echo "[openbao-auto-init] triggered rollout restart for Deployment/${dep}"
-                  else
-                    echo "[openbao-auto-init] WARN: rollout restart for ${dep} returned HTTP ${rc} (non-fatal)"
-                  fi
-                done
-              }
-
-              kube_read_service_token() {
-                # Read the current renewable service token out of the
-                # gibson-platform-operator-vault Secret. Prints the decoded
-                # token, or nothing.
+              kube_read_token() {
+                # Read the current renewable service token out of the Secret
+                # named $1. Prints the decoded token, or nothing.
                 b64=$(kube_curl \
-                  "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/gibson-platform-operator-vault" \
+                  "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/$1" \
                   2>/dev/null | grep '"VAULT_ADMIN_TOKEN":' | head -1 | \
                   sed 's/.*"VAULT_ADMIN_TOKEN":[[:space:]]*"\([^"]*\)".*/\1/')
                 if [ -n "$b64" ]; then
@@ -17707,10 +17773,13 @@ spec:
                 fi
               }
 
-              vault_ensure_service_token() {
-                # Ensure gibson-platform-operator-vault has a valid, non-expired
-                # renewable service token. Called on every pod start and every
-                # 5 minutes in steady state.
+              vault_ensure_token() {
+                # $1 the Secret, $2 its policy, $3 (optional) a seeder login
+                # token the caller already holds.
+                #
+                # Ensure the Secret has a valid, non-expired renewable service
+                # token. Called on every pod start and every 5 minutes in
+                # steady state, once per operator token.
                 #
                 # Strategy:
                 #   1. Read current token from the Secret.
@@ -17720,16 +17789,15 @@ spec:
                 #      Renewal keeps the same token ID, so running pods pick up
                 #      the extended TTL automatically without a restart.
                 #   5. If non-200 — log in with the openbao-seeder role, mint a
-                #      fresh token, patch the Secret and roll the operators.
-                #      The optional $1 is a seeder login token the caller
-                #      already holds; without it this function logs in itself.
+                #      fresh token and write the Secret. Reloader rolls the
+                #      operator that reads it.
                 # Reaching step 5 means the sidecar was down for longer than
                 # the token's period, or the store was restored from an
                 # archive into a cluster that never saw this token. Either
                 # way the re-auth path is the ServiceAccount, never a stored
                 # credential (deploy#1732 closed the deploy#1731 gap).
-                held="${1:-}"
-                current_tok=$(kube_read_service_token)
+                secret="$1"; policy="$2"; held="${3:-}"
+                current_tok=$(kube_read_token "$secret")
                 if [ -n "$current_tok" ]; then
                   lookup_resp=$(curl -sS -o ${TMPD}/lookup.json -w '%{http_code}' \
                     -H "X-Vault-Token: ${current_tok}" \
@@ -17737,41 +17805,57 @@ spec:
                   if [ "$lookup_resp" = "200" ]; then
                     ttl=$(grep -o '"ttl":[0-9]*' ${TMPD}/lookup.json | head -1 | cut -d: -f2)
                     ttl=${ttl:-0}
-                    if [ "$ttl" -gt 1800 ] 2>/dev/null; then
-                      return 0
+                    # A token that carries another policy (a store from
+                    # before the tenant-operator had its own) is replaced.
+                    if jq -e --arg p "$policy" '.data.policies | index($p)' ${TMPD}/lookup.json >/dev/null; then
+                      if [ "$ttl" -gt 1800 ] 2>/dev/null; then
+                        return 0
+                      fi
+                      echo "[openbao-auto-init] ${secret} token TTL=${ttl}s below 1800s threshold — renewing"
+                      renew_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+                        -X POST -H "X-Vault-Token: ${current_tok}" \
+                        "${BAO_ADDR_LOCAL}/v1/auth/token/renew-self")
+                      if [ "$renew_code" = "200" ]; then
+                        echo "[openbao-auto-init] ${secret} token renewed (same ID, extended TTL)"
+                        return 0
+                      fi
+                      echo "[openbao-auto-init] renew-self returned HTTP ${renew_code} — re-minting ${secret}"
+                    else
+                      echo "[openbao-auto-init] ${secret} token does not carry policy ${policy} — re-minting"
                     fi
-                    echo "[openbao-auto-init] service token TTL=${ttl}s below 1800s threshold — renewing"
-                    renew_code=$(curl -sS -o /dev/null -w '%{http_code}' \
-                      -X POST -H "X-Vault-Token: ${current_tok}" \
-                      "${BAO_ADDR_LOCAL}/v1/auth/token/renew-self")
-                    if [ "$renew_code" = "200" ]; then
-                      echo "[openbao-auto-init] service token renewed (same ID, extended TTL)"
-                      return 0
-                    fi
-                    echo "[openbao-auto-init] renew-self returned HTTP ${renew_code} — re-minting"
                   else
-                    echo "[openbao-auto-init] service token expired or invalid (HTTP ${lookup_resp}) — re-minting"
+                    echo "[openbao-auto-init] ${secret} token expired or invalid (HTTP ${lookup_resp}) — re-minting"
                   fi
                 else
-                  echo "[openbao-auto-init] no service token in gibson-platform-operator-vault — minting one"
+                  echo "[openbao-auto-init] no service token in ${secret} — minting one"
                 fi
                 minter="$held"
                 if [ -z "$minter" ]; then
                   minter=$(bao_login_seeder) || {
-                    echo "[openbao-auto-init] FATAL: the service token is unusable and the ${SEEDER_ROLE} login failed, so nothing can mint a replacement. Procedure: docs/runbooks/openbao-recovery.md" >&2
+                    echo "[openbao-auto-init] FATAL: the ${secret} token is unusable and the ${SEEDER_ROLE} login failed, so nothing can mint a replacement. Procedure: docs/runbooks/openbao-recovery.md" >&2
                     return 1
                   }
                 fi
-                if vault_mint_renewable_service_token "$minter"; then
-                  echo "[openbao-auto-init] re-minted the platform service token with the ${SEEDER_ROLE} role (ServiceAccount ${OWN_SA}); no root token was involved"
-                  rc=0
+                if vault_mint_token "$minter" "$policy" "$secret"; then
+                  echo "[openbao-auto-init] re-minted ${secret} with the ${SEEDER_ROLE} role (ServiceAccount ${OWN_SA}); no root token was involved"
+                  erc=0
                 else
-                  rc=1
+                  erc=1
                 fi
-                # The KV copy the tenant-operator reads through ESO must follow.
-                seed_one "$minter" gibson-vault-admin-token token:svctoken || rc=1
+                # The KV copy the platform-operator reads through ESO must follow.
+                if [ "$secret" = "$PLATFORM_TOKEN_SECRET" ]; then
+                  seed_one "$minter" gibson-vault-admin-token token:svctoken || erc=1
+                fi
                 [ -n "$held" ] || vault_revoke_self "$minter"
-                return $rc
+                return $erc
+              }
+
+              vault_ensure_tokens() {
+                # Both operator tokens. $1 (optional) a held seeder token.
+                trc=0
+                vault_ensure_token "$PLATFORM_TOKEN_SECRET" "$ADMIN_POLICY" "${1:-}" || trc=1
+                vault_ensure_token "$TENANT_OP_TOKEN_SECRET" "$TENANT_OP_POLICY" "${1:-}" || trc=1
+                return $trc
               }
 
               # ---------------------------------------------------------------
@@ -17944,7 +18028,7 @@ spec:
                         val=""; write=1
                       fi ;;
                     svctoken)
-                      val=$(kube_read_service_token)
+                      val=$(kube_read_token "$PLATFORM_TOKEN_SECRET")
                       if [ -n "$val" ] && [ "$val" != "$curval" ]; then write=1; fi ;;
                     *)
                       if [ "$present" != "true" ]; then
@@ -18049,6 +18133,27 @@ spec:
                   'path "*" { capabilities = ["create", "read", "update", "delete", "list", "sudo", "patch"] }
               ' || return 1
 
+                # tenant-operator: what the tenant-operator's code calls, and
+                # nothing in the root namespace's kv store, where the escrowed
+                # Zitadel owner credentials live (gibson
+                # operators/tenant/internal/clients/vault):
+                #   sys/auth/jwt              VerifyJWTAuthMounted reads the
+                #                             root jwt mount (a sys/auth/<path>
+                #                             read needs sudo)
+                #   sys/namespaces/tenant-*   create and delete tenant-<id>
+                #   transit/hmac/*            KEK derivation (HMAC only, which
+                #                             reveals no key material)
+                #   tenant-*                  everything inside a tenant
+                #                             namespace: its kv mount, jwt
+                #                             auth mount, policy and role
+                # lookup-self and renew-self come with the default policy.
+                vault_write_policy "$tok" "$TENANT_OP_POLICY" \
+                  'path "sys/auth/jwt" { capabilities = ["read", "sudo"] }
+              path "sys/namespaces/tenant-*" { capabilities = ["create", "update", "read", "delete"] }
+              path "transit/hmac/*" { capabilities = ["update"] }
+              path "tenant-*" { capabilities = ["create", "read", "update", "delete", "list", "sudo", "patch"] }
+              ' || return 1
+
                 # eso-reader: read-only, and only the platform material. ESO
                 # never needs write, and never needs transit.
                 #
@@ -18148,7 +18253,7 @@ spec:
                 vault_ensure_kv_v2_secret_mount "$seeder" || rc=1
                 vault_ensure_transit_mount "$seeder" || rc=1
                 vault_configure_access "$seeder" || rc=1
-                vault_ensure_service_token "$seeder" || rc=1
+                vault_ensure_tokens "$seeder" || rc=1
                 vault_seed_platform_secrets "$seeder" || rc=1
                 vault_revoke_self "$seeder"
                 seeder=""
@@ -18224,7 +18329,9 @@ spec:
                     sleep 5
                     continue
                   fi
-                  retry_n 5 5 vault_mint_renewable_service_token "$initial_root" || { sleep 5; continue; }
+                  retry_n 5 5 vault_mint_token "$initial_root" "$TENANT_OP_POLICY" "$TENANT_OP_TOKEN_SECRET" || { sleep 5; continue; }
+                  # The platform token last: svc_token holds it for the check below.
+                  retry_n 5 5 vault_mint_token "$initial_root" "$ADMIN_POLICY" "$PLATFORM_TOKEN_SECRET" || { sleep 5; continue; }
                   retry_n 5 5 vault_seed_platform_secrets "$initial_root" || { sleep 5; continue; }
                   # The replacement credential must authenticate BEFORE the
                   # initial root is destroyed.
@@ -18274,7 +18381,7 @@ spec:
                 fi
                 steady_tick=$((${steady_tick:-0} + 1))
                 if [ "$steady_tick" -ge 30 ]; then
-                  vault_ensure_service_token || echo "[openbao-auto-init] WARN: service token refresh failed"
+                  vault_ensure_tokens || echo "[openbao-auto-init] WARN: service token refresh failed"
                   vault_follow_keyring_inputs || echo "[openbao-auto-init] WARN: keyring input pass did not complete; it runs again in five minutes"
                   steady_tick=0
                 fi
@@ -21537,7 +21644,7 @@ metadata:
     velero.io/exclude-from-backup: "true"
   annotations:
     # Regular resource (never a hook — a hook-delete-policy would delete the
-    # database cluster) at wave -7: with the postgres-exec RBAC (-7), after
+    # database cluster) at wave -7: with the postgres-setup ServiceAccount (-7), after
     # the folded ExternalSecrets (-8), and BEFORE the -6 Sync-hook setup Jobs
     # that poll this CR's .status.currentPrimary. See the wave ordering note
     # in values.yaml (deploy#820).
@@ -21611,6 +21718,10 @@ spec:
     initdb:
       database: postgres
       owner: postgres
+      # The owner is `postgres`, so its Secret is the superuser Secret (see
+      # ONE SECRET FOR THE ROLE `postgres` in the header).
+      secret:
+        name: platform-postgres-superuser
   # Continuous backup to the durable bucket (deploy#1496,
   # deploy#1730). Setting barmanObjectStore is what turns on WAL archiving:
   # CNPG rewrites archive_command to ship every completed segment here. A
@@ -22127,7 +22238,7 @@ spec:
 ---
 # Source: gibson/charts/gibson-workloads/templates/setec/daemon-client-secret.yaml
 # ESO's kubernetes provider talks to the API server as $readerSA, so the
-# Role above is the whole of what this store can see. caProvider reads the
+# $readerSA Role at the top of this file is the whole of what this store can see. caProvider reads the
 # kube-root-ca.crt ConfigMap that every namespace carries.
 apiVersion: external-secrets.io/v1
 kind: ClusterSecretStore
@@ -24046,6 +24157,32 @@ spec:
   namespaceSelector:
     any: true
 ---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/rolebinding-scope-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gibson-tenant-operator-rolebinding-scope
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["rolebindings"]
+  matchConditions:
+    - name: tenant-operator
+      expression: request.userInfo.username == "system:serviceaccount:gibson:gibson-tenant-operator"
+  validations:
+    - expression: request.namespace.startsWith('tenant-')
+      reason: Forbidden
+      messageExpression: >-
+        'the tenant-operator writes RoleBindings in tenant namespaces only, and ' +
+        request.namespace + ' is not one'
+---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/runtime-agent-node-guard.yaml
 # Node-write guard for the runtime-agent ServiceAccount
 # (GHSA-p8f8-3qpw-7h93).
@@ -24434,6 +24571,18 @@ spec:
         ' issued to a workload written by the principal that manages this release. Add this' +
         ' principal to spire.identityAdmission.workloadCreators if it legitimately deploys' +
         ' Gibson, or drop the platform component label and ServiceAccount from the pod template.'
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/rolebinding-scope-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gibson-tenant-operator-rolebinding-scope
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  policyName: gibson-tenant-operator-rolebinding-scope
+  validationActions: ["Deny"]
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/runtime-agent-node-guard.yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -25018,25 +25167,22 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     argocd.argoproj.io/sync-wave: "-2"
 ---
-# Source: gibson/templates/jobs/platform-primitives-exec-rbac.yaml
+# Source: gibson/templates/jobs/postgres-setup-serviceaccount.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: postgres-exec
+  name: postgres-setup
   namespace: gibson
   labels:
-    app.kubernetes.io/component: postgres-bootstrap
+    app.kubernetes.io/component: postgres-setup
   annotations:
-    # Must exist before the Sync-wave -6 postgres-setup Jobs that run
-    # under this SA (deploy#908). Run as an early Sync hook (-7) instead of
-    # PostSync; postgres-exec is used only by ephemeral setup Jobs, so hook
-    # lifecycle is safe (unlike a standing-Deployment SA).
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/sync-wave: "-7"
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     helm.sh/hook: pre-install,pre-upgrade
     helm.sh/hook-weight: '-7'
     helm.sh/hook-delete-policy: before-hook-creation
+automountServiceAccountToken: false
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/hooks/pre-upgrade-runtime-check.yaml
 apiVersion: v1
@@ -25242,7 +25388,6 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     resourceNames:
-      - gibson-openbao-keys
       - "gibson-master-key"
       - gibson-dashboard-oidc
       - "gibson-zitadel-dashboard"
@@ -25324,85 +25469,6 @@ rules:
   # "waiting for iam-admin" with the Secret present and this list naming
   # the PAT alone. The Job now refuses to wait on a Secret it may not read.
   resourceNames: [iam-admin-pat, iam-admin, login-client]
----
-# Source: gibson/templates/jobs/platform-primitives-exec-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: postgres-exec
-  namespace: gibson
-  labels:
-    app.kubernetes.io/component: postgres-bootstrap
-  annotations:
-    # Must exist before the Sync-wave -6 postgres-setup Jobs that run
-    # under this SA (deploy#908). Run as an early Sync hook (-7) instead of
-    # PostSync; postgres-exec is used only by ephemeral setup Jobs, so hook
-    # lifecycle is safe (unlike a standing-Deployment SA).
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/sync-wave: "-7"
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    helm.sh/hook: pre-install,pre-upgrade
-    helm.sh/hook-weight: '-7'
-    helm.sh/hook-delete-policy: before-hook-creation
-rules:
-# deploy#1363: the pods/exec + pods-list + cnpg-cluster-read grants exist for
-# the CNPG-exec setup Jobs (gibson-workloads/openfga/zitadel/spire-
-# postgres-setup), which kubectl-exec into the elected in-cluster CNPG
-# primary. Since (deploy#1730) that Cluster is the platform Postgres
-# on every profile, so the grants render everywhere. `pods/exec: create` in
-# gibson is the same identity primitive as pod-create (exec a platform pod,
-# inherit its SVID / SA token / mounted Secrets; the platform-identity VAP
-# matches `pods` CREATE, not `pods/exec`).
-#
-# WHAT STANDS, AND FOR HOW LONG. These three objects are pre-install hooks
-# with before-hook-creation deletion, so they persist from one install or
-# upgrade to the next; the Jobs at wave -6 need them and a non-Job hook is
-# "succeeded" the moment it exists, so hook-succeeded deletion would remove
-# them first. The ServiceAccount therefore stands between upgrades, and
-# anyone who can create a Pod in this namespace can name it. Two things
-# bound what that buys: the secrets grant below names the six credential
-# Secrets the Jobs read and nothing else (get only, no list), and nothing
-# carries helm.sh/resource-policy: keep any more, so an uninstall removes
-# the identity instead of leaving a standing pods/exec grant behind.
-#
-# The exec grant itself cannot be name-scoped: the CNPG primary is elected,
-# so its pod name is not deterministic. That residual is inherent to the
-# exec-based bootstrap and would need a CNPG-native bootstrap (Database CR /
-# postInitSQL) to remove — tracked on #1363.
-- apiGroups:
-  - ''
-  resources:
-  - pods
-  verbs:
-  - get
-  - list
-- apiGroups:
-  - ''
-  resources:
-  - pods/exec
-  verbs:
-  - create
-- apiGroups:
-  - postgresql.cnpg.io
-  resources:
-  - clusters
-  verbs:
-  - get
-  - list
-- apiGroups:
-  - ''
-  resources:
-  - secrets
-  # The Jobs read one key of each of these by name; nothing else.
-  resourceNames:
-  - gibson-platform-postgres-credentials
-  - dashboard-postgres-credentials
-  - tenant-admin-postgres-credentials
-  - openfga-postgres-credentials
-  - spire-postgres-credentials
-  - zitadel-postgres-credentials
-  verbs:
-  - get
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/02-bootstrap-secrets.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -25503,34 +25569,6 @@ subjects:
 roleRef:
   kind: Role
   name: iam-admin-pat-escrow
-  apiGroup: rbac.authorization.k8s.io
----
-# Source: gibson/templates/jobs/platform-primitives-exec-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: postgres-exec
-  namespace: gibson
-  labels:
-    app.kubernetes.io/component: postgres-bootstrap
-  annotations:
-    # Must exist before the Sync-wave -6 postgres-setup Jobs that run
-    # under this SA (deploy#908). Run as an early Sync hook (-7) instead of
-    # PostSync; postgres-exec is used only by ephemeral setup Jobs, so hook
-    # lifecycle is safe (unlike a standing-Deployment SA).
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/sync-wave: "-7"
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    helm.sh/hook: pre-install,pre-upgrade
-    helm.sh/hook-weight: '-7'
-    helm.sh/hook-delete-policy: before-hook-creation
-subjects:
-- kind: ServiceAccount
-  name: postgres-exec
-  namespace: gibson
-roleRef:
-  kind: Role
-  name: postgres-exec
   apiGroup: rbac.authorization.k8s.io
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/01-service-reachability.yaml
@@ -25759,8 +25797,6 @@ spec:
 
           # --- structural Secrets (always expected in every overlay) ----
 
-          secret_has_key "$NS" "gibson-openbao-keys"     "OPENBAO_ADMIN_TOKEN"
-
           # Master-KEK Secret is platform-operator-owned. The chart names it via
           # tests.bootstrap.masterKeySecret; defaults to gibson-master-key
           # which matches the gibson-operators chart's default
@@ -25774,10 +25810,11 @@ spec:
           secret_has_key "$NS" "gibson-dashboard-oidc" "client_secret"
 
           # The Zitadel owner credentials (iam-admin-pat, iam-admin, the System
-          # API key) are not checked here. Only bootstrap may read them
-          # (scripts/check-owner-credential-readers.py), and a test that
-          # reads them would be one more reader. The platform-operator's
-          # PlatformBootstrap conditions prove the owner PAT works.
+          # API key) and the OpenBao platform-admin token (gibson-openbao-keys,
+          # which can read the escrowed copies) are not checked here. Only
+          # bootstrap may read them (scripts/check-owner-credential-readers.py),
+          # and a test that reads them would be one more reader. The
+          # platform-operator's PlatformBootstrap conditions prove both work.
 
           # Dashboard MACHINE_USER PAT.
           # Default `gibson-zitadel-dashboard` matches gibson-operators
@@ -27792,22 +27829,131 @@ spec:
   template:
     metadata:
       labels:
-        # deploy#1365: pod-template label so the bringup-jobs
-        # NetworkPolicy can select this Job's pods under the
-        # gibson namespace default-deny (unlabelled = severed).
-        app.kubernetes.io/component: postgres-exec
+        # networkpolicy-bringup-jobs.yaml selects this label for egress.
+        app.kubernetes.io/component: postgres-setup
+        # The opt-in the platform-postgres instances policy admits on :5432
+        # (gibson-workloads namespace-isolation/subchart-workloads.yaml).
+        gibson.zeroroot.ai/platform-postgres-client: "true"
     spec:
       restartPolicy: OnFailure
-      serviceAccountName: postgres-exec
+      serviceAccountName: postgres-setup
+      automountServiceAccountToken: false
       containers:
       - name: setup
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
-        command:
-        - bash
-        - -ec
+        image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
+        env:
+        - name: PGHOST
+          value: platform-postgres-rw.gibson.svc
+        - name: PGPORT
+          value: "5432"
+        - name: PGSSLMODE
+          value: require
+        - name: PGCONNECT_TIMEOUT
+          value: "5"
+        - name: PGUSER
+          valueFrom:
+            secretKeyRef:
+              name: platform-postgres-superuser
+              key: username
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-postgres-superuser
+              key: password
+        - name: PGSETUP_PW_GIBSON_PLATFORM
+          valueFrom:
+            secretKeyRef:
+              name: gibson-platform-postgres-credentials
+              key: password
+        - name: PGSETUP_PW_DASHBOARD
+          valueFrom:
+            secretKeyRef:
+              name: dashboard-postgres-credentials
+              key: password
+        - name: PGSETUP_PW_TENANT_ADMIN
+          valueFrom:
+            secretKeyRef:
+              name: tenant-admin-postgres-credentials
+              key: password
+        command: [bash, -ec]
         args:
-        - "# Wait for primary pod\necho \"waiting for platform-postgres primary...\"\n# Source the primary instance name from CNPG's authoritative\n# Cluster.status.currentPrimary field instead of pod labels.\n# The `role=primary` label is applied by CNPG AFTER promotion,\n# which races this hook at sync-wave -5. Cluster status is set\n# by CNPG the moment the primary is elected. deploy#322\n# finding 9.\nPOD=\"\"\nfor i in $(seq 1 90); do\n  P=$(kubectl -n gibson get cluster.postgresql.cnpg.io platform-postgres \\\n      -o jsonpath='{.status.currentPrimary}' 2>/dev/null || true)\n  if [ -n \"$P\" ] && \\\n     kubectl -n gibson get pod \"$P\" \\\n      -o jsonpath='{.status.phase}' 2>/dev/null | grep -q Running; then\n    POD=$P\n    break\n  fi\n  sleep 2\ndone\nif [ -z \"$POD\" ]; then\n  echo \"ERROR: platform-postgres has no Running currentPrimary after 180s \u2014 Argo will retry\"\n  exit 1\nfi\necho \"primary pod: $POD\"\n\nEXEC=\"kubectl exec -n gibson $POD -c postgres --\"\nEXEC_I=\"kubectl exec -i -n gibson $POD -c postgres --\"\n\n# role:db:role_opts:secret_name\n#\n# gitops#99: tenant_admin needs CREATEROLE in addition to\n# CREATEDB. The tenant-operator's per-tenant Postgres\n# provisioner creates BOTH the per-tenant database AND a\n# per-tenant `<tenant>_app` role inside it. Without\n# CREATEROLE the saga step \"Postgres\" fails at the role-\n# creation stage with SQLSTATE 42501.\nENTRIES=(\n  \"gibson_platform:gibson_platform:LOGIN:gibson-platform-postgres-credentials\"\n  \"dashboard:dashboard:LOGIN:dashboard-postgres-credentials\"\n  \"tenant_admin:tenant_admin:LOGIN CREATEDB CREATEROLE:tenant-admin-postgres-credentials\"\n)\n\nfor entry in \"${ENTRIES[@]}\"; do\n  IFS=\":\" read -r ROLE DB ROLE_OPTS SECRET_NAME <<< \"$entry\"\n  echo \"[$ROLE] starting setup...\"\n\n  # Wait for Secret\n  until PW=$(kubectl -n gibson get secret \"$SECRET_NAME\" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d) && [ -n \"$PW\" ]; do\n    echo \"[$ROLE] waiting for Secret $SECRET_NAME...\"\n    sleep 2\n  done\n  echo \"[$ROLE] secret materialised\"\n\n  # CREATE ROLE if new, then ALWAYS apply the declared\n  # ROLE_OPTS via ALTER ROLE \u2014 this makes the setup Job\n  # idempotent on attribute changes too, not just on\n  # role-presence. Previously, an existing role's options\n  # could drift from the declared set forever (the case\n  # that caused gitops#99: tenant_admin's CREATEROLE flag\n  # was missing on a cluster created before the update).\n  cat <<SQL | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1\n  DO \\$\\$\n  BEGIN\n    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '$ROLE') THEN\n      EXECUTE 'CREATE ROLE \"' || '$ROLE' || '\" WITH $ROLE_OPTS';\n    ELSE\n      EXECUTE 'ALTER ROLE \"' || '$ROLE' || '\" WITH $ROLE_OPTS';\n    END IF;\n  END\n  \\$\\$;\nSQL\n\n  # CREATE DATABASE (no IF NOT EXISTS)\n  if ! $EXEC psql -U postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='$DB'\" | grep -q '^1$'; then\n    $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"CREATE DATABASE \\\"$DB\\\" OWNER \\\"$ROLE\\\";\"\n  else\n    $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"ALTER DATABASE \\\"$DB\\\" OWNER TO \\\"$ROLE\\\";\"\n  fi\n\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"GRANT ALL PRIVILEGES ON DATABASE \\\"$DB\\\" TO \\\"$ROLE\\\";\"\n  # The password is a SQL string literal: double every single quote.\nPW_SQL=$(printf '%s' \"$PW\" | sed \"s/'/''/g\")\nprintf \"%s\\n\" \"ALTER ROLE \\\"$ROLE\\\" WITH PASSWORD '$PW_SQL';\" | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1 -d postgres\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d \"$DB\" -c \"ALTER SCHEMA public OWNER TO \\\"$ROLE\\\"; GRANT ALL ON SCHEMA public TO \\\"$ROLE\\\";\"\n\n  echo \"[$ROLE] setup complete\"\ndone\n\n# gitops#101: per-tenant DBs require pg_trgm for the\n# missions_name_trgm_idx GIN index in migration 003.\n# CREATE DATABASE doesn't carry extensions over from\n# template1 unless they're installed there. Seed it in\n# template1 so every NEW per-tenant DB inherits it;\n# backfill any existing tenant_* DBs in-place so the\n# current cluster recovers without manual operator work.\necho \"\
-          [pg_trgm] installing in template1...\"\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d template1 \\\n  -c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\"\necho \"[pg_trgm] template1 done.\"\n\necho \"[pg_trgm] backfilling existing per-tenant DBs...\"\nfor tdb in $($EXEC psql -U postgres -tAc \\\n    \"SELECT datname FROM pg_database WHERE datname LIKE 'tenant\\\\_%' ESCAPE '\\\\\\\\' AND datname <> 'tenant_admin'\"); do\n  echo \"  [pg_trgm] $tdb\"\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d \"$tdb\" \\\n    -c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\"\ndone\necho \"[pg_trgm] backfill complete.\"\n\n# tenant-operator#69: the operator's Neo4j data-plane step\n# writes one row per tenant into the tenant_neo4j_endpoints\n# registry table (bolt URI + secret name + tier). The table\n# lives in the platform postgres `postgres` database that\n# `tenant_admin` connects to via DATAPLANE_PG_ADMIN_DSN.\n# The CREATE TABLE migration ships in\n# tenant-operator/migrations/001_create_tenant_neo4j_endpoints.up.sql\n# but the operator never runs it on startup, so every\n# signup's Neo4j step failed at registry-insert with\n# SQLSTATE 42P01 (\"relation does not exist\"). This bash\n# CREATE is the gitops-side counterpart of that migration\n# so signup works on a fresh cluster; tenant-operator#69\n# tracks moving this to a proper embed.FS + golang-migrate\n# pass at operator startup.\n# D1-G (deploy#256): tenant-operator's DATAPLANE_PG_ADMIN_DSN\n# connects as `tenant_admin` to the BUILT-IN `postgres` DB,\n# NOT the `tenant_admin` DB. The operator's platform-db\n# migrations try CREATE TABLE in `public` of `postgres` and\n# fail with `permission denied for schema public`\n# (SQLSTATE 42501) because PostgreSQL 15+ owns `public` in\n# the `postgres` DB as `pg_database_owner` and revoked\n# default CREATE for non-owners. The other DBs (gibson_platform,\n# tenant_admin) get the ownership flip via the loop above\n# (line 94), but `postgres` is not in ENTRIES \u2014 it's the\n# cluster's built-in DB.\n#\n# Fix: explicit GRANT CREATE,USAGE on the postgres-DB public\n# schema for tenant_admin. Idempotent \u2014 re-running with\n# privileges already granted is a no-op.\necho \"[postgres-db] granting tenant_admin CREATE on public schema of postgres DB...\"\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres \\\n  -c \"GRANT CREATE, USAGE ON SCHEMA public TO tenant_admin;\"\necho \"[postgres-db] grant complete.\"\n\necho \"[neo4j-registry] ensuring tenant_neo4j_endpoints exists...\"\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"\n  CREATE TABLE IF NOT EXISTS tenant_neo4j_endpoints (\n      tenant_id   TEXT        PRIMARY KEY,\n      bolt_uri    TEXT        NOT NULL,\n      secret_name TEXT        NOT NULL,\n      tier        TEXT        NOT NULL,\n      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n      ready_at    TIMESTAMPTZ,\n      version     INT         NOT NULL DEFAULT 1\n  );\n  GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_neo4j_endpoints TO tenant_admin;\n\"\necho \"[neo4j-registry] table ready.\"\n\necho \"ALL_ROLES_SETUP_OK\"\n"
+        - |
+          set -euo pipefail
+          # Bitnami puts the client under /opt/bitnami/postgresql/bin.
+          export PATH="/opt/bitnami/postgresql/bin:$PATH"
+          echo "[postgres-setup] waiting for platform-postgres-rw to accept connections..."
+          i=0
+          until pg_isready -q -d postgres; do
+            i=$((i + 1))
+            if [ "$i" -ge 90 ]; then
+              echo "[postgres-setup] ERROR: platform-postgres-rw did not accept connections in 180s; the Job retries"
+              exit 1
+            fi
+            sleep 2
+          done
+          PSQL=(psql -X -q -v ON_ERROR_STOP=1)
+    
+          # setup <role> <database> <role options> <env var that holds the password>
+          setup() {
+            echo "[$1] role, database and schema..."
+            if [ -z "${!4:-}" ]; then
+              echo "[$1] ERROR: the password in $4 is empty"
+              exit 1
+            fi
+            "${PSQL[@]}" -d postgres -v role="$1" -v db="$2" -v opts="$3" -v pwenv="$4" <<'SQL'
+          \getenv pw :pwenv
+          SELECT format('CREATE ROLE %I', :'role')
+            WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = :'role') \gexec
+          SELECT format('ALTER ROLE %I WITH %s PASSWORD %L', :'role', :'opts', :'pw') \gexec
+          SELECT format('CREATE DATABASE %I OWNER %I', :'db', :'role')
+            WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_database WHERE datname = :'db') \gexec
+          SELECT format('ALTER DATABASE %I OWNER TO %I', :'db', :'role') \gexec
+          SELECT format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', :'db', :'role') \gexec
+          \connect :db
+          SELECT format('ALTER SCHEMA public OWNER TO %I', :'role') \gexec
+          SELECT format('GRANT ALL ON SCHEMA public TO %I', :'role') \gexec
+          SQL
+            echo "[$1] setup complete"
+          }
+          setup "gibson_platform" "gibson_platform" "LOGIN" PGSETUP_PW_GIBSON_PLATFORM
+          setup "dashboard" "dashboard" "LOGIN" PGSETUP_PW_DASHBOARD
+          setup "tenant_admin" "tenant_admin" "LOGIN CREATEDB CREATEROLE" PGSETUP_PW_TENANT_ADMIN
+          # gitops#101: per-tenant databases need pg_trgm for the
+          # missions_name_trgm_idx GIN index in migration 003. CREATE DATABASE copies
+          # template1, so the extension goes there for every NEW tenant database, and
+          # every existing tenant_* database gets it in place.
+          echo "[pg_trgm] template1 and existing tenant databases..."
+          "${PSQL[@]}" -d template1 -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+          for tdb in $("${PSQL[@]}" -d postgres -tAc "SELECT datname FROM pg_catalog.pg_database WHERE datname LIKE 'tenant\_%' AND datname <> 'tenant_admin'"); do
+            echo "  [pg_trgm] $tdb"
+            "${PSQL[@]}" -d "$tdb" -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+          done
+          
+          # D1-G (deploy#256): the tenant-operator's DATAPLANE_PG_ADMIN_DSN connects as
+          # tenant_admin to the built-in postgres database, where PostgreSQL 15 and
+          # later own the public schema as pg_database_owner and grant no CREATE to
+          # others. Its platform-db migrations create tables there.
+          echo "[postgres-db] tenant_admin may create in the public schema of postgres..."
+          "${PSQL[@]}" -d postgres -c "GRANT CREATE, USAGE ON SCHEMA public TO tenant_admin;"
+          
+          # tenant-operator#69: the Neo4j data-plane step writes one row per tenant
+          # into tenant_neo4j_endpoints, in the postgres database tenant_admin
+          # connects to. The operator does not run that migration at startup, so the
+          # table is created here.
+          echo "[neo4j-registry] tenant_neo4j_endpoints..."
+          "${PSQL[@]}" -d postgres <<'SQL'
+          CREATE TABLE IF NOT EXISTS tenant_neo4j_endpoints (
+              tenant_id   TEXT        PRIMARY KEY,
+              bolt_uri    TEXT        NOT NULL,
+              secret_name TEXT        NOT NULL,
+              tier        TEXT        NOT NULL,
+              created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              ready_at    TIMESTAMPTZ,
+              version     INT         NOT NULL DEFAULT 1
+          );
+          GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_neo4j_endpoints TO tenant_admin;
+          SQL
+          echo "[postgres-setup] ALL_ROLES_SETUP_OK"
 ---
 # Source: gibson/templates/jobs/openfga-postgres-setup-job.yaml
 apiVersion: batch/v1
@@ -27850,30 +27996,84 @@ spec:
   template:
     metadata:
       labels:
-        # deploy#1365: pod-template label so the bringup-jobs
-        # NetworkPolicy can select this Job's pods under the
-        # gibson namespace default-deny (unlabelled = severed).
-        app.kubernetes.io/component: postgres-exec
+        # networkpolicy-bringup-jobs.yaml selects this label for egress.
+        app.kubernetes.io/component: postgres-setup
+        # The opt-in the platform-postgres instances policy admits on :5432
+        # (gibson-workloads namespace-isolation/subchart-workloads.yaml).
+        gibson.zeroroot.ai/platform-postgres-client: "true"
     spec:
       restartPolicy: OnFailure
-      serviceAccountName: postgres-exec
+      serviceAccountName: postgres-setup
+      automountServiceAccountToken: false
       containers:
       - name: setup
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+        image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
         env:
-        - name: ROLE
-          value: openfga
-        - name: DB
-          value: openfga
-        - name: ROLE_OPTS
-          value: LOGIN
-        - name: SECRET_NAME
-          value: openfga-postgres-credentials
-        command:
-        - sh
-        - -ec
+        - name: PGHOST
+          value: platform-postgres-rw.gibson.svc
+        - name: PGPORT
+          value: "5432"
+        - name: PGSSLMODE
+          value: require
+        - name: PGCONNECT_TIMEOUT
+          value: "5"
+        - name: PGUSER
+          valueFrom:
+            secretKeyRef:
+              name: platform-postgres-superuser
+              key: username
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-postgres-superuser
+              key: password
+        - name: PGSETUP_PW_OPENFGA
+          valueFrom:
+            secretKeyRef:
+              name: openfga-postgres-credentials
+              key: password
+        command: [bash, -ec]
         args:
-        - "echo \"[$ROLE] waiting for platform-postgres primary...\"\n# Source the primary instance name from CNPG's authoritative\n# Cluster.status.currentPrimary field instead of pod labels.\n# The `role=primary` label is applied by CNPG AFTER promotion,\n# which races this hook at sync-wave -5. Cluster status is set\n# by CNPG the moment the primary is elected. deploy#322\n# finding 9.\nPOD=\"\"\nfor i in $(seq 1 90); do\n  P=$(kubectl -n gibson get cluster.postgresql.cnpg.io platform-postgres \\\n      -o jsonpath='{.status.currentPrimary}' 2>/dev/null || true)\n  if [ -n \"$P\" ] && \\\n     kubectl -n gibson get pod \"$P\" \\\n      -o jsonpath='{.status.phase}' 2>/dev/null | grep -q Running; then\n    POD=$P\n    break\n  fi\n  sleep 2\ndone\nif [ -z \"$POD\" ]; then\n  echo \"ERROR: platform-postgres has no Running currentPrimary after 180s \u2014 Argo will retry\"\n  exit 1\nfi\necho \"[$ROLE] primary pod: $POD\"\n\necho \"[$ROLE] waiting for Secret $SECRET_NAME...\"\nuntil PW=$(kubectl -n gibson get secret \"$SECRET_NAME\" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d) && [ -n \"$PW\" ]; do sleep 2; done\necho \"[$ROLE] secret materialised\"\n\nEXEC=\"kubectl exec -n gibson $POD -c postgres --\"\nEXEC_I=\"kubectl exec -i -n gibson $POD -c postgres --\"\n\ncat <<SQL | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1\nDO \\$\\$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '$ROLE') THEN\n    EXECUTE 'CREATE ROLE \"' || '$ROLE' || '\" WITH $ROLE_OPTS';\n  END IF;\nEND\n\\$\\$;\nSQL\n\nif ! $EXEC psql -U postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='$DB'\" | grep -q '^1$'; then\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"CREATE DATABASE \\\"$DB\\\" OWNER \\\"$ROLE\\\";\"\nelse\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"ALTER DATABASE \\\"$DB\\\" OWNER TO \\\"$ROLE\\\";\"\nfi\n\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"GRANT ALL PRIVILEGES ON DATABASE \\\"$DB\\\" TO \\\"$ROLE\\\";\"\n# The password is a SQL string literal: double every single quote.\nPW_SQL=$(printf '%s' \"$PW\" | sed \"s/'/''/g\")\nprintf \"%s\\n\" \"ALTER ROLE \\\"$ROLE\\\" WITH PASSWORD '$PW_SQL';\" | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1 -d postgres\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d \"$DB\" -c \"ALTER SCHEMA public OWNER TO \\\"$ROLE\\\"; GRANT ALL ON SCHEMA public TO \\\"$ROLE\\\";\"\n\necho \"[$ROLE] setup complete\"\n"
+        - |
+          set -euo pipefail
+          # Bitnami puts the client under /opt/bitnami/postgresql/bin.
+          export PATH="/opt/bitnami/postgresql/bin:$PATH"
+          echo "[postgres-setup] waiting for platform-postgres-rw to accept connections..."
+          i=0
+          until pg_isready -q -d postgres; do
+            i=$((i + 1))
+            if [ "$i" -ge 90 ]; then
+              echo "[postgres-setup] ERROR: platform-postgres-rw did not accept connections in 180s; the Job retries"
+              exit 1
+            fi
+            sleep 2
+          done
+          PSQL=(psql -X -q -v ON_ERROR_STOP=1)
+    
+          # setup <role> <database> <role options> <env var that holds the password>
+          setup() {
+            echo "[$1] role, database and schema..."
+            if [ -z "${!4:-}" ]; then
+              echo "[$1] ERROR: the password in $4 is empty"
+              exit 1
+            fi
+            "${PSQL[@]}" -d postgres -v role="$1" -v db="$2" -v opts="$3" -v pwenv="$4" <<'SQL'
+          \getenv pw :pwenv
+          SELECT format('CREATE ROLE %I', :'role')
+            WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = :'role') \gexec
+          SELECT format('ALTER ROLE %I WITH %s PASSWORD %L', :'role', :'opts', :'pw') \gexec
+          SELECT format('CREATE DATABASE %I OWNER %I', :'db', :'role')
+            WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_database WHERE datname = :'db') \gexec
+          SELECT format('ALTER DATABASE %I OWNER TO %I', :'db', :'role') \gexec
+          SELECT format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', :'db', :'role') \gexec
+          \connect :db
+          SELECT format('ALTER SCHEMA public OWNER TO %I', :'role') \gexec
+          SELECT format('GRANT ALL ON SCHEMA public TO %I', :'role') \gexec
+          SQL
+            echo "[$1] setup complete"
+          }
+          setup "openfga" "openfga" "LOGIN" PGSETUP_PW_OPENFGA
+          echo "[postgres-setup] ALL_ROLES_SETUP_OK"
 ---
 # Source: gibson/templates/jobs/spire-postgres-setup-job.yaml
 apiVersion: batch/v1
@@ -27916,30 +28116,84 @@ spec:
   template:
     metadata:
       labels:
-        # deploy#1365: pod-template label so the bringup-jobs
-        # NetworkPolicy can select this Job's pods under the
-        # gibson namespace default-deny (unlabelled = severed).
-        app.kubernetes.io/component: postgres-exec
+        # networkpolicy-bringup-jobs.yaml selects this label for egress.
+        app.kubernetes.io/component: postgres-setup
+        # The opt-in the platform-postgres instances policy admits on :5432
+        # (gibson-workloads namespace-isolation/subchart-workloads.yaml).
+        gibson.zeroroot.ai/platform-postgres-client: "true"
     spec:
       restartPolicy: OnFailure
-      serviceAccountName: postgres-exec
+      serviceAccountName: postgres-setup
+      automountServiceAccountToken: false
       containers:
       - name: setup
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+        image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
         env:
-        - name: ROLE
-          value: spire
-        - name: DB
-          value: spire
-        - name: ROLE_OPTS
-          value: LOGIN
-        - name: SECRET_NAME
-          value: spire-postgres-credentials
-        command:
-        - sh
-        - -ec
+        - name: PGHOST
+          value: platform-postgres-rw.gibson.svc
+        - name: PGPORT
+          value: "5432"
+        - name: PGSSLMODE
+          value: require
+        - name: PGCONNECT_TIMEOUT
+          value: "5"
+        - name: PGUSER
+          valueFrom:
+            secretKeyRef:
+              name: platform-postgres-superuser
+              key: username
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-postgres-superuser
+              key: password
+        - name: PGSETUP_PW_SPIRE
+          valueFrom:
+            secretKeyRef:
+              name: spire-postgres-credentials
+              key: password
+        command: [bash, -ec]
         args:
-        - "echo \"[$ROLE] waiting for platform-postgres primary...\"\n# Source the primary instance name from CNPG's authoritative\n# Cluster.status.currentPrimary field instead of pod labels.\n# The `role=primary` label is applied by CNPG AFTER promotion,\n# which races this hook at sync-wave -5. Cluster status is set\n# by CNPG the moment the primary is elected. deploy#322\n# finding 9.\nPOD=\"\"\nfor i in $(seq 1 90); do\n  P=$(kubectl -n gibson get cluster.postgresql.cnpg.io platform-postgres \\\n      -o jsonpath='{.status.currentPrimary}' 2>/dev/null || true)\n  if [ -n \"$P\" ] && \\\n     kubectl -n gibson get pod \"$P\" \\\n      -o jsonpath='{.status.phase}' 2>/dev/null | grep -q Running; then\n    POD=$P\n    break\n  fi\n  sleep 2\ndone\nif [ -z \"$POD\" ]; then\n  echo \"ERROR: platform-postgres has no Running currentPrimary after 180s \u2014 Argo will retry\"\n  exit 1\nfi\necho \"[$ROLE] primary pod: $POD\"\n\necho \"[$ROLE] waiting for Secret $SECRET_NAME...\"\nuntil PW=$(kubectl -n gibson get secret \"$SECRET_NAME\" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d) && [ -n \"$PW\" ]; do sleep 2; done\n\nEXEC=\"kubectl exec -n gibson $POD -c postgres --\"\nEXEC_I=\"kubectl exec -i -n gibson $POD -c postgres --\"\n\ncat <<SQL | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1\nDO \\$\\$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '$ROLE') THEN\n    EXECUTE 'CREATE ROLE \"' || '$ROLE' || '\" WITH $ROLE_OPTS';\n  END IF;\nEND\n\\$\\$;\nSQL\n\nif ! $EXEC psql -U postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='$DB'\" | grep -q '^1$'; then\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"CREATE DATABASE \\\"$DB\\\" OWNER \\\"$ROLE\\\";\"\nelse\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"ALTER DATABASE \\\"$DB\\\" OWNER TO \\\"$ROLE\\\";\"\nfi\n\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"GRANT ALL PRIVILEGES ON DATABASE \\\"$DB\\\" TO \\\"$ROLE\\\";\"\n# The password is a SQL string literal: double every single quote.\nPW_SQL=$(printf '%s' \"$PW\" | sed \"s/'/''/g\")\nprintf \"%s\\n\" \"ALTER ROLE \\\"$ROLE\\\" WITH PASSWORD '$PW_SQL';\" | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1 -d postgres\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d \"$DB\" -c \"ALTER SCHEMA public OWNER TO \\\"$ROLE\\\"; GRANT ALL ON SCHEMA public TO \\\"$ROLE\\\";\"\n\necho \"[$ROLE] setup complete\"\n"
+        - |
+          set -euo pipefail
+          # Bitnami puts the client under /opt/bitnami/postgresql/bin.
+          export PATH="/opt/bitnami/postgresql/bin:$PATH"
+          echo "[postgres-setup] waiting for platform-postgres-rw to accept connections..."
+          i=0
+          until pg_isready -q -d postgres; do
+            i=$((i + 1))
+            if [ "$i" -ge 90 ]; then
+              echo "[postgres-setup] ERROR: platform-postgres-rw did not accept connections in 180s; the Job retries"
+              exit 1
+            fi
+            sleep 2
+          done
+          PSQL=(psql -X -q -v ON_ERROR_STOP=1)
+    
+          # setup <role> <database> <role options> <env var that holds the password>
+          setup() {
+            echo "[$1] role, database and schema..."
+            if [ -z "${!4:-}" ]; then
+              echo "[$1] ERROR: the password in $4 is empty"
+              exit 1
+            fi
+            "${PSQL[@]}" -d postgres -v role="$1" -v db="$2" -v opts="$3" -v pwenv="$4" <<'SQL'
+          \getenv pw :pwenv
+          SELECT format('CREATE ROLE %I', :'role')
+            WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = :'role') \gexec
+          SELECT format('ALTER ROLE %I WITH %s PASSWORD %L', :'role', :'opts', :'pw') \gexec
+          SELECT format('CREATE DATABASE %I OWNER %I', :'db', :'role')
+            WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_database WHERE datname = :'db') \gexec
+          SELECT format('ALTER DATABASE %I OWNER TO %I', :'db', :'role') \gexec
+          SELECT format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', :'db', :'role') \gexec
+          \connect :db
+          SELECT format('ALTER SCHEMA public OWNER TO %I', :'role') \gexec
+          SELECT format('GRANT ALL ON SCHEMA public TO %I', :'role') \gexec
+          SQL
+            echo "[$1] setup complete"
+          }
+          setup "spire" "spire" "LOGIN" PGSETUP_PW_SPIRE
+          echo "[postgres-setup] ALL_ROLES_SETUP_OK"
 ---
 # Source: gibson/templates/jobs/zitadel-postgres-setup-job.yaml
 apiVersion: batch/v1
@@ -27982,30 +28236,84 @@ spec:
   template:
     metadata:
       labels:
-        # deploy#1365: pod-template label so the bringup-jobs
-        # NetworkPolicy can select this Job's pods under the
-        # gibson namespace default-deny (unlabelled = severed).
-        app.kubernetes.io/component: postgres-exec
+        # networkpolicy-bringup-jobs.yaml selects this label for egress.
+        app.kubernetes.io/component: postgres-setup
+        # The opt-in the platform-postgres instances policy admits on :5432
+        # (gibson-workloads namespace-isolation/subchart-workloads.yaml).
+        gibson.zeroroot.ai/platform-postgres-client: "true"
     spec:
       restartPolicy: OnFailure
-      serviceAccountName: postgres-exec
+      serviceAccountName: postgres-setup
+      automountServiceAccountToken: false
       containers:
       - name: setup
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+        image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
         env:
-        - name: ROLE
-          value: zitadel
-        - name: DB
-          value: zitadel
-        - name: ROLE_OPTS
-          value: LOGIN CREATEDB
-        - name: SECRET_NAME
-          value: zitadel-postgres-credentials
-        command:
-        - sh
-        - -ec
+        - name: PGHOST
+          value: platform-postgres-rw.gibson.svc
+        - name: PGPORT
+          value: "5432"
+        - name: PGSSLMODE
+          value: require
+        - name: PGCONNECT_TIMEOUT
+          value: "5"
+        - name: PGUSER
+          valueFrom:
+            secretKeyRef:
+              name: platform-postgres-superuser
+              key: username
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: platform-postgres-superuser
+              key: password
+        - name: PGSETUP_PW_ZITADEL
+          valueFrom:
+            secretKeyRef:
+              name: zitadel-postgres-credentials
+              key: password
+        command: [bash, -ec]
         args:
-        - "# --- 1. Wait for primary pod ---\n# Source the primary instance name from CNPG's authoritative\n# Cluster.status.currentPrimary field instead of pod labels.\n# The `role=primary` label is applied by CNPG AFTER promotion,\n# which races this hook at sync-wave -5. Cluster status is set\n# by CNPG the moment the primary is elected. deploy#322\n# finding 9.\necho \"[$ROLE] waiting for platform-postgres primary...\"\nPOD=\"\"\nfor i in $(seq 1 90); do\n  P=$(kubectl -n gibson get cluster.postgresql.cnpg.io platform-postgres \\\n      -o jsonpath='{.status.currentPrimary}' 2>/dev/null || true)\n  if [ -n \"$P\" ] && \\\n     kubectl -n gibson get pod \"$P\" \\\n      -o jsonpath='{.status.phase}' 2>/dev/null | grep -q Running; then\n    POD=$P\n    break\n  fi\n  sleep 2\ndone\nif [ -z \"$POD\" ]; then\n  echo \"[$ROLE] ERROR: platform-postgres has no Running currentPrimary after 180s \u2014 Argo will retry\"\n  exit 1\nfi\necho \"[$ROLE] primary pod: $POD\"\n\n# --- 2. Wait for the Secret to be materialised by ESO ---\necho \"[$ROLE] waiting for Secret $SECRET_NAME...\"\nuntil PW=$(kubectl -n gibson get secret \"$SECRET_NAME\" \\\n    -o jsonpath='{.data.password}' 2>/dev/null | base64 -d) \\\n    && [ -n \"$PW\" ]; do\n  sleep 2\ndone\necho \"[$ROLE] secret materialised\"\n\nEXEC=\"kubectl exec -n gibson $POD -c postgres --\"\nEXEC_I=\"kubectl exec -i -n gibson $POD -c postgres --\"\n\n# --- 3. CREATE ROLE (idempotent via DO block) ---\necho \"[$ROLE] CREATE ROLE if not exists...\"\ncat <<SQL | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1\nDO \\$\\$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '$ROLE') THEN\n    EXECUTE 'CREATE ROLE \"' || '$ROLE' || '\" WITH $ROLE_OPTS';\n  END IF;\nEND\n\\$\\$;\nSQL\n\n# --- 4. CREATE DATABASE (CREATE DATABASE has no IF NOT EXISTS) ---\necho \"[$ROLE] CREATE DATABASE if not exists...\"\nif ! $EXEC psql -U postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='$DB'\" | grep -q '^1$'; then\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \\\n    \"CREATE DATABASE \\\"$DB\\\" OWNER \\\"$ROLE\\\";\"\nelse\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \\\n    \"ALTER DATABASE \\\"$DB\\\" OWNER TO \\\"$ROLE\\\";\"\nfi\n\n# --- 5. GRANT on DB ---\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \\\n  \"GRANT ALL PRIVILEGES ON DATABASE \\\"$DB\\\" TO \\\"$ROLE\\\";\"\n\n# --- 6. ALTER ROLE WITH PASSWORD (via stdin to avoid escaping) ---\necho \"[$ROLE] ALTER ROLE WITH PASSWORD...\"\n# The password is a SQL string literal: double every single quote.\nPW_SQL=$(printf '%s' \"$PW\" | sed \"s/'/''/g\")\nprintf \"%s\\n\" \"ALTER ROLE \\\"$ROLE\\\" WITH PASSWORD '$PW_SQL';\" | \\\n  $EXEC_I psql -U postgres -v ON_ERROR_STOP=1 -d postgres\n\n# --- 7. public schema ownership (PG14+ no longer grants public-CREATE) ---\necho \"[$ROLE] schema public OWNER + GRANT...\"\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d \"$DB\" -c \\\n  \"ALTER SCHEMA public OWNER TO \\\"$ROLE\\\"; GRANT ALL ON SCHEMA public TO \\\"$ROLE\\\";\"\n\necho \"[$ROLE] setup complete\"\n"
+        - |
+          set -euo pipefail
+          # Bitnami puts the client under /opt/bitnami/postgresql/bin.
+          export PATH="/opt/bitnami/postgresql/bin:$PATH"
+          echo "[postgres-setup] waiting for platform-postgres-rw to accept connections..."
+          i=0
+          until pg_isready -q -d postgres; do
+            i=$((i + 1))
+            if [ "$i" -ge 90 ]; then
+              echo "[postgres-setup] ERROR: platform-postgres-rw did not accept connections in 180s; the Job retries"
+              exit 1
+            fi
+            sleep 2
+          done
+          PSQL=(psql -X -q -v ON_ERROR_STOP=1)
+    
+          # setup <role> <database> <role options> <env var that holds the password>
+          setup() {
+            echo "[$1] role, database and schema..."
+            if [ -z "${!4:-}" ]; then
+              echo "[$1] ERROR: the password in $4 is empty"
+              exit 1
+            fi
+            "${PSQL[@]}" -d postgres -v role="$1" -v db="$2" -v opts="$3" -v pwenv="$4" <<'SQL'
+          \getenv pw :pwenv
+          SELECT format('CREATE ROLE %I', :'role')
+            WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = :'role') \gexec
+          SELECT format('ALTER ROLE %I WITH %s PASSWORD %L', :'role', :'opts', :'pw') \gexec
+          SELECT format('CREATE DATABASE %I OWNER %I', :'db', :'role')
+            WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_database WHERE datname = :'db') \gexec
+          SELECT format('ALTER DATABASE %I OWNER TO %I', :'db', :'role') \gexec
+          SELECT format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', :'db', :'role') \gexec
+          \connect :db
+          SELECT format('ALTER SCHEMA public OWNER TO %I', :'role') \gexec
+          SELECT format('GRANT ALL ON SCHEMA public TO %I', :'role') \gexec
+          SQL
+            echo "[$1] setup complete"
+          }
+          setup "zitadel" "zitadel" "LOGIN CREATEDB" PGSETUP_PW_ZITADEL
+          echo "[postgres-setup] ALL_ROLES_SETUP_OK"
 ---
 # Source: gibson/templates/webhook-gate.yaml
 apiVersion: batch/v1

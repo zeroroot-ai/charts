@@ -28,10 +28,13 @@ What's in here:
 
   NetworkPolicies — read-only for verifying chart-rendered NPs.
 
-  Roles+RoleBindings — operator may need to mint a Role+RoleBinding in
-                   the release namespace (e.g., spire-jwks-exporter
-                   projected SA token RBAC). Full CRUD here is bounded
-                   to the release namespace by Role scope.
+  Roles+RoleBindings — none. The operator writes RoleBindings only in
+                   tenant namespaces (internal/controller/tenant_namespace.go),
+                   through its ClusterRole. A RoleBinding it could write here
+                   could bind gibson-connector-creds, which reads every
+                   Secret in the namespace. The ValidatingAdmissionPolicy
+                   in rolebinding-scope-admission.yaml refuses such a write
+                   from the ClusterRole grant too.
 
   Leases         — controller-runtime leader-election lock lives in the
                    operator's own namespace.
@@ -61,9 +64,6 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["get", "list", "watch"]
-  - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: ["roles", "rolebindings"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

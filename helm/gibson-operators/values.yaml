@@ -499,9 +499,9 @@ dataPlane:
   vault:
     addr: ""
     transitKey: "master-kek"
-    adminTokenSecretRef:
-      name: ""
-      key: VAULT_ADMIN_TOKEN
+    # No token knob: the operator reads its own token from
+    # gibson-tenant-operator-vault, which the openbao-auto-init sidecar mints
+    # with the tenant-operator policy (templates/tenant-operator/deployment.yaml).
   redis:
     adminURL: ""
 
@@ -682,3 +682,21 @@ reloader:
     repository: ghcr.io/stakater/reloader
     tag: "v1.4.6"
     pullPolicy: IfNotPresent
+  # The workloads Reloader may roll: every Deployment and StatefulSet in the
+  # release namespace that carries a `*.reloader.stakater.com/reload`
+  # annotation, in any of the three charts. The Reloader Role grants `patch`
+  # on these names and no other (templates/reloader/reloader.yaml).
+  # scripts/check-reloader-namespaced.py renders the umbrella and fails when
+  # an annotated workload is missing here, or a name here has no annotation.
+  rollouts:
+    deployments:
+      - gibson-dashboard
+      - gibson-envoy
+      - gibson-ext-authz
+      - gibson-openfga
+      - gibson-tenant-operator
+      - gibson-zitadel
+      - gibson-zitadel-login
+    statefulsets:
+      - gibson-gibson-workloads
+      - gibson-redis-stack
