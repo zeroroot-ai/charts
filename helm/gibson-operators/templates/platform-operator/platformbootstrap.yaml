@@ -106,6 +106,25 @@ spec:
       apiURL: {{ . | quote }}
       {{- end }}
     {{- end }}
+  {{- /* ADR-0093 decisions 5, 8 and 12 (hosted#201): the one human Zitadel
+         administrator. The platform-operator creates this account with no
+         password and sends a one-time setup link, or writes it to
+         setupSecretRef in offline mode. The umbrella's platform-owner guard
+         already refuses a render without an email, so the block is always
+         rendered here. */}}
+  {{- $po := (.Values.global).platformOwner | default dict }}
+  platformOwner:
+    email: {{ $po.email | quote }}
+    offlineSetup: {{ $po.offlineSetup | default false }}
+    setupGeneration: {{ $po.setupGeneration | default 0 | int64 }}
+    {{- with $po.setupSecretRef }}
+    setupSecretRef:
+      name: {{ .name | quote }}
+      key: {{ .key | quote }}
+      {{- with .namespace }}
+      namespace: {{ . | quote }}
+      {{- end }}
+    {{- end }}
   {{- if .Values.platformBootstrap.oidcClients }}
   oidcClients:
     {{- range .Values.platformBootstrap.oidcClients }}

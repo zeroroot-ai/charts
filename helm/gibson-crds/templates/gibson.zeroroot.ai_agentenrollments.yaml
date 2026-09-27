@@ -24,20 +24,31 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .status.hostId
-      name: HostID
-      priority: 10
-      type: string
-    - jsonPath: .status.lastHeartbeat
-      name: LastHeartbeat
-      type: date
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: AgentEnrollment represents an external agent registration.
+        description: |-
+          AgentEnrollment represents an external agent registration.
+
+          It carries AUTHORIZATION, not credentials. Reconciling one issues the FGA
+          grants that let an already-identified component do its work; it does not mint,
+          publish or expire anything the component authenticates with.
+
+          A component's bootstrap credential comes from `gibson agent enroll`, run by a
+          human against a logged-in CLI session, and is used for exactly one check-in;
+          the host key persisted at that moment re-registers the host unattended
+          thereafter (ADR-0045). That step is deliberately human-in-the-loop and once.
+
+          This resource therefore has no BootstrapReady phase and no bootstrap secret
+          reference. It used to declare both, plus a HostID and a LastHeartbeat that no
+          controller ever wrote, which read as a second, Kubernetes-native issuance path
+          — one where holding RBAC on this namespace would be enough to mint a component
+          credential without the device flow. That is a wider authority question than a
+          CRD field, and until it is answered deliberately, the resource must not look
+          like the answer is yes (gibson#1188).
         properties:
           apiVersion:
             description: |-
@@ -115,11 +126,6 @@ spec:
           status:
             description: AgentEnrollmentStatus defines the observed state.
             properties:
-              bootstrapExpiresAt:
-                format: date-time
-                type: string
-              bootstrapSecretRef:
-                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -181,13 +187,6 @@ spec:
                 x-kubernetes-list-type: map
               grantsAppliedCount:
                 type: integer
-              hostId:
-                description: HostID is populated after the agent's first /register
-                  call.
-                type: string
-              lastHeartbeat:
-                format: date-time
-                type: string
               observedGeneration:
                 format: int64
                 type: integer
@@ -195,10 +194,7 @@ spec:
                 description: AgentEnrollmentPhase represents the lifecycle phase.
                 enum:
                 - Pending
-                - BootstrapReady
-                - Enrolling
                 - Active
-                - Degraded
                 - Revoked
                 - Failed
                 - Terminated
