@@ -482,6 +482,15 @@ spec:
             # for every endpoint.
             - name: ZITADEL_EXTERNAL_DOMAIN
               value: {{ (((.Values.zitadel).zitadel).configmapConfig).ExternalDomain | default (include "gibson.zitadelExternalDomain" .) | quote }}
+            # ADR-0093 decision 2: the gibson project each tenant org is
+            # granted and whose four tenant roles the role sync reads. The
+            # operator refuses to start without it. The platform-operator
+            # writes project_id into this machine user's Secret.
+            - name: ZITADEL_PROJECT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-zitadel-tenant-operator
+                  key: project_id
             # ---------------------------------------------------------------
             # Data-plane provisioning env vars. Operator's cmd/main.go reads
             # these to construct the per-store admin clients used by the
