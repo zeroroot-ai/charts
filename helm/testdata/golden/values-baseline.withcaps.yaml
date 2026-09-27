@@ -20608,6 +20608,7 @@ spec:
               SEEDED=0
               SKIPPED=0
               MISSING=0
+              KEEP=""
               for sa in $REQUIRED; do
                 numeric=$(echo "$MAP_JSON" | jq -r --arg k "$sa" '.data[$k] // empty')
                 if [ -z "$numeric" ] || [ "$numeric" = "<unset>" ]; then
@@ -20615,6 +20616,7 @@ spec:
                   MISSING=$((MISSING+1))
                   continue
                 fi
+                KEEP="${KEEP} user:${numeric}"
                 TUPLE_BODY="{
                   \"writes\": {
                     \"tuple_keys\": [
@@ -20644,7 +20646,55 @@ spec:
                 esac
               done
 
-              echo "=== FGA Init Complete: store=${STORE_ID} model=${MODEL_ID} seeded=${SEEDED} skipped=${SKIPPED} missing=${MISSING} ==="
+              echo "--- Step 5: prune platform_operator tuples outside REQUIRED ---"
+              # REQUIRED is the whole list, not a floor (ADR-0093, hosted#207).
+              # An upgrade from a chart that seeded more SAs (for example
+              # gibson-dashboard-service, before hosted#191) leaves their
+              # tuples behind, because Step 4 only writes. Delete every
+              # platform_operator holder on system_tenant:_system that is
+              # not a REQUIRED SA. Only when every REQUIRED SA resolved:
+              # otherwise KEEP is short and a valid tuple would go.
+              # One delete per request: OpenFGA fails a whole write batch
+              # when one key in it is wrong.
+              PRUNED=0
+              if [ "$MISSING" -ne 0 ]; then
+                echo "  WARNING: ${MISSING} REQUIRED SA(s) unresolved — prune skipped."
+              else
+                HOLDERS=""
+                CONT=""
+                while :; do
+                  READ_BODY=$(jq -cn --arg c "$CONT" '{tuple_key:{relation:"platform_operator",object:"system_tenant:_system"},page_size:100} + (if $c == "" then {} else {continuation_token:$c} end)')
+                  READ_HTTP=$(curl -sS -o /tmp/read.json -w '%{http_code}' \
+                    -H 'Content-Type: application/json' \
+                    -X POST --data "$READ_BODY" \
+                    "${FGA}/stores/${STORE_ID}/read")
+                  if [ "$READ_HTTP" != "200" ]; then
+                    echo "FATAL: read platform_operator tuples returned ${READ_HTTP}"
+                    cat /tmp/read.json
+                    exit 1
+                  fi
+                  HOLDERS="${HOLDERS} $(jq -r '[.tuples[]?.key.user] | join(" ")' /tmp/read.json)"
+                  CONT=$(jq -r '.continuation_token // empty' /tmp/read.json)
+                  [ -n "$CONT" ] || break
+                done
+                for holder in $HOLDERS; do
+                  case " ${KEEP} " in *" ${holder} "*) continue ;; esac
+                  DEL_BODY=$(jq -cn --arg u "$holder" '{deletes:{tuple_keys:[{user:$u,relation:"platform_operator",object:"system_tenant:_system"}]}}')
+                  DEL_HTTP=$(curl -sS -o /tmp/del.json -w '%{http_code}' \
+                    -H 'Content-Type: application/json' \
+                    -X POST --data "$DEL_BODY" \
+                    "${FGA}/stores/${STORE_ID}/write")
+                  if [ "$DEL_HTTP" != "200" ]; then
+                    echo "FATAL: delete platform_operator tuple for ${holder} returned ${DEL_HTTP}"
+                    cat /tmp/del.json
+                    exit 1
+                  fi
+                  echo "  pruned ${holder} → platform_operator on system_tenant:_system (not a REQUIRED SA)"
+                  PRUNED=$((PRUNED+1))
+                done
+              fi
+
+              echo "=== FGA Init Complete: store=${STORE_ID} model=${MODEL_ID} seeded=${SEEDED} skipped=${SKIPPED} missing=${MISSING} pruned=${PRUNED} ==="
           env:
             # CA for the OpenFGA HTTP-listener cert (deploy#1382); curl
             # reads CURL_CA_BUNDLE for every call that has no --cacert.
