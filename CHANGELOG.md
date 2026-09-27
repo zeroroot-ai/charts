@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.1](https://github.com/zeroroot-ai/charts/compare/v0.132.0...v0.132.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **netpol:** every NetworkPolicy applies before the hook Jobs ([#188](https://github.com/zeroroot-ai/charts/issues/188)) ([0c00d52](https://github.com/zeroroot-ai/charts/commit/0c00d5297f623976813677819c9a8e077fd81ff3))
+
 ## [0.132.0](https://github.com/zeroroot-ai/charts/compare/v0.131.0...v0.132.0) (2026-09-27)
 
 
