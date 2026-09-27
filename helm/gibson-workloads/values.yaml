@@ -1001,7 +1001,7 @@ auth:
 # toggle has been deleted; the platform cannot run without it. Sub-feature
 # toggles (`serviceAccount.create`, `autoscaling.enabled`,
 # `podDisruptionBudget.enabled`, `networkPolicy.enabled`, `ingress.enabled`,
-# `jobs.shellGC.enabled`, etc.) remain legitimate.
+# etc.) remain legitimate.
 dashboard:
 
   # hstsDisabled controls whether the dashboard emits the HSTS header.
@@ -1294,32 +1294,6 @@ dashboard:
   # Should match the dashboard's external URL (NEXTAUTH_URL).
   publicUrl: ""                       # PUBLIC_URL
 
-  # Scheduled background jobs that run against the dashboard DB. Each
-  # job is emitted as a Kubernetes CronJob gated on its `.enabled` key so
-  # sites that don't want automated GC can turn it off without touching
-  # the chart templates.
-  jobs:
-    # Unclaimed shell-user garbage collection — deletes tenant-operator
-    # shell users older than `olderThanDays` that have no credential
-    # account and no surviving membership. Default daily at 03:00 UTC.
-    shellGC:
-      enabled: true
-      schedule: "0 3 * * *"
-      olderThanDays: 30
-      dryRun: false
-      # successfulJobsHistoryLimit / failedJobsHistoryLimit default to
-      # Kubernetes' built-ins (3 / 1). Override here if you need a longer
-      # retention for audit purposes.
-      successfulJobsHistoryLimit: 3
-      failedJobsHistoryLimit: 1
-      resources:
-        requests:
-          cpu: 50m
-          memory: 128Mi
-        limits:
-          cpu: 250m
-          memory: 256Mi
-
   # Development settings
   # WARNING: NEVER set disableAuth to true in production
   disableAuth: false
@@ -1389,15 +1363,11 @@ dashboard:
     uri: ""       # override for external Neo4j Aura or managed instances
     user: "neo4j"
 
-  # Dashboard PostgreSQL connection settings.
-  # These control the connection string in the daemon configmap and dashboard deployment.
-  # The Bitnami subchart settings (dashboard-postgresql:) control the PVC, auth, and service.
+  # Dashboard PostgreSQL settings for the daemon configmap and the dashboard
+  # deployment. The host, port, database and user come from the
+  # platformPostgres tier helpers.
   postgres:
     enabled: true
-    host: ""        # Defaults to gibson-dashboard-postgresql in templates
-    port: 5432
-    database: dashboard
-    username: dashboard
     # password is sourced from DASHBOARD_DB_PASSWORD in gibson-db-secrets
     # NOTE: sslmode is hardcoded `require` in chart templates (Spec
     # first-deploy-unblock-and-ha R7); no sslMode/sslmode knob here.
