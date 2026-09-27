@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.3](https://github.com/zeroroot-ai/charts/compare/v0.132.2...v0.132.3) (2026-09-27)
+
+
+### Bug Fixes
+
+* **dashboard:** delete the shell-user GC CronJob, which could never run ([#195](https://github.com/zeroroot-ai/charts/issues/195)) ([3de88ca](https://github.com/zeroroot-ai/charts/commit/3de88ca6d7f383cefb81f1bb121e973be7f740c2))
+
 ## [0.132.2](https://github.com/zeroroot-ai/charts/compare/v0.132.1...v0.132.2) (2026-09-27)
 
 
