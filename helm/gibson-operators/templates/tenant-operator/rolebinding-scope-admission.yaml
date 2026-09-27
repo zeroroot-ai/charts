@@ -1,0 +1,56 @@
+{{- /*
+The tenant-operator writes RoleBindings in tenant namespaces only.
+
+Its ClusterRole grants create, update, patch and delete on RoleBindings in
+every namespace, and `bind` on two ClusterRoles:
+gibson-tenant-operator-tenant-namespace and gibson-connector-creds. It needs
+both in each tenant namespace, which the operator creates at provision time,
+so RBAC cannot name the namespaces in advance. Both ClusterRoles read every
+Secret in the namespace they are bound in. A RoleBinding in the release
+namespace would therefore let the operator read the Secrets there, the
+Zitadel owner credentials among them.
+
+This policy refuses a RoleBinding write by the operator's ServiceAccount in
+any namespace whose name does not start with `tenant-`. Every namespace the
+operator provisions is `tenant-<name>` (internal/controller/tenant_namespace.go,
+pkg/platform/tenant/names.go). scripts/check-owner-credential-readers.py lists
+the operator's bind grant with `guarded-by` this policy, and fails the render
+when the policy or its Deny binding is gone.
+*/ -}}
+{{- $ns := .Values.tenantOperator.namespace | default "gibson" }}
+{{- $user := printf "system:serviceaccount:%s:gibson-tenant-operator" $ns }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gibson-tenant-operator-rolebinding-scope
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["rolebindings"]
+  matchConditions:
+    - name: tenant-operator
+      expression: request.userInfo.username == {{ $user | quote }}
+  validations:
+    - expression: request.namespace.startsWith('tenant-')
+      reason: Forbidden
+      messageExpression: >-
+        'the tenant-operator writes RoleBindings in tenant namespaces only, and ' +
+        request.namespace + ' is not one'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gibson-tenant-operator-rolebinding-scope
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  policyName: gibson-tenant-operator-rolebinding-scope
+  validationActions: ["Deny"]

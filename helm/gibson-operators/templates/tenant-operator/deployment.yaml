@@ -46,7 +46,13 @@ spec:
           roll is declarative rather than a kubectl restart at rotation time
           (deploy#1144).
         */}}
-        secret.reloader.stakater.com/reload: {{ (((.Values.tenantOperator).billing).stripeSecretKeySecretRef) | default "gibson-stripe-credentials" | quote }}
+        {{- /*
+          The operator also reads its OpenBao token into env at pod start.
+          The openbao-auto-init sidecar re-mints it into
+          gibson-tenant-operator-vault when it expires, and Reloader rolls
+          this Deployment when that Secret changes.
+        */}}
+        secret.reloader.stakater.com/reload: {{ printf "%s,gibson-tenant-operator-vault" ((((.Values.tenantOperator).billing).stripeSecretKeySecretRef) | default "gibson-stripe-credentials") | quote }}
     spec:
       {{- include "gibson.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: gibson-tenant-operator
@@ -569,32 +575,31 @@ spec:
             # GIBSON_VAULT_ADDR points at the Vault Service — in-chart in
             # kind (set via values-kind.yaml) or an external Vault in
             # prod (set per-environment overlay).
-            # GIBSON_VAULT_AUTH_TOKEN is the periodic admin token the
-            # operator presents on every request — sourced from
-            # <release>-vault-keys (kind: dev-root materialised by the
-            # vault-dev-token-secret template; production: pre-existing
-            # Secret per chart NOTES.txt).
+            # GIBSON_VAULT_AUTH_TOKEN (transit KEK derivation) and
+            # GIBSON_VAULT_ADMIN_TOKEN (tenant namespaces) are the operator's
+            # own periodic OpenBao token, policy `tenant-operator`. The
+            # openbao-auto-init sidecar mints it into
+            # gibson-tenant-operator-vault and keeps it renewed
+            # (gibson-workloads templates/auth/openbao-deployment.yaml). The
+            # policy reaches tenant-<id> namespaces, sys/namespaces/tenant-*,
+            # transit/hmac and the root jwt mount's config, and nothing in
+            # the root kv store, where the escrowed Zitadel owner
+            # credentials live. The platform-admin token stays with the
+            # platform-operator.
             # GIBSON_VAULT_TRANSIT_KEY names the transit key the
-            # operator uses for HMAC-SHA256 KEK derivation; the chart's
-            # vault-transit-bootstrap Job creates the key on
-            # post-install/upgrade.
+            # operator uses for HMAC-SHA256 KEK derivation.
             - name: GIBSON_VAULT_ADDR
               value: {{ .Values.dataPlane.vault.addr | required "dataPlane.vault.addr is required (one-code-path: deploy#197 — Vault is non-negotiable; set this to the Vault Service URL, e.g. http://gibson-vault.gibson.svc:8200 for in-chart kind or your external Vault address in prod)" | quote }}
             - name: GIBSON_VAULT_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.dataPlane.vault.adminTokenSecretRef.name | default (printf "%s-vault-keys" .Release.Name) }}
-                  key: {{ .Values.dataPlane.vault.adminTokenSecretRef.key | default "VAULT_ADMIN_TOKEN" }}
-            # buildVaultAdminClient (cmd/main.go) reads GIBSON_VAULT_ADMIN_TOKEN
-            # while buildKEKDeriver reads GIBSON_VAULT_AUTH_TOKEN. Same Secret
-            # source for both — admin token doubles as auth token in dev/single-token
-            # deployments. The operator's two Vault clients are still separate Go
-            # constructions; this only unifies their env wiring.
+                  name: gibson-tenant-operator-vault
+                  key: VAULT_ADMIN_TOKEN
             - name: GIBSON_VAULT_ADMIN_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.dataPlane.vault.adminTokenSecretRef.name | default (printf "%s-vault-keys" .Release.Name) }}
-                  key: {{ .Values.dataPlane.vault.adminTokenSecretRef.key | default "VAULT_ADMIN_TOKEN" }}
+                  name: gibson-tenant-operator-vault
+                  key: VAULT_ADMIN_TOKEN
             - name: GIBSON_VAULT_TRANSIT_KEY
               value: {{ .Values.dataPlane.vault.transitKey | default "master-kek" | quote }}
             # ---------------------------------------------------------------

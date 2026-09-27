@@ -161,6 +161,14 @@ edge-strips-instance-headers: ## The Envoy edge never forwards a client's Zitade
 	@python3 scripts/check-edge-strips-instance-headers.py --selftest
 	@python3 scripts/check-edge-strips-instance-headers.py
 
+.PHONY: edge-zitadel-routes edge-zitadel-routes-live
+edge-zitadel-routes: ## The edge sends only listed routes to Zitadel, and refuses a user's own email or username change (ADR-0093)
+	@python3 scripts/check-edge-zitadel-routes.py --selftest
+	@python3 scripts/check-edge-zitadel-routes.py
+
+edge-zitadel-routes-live: ## The same requests against a running edge: EDGE_URL=https://app.<domain>[:port] [EDGE_RESOLVE=..] [EDGE_INSECURE=1] [ZITADEL_TOKEN=..]
+	@python3 scripts/check-edge-zitadel-routes.py --live
+
 hostnames: ## No literal platform hostname; every host derives from global.domain (charts#17)
 	@python3 scripts/check-hostnames.py --selftest
 	@python3 scripts/check-hostnames.py
@@ -198,11 +206,11 @@ secret-reads-granted: ## Every `kubectl get secret` in a rendered pod is granted
 	@python3 scripts/check-secret-reads-granted.py
 
 .PHONY: owner-credential-readers owner-credential-readers-live
-owner-credential-readers: ## Only bootstrap reads the Zitadel owner credentials: no new mount, env or RBAC read of iam-admin-pat, iam-admin or the System API key
+owner-credential-readers: ## Only bootstrap reads the Zitadel owner credentials, and no workload can exec into, patch, mint a token for or bind over one that does
 	@python3 scripts/check-owner-credential-readers.py --selftest
 	@python3 scripts/check-owner-credential-readers.py
 
-owner-credential-readers-live: ## The same check against the current kube context, with kubectl auth can-i for every ServiceAccount
+owner-credential-readers-live: ## The same check against the current kube context: kubectl auth can-i and a SelfSubjectRulesReview for every ServiceAccount
 	@python3 scripts/check-owner-credential-readers.py --live
 
 daemon-sa-binding: ## The tenant-operator binds the daemon's real ServiceAccount to gibson-connector-creds, per tenant namespace only (gibson#137)
@@ -232,10 +240,19 @@ tool-image: ## No template names the alpine-k8s tool image by hand; it renders g
 	@python3 scripts/check-no-literal-tool-image.py --selftest
 	@python3 scripts/check-no-literal-tool-image.py
 
-vendor-operators: ## Re-vendor the third-party CRDs from the pinned sub-charts
+vendor-operators: ## Re-vendor the third-party CRDs and operator RBAC from the pinned sub-charts
 	@python3 scripts/vendor-operator-crds.py
+	@python3 scripts/vendor-operator-rbac.py
 
-check: golden attribution cloud-free chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates probes netpol-coverage daemon-netpol-admits-callers edge-strips-instance-headers hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor platform-owner-values no-owner-password-secret ## Everything that runs without a cluster
+cnpg-superuser-secret: ## One Secret sets the password of the role postgres: a CNPG initdb owner postgres uses the superuser Secret
+	@python3 scripts/check-cnpg-superuser-secret.py --selftest
+	@python3 scripts/check-cnpg-superuser-secret.py
+
+operator-rbac-fresh: ## The vendored cert-manager and External Secrets RBAC matches the pinned sub-charts, less the rules REMOVED_RULES names
+	@python3 scripts/vendor-operator-rbac.py --selftest
+	@python3 scripts/vendor-operator-rbac.py --check
+
+check: golden attribution cloud-free chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates probes netpol-coverage daemon-netpol-admits-callers edge-strips-instance-headers hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context

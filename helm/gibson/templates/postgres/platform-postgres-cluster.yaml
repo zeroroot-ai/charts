@@ -14,15 +14,29 @@ Postgres beside a managed one.
 
 Bare CNPG Cluster. Knows NOTHING about any specific app: per-app postgres
 setup (CREATE ROLE / DATABASE / GRANT) is owned by the postgres-setup Jobs in
-templates/jobs/*, which run against this cluster's `platform-postgres-rw`
-Service via the postgres-exec ServiceAccount (platform-primitives-exec-rbac,
-wave -7). Adding/removing an app requires zero edits here.
+templates/jobs/*, which connect to this cluster's `platform-postgres-rw`
+Service as the superuser (templates/jobs/_postgres-setup.tpl). Adding/removing an app requires zero edits here.
 
 Superuser secret: CNPG-OWNED here (deploy#652). enableSuperuserAccess: true
 with NO spec.superuserSecret — CNPG generates `platform-postgres-superuser`
-(= <cluster>-superuser, type basic-auth) and SETS the postgres role to it on
-every bootstrap, including re-initdb. The umbrella's PlatformBootstrap
-postgresBundle reads that same secret name, so it always matches.
+(= <cluster>-superuser, type basic-auth). The umbrella's PlatformBootstrap
+postgresBundle and the postgres-setup Jobs log in with it.
+
+ONE SECRET FOR THE ROLE `postgres`. The initdb bootstrap names `postgres` as
+the owner of the application database. CNPG's instance manager applies two
+Secrets to the database on every reconcile of the primary
+(internal/management/controller/instance_controller.go,
+refreshCredentialsFromSecret, v1.30.0): first the superuser Secret to the
+role `postgres`, then the owner Secret to the owner role, which is also
+`postgres`. The owner Secret defaults to a generated <cluster>-app, so the
+last write left `postgres` with the app password and the superuser Secret
+never logged in (measured on kind 2026-09-27: every postgres-setup Job got
+"password authentication failed for user postgres", and the stored SCRAM
+verifier matched platform-postgres-app). `initdb.secret` names the superuser
+Secret as the owner Secret, so both writes set the same password, on a new
+cluster and on one that already has the app Secret.
+scripts/check-cnpg-superuser-secret.py fails the render when two Secrets
+claim the role `postgres`.
 */ -}}
 {{- if hasKey .Values "externalPostgres" }}
   {{- fail "externalPostgres was deleted (deploy#1730). Every profile renders the in-cluster CNPG Cluster; there is no managed-Postgres branch to select. Remove the key from the values file." }}
@@ -59,7 +73,7 @@ metadata:
     velero.io/exclude-from-backup: "true"
   annotations:
     # Regular resource (never a hook — a hook-delete-policy would delete the
-    # database cluster) at wave -7: with the postgres-exec RBAC (-7), after
+    # database cluster) at wave -7: with the postgres-setup ServiceAccount (-7), after
     # the folded ExternalSecrets (-8), and BEFORE the -6 Sync-hook setup Jobs
     # that poll this CR's .status.currentPrimary. See the wave ordering note
     # in values.yaml (deploy#820).
@@ -204,6 +218,10 @@ spec:
     initdb:
       database: postgres
       owner: postgres
+      # The owner is `postgres`, so its Secret is the superuser Secret (see
+      # ONE SECRET FOR THE ROLE `postgres` in the header).
+      secret:
+        name: platform-postgres-superuser
 {{- end }}
   # Continuous backup to the durable bucket (deploy#1496,
   # deploy#1730). Setting barmanObjectStore is what turns on WAL archiving:

@@ -3926,15 +3926,6 @@ dataPlane:
     # currently exercised end-to-end; enterprise is reserved.
     edition: "community"
 
-    # adminTokenSecretRef — Secret holding the operator's OpenBao auth
-    # token (used for admin operations + transit derive). The chart's
-    # default value points at a Secret created by the OpenBao bootstrap
-    # workflow; production overlays may point at a customer-managed
-    # Secret instead.
-    adminTokenSecretRef:
-      name: ""   # defaults to "<release>-openbao-keys"
-      key: "VAULT_ADMIN_TOKEN"
-
     # runBackfill — set to true on a one-time `helm upgrade` to run
     # the tenant-credentials-backfill Job that iterates existing
     # Tenant CRs and populates per-tenant OpenBao credentials. Default

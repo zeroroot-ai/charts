@@ -1,0 +1,62 @@
+# edge-zitadel-routes.yaml: every route on which the Envoy edge sends a
+# request to Zitadel, and why.
+#
+# scripts/check-edge-zitadel-routes.py renders the chart and lists each route
+# whose cluster is Zitadel core (zitadel_upstream) or the Zitadel login
+# (zitadel_login). A route that is not listed here fails the build, and so
+# does a listed route that no render produces, so this list cannot go stale.
+#
+# Keyed by content, never by line number:
+#   "<route config>/<virtual host> <match kind>:<match value>"
+#
+# Adding a line here publishes more of Zitadel on the edge. Say why the route
+# must be public, and who calls it.
+routes:
+  "public_routes/app prefix:/device":
+    why: OAuth device authorization page. `gibson login` sends the user here.
+  "public_routes/app prefix:/ui/login/":
+    why: Zitadel's embedded login, which the device flow still uses.
+  "public_routes/app prefix:/ui/console":
+    why: The Zitadel console. Only the Platform owner has a Zitadel administrator role.
+  "public_routes/app prefix:/ui/":
+    why: The hosted login (Login V2). The authorize endpoint sends the browser here.
+  "public_routes/app prefix:/.well-known/openid-configuration":
+    why: OIDC discovery for the app issuer.
+  "public_routes/app prefix:/oauth/":
+    why: OAuth 2.0 authorize, token, keys and device endpoints.
+  "public_routes/app prefix:/oidc/":
+    why: OIDC userinfo, end-session and introspection endpoints.
+  "public_routes/app prefix:/idps/":
+    why: External identity provider callbacks.
+  "public_routes/app prefix:/saml/":
+    why: SAML endpoints.
+  "public_routes/app prefix:/auth/v1/":
+    why: >-
+      The auth API for the signed-in user (password policy, own user). The
+      edge answers 403 for the own-username and own-email changes before
+      this route.
+  "public_routes/app prefix:/management/v1/":
+    why: The management API. The console and the platform call it. It needs org permissions.
+  "public_routes/app prefix:/admin/v1/":
+    why: The instance admin API. The console calls it. It needs instance permissions.
+  "public_routes/app prefix:/v2/":
+    why: >-
+      The v2 REST APIs. Signup creates users here. The edge answers 403 for
+      the email and username changes before this route.
+  "public_routes/app prefix:/v2beta/":
+    why: The v2beta REST APIs. Same 403 routes as /v2/.
+  "public_routes/app prefix:/zitadel.":
+    why: >-
+      gRPC, gRPC-web and Connect for every Zitadel service. The console and
+      the hosted login call these. The edge answers 403 for the email and
+      username changes before this route.
+  "public_routes/app prefix:/assets/":
+    why: Label policy assets (logo, icon, font) that the hosted login shows.
+  "api_routes/api prefix:/.well-known/openid-configuration":
+    why: OIDC discovery for clients that start from the API host.
+  "cluster_oidc_routes/cluster_oidc prefix:/.well-known/":
+    why: In-cluster OIDC discovery. The virtual host accepts only the in-cluster Service names.
+  "cluster_oidc_routes/cluster_oidc prefix:/oauth/v2/":
+    why: In-cluster token and keys endpoints. Same Service-name virtual host.
+  "cluster_oidc_routes/cluster_oidc prefix:/management/v1/":
+    why: In-cluster management API calls. Same Service-name virtual host.

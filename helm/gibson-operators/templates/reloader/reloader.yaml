@@ -84,22 +84,41 @@ metadata:
     app.kubernetes.io/name: reloader
     app.kubernetes.io/component: reloader
 rules:
-  # update+patch on a workload's pod template is a platform-identity grant,
-  # not a restart button: Kubernetes has no `serviceaccounts/use` verb, so
-  # whoever can rewrite `.spec.template` can set `serviceAccountName` to any
-  # SA in this namespace and take that workload's SVID (deploy#1210). RBAC
-  # cannot restrict a patch to one field path, so the narrowing available
-  # here is the resource list, and it is kept to what the chart actually
-  # annotates.
+  # patch on a workload's pod template is a platform-identity grant, not a
+  # restart button: Kubernetes has no `serviceaccounts/use` verb, so whoever
+  # can rewrite `.spec.template` can set the image, the command and
+  # `serviceAccountName`, and so become that workload (deploy#1210). RBAC
+  # cannot restrict a patch to one field path, so the narrowing available is
+  # the object name. The write rule names exactly the workloads that carry a
+  # `*.reloader.stakater.com/reload` annotation (values.yaml
+  # reloader.rollouts), and scripts/check-reloader-namespaced.py fails the
+  # build when the two lists differ, in either direction.
   #
-  # `daemonsets` is NOT in that list. No DaemonSet in any of the three
-  # charts carries a `*.reloader.stakater.com/reload` annotation — the
-  # annotated set is the envoy / ext-authz / dashboard / tenant-operator
-  # Deployments and the daemon / redis-stack StatefulSets. Re-add it only
-  # together with the DaemonSet that needs it.
+  # `patch` only. Reloader v1.4.6 rolls a Deployment or StatefulSet with a
+  # strategic-merge patch of the pod template annotation
+  # (internal/pkg/handler/upgrade.go: SupportsPatch is true for both), so
+  # `update` is never used. get, list and watch cannot be limited by name:
+  # the informers list every Deployment and StatefulSet to find the
+  # annotated ones.
+  #
+  # `daemonsets` is NOT here. No DaemonSet in any of the three charts carries
+  # a reload annotation. Re-add it only together with the DaemonSet that
+  # needs it.
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]
-    verbs: ["list", "get", "update", "patch"]
+    verbs: ["list", "get", "watch"]
+  {{- with .Values.reloader.rollouts.deployments }}
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: {{ toJson . }}
+    verbs: ["patch"]
+  {{- end }}
+  {{- with .Values.reloader.rollouts.statefulsets }}
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    resourceNames: {{ toJson . }}
+    verbs: ["patch"]
+  {{- end }}
   - apiGroups: ["batch"]
     resources: ["cronjobs"]
     verbs: ["list", "get"]
