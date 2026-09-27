@@ -4737,16 +4737,19 @@ upgrade:
 # nothing creates the initial principal — without this the platform comes up
 # and nobody can log in.
 #
-# The credential is GENERATED and written to a Secret, never supplied here. A
-# password typed into values lives in this file, in shell history, and in
-# whatever copied it. Retrieve it with:
+# No password is EVER generated or written to a Secret (ADR-0093 decision 8,
+# hosted#202). The owner is created with no password, and Zitadel's own
+# invite-code flow emails them a one-time setup link — the exact mechanism
+# the Platform owner uses. On a profile with no mail transport,
+# global.firstTenant.offlineSetup writes the link instead to the Secret named
+# by global.firstTenant.setupSecretRef. Re-running the install never resends
+# a link the owner has already used: an existing owner takes the find path
+# and neither the tenant role grant nor the setup link is repeated.
 #
-#   kubectl -n gibson get secret gibson-first-admin \
-#     -o jsonpath='{.data.password}' | base64 -d
-#
-# then sign in, change it, and delete the Secret. Re-running the install never
-# resets it: an existing owner takes the find path and the Secret is
-# create-only.
+# email/tenantId/tenantDisplayName/enabled below are superseded by
+# global.firstTenant (the one identity both gibson-operators and
+# gibson-workloads read — see gibson-workloads-first-admin.yaml); they stay
+# only until every reader of this subchart in isolation is confirmed gone.
 firstAdmin:
   # Off by default: SaaS uses self-serve signup and must not seed an owner.
   # values-baseline.yaml turns it on.
@@ -4755,7 +4758,6 @@ firstAdmin:
   email: ""
   tenantId: "default"
   tenantDisplayName: "Default Workspace"
-  credentialSecret: "gibson-first-admin"
   # FQDN, not the short name: the first-admin Job's DNS query for a short name
   # depends on the pod's search-domain list and races CoreDNS under a cold,
   # loaded bring-up. A trailing-dot FQDN is a single deterministic lookup

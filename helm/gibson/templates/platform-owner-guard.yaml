@@ -1,5 +1,6 @@
 {{- /*
-Platform owner install-value guard (ADR-0093 decisions 6/8, hosted#201).
+Platform owner and first-tenant-Owner install-value guard
+(ADR-0093 decisions 6/8, hosted#201/#202).
 
 Two required values name the two humans this install creates on day one:
 global.platformOwner.email (the one Zitadel administrator every install has,
@@ -8,17 +9,20 @@ Owner, required only when global.firstTenant.enabled is true — SaaS/staging/
 prod create their first tenant through self-serve signup instead and leave
 that value empty on purpose). `required` fails the render with a clear
 message when a value that must be set is empty; the checks below cover what
-`required` cannot: two DIFFERENT addresses, and a working way to reach the
-Platform owner.
+`required` cannot: two DIFFERENT addresses, and a working way to reach each
+of them.
 
-MAIL. Zitadel emails the setup link through its own invite-code flow. A
-profile that ships no delivering transport
-(gibson-workloads.gibson.email.provider != "smtp") must say so on purpose
-with global.platformOwner.offlineSetup: true, or the platform-operator would
-try to send a link nothing can deliver and the Platform owner could never
-sign in. Offline mode instead writes a one-time, expiring link to
-global.platformOwner.setupSecretRef (readable only by cluster
-administrators) — see operators/platform in zeroroot-ai/gibson.
+MAIL. Zitadel emails the setup link through its own invite-code flow, for
+BOTH the Platform owner and the seeded first tenant's Owner — the same
+mechanism, reused rather than a second one (ADR-0027). A profile that ships
+no delivering transport (gibson-workloads.gibson.email.provider != "smtp")
+must say so on purpose with offlineSetup: true on whichever of the two is in
+play, or the operator/first-admin Job would try to send a link nothing can
+deliver and that person could never sign in. Offline mode instead writes a
+one-time, expiring link to a Secret (readable only by cluster
+administrators) named by setupSecretRef — see operators/platform (Platform
+owner) and cmd/bootstrap-tenant-owner (first tenant's Owner) in
+zeroroot-ai/gibson. No password is ever written to a Secret, for either.
 
 This template renders no resource: it exists to run these checks on every
 `helm template` / `helm install` / `helm upgrade`, unconditionally.
@@ -43,5 +47,18 @@ This template renders no resource: it exists to run these checks on every
 {{- end -}}
 {{- if not (($po.setupSecretRef | default dict).key) -}}
 {{- fail "global.platformOwner.offlineSetup is true but global.platformOwner.setupSecretRef.key is empty — the CRD's SecretKeyRef type requires it (e.g. \"setup-link\")." -}}
+{{- end -}}
+{{- end -}}
+{{- if $ft.enabled -}}
+{{- if and (not $mailConfigured) (not $ft.offlineSetup) -}}
+{{- fail "global.firstTenant.ownerEmail has no way to reach its Owner: gibson-workloads.gibson.email.provider is not \"smtp\" (no delivering mail transport) and global.firstTenant.offlineSetup is not true. Configure real mail, or set global.firstTenant.offlineSetup: true so the first-admin Job writes a one-time setup link to global.firstTenant.setupSecretRef instead (ADR-0093 decision 8, hosted#202)." -}}
+{{- end -}}
+{{- if $ft.offlineSetup -}}
+{{- if not (($ft.setupSecretRef | default dict).name) -}}
+{{- fail "global.firstTenant.offlineSetup is true but global.firstTenant.setupSecretRef.name is empty — the first-admin Job needs a Secret name to write the one-time setup link into." -}}
+{{- end -}}
+{{- if not (($ft.setupSecretRef | default dict).key) -}}
+{{- fail "global.firstTenant.offlineSetup is true but global.firstTenant.setupSecretRef.key is empty — the CRD's SecretKeyRef type requires it (e.g. \"setup-link\")." -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}

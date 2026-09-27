@@ -25232,20 +25232,10 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     argocd.argoproj.io/sync-wave: "0"
 rules:
-  # get and delete are scoped by resourceNames to ONLY the credential Secret.
-  # get: the bootstrap reads it to decide whether the owner was already set up
-  # (idempotence: never reset a rotated password).
-  # delete: once Zitadel shows the password changed after this Secret was
-  # written, the value inside it is one Zitadel no longer accepts. The Secret
-  # says "sign in, change it, then delete this Secret" and operators skip the
-  # last step, leaving a stale password that still reads as the way in — found
-  # out during a break-glass event. The bootstrap completes the instruction.
-  # resourceNames is permitted with both verbs (unlike create), so this stays
-  # minimal: the Job can read and remove that one Secret, no others.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "delete"]
-    resourceNames: ["gibson-first-admin"]
+    verbs: ["get", "update"]
+    resourceNames: ["gibson-first-tenant-owner-setup"]
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
@@ -27607,13 +27597,14 @@ spec:
               fi
               echo "[first-admin] tenant org ${ORG} is ready"
 
-              echo "[first-admin] creating the owner with a generated credential"
+              echo "[first-admin] creating the owner with no password - a one-time setup link will be written to a Secret"
               bootstrap-tenant-owner \
                 -tenant "${TENANT}" \
                 -owner-email "${BOOTSTRAP_ADMIN_EMAIL}" \
-                -generate-password \
-                -credential-secret "gibson-first-admin" \
-                -credential-namespace "${NS}"
+                -setup-secret-namespace "${NS}" \
+                -offline-setup \
+                -setup-secret "gibson-first-tenant-owner-setup" \
+                -setup-secret-key "setup-link"
           volumeMounts:
             - name: fga-ca
               mountPath: /etc/ssl/fga-ca

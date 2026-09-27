@@ -11,9 +11,10 @@ session-less path — because the interactive AdminProvisionTenant RPC is gated 
 a session-revocation check no headless caller satisfies (gibson#1496). This Job
 does the one remaining step, which needs the tenant's Zitadel org to exist:
 
-  `bootstrap-tenant-owner` creates the owner's user IN THAT ORG, grants the
-  membership and writes the FGA tuple. It waits until the Tenant CR the operator
-  seeded reports status.zitadelOrgID, then runs.
+  `bootstrap-tenant-owner` creates the owner's user IN THAT ORG, with NO
+  password (ADR-0093 decision 8, hosted#202), sends or writes a one-time
+  setup link, and grants the tenant role. It waits until the Tenant CR the
+  operator seeded reports status.zitadelOrgID, then runs.
 
 WHY THIS LIVES AT THE UMBRELLA LEVEL, NOT IN gibson-workloads:
 The Job is a post-install helm hook. Inside a gibson-* subchart a helm hook
@@ -130,11 +131,16 @@ subjects:
     namespace: {{ $ns }}
 ---
 {{/*
-`create` cannot be pinned with resourceNames (Kubernetes RBAC does not allow
-create + resourceNames together), but there is deliberately NO update, patch or
-get on Secrets beyond the one credential Secret: the Job may write the credential
-once and can never read one back or overwrite one — the create-only rule the
-binary enforces.
+No password is ever written to a Secret (ADR-0093 decision 8, hosted#202).
+Offline mode writes a one-time setup LINK instead, to the Secret named by
+global.firstTenant.setupSecretRef — get+update are scoped by resourceNames to
+ONLY that one Secret, so a retry can overwrite a link CreateSetupInviteCode
+already invalidated on the Zitadel side (create-or-update; see
+writeOfflineSetupLinkSecret in cmd/bootstrap-tenant-owner). `create` cannot be
+pinned with resourceNames (Kubernetes RBAC does not allow create +
+resourceNames together), so it stays a separate, still Secret-only rule. When
+mail is configured (offlineSetup: false) no Secret write happens at all, and
+this whole rule block renders nothing.
 */ -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -154,23 +160,17 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     argocd.argoproj.io/sync-wave: "0"
 rules:
-  # get and delete are scoped by resourceNames to ONLY the credential Secret.
-  # get: the bootstrap reads it to decide whether the owner was already set up
-  # (idempotence: never reset a rotated password).
-  # delete: once Zitadel shows the password changed after this Secret was
-  # written, the value inside it is one Zitadel no longer accepts. The Secret
-  # says "sign in, change it, then delete this Secret" and operators skip the
-  # last step, leaving a stale password that still reads as the way in — found
-  # out during a break-glass event. The bootstrap completes the instruction.
-  # resourceNames is permitted with both verbs (unlike create), so this stays
-  # minimal: the Job can read and remove that one Secret, no others.
+{{- if $ft.offlineSetup }}
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "delete"]
-    resourceNames: ["{{ $fa.credentialSecret | default "gibson-first-admin" }}"]
+    verbs: ["get", "update"]
+    resourceNames: ["{{ ($ft.setupSecretRef).name }}"]
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
+{{- else }}
+  []
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -312,13 +312,14 @@ spec:
               fi
               echo "[first-admin] tenant org ${ORG} is ready"
 
-              echo "[first-admin] creating the owner with a generated credential"
+              echo "[first-admin] creating the owner with no password - a one-time setup link {{ if $ft.offlineSetup }}will be written to a Secret{{ else }}will be emailed{{ end }}"
               bootstrap-tenant-owner \
                 -tenant "${TENANT}" \
                 -owner-email "${BOOTSTRAP_ADMIN_EMAIL}" \
-                -generate-password \
-                -credential-secret "{{ $fa.credentialSecret | default "gibson-first-admin" }}" \
-                -credential-namespace "${NS}"
+                -setup-secret-namespace "${NS}"{{ if $ft.offlineSetup }} \
+                -offline-setup \
+                -setup-secret "{{ ($ft.setupSecretRef).name }}" \
+                -setup-secret-key "{{ ($ft.setupSecretRef).key | default "setup-link" }}"{{ end }}
           volumeMounts:
             - name: fga-ca
               mountPath: /etc/ssl/fga-ca
