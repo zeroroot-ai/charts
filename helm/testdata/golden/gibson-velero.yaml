@@ -4382,6 +4382,15 @@ spec:
       # holds no verb on the group (templates/rbac.yaml), and this glob keeps
       # the item collector from even asking, so the phase stays Completed.
       - "*.generators.external-secrets.io"
+      # k3s ships its own kinds: HelmChart and HelmChartConfig in
+      # helm.cattle.io, and Addon in k3s.cattle.io. They are the distribution's
+      # own install records, not platform state, and the RBAC grants no verb on
+      # them. Without these globs every backup on a k3s cluster ends
+      # PartiallyFailed with "forbidden" once per kind and namespace, even
+      # though every volume backed up. Measured on staging (k3s, ADR-0091),
+      # 2026-09-27: 12 errors in platform-hourly-20260927150028.
+      - "*.helm.cattle.io"
+      - "*.k3s.cattle.io"
     includedClusterScopedResources:
       - tenants.gibson.zeroroot.ai
     defaultVolumesToFsBackup: true
