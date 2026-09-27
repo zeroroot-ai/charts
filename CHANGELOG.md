@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.132.0](https://github.com/zeroroot-ai/charts/compare/v0.131.0...v0.132.0) (2026-09-27)
+
+
+### Features
+
+* **chart:** give Zitadel an active SMTP email provider ([#179](https://github.com/zeroroot-ai/charts/issues/179)) ([550eb5d](https://github.com/zeroroot-ai/charts/commit/550eb5dae6640ee1f6a6040f5802670d0ab26328))
+* **chart:** the edge refuses email and username changes and lists every Zitadel route ([#177](https://github.com/zeroroot-ai/charts/issues/177)) ([62090b7](https://github.com/zeroroot-ai/charts/commit/62090b7283e1e4d3907b1d27bfcde3972895d925))
+* **chart:** the first tenant's Owner gets a setup link; gibson v0.142.0 and dashboard v0.122.0 ([#174](https://github.com/zeroroot-ai/charts/issues/174)) ([6604b69](https://github.com/zeroroot-ai/charts/commit/6604b690135ed8757df960a18ea70543c8d69a69))
+
+
+### Bug Fixes
+
+* **acceptance:** the admin-role live check runs against a real cluster ([#185](https://github.com/zeroroot-ai/charts/issues/185)) ([a5830ca](https://github.com/zeroroot-ai/charts/commit/a5830ca010184989c98288e92e4b143a00bf576d))
+* **gibson:** guard against an instance-administrator role leaking back in ([#182](https://github.com/zeroroot-ai/charts/issues/182)) ([9f34d52](https://github.com/zeroroot-ai/charts/commit/9f34d5276cffc7bd8a462ccc21185af11bd9f070))
+* **gibson:** narrow the daemon and tenant-operator to IAM_ORG_MANAGER ([#176](https://github.com/zeroroot-ai/charts/issues/176)) ([cf423c4](https://github.com/zeroroot-ai/charts/commit/cf423c441913548ea3fd06e6b0cfb3f3a56e40b2))
+* **rbac:** no workload can exec into, patch, mint a token for or bind over an owner-credential reader ([#178](https://github.com/zeroroot-ai/charts/issues/178)) ([012ca4d](https://github.com/zeroroot-ai/charts/commit/012ca4d833a94d8be7622a68b113b5dea523dc7b))
+* **tenant:** size the enterprise-deploy tenant Neo4j at the measured floor ([#181](https://github.com/zeroroot-ai/charts/issues/181)) ([2febe08](https://github.com/zeroroot-ai/charts/commit/2febe083188a65fbbb3a978cd54774212de0556f))
+* **velero:** skip the k3s install kinds so a k3s backup completes ([#186](https://github.com/zeroroot-ai/charts/issues/186)) ([d8433e3](https://github.com/zeroroot-ai/charts/commit/d8433e39c81096a03561bec95b0aa35060a20c6d))
+
 ## [0.131.0](https://github.com/zeroroot-ai/charts/compare/v0.130.3...v0.131.0) (2026-09-27)
 
 
