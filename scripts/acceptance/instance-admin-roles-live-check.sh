@@ -60,7 +60,7 @@ while IFS=$'\t' read -r uid login type roles; do
     TYPE_MACHINE:login-client)          want='["IAM_LOGIN_CLIENT"]' ;;
     TYPE_MACHINE:gibson-daemon|TYPE_MACHINE:gibson-tenant-operator) want='["IAM_ORG_MANAGER"]' ;;
     TYPE_HUMAN:*)
-      if [ -n "$OWNER_EMAIL" ] && [ "$(echo "$login" | tr 'A-Z' 'a-z')" = "$(echo "$OWNER_EMAIL" | tr 'A-Z' 'a-z')" ]; then
+      if [ -n "$OWNER_EMAIL" ] && [ "$(echo "$login" | tr '[:upper:]' '[:lower:]')" = "$(echo "$OWNER_EMAIL" | tr '[:upper:]' '[:lower:]')" ]; then
         want='["IAM_OWNER"]'; owner_id="$uid"
       else
         fail "human ${login} (${uid}) is a Zitadel administrator with ${roles}; only the Platform owner (${OWNER_EMAIL}) may be"
