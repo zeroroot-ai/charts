@@ -45,7 +45,7 @@ holds the initial root token in memory for one bootstrap pass, mounts kv v2
 and transit, writes the policies `platform-admin` and `eso-reader`, enables
 the kubernetes auth mount with the roles `eso-reader` (ESO's ServiceAccount)
 and `openbao-seeder` (this pod's own ServiceAccount), proves the seeder
-login works, mints the platform service token, seeds every key in
+login works, mints the two operator service tokens, seeds every key in
 files/openbao-seed-keys.txt, and then REVOKES the initial root token. The
 recovery keys that /sys/init returns are never parsed, never logged and
 never written: see vault_init for why. No profile mints a literal root token
@@ -53,11 +53,14 @@ never written: see vault_init for why. No profile mints a literal root token
 exists anywhere.
 
 deploy#1195 (root-token hygiene) still holds: no root token is ever written
-to a Kubernetes Secret. The only standing credential is the renewable
-service token in `gibson-platform-operator-vault`, policy `platform-admin`,
-minted no_parent so revoking the initial root does not cascade to it. When
-it dies (sidecar down longer than its period, or a store restored into a new
-cluster) the sidecar logs in with the `openbao-seeder` role from its
+to a Kubernetes Secret. The standing credentials are two renewable service
+tokens: `gibson-tenant-operator-vault`, policy `tenant-operator` (tenant
+namespaces, the KEK HMAC, and no read of the root kv store where the
+escrowed Zitadel owner credentials live), and
+`gibson-platform-operator-vault`, policy `platform-admin`,
+both minted no_parent so revoking the initial root does not cascade to
+them. When one dies (sidecar down longer than its period, or a store restored
+into a new cluster) the sidecar logs in with the `openbao-seeder` role from its
 projected ServiceAccount token and mints a replacement. That login is the
 standing path back into the store on every profile: no stored credential,
 no recovery key, no manual recovery (closes the deploy#1731 gap).
@@ -319,7 +322,7 @@ spec:
         #    initial root token is held in memory for this one pass. It
         #    mounts kv v2 and transit, writes the two policies and the two
         #    kubernetes-auth roles, proves that this sidecar can log in with
-        #    its OWN ServiceAccount, mints the platform service token, seeds
+        #    its OWN ServiceAccount, mints the two operator tokens, seeds
         #    every key in files/openbao-seed-keys.txt, and is then REVOKED.
         #    The recovery keys in the init response are discarded unread
         #    (see vault_init).
@@ -378,6 +381,10 @@ spec:
               AUTH_MOUNT="kubernetes"
               SEEDER_ROLE="openbao-seeder"
               ADMIN_POLICY="platform-admin"
+              # The two operator tokens, each in its own Secret (vault_mint_token).
+              PLATFORM_TOKEN_SECRET="gibson-platform-operator-vault"
+              TENANT_OP_TOKEN_SECRET="gibson-tenant-operator-vault"
+              TENANT_OP_POLICY="tenant-operator"
               ESO_ROLE="eso-reader"
               ESO_POLICY="eso-reader"
               ESO_SA_NAME="{{ $esoSA.name | default "external-secrets" }}"
@@ -552,7 +559,9 @@ spec:
                 echo "[openbao-auto-init] seeder role login OK: ServiceAccount ${OWN_SA} -> auth/${AUTH_MOUNT} role ${SEEDER_ROLE} (policy ${ADMIN_POLICY})"
               }
 
-              vault_mint_renewable_service_token() {
+              vault_mint_token() {
+                # $1 minter token, $2 policy, $3 the Secret that receives it.
+                #
                 # Mint a RENEWABLE service token for operator runtime use.
                 # The initial root token is non-renewable by design, and it is
                 # revoked at the end of bootstrap; the platform-operator's
@@ -567,28 +576,27 @@ spec:
                 # revocation of whatever minted it (the initial root at init,
                 # a seeder login token on a re-mint).
                 #
-                # The policy is platform-admin, never root (deploy#1732). The
-                # operators create tenant namespaces, policies, transit keys
-                # and auth mounts, so the policy is `path "*"` with every
-                # capability including sudo; what it is NOT is a root token,
-                # so no root-policy token exists after bootstrap, and the
-                # openbao-seeder role (same policy) can mint a replacement.
+                # Two tokens, one per operator:
+                #   gibson-platform-operator-vault  policy platform-admin, the
+                #     platform-operator's (through the ESO copy
+                #     gibson-openbao-keys, see seed key gibson-vault-admin-token)
+                #   gibson-tenant-operator-vault    policy tenant-operator, the
+                #     tenant-operator's, read from this Secret directly
+                # The tenant-operator's token reaches tenant namespaces, the
+                # KEK HMAC and nothing in the root namespace's kv store, where
+                # the escrowed Zitadel owner credentials live.
                 #
-                # The resulting client_token is written into the
-                # `gibson-platform-operator-vault` Secret under key
-                # VAULT_ADMIN_TOKEN. The platform-operator and tenant-operator
-                # deployments are wired to this Secret (via
-                # platformOperator.vaultTokenSecretRef and
-                # dataPlane.vault.adminTokenSecretRef in values-kind.yaml) so
-                # they receive a token that renew-self can actually extend.
-                minter="$1"
-                body=$(jq -nc --arg p "$ADMIN_POLICY" '{"policies":[$p],"period":"1h","renewable":true,"no_parent":true}')
+                # Nothing here restarts a workload. Reloader rolls each
+                # operator when the Secret it reads changes (the
+                # secret.reloader.stakater.com/reload annotation on each).
+                minter="$1"; policy="$2"; secret="$3"
+                body=$(jq -nc --arg p "$policy" '{"policies":[$p],"period":"1h","renewable":true,"no_parent":true}')
                 code=$(curl -sS -o ${TMPD}/svc_tok.json -w '%{http_code}' \
                   -X POST -H "X-Vault-Token: ${minter}" -H "Content-Type: application/json" \
                   -d "$body" \
                   "${BAO_ADDR_LOCAL}/v1/auth/token/create")
                 if [ "$code" != "200" ]; then
-                  echo "[openbao-auto-init] FATAL: mint renewable service token returned HTTP $code: $(cat ${TMPD}/svc_tok.json)" >&2
+                  echo "[openbao-auto-init] FATAL: mint renewable service token (policy=${policy}) returned HTTP $code: $(cat ${TMPD}/svc_tok.json)" >&2
                   rm -f ${TMPD}/svc_tok.json
                   return 1
                 fi
@@ -598,20 +606,19 @@ spec:
                   echo "[openbao-auto-init] FATAL: renewable service token response missing client_token" >&2
                   return 1
                 fi
-                echo "[openbao-auto-init] minted renewable service token (policy=${ADMIN_POLICY}, period=1h, renewable=true)"
-                # Write the renewable token into the gibson-platform-operator-vault Secret.
-                # Idempotent: tries POST first (create); on 409 (already exists) falls back
-                # to PATCH (update). This Secret is consumed by the platform-operator and
-                # tenant-operator via vaultTokenSecretRef / adminTokenSecretRef.
+                echo "[openbao-auto-init] minted renewable service token (policy=${policy}, period=1h, renewable=true) for Secret ${secret}"
+                # Idempotent: tries POST first (create); on 409 (already
+                # exists) falls back to PATCH (update).
                 svc_tok_b64=$(printf '%s' "$svc_token" | base64 | tr -d '\n')
                 op_secret_body=$(jq -nc \
                   --arg ns "$NAMESPACE" \
+                  --arg name "$secret" \
                   --arg b64 "$svc_tok_b64" \
                   '{
                     "apiVersion":"v1",
                     "kind":"Secret",
                     "metadata":{
-                      "name":"gibson-platform-operator-vault",
+                      "name":$name,
                       "namespace":$ns,
                       "labels":{
                         "app.kubernetes.io/managed-by":"openbao-auto-init",
@@ -627,61 +634,33 @@ spec:
                   --data-binary "$op_secret_body" \
                   "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets")
                 if [ "$op_code" = "201" ]; then
-                  echo "[openbao-auto-init] created gibson-platform-operator-vault Secret"
-                  kube_rollout_restart_deployments
+                  echo "[openbao-auto-init] created ${secret} Secret"
                   return 0
                 fi
                 if [ "$op_code" = "409" ]; then
-                  # Secret already exists — patch the VAULT_ADMIN_TOKEN field.
                   patch_body=$(jq -nc --arg b64 "$svc_tok_b64" \
                     '{"data":{"VAULT_ADMIN_TOKEN":$b64}}')
                   patch_code=$(kube_curl -o ${TMPD}/op_patch.json -w '%{http_code}' \
                     -H "Content-Type: application/strategic-merge-patch+json" \
                     -X PATCH \
                     --data-binary "$patch_body" \
-                    "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/gibson-platform-operator-vault")
+                    "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/${secret}")
                   if [ "$patch_code" = "200" ]; then
-                    echo "[openbao-auto-init] patched gibson-platform-operator-vault Secret (token refresh)"
-                    kube_rollout_restart_deployments
+                    echo "[openbao-auto-init] patched ${secret} Secret (token refresh)"
                     return 0
                   fi
-                  echo "[openbao-auto-init] FATAL: patch gibson-platform-operator-vault returned HTTP $patch_code: $(cat ${TMPD}/op_patch.json)" >&2
+                  echo "[openbao-auto-init] FATAL: patch ${secret} returned HTTP $patch_code: $(cat ${TMPD}/op_patch.json)" >&2
                   return 1
                 fi
-                echo "[openbao-auto-init] FATAL: create gibson-platform-operator-vault returned HTTP $op_code: $(cat ${TMPD}/op_sec.json)" >&2
+                echo "[openbao-auto-init] FATAL: create ${secret} returned HTTP $op_code: $(cat ${TMPD}/op_sec.json)" >&2
                 return 1
               }
 
-              kube_rollout_restart_deployments() {
-                # Trigger rollout restart of the operator Deployments after a
-                # re-mint. Re-minting changes the token ID; running pods have
-                # the old ID as an env var and will keep getting 403 until they
-                # restart. Proactive renewal (vault_ensure_service_token) avoids
-                # re-mint in steady state, so this path fires only when the token
-                # was already expired (e.g., after an extended Vault downtime).
-                ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-                patch=$(jq -nc --arg ts "$ts" \
-                  '{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":$ts}}}}}')
-                for dep in gibson-tenant-operator gibson-platform-operator; do
-                  rc=$(kube_curl -o /dev/null -w '%{http_code}' \
-                    -H "Content-Type: application/strategic-merge-patch+json" \
-                    -X PATCH \
-                    --data-binary "$patch" \
-                    "${KUBE_API}/apis/apps/v1/namespaces/${NAMESPACE}/deployments/${dep}")
-                  if [ "$rc" = "200" ]; then
-                    echo "[openbao-auto-init] triggered rollout restart for Deployment/${dep}"
-                  else
-                    echo "[openbao-auto-init] WARN: rollout restart for ${dep} returned HTTP ${rc} (non-fatal)"
-                  fi
-                done
-              }
-
-              kube_read_service_token() {
-                # Read the current renewable service token out of the
-                # gibson-platform-operator-vault Secret. Prints the decoded
-                # token, or nothing.
+              kube_read_token() {
+                # Read the current renewable service token out of the Secret
+                # named $1. Prints the decoded token, or nothing.
                 b64=$(kube_curl \
-                  "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/gibson-platform-operator-vault" \
+                  "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/$1" \
                   2>/dev/null | grep '"VAULT_ADMIN_TOKEN":' | head -1 | \
                   sed 's/.*"VAULT_ADMIN_TOKEN":[[:space:]]*"\([^"]*\)".*/\1/')
                 if [ -n "$b64" ]; then
@@ -689,10 +668,13 @@ spec:
                 fi
               }
 
-              vault_ensure_service_token() {
-                # Ensure gibson-platform-operator-vault has a valid, non-expired
-                # renewable service token. Called on every pod start and every
-                # 5 minutes in steady state.
+              vault_ensure_token() {
+                # $1 the Secret, $2 its policy, $3 (optional) a seeder login
+                # token the caller already holds.
+                #
+                # Ensure the Secret has a valid, non-expired renewable service
+                # token. Called on every pod start and every 5 minutes in
+                # steady state, once per operator token.
                 #
                 # Strategy:
                 #   1. Read current token from the Secret.
@@ -702,16 +684,15 @@ spec:
                 #      Renewal keeps the same token ID, so running pods pick up
                 #      the extended TTL automatically without a restart.
                 #   5. If non-200 — log in with the openbao-seeder role, mint a
-                #      fresh token, patch the Secret and roll the operators.
-                #      The optional $1 is a seeder login token the caller
-                #      already holds; without it this function logs in itself.
+                #      fresh token and write the Secret. Reloader rolls the
+                #      operator that reads it.
                 # Reaching step 5 means the sidecar was down for longer than
                 # the token's period, or the store was restored from an
                 # archive into a cluster that never saw this token. Either
                 # way the re-auth path is the ServiceAccount, never a stored
                 # credential (deploy#1732 closed the deploy#1731 gap).
-                held="${1:-}"
-                current_tok=$(kube_read_service_token)
+                secret="$1"; policy="$2"; held="${3:-}"
+                current_tok=$(kube_read_token "$secret")
                 if [ -n "$current_tok" ]; then
                   lookup_resp=$(curl -sS -o ${TMPD}/lookup.json -w '%{http_code}' \
                     -H "X-Vault-Token: ${current_tok}" \
@@ -719,41 +700,57 @@ spec:
                   if [ "$lookup_resp" = "200" ]; then
                     ttl=$(grep -o '"ttl":[0-9]*' ${TMPD}/lookup.json | head -1 | cut -d: -f2)
                     ttl=${ttl:-0}
-                    if [ "$ttl" -gt 1800 ] 2>/dev/null; then
-                      return 0
+                    # A token that carries another policy (a store from
+                    # before the tenant-operator had its own) is replaced.
+                    if jq -e --arg p "$policy" '.data.policies | index($p)' ${TMPD}/lookup.json >/dev/null; then
+                      if [ "$ttl" -gt 1800 ] 2>/dev/null; then
+                        return 0
+                      fi
+                      echo "[openbao-auto-init] ${secret} token TTL=${ttl}s below 1800s threshold — renewing"
+                      renew_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+                        -X POST -H "X-Vault-Token: ${current_tok}" \
+                        "${BAO_ADDR_LOCAL}/v1/auth/token/renew-self")
+                      if [ "$renew_code" = "200" ]; then
+                        echo "[openbao-auto-init] ${secret} token renewed (same ID, extended TTL)"
+                        return 0
+                      fi
+                      echo "[openbao-auto-init] renew-self returned HTTP ${renew_code} — re-minting ${secret}"
+                    else
+                      echo "[openbao-auto-init] ${secret} token does not carry policy ${policy} — re-minting"
                     fi
-                    echo "[openbao-auto-init] service token TTL=${ttl}s below 1800s threshold — renewing"
-                    renew_code=$(curl -sS -o /dev/null -w '%{http_code}' \
-                      -X POST -H "X-Vault-Token: ${current_tok}" \
-                      "${BAO_ADDR_LOCAL}/v1/auth/token/renew-self")
-                    if [ "$renew_code" = "200" ]; then
-                      echo "[openbao-auto-init] service token renewed (same ID, extended TTL)"
-                      return 0
-                    fi
-                    echo "[openbao-auto-init] renew-self returned HTTP ${renew_code} — re-minting"
                   else
-                    echo "[openbao-auto-init] service token expired or invalid (HTTP ${lookup_resp}) — re-minting"
+                    echo "[openbao-auto-init] ${secret} token expired or invalid (HTTP ${lookup_resp}) — re-minting"
                   fi
                 else
-                  echo "[openbao-auto-init] no service token in gibson-platform-operator-vault — minting one"
+                  echo "[openbao-auto-init] no service token in ${secret} — minting one"
                 fi
                 minter="$held"
                 if [ -z "$minter" ]; then
                   minter=$(bao_login_seeder) || {
-                    echo "[openbao-auto-init] FATAL: the service token is unusable and the ${SEEDER_ROLE} login failed, so nothing can mint a replacement. Procedure: docs/runbooks/openbao-recovery.md" >&2
+                    echo "[openbao-auto-init] FATAL: the ${secret} token is unusable and the ${SEEDER_ROLE} login failed, so nothing can mint a replacement. Procedure: docs/runbooks/openbao-recovery.md" >&2
                     return 1
                   }
                 fi
-                if vault_mint_renewable_service_token "$minter"; then
-                  echo "[openbao-auto-init] re-minted the platform service token with the ${SEEDER_ROLE} role (ServiceAccount ${OWN_SA}); no root token was involved"
-                  rc=0
+                if vault_mint_token "$minter" "$policy" "$secret"; then
+                  echo "[openbao-auto-init] re-minted ${secret} with the ${SEEDER_ROLE} role (ServiceAccount ${OWN_SA}); no root token was involved"
+                  erc=0
                 else
-                  rc=1
+                  erc=1
                 fi
-                # The KV copy the tenant-operator reads through ESO must follow.
-                seed_one "$minter" gibson-vault-admin-token token:svctoken || rc=1
+                # The KV copy the platform-operator reads through ESO must follow.
+                if [ "$secret" = "$PLATFORM_TOKEN_SECRET" ]; then
+                  seed_one "$minter" gibson-vault-admin-token token:svctoken || erc=1
+                fi
                 [ -n "$held" ] || vault_revoke_self "$minter"
-                return $rc
+                return $erc
+              }
+
+              vault_ensure_tokens() {
+                # Both operator tokens. $1 (optional) a held seeder token.
+                trc=0
+                vault_ensure_token "$PLATFORM_TOKEN_SECRET" "$ADMIN_POLICY" "${1:-}" || trc=1
+                vault_ensure_token "$TENANT_OP_TOKEN_SECRET" "$TENANT_OP_POLICY" "${1:-}" || trc=1
+                return $trc
               }
 
               # ---------------------------------------------------------------
@@ -926,7 +923,7 @@ spec:
                         val=""; write=1
                       fi ;;
                     svctoken)
-                      val=$(kube_read_service_token)
+                      val=$(kube_read_token "$PLATFORM_TOKEN_SECRET")
                       if [ -n "$val" ] && [ "$val" != "$curval" ]; then write=1; fi ;;
                     *)
                       if [ "$present" != "true" ]; then
@@ -1031,6 +1028,27 @@ spec:
                   'path "*" { capabilities = ["create", "read", "update", "delete", "list", "sudo", "patch"] }
               ' || return 1
 
+                # tenant-operator: what the tenant-operator's code calls, and
+                # nothing in the root namespace's kv store, where the escrowed
+                # Zitadel owner credentials live (gibson
+                # operators/tenant/internal/clients/vault):
+                #   sys/auth/jwt              VerifyJWTAuthMounted reads the
+                #                             root jwt mount (a sys/auth/<path>
+                #                             read needs sudo)
+                #   sys/namespaces/tenant-*   create and delete tenant-<id>
+                #   transit/hmac/*            KEK derivation (HMAC only, which
+                #                             reveals no key material)
+                #   tenant-*                  everything inside a tenant
+                #                             namespace: its kv mount, jwt
+                #                             auth mount, policy and role
+                # lookup-self and renew-self come with the default policy.
+                vault_write_policy "$tok" "$TENANT_OP_POLICY" \
+                  'path "sys/auth/jwt" { capabilities = ["read", "sudo"] }
+              path "sys/namespaces/tenant-*" { capabilities = ["create", "update", "read", "delete"] }
+              path "transit/hmac/*" { capabilities = ["update"] }
+              path "tenant-*" { capabilities = ["create", "read", "update", "delete", "list", "sudo", "patch"] }
+              ' || return 1
+
                 # eso-reader: read-only, and only the platform material. ESO
                 # never needs write, and never needs transit.
                 #
@@ -1130,7 +1148,7 @@ spec:
                 vault_ensure_kv_v2_secret_mount "$seeder" || rc=1
                 vault_ensure_transit_mount "$seeder" || rc=1
                 vault_configure_access "$seeder" || rc=1
-                vault_ensure_service_token "$seeder" || rc=1
+                vault_ensure_tokens "$seeder" || rc=1
                 vault_seed_platform_secrets "$seeder" || rc=1
                 vault_revoke_self "$seeder"
                 seeder=""
@@ -1206,7 +1224,9 @@ spec:
                     sleep 5
                     continue
                   fi
-                  retry_n 5 5 vault_mint_renewable_service_token "$initial_root" || { sleep 5; continue; }
+                  retry_n 5 5 vault_mint_token "$initial_root" "$TENANT_OP_POLICY" "$TENANT_OP_TOKEN_SECRET" || { sleep 5; continue; }
+                  # The platform token last: svc_token holds it for the check below.
+                  retry_n 5 5 vault_mint_token "$initial_root" "$ADMIN_POLICY" "$PLATFORM_TOKEN_SECRET" || { sleep 5; continue; }
                   retry_n 5 5 vault_seed_platform_secrets "$initial_root" || { sleep 5; continue; }
                   # The replacement credential must authenticate BEFORE the
                   # initial root is destroyed.
@@ -1256,7 +1276,7 @@ spec:
                 fi
                 steady_tick=$((${steady_tick:-0} + 1))
                 if [ "$steady_tick" -ge 30 ]; then
-                  vault_ensure_service_token || echo "[openbao-auto-init] WARN: service token refresh failed"
+                  vault_ensure_tokens || echo "[openbao-auto-init] WARN: service token refresh failed"
                   vault_follow_keyring_inputs || echo "[openbao-auto-init] WARN: keyring input pass did not complete; it runs again in five minutes"
                   steady_tick=0
                 fi
@@ -1413,18 +1433,25 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 ---
-# openbao-auto-init RBAC. The sidecar manages ONE Secret:
-#   gibson-platform-operator-vault — the renewable service token consumed by
-#   the platform-operator and tenant-operator (deploy#454). Writing a
-#   non-renewable root token into the operator Secret causes
-#   VaultTransitReady=False because vaulttoken.Renewer calls renew-self
-#   which OpenBao rejects with 400 "lease is not renewable".
+# openbao-auto-init RBAC. The sidecar manages TWO Secrets, the renewable
+# service tokens of the two operators (deploy#454):
+#   gibson-platform-operator-vault — policy platform-admin
+#   gibson-tenant-operator-vault   — policy tenant-operator
+# A non-renewable root token in either would cause VaultTransitReady=False,
+# because vaulttoken.Renewer calls renew-self and OpenBao rejects it with
+# 400 "lease is not renewable".
 #
 # The unseal-keys Secret and the delete verb that went with it are gone
 # (deploy#1731): under the static seal nothing is minted into a Secret, so
-# the sidecar needs no delete and no second resourceName. The unscoped
-# `create` verb is required because POST /secrets does not allow
-# resourceName pinning (Kubernetes RBAC has no create + resourceNames).
+# the sidecar needs no delete. The unscoped `create` verb is required because
+# POST /secrets does not allow resourceName pinning (Kubernetes RBAC has no
+# create + resourceNames).
+#
+# No verb on Deployments. The sidecar used to roll both operators after a
+# re-mint, which needed `patch` on their Deployments, and a patch of a pod
+# template can change the image and the ServiceAccount. Reloader rolls each
+# operator when its token Secret changes instead (the reload annotation on
+# each Deployment).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -1456,13 +1483,7 @@ rules:
     verbs: ["get", "update", "patch"]
     resourceNames:
       - gibson-platform-operator-vault
-  # Patch deployments to trigger rollout restart after re-mint (token ID changes).
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    verbs: ["patch"]
-    resourceNames:
-      - gibson-tenant-operator
-      - gibson-platform-operator
+      - gibson-tenant-operator-vault
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

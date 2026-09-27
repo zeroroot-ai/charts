@@ -420,6 +420,15 @@ platformPostgres:
 # that name exists, so the tenant-operator's operator→daemon dial
 # fails on the first tenant reconcile (deploy#879, found during the staging
 # signup outage 2026-06-12).
+# The postgres-setup Jobs (templates/jobs/_postgres-setup.tpl) run psql
+# against platform-postgres-rw. The image is the psql client the chart's
+# data-plane helm test already uses (gibson-workloads tests.psqlImage), so it
+# is on the org mirror and in the air-gap image list.
+postgresSetup:
+  image:
+    repository: ghcr.io/zeroroot-ai/mirror/bitnami-postgresql
+    tag: "16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
+
 gibson-operators:
   tenantOperator:
     daemonGrpcAddress: "gibson-gibson-workloads:50051"

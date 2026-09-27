@@ -270,8 +270,8 @@ spec:
      live everywhere. :5432 callers: every platform component with
      a database, the CNPG operator itself, and instance-to-instance
      replication. :8000 is the operator's instance-status probe;
-     :9187 metrics. The postgres-setup bringup Jobs are NOT listed — they
-     reach the primary via `kubectl exec`, not the network.
+     :9187 metrics. The umbrella's postgres-setup bringup Jobs reach :5432
+     through the opt-in label below (THE SEAM), like any other client.
 
      THE SEAM FOR EVERYTHING THIS CHART DOES NOT SHIP. A SaaS overlay
      (ADR-0006) is a separate Argo Application that this chart knows nothing

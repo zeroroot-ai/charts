@@ -14,9 +14,8 @@ Postgres beside a managed one.
 
 Bare CNPG Cluster. Knows NOTHING about any specific app: per-app postgres
 setup (CREATE ROLE / DATABASE / GRANT) is owned by the postgres-setup Jobs in
-templates/jobs/*, which run against this cluster's `platform-postgres-rw`
-Service via the postgres-exec ServiceAccount (platform-primitives-exec-rbac,
-wave -7). Adding/removing an app requires zero edits here.
+templates/jobs/*, which connect to this cluster's `platform-postgres-rw`
+Service as the superuser (templates/jobs/_postgres-setup.tpl). Adding/removing an app requires zero edits here.
 
 Superuser secret: CNPG-OWNED here (deploy#652). enableSuperuserAccess: true
 with NO spec.superuserSecret — CNPG generates `platform-postgres-superuser`
@@ -59,7 +58,7 @@ metadata:
     velero.io/exclude-from-backup: "true"
   annotations:
     # Regular resource (never a hook — a hook-delete-policy would delete the
-    # database cluster) at wave -7: with the postgres-exec RBAC (-7), after
+    # database cluster) at wave -7: with the postgres-setup ServiceAccount (-7), after
     # the folded ExternalSecrets (-8), and BEFORE the -6 Sync-hook setup Jobs
     # that poll this CR's .status.currentPrimary. See the wave ordering note
     # in values.yaml (deploy#820).
