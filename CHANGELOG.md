@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.130.3](https://github.com/zeroroot-ai/charts/compare/v0.130.2...v0.130.3) (2026-09-26)
+
+
+### Bug Fixes
+
+* **gibson:** gibson v0.139.0 with exact service account roles and the sign-in policy ([#170](https://github.com/zeroroot-ai/charts/issues/170)) ([5723240](https://github.com/zeroroot-ai/charts/commit/572324082b004f5769c3c501d771d81724c6b455))
+* **zitadel:** bump to v4.18.0 ([#166](https://github.com/zeroroot-ai/charts/issues/166)) ([3f4ba3e](https://github.com/zeroroot-ai/charts/commit/3f4ba3e461fa0b6cd14165ad9077c658c2c0f12f))
+* **zitadel:** only bootstrap reads the Zitadel owner credentials ([#168](https://github.com/zeroroot-ai/charts/issues/168)) ([3eb83db](https://github.com/zeroroot-ai/charts/commit/3eb83db7facb322254628dd1054b271239364ce2))
+
 ## [0.130.2](https://github.com/zeroroot-ai/charts/compare/v0.130.1...v0.130.2) (2026-09-24)
 
 

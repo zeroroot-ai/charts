@@ -10,7 +10,7 @@ metadata:
     helm.sh/chart: gibson-operators-0.3.0
     app.kubernetes.io/name: gibson-operators
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: priority-class
 value: 900
@@ -31,7 +31,7 @@ metadata:
     helm.sh/chart: gibson-operators-0.3.0
     app.kubernetes.io/name: gibson-operators
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: priority-class
 value: 500
@@ -62,7 +62,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: tenant-neo4j
 # value: 100 — well below cluster-critical (1B), above the default 0.
@@ -73,21 +73,6 @@ globalDefault: false
 description: >
   Per-tenant Neo4j StatefulSet pods. Used by gibson-tenant-neo4j-cap
   ResourceQuota to scope the kind memory cap (Task 33 / Req 10.4).
----
-# Source: gibson/charts/gibson-operators/templates/cross-namespace-eso-rbac.yaml
-# Ensure the zitadel ns exists — this chart drops RBAC into it, but
-# zitadel itself is installed by a sibling Application (cnpg-operator's
-# zitadel sub-app in apps/<env>/zitadel.yaml). In kind dev where that
-# sibling isn't yet present, this template creates the ns so the
-# RBAC has somewhere to land.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: zitadel
-  labels:
-    app.kubernetes.io/managed-by: Helm
-  annotations:
-    "helm.sh/resource-policy": keep
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/namespace.yaml
 apiVersion: v1
@@ -125,7 +110,7 @@ metadata:
     helm.sh/chart: gibson-operators-0.3.0
     app.kubernetes.io/name: gibson-operators
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: connector-operator
 spec:
@@ -162,7 +147,7 @@ metadata:
     helm.sh/chart: gibson-operators-0.3.0
     app.kubernetes.io/name: gibson-operators
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: platform-operator
 spec:
@@ -200,7 +185,7 @@ metadata:
     helm.sh/chart: gibson-operators-0.3.0
     app.kubernetes.io/name: gibson-operators
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: reloader
 spec:
@@ -239,7 +224,7 @@ metadata:
     helm.sh/chart: gibson-operators-0.3.0
     app.kubernetes.io/name: gibson-operators
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: tenant-operator
 spec:
@@ -334,7 +319,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: dashboard
 spec:
@@ -381,7 +366,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: redis
 spec:
@@ -449,7 +434,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: envoy
 spec:
@@ -494,7 +479,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ext-authz
 spec:
@@ -545,7 +530,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: daemon
 spec:
@@ -672,7 +657,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: namespace-default-deny
 spec:
@@ -691,7 +676,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: openbao-isolation
 spec:
@@ -779,7 +764,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: docs-svc-isolation
 spec:
@@ -821,7 +806,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: client-workloads-isolation
 spec:
@@ -859,7 +844,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: dev-observability-isolation
 spec:
@@ -893,7 +878,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spire-server-isolation
 spec:
@@ -939,7 +924,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spiffe-csi-driver-isolation
 spec:
@@ -962,7 +947,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spiffe-oidc-discovery-provider-isolation
 spec:
@@ -1025,7 +1010,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: openfga-isolation
 spec:
@@ -1090,7 +1075,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: zitadel-isolation
 spec:
@@ -1125,9 +1110,6 @@ spec:
               app.kubernetes.io/component: platform-operator
         - podSelector:
             matchLabels:
-              app.kubernetes.io/component: signup-bot-pat-minter
-        - podSelector:
-            matchLabels:
               app.kubernetes.io/component: zitadel-login-branding
         # The first-admin Job creates the founding owner through the
         # Management API, dialing Zitadel by Service name (ADR-0092).
@@ -1150,7 +1132,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: zitadel-login-isolation
 spec:
@@ -1181,7 +1163,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: platform-neo4j-isolation
 spec:
@@ -1217,7 +1199,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: cnpg-jobs-isolation
 spec:
@@ -1241,7 +1223,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: cnpg-instances-isolation
 spec:
@@ -1350,7 +1332,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ratelimit
 spec:
@@ -1426,7 +1408,6 @@ spec:
         operator: In
         values:
           - postgres-exec
-          - signup-bot-pat-minter
           - zitadel-login-branding
           # deploy#1631: the first-admin Job. Under the namespace default-deny,
           # a component label absent from THIS list means the pod cannot even
@@ -1768,7 +1749,7 @@ metadata:
     helm.sh/chart: gibson-operators-0.3.0
     app.kubernetes.io/name: gibson-operators
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: tenant-operator
 spec:
@@ -1813,7 +1794,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: envoy
 spec:
@@ -1965,17 +1946,6 @@ metadata:
     app.kubernetes.io/part-of: gibson
     app.kubernetes.io/managed-by: Helm
 ---
-# Source: gibson/charts/gibson-operators/templates/cross-namespace-eso-rbac.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: gibson-zitadel-admin-reader
-  namespace: zitadel
-  labels:
-    app.kubernetes.io/name: gibson-zitadel-admin-reader
-    app.kubernetes.io/part-of: gibson
-    app.kubernetes.io/managed-by: Helm
----
 # Source: gibson/charts/gibson-operators/templates/platform-operator/sa.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -2061,7 +2031,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: openbao
   # Workload-identity annotations, when the substrate has them. Empty in kind.
@@ -2078,7 +2048,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: openbao-jwt-auth-init
 ---
@@ -2092,7 +2062,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: dashboard
 ---
@@ -2106,7 +2076,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: redis-rotation
 ---
@@ -2120,7 +2090,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: envoy
 automountServiceAccountToken: false
@@ -2135,7 +2105,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ext-authz
 ---
@@ -2149,7 +2119,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: fga-init
   annotations:
@@ -2165,7 +2135,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
 ---
 # Source: gibson/charts/gibson-workloads/templates/operations/active-session-backfill/job.yaml
@@ -2178,7 +2148,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: active-session-backfill
   annotations:
@@ -2194,7 +2164,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ratelimit
 automountServiceAccountToken: false
@@ -2209,7 +2179,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: sandbox-eviction-handler
 ---
@@ -2223,7 +2193,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: setec-cert-bridge
 ---
@@ -2237,7 +2207,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: helm-test
 automountServiceAccountToken: false
@@ -3075,7 +3045,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: openbao
 data:
@@ -3117,7 +3087,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: sa-identity-map
   annotations:
@@ -3135,7 +3105,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: dashboard
 data:
@@ -3155,7 +3125,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: grafana
     grafana_dashboard: "1"
@@ -3174,7 +3144,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: grafana
     grafana_dashboard: "1"
@@ -3194,7 +3164,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: grafana
     grafana_dashboard: "1"
@@ -3411,7 +3381,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: redis
 data:
@@ -3450,7 +3420,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
 data:
   domain: "selfhosted.example.com"
@@ -3480,7 +3450,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: envoy
 data:
@@ -5808,7 +5778,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ext-authz
   annotations:
@@ -5847,7 +5817,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: daemon
 data:
@@ -6080,7 +6050,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: daemon
 data:
@@ -6179,7 +6149,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: reserved-names
 data:
@@ -6221,7 +6191,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: tenant-neo4j
 data:
@@ -6249,7 +6219,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ratelimit
 data:
@@ -6974,10 +6944,17 @@ data:
             Mode: require
           Username: zitadel
     DefaultInstance:
+      DomainPolicy:
+        UserLoginMustBeDomain: false
       LoginPolicy:
-        AllowExternalIDP: true
+        AllowDomainDiscovery: false
+        AllowExternalIDP: false
         AllowRegister: false
         AllowUsernamePassword: true
+        ForceMFA: true
+        ForceMFALocalOnly: false
+        MfaInitSkipLifetime: 0s
+        PasswordlessType: 1
     ExternalDomain: app.selfhosted.example.com
     ExternalPort: 443
     ExternalSecure: true
@@ -7384,12 +7361,13 @@ metadata:
     app.kubernetes.io/name: gibson-connector-operator
     app.kubernetes.io/part-of: gibson
 rules:
-  # ConfigMaps + Secrets alongside each connector (permission-profile
-  # ConfigMaps, and the daemon-written credential Secret the operator reads).
-  # The operator never authors Secret manifests in the chart; this grant is
-  # the runtime read/patch surface only.
+  # ConfigMaps alongside each connector (the egress-profile ConfigMap). No
+  # Secrets: the operator only puts the credential Secret's NAME into the
+  # MCPRemoteProxy spec. The daemon writes that Secret and ToolHive reads
+  # it. A cluster-wide Secret read would also reach the Zitadel owner
+  # credentials (scripts/check-owner-credential-readers.py).
   - apiGroups: [""]
-    resources: ["configmaps", "secrets"]
+    resources: ["configmaps"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
 
   # ConnectorInstance — the CR this operator owns end to end, cluster-wide
@@ -7988,7 +7966,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
 rules:
   - apiGroups: ["gibson.zeroroot.ai"]
@@ -8021,7 +7999,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
 rules:
   - apiGroups: [""]
@@ -8037,7 +8015,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
 rules:
   - apiGroups: ["gibson.zeroroot.ai"]
@@ -8056,7 +8034,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: active-session-backfill
   annotations:
@@ -8075,7 +8053,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: sandbox-eviction-handler
 rules:
@@ -9475,7 +9453,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: openbao
 roleRef:
@@ -9513,7 +9491,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -9533,7 +9511,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -9553,7 +9531,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: active-session-backfill
   annotations:
@@ -9576,7 +9554,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: sandbox-eviction-handler
 roleRef:
@@ -9935,22 +9913,6 @@ rules:
     resources: ["events"]
     verbs: ["create", "patch"]
 ---
-# Source: gibson/charts/gibson-operators/templates/cross-namespace-eso-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: gibson-zitadel-admin-reader
-  namespace: zitadel
-  labels:
-    app.kubernetes.io/name: gibson-zitadel-admin-reader
-    app.kubernetes.io/part-of: gibson
-rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames:
-      - iam-admin-pat
-    verbs: ["get", "list", "watch"]
----
 # Source: gibson/charts/gibson-operators/templates/reloader/reloader.yaml
 # Reloader reads Secrets and ConfigMaps through informers, and it scopes
 # those informers to KUBERNETES_NAMESPACE (internal/pkg/cmd/reloader.go:
@@ -10018,7 +9980,8 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    resourceNames: ["gibson-redis-stack"]
+    verbs: ["get"]
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list", "watch"]
@@ -10108,7 +10071,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: openbao
 rules:
@@ -10142,7 +10105,6 @@ rules:
     resources: ["secrets"]
     verbs: ["get"]
     resourceNames:
-      - gibson-zitadel-signup-bot-pat
       - "gibson-gibson-workloads-db-secrets"
 ---
 # Source: gibson/charts/gibson-workloads/templates/databases/redis-rotation-controller.yaml
@@ -10155,14 +10117,18 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: redis-rotation
 rules:
   # Read the redis password Secret to detect rotation and retrieve passwords.
+  # Every read in the script is a named `kubectl get secret`, so the rule
+  # names the Secret. A namespace-wide read would also reach the Zitadel
+  # owner credentials (scripts/check-owner-credential-readers.py).
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list"]
+    resourceNames: ["gibson-redis-stack"]
+    verbs: ["get"]
   # Manage the rotation-state Secret (stores last-processed version +
   # last-known password for the dual-password ACL window).
   # K8s ignores resourceNames for `create` (no name exists yet at create time),
@@ -10234,7 +10200,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ext-authz
 rules:
@@ -10253,7 +10219,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: fga-init
   annotations:
@@ -10273,16 +10239,20 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
 rules:
-  # secrets get/list/watch — used by daemon Pod init containers
-  # (wait-for-idp-admin-secret) to poll for
-  # ESO-materialised Secrets before the daemon container starts.
-  # NOT used by daemon Go code — forbids daemon-side K8s API.
+  # secrets get, on one name. The init container wait-for-idp-admin-secret
+  # polls that Secret with `kubectl get secret <name>` before the daemon
+  # container starts. The daemon's Go code reads no Secret in this
+  # namespace through the API. No list and no watch: a namespace-wide
+  # read would also reach the Zitadel owner credentials (iam-admin-pat,
+  # iam-admin, the System API key), which only bootstrap may read
+  # (scripts/check-owner-credential-readers.py).
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list", "watch"]
+    resourceNames: ["idp-admin-credentials"]
+    verbs: ["get"]
   # pods get/list/watch — used by the wait-for-prerequisites init
   # container to poll for tenant-operator Pod Ready before the daemon
   # container starts.
@@ -10310,7 +10280,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: active-session-backfill
   annotations:
@@ -10330,7 +10300,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: setec-cert-bridge
 rules:
@@ -10580,24 +10550,6 @@ roleRef:
   kind: Role
   name: gibson-connector-operator-leader-election
 ---
-# Source: gibson/charts/gibson-operators/templates/cross-namespace-eso-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: gibson-zitadel-admin-reader
-  namespace: zitadel
-  labels:
-    app.kubernetes.io/name: gibson-zitadel-admin-reader
-    app.kubernetes.io/part-of: gibson
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: gibson-zitadel-admin-reader
-subjects:
-  - kind: ServiceAccount
-    name: gibson-zitadel-admin-reader
-    namespace: zitadel
----
 # Source: gibson/charts/gibson-operators/templates/reloader/reloader.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -10740,7 +10692,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: openbao
 roleRef:
@@ -10780,7 +10732,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: redis-rotation
 roleRef:
@@ -10802,7 +10754,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ext-authz
 roleRef:
@@ -10824,7 +10776,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: fga-init
   annotations:
@@ -10848,7 +10800,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -10869,7 +10821,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: active-session-backfill
   annotations:
@@ -10893,7 +10845,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: setec-cert-bridge
 roleRef:
@@ -11371,7 +11323,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: openbao
 spec:
@@ -11400,7 +11352,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: dashboard
 spec:
@@ -11425,7 +11377,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: redis
 spec:
@@ -11450,7 +11402,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: docs-svc
 spec:
@@ -11474,7 +11426,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: envoy
   annotations:
@@ -11530,7 +11482,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ext-authz
 spec:
@@ -11561,7 +11513,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: daemon
 spec:
@@ -11611,7 +11563,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ratelimit
 spec:
@@ -12012,7 +11964,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: sandbox-eviction-handler
 spec:
@@ -12051,7 +12003,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sandbox-eviction-handler
-          image: "ghcr.io/zeroroot-ai/gibson:v0.138.3@sha256:db5b8ce1adb7063718cc02b06ef382ac327ade8207f4a7165926d2fc81c21e51"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.139.0@sha256:22a8bd9227cfe3cdc8ea32f229c40f8bbaacc41a1dc30e8db62a37ce95855bc9"
           imagePullPolicy: Always
           command: ["/usr/local/bin/sandbox-eviction-handler"]
           args:
@@ -13119,7 +13071,7 @@ spec:
               readOnly: true
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/connector-operator:v0.138.3@sha256:d83c049e1ee546c97e3d8b23897119652d12575f5d0e9d1d6272c398e4a109ca"
+          image: "ghcr.io/zeroroot-ai/connector-operator:v0.139.0@sha256:bbb9a024321142d54789e1f59047e257f036016ac151097fb0f33aff4fba13e3"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -13237,7 +13189,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/platform-operator:v0.138.3@sha256:0a1f64502f63459c60bf72b2b0618d2e2b0f466838f51cb775f75a6231539aa9"
+          image: "ghcr.io/zeroroot-ai/platform-operator:v0.139.0@sha256:38d0a52cf604c298fefafc7593dd41c1ced8b5a0b4798dc2afde7136aba757b9"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -13697,7 +13649,7 @@ spec:
               memory: 64Mi
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.138.3@sha256:4160cdaae5920e196af941d52aa554159b0b4a75c729c866fb372dd93eb2c752"
+          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.139.0@sha256:65da1c3ad71b829ab33a60fcb1e6beb70f061c992d6172dd8c116a2afb87e00a"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -14489,7 +14441,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: dashboard
 spec:
@@ -14515,8 +14467,8 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,shared-identity"
-        checksum/config: f4b307d6e93921902802aefb3878e4ecd0089c79f38afda86410f5c692a8f25d
-        checksum/secret: e99533c2009fa3a8efddd343a09ca912eb867c02c6593be13cd4696f8097560e
+        checksum/config: 4e37a3b6300dfe7b9db7e1d71ab19403f25ddc81ed3076a3523f1a0cf839c04c
+        checksum/secret: 028521c84304e29ddb03125ae64cbf30f151693941c5a32c0e0fc7598b8339eb
         # Pod-roll-on-Secret-change is delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). The prior pattern
         # (a checksum annotation computing sha256sum over a lookup-loaded
         # Secret) was broken under Argo's offline `helm template` render —
@@ -14525,7 +14477,7 @@ spec:
         # rotated. Reloader runs cluster-wide and watches the explicitly-
         # named Secrets below; when any of them changes, Reloader triggers
         # a rolling restart of this Deployment.
-        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-zitadel-signup-bot-pat,gibson-workloads-dashboard-secrets,gibson-workloads-redis-stack,gibson-stripe-credentials"
+        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-workloads-dashboard-secrets,gibson-workloads-redis-stack,gibson-stripe-credentials"
     spec:
       
       imagePullSecrets:
@@ -14659,44 +14611,6 @@ spec:
             - name: zitadel-client
               mountPath: /var/run/zitadel-client
               readOnly: true
-        # one-code-path #203: wait-for-signup-bot-pat blocks pod start
-        # until the gibson-zitadel-signup-bot-pat Secret has been minted
-        # by the post-install bootstrap Job + materialised via ESO. The
-        # ZITADEL_SIGNUP_BOT_PAT env entry was flipped from
-        # `optional: true` to required.
-        - name: wait-for-signup-bot-pat
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
-          command: ['/bin/bash', '-c']
-          args:
-            - |
-              set -eu
-              ns="gibson"
-              echo "[wait-for-signup-bot-pat] waiting for Secret ${ns}/gibson-zitadel-signup-bot-pat key=pat..."
-              for i in $(seq 1 30); do
-                if kubectl get secret -n "${ns}" gibson-zitadel-signup-bot-pat \
-                    -o jsonpath='{.data.pat}' 2>/dev/null \
-                    | base64 -d 2>/dev/null | grep -q .; then
-                  echo "[wait-for-signup-bot-pat] ok"
-                  exit 0
-                fi
-                sleep 2
-              done
-              echo "[wait-for-signup-bot-pat] timed out after 60s -- the gibson-zitadel-signup-bot-pat Secret was not materialised. Check: kubectl get externalsecret,secret -n ${ns} | grep signup-bot" >&2
-              exit 1
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 1001
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
         # one-code-path #203: wait-for-db-secrets blocks pod start until
         # the Secret backing NEO4J_PASSWORD has been materialised. The
         # NEO4J_PASSWORD env entry was flipped from `optional: true` to
@@ -14819,7 +14733,7 @@ spec:
               mountPath: /shared
       containers:
         - name: dashboard
-          image: "ghcr.io/zeroroot-ai/dashboard:v0.121.0@sha256:532a55c110be31390f65fac19a22e7a784e85e630c541e9aed96e6010baedadd"
+          image: "ghcr.io/zeroroot-ai/dashboard:v0.121.1@sha256:ca32cee940d39cc65c11814bc508817c72a36c47ca90cdd7c803633bb74f4bd6"
           imagePullPolicy: IfNotPresent
           # Spec: canonical-service-identity Req 5 — the resolve-sa-identity-map
           # init container writes the comma-joined numeric subs to
@@ -15029,22 +14943,6 @@ spec:
                 secretKeyRef:
                   name: gibson-zitadel-dashboard
                   key: ZITADEL_CLIENT_SECRET
-            # Scoped Zitadel PAT for the dashboard-native signupAction
-            # (spec: dashboard-native-signup). Belongs to the `signup-bot`
-            # machine user which has IAM_USER_MANAGER only — it can create
-            # humans + read password policy, NOT touch orgs or admin the
-            # instance. This is INTENTIONALLY NOT the iam-admin-pat; a
-            # build-time guard at scripts/check-no-iam-admin-pat-in-dashboard.mjs
-            # keeps that separation enforced.
-            # one-code-path #203: was `optional: true`. The
-            # wait-for-signup-bot-pat init container above blocks pod
-            # start until the Secret has been minted by the post-install
-            # bootstrap Job + materialised via ESO.
-            - name: ZITADEL_SIGNUP_BOT_PAT
-              valueFrom:
-                secretKeyRef:
-                  name: gibson-zitadel-signup-bot-pat
-                  key: pat
             # The signupAction also needs the external domain to forge
             # Host headers when the admin-client's apiUrl points at the
             # in-cluster Zitadel Service (same trick as Envoy routing).
@@ -15360,7 +15258,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: docs-svc
 spec:
@@ -15480,7 +15378,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: envoy
 spec:
@@ -15506,7 +15404,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 306f4800358b88eaf01b501d05782225e8fbbec9df02548a845b1c29f200ec74
+        checksum/config: a9cb81f42dd5478d161c4e6b793bbd69dcb6b42168a12bc4b480062766f68141
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -15849,7 +15747,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ext-authz
 spec:
@@ -15875,8 +15773,8 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,tmp"
-        checksum/registry: af2d26456965eb02fb06df983cb3b16b92f7d5bc38f3488ea69c38a4bf38192b
-        checksum/daemon-registry: 614415a16ef2c41e87e5affe9875eea0c7a88fce1b0341758d5519e636213071
+        checksum/registry: 03e1ae0ef7f1c4015408920840ac885e09f0f096974c15a5fdd4c5c527e33402
+        checksum/daemon-registry: fb028dff14647dfa641c51bb1006133af83b2dfa29ada9560656ac0dbf240da5
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
         secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc"
     spec:
@@ -15989,7 +15887,7 @@ spec:
               memory: 64Mi
       containers:
         - name: ext-authz
-          image: "ghcr.io/zeroroot-ai/ext-authz:v0.138.3@sha256:ee05154e7fb99118ebeb4d58bf361b967731035e5468f69017e752cd7a23d39f"
+          image: "ghcr.io/zeroroot-ai/ext-authz:v0.139.0@sha256:df9dddfee84afcc2bf1093720ccf0c7219ee7812eded797c9c7326d90a1b44b2"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -16089,6 +15987,13 @@ spec:
             # scripts/.extauthz-transport-waivers.txt, and vice versa.
             - name: EXT_AUTHZ_CGJWT_KEYS_URL
               value: "https://gibson-gibson-workloads:8086/capabilitygrant/v1/keys"
+            # ADR-0093 decision 4: a person's tenant comes from the Zitadel org
+            # in their verified token. ext-authz maps the org to the tenant
+            # through the daemon's mTLS authz-registry listener. The value must
+            # be https and end with a slash (the org id is appended). ext-authz
+            # refuses to start without it.
+            - name: EXT_AUTHZ_ORG_TENANT_URL
+              value: "https://gibson-gibson-workloads:8086/identity/v1/org-tenant/"
             # gibson#133: the OIDC client ids of the human sign-in flows. A
             # token issued to any other client is a machine credential and
             # skips the session gate; without this every machine user's
@@ -16291,7 +16196,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ratelimit
 spec:
@@ -16320,7 +16225,7 @@ spec:
         # A quota change is a ConfigMap change; roll the pod so ratelimit
         # re-reads it (RUNTIME_WATCH_ROOT is off: watching a projected
         # ConfigMap is racy across the kubelet's symlink swap).
-        checksum/config: 304d1ce919c8d2046e2105cc37f2b6b2722812566b7be2d56cc509151b06c374
+        checksum/config: d894ee808f24f8360967f8f7aeca6dc6cf400853b7ca95bd64034c431200be63
     spec:
       
       imagePullSecrets:
@@ -16982,7 +16887,7 @@ spec:
     metadata:
       annotations:
         secret.reloader.stakater.com/reload: gibson-zitadel-system-key
-        checksum/configmap: 4e17f97d50a341deaac9b055baa883b15cb5ecd745c07619581762e39936273a
+        checksum/configmap: 91bd0d0e36d94897f73223bae6bed4b9f0b923be1ae06ddfe5f979a390f9a145
         checksum/secret-db-ssl-ca-crt: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         checksum/secret-zitadel-secrets: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
       labels:
@@ -17117,7 +17022,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: openbao
 spec:
@@ -18327,7 +18232,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: redis
 spec:
@@ -18491,7 +18396,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: daemon
     # spec zero-trust-hardening Task 5.4 — operational traceability of the
@@ -18522,7 +18427,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "tmp,spire-agent-socket"
-        checksum/config: 364d7d09e380cabfc418142d6f867643cbedf188349a0f3a218cd38c161f7b99
+        checksum/config: 8c01b5b4f94f6083c017172a1487e3031ab8310af34cdb73677d7decf33082f7
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). Consumer envFrom
         # resolution is frozen for the pod's lifetime; Reloader watches the
         # named Secrets and triggers a rolling restart when any changes.
@@ -18732,7 +18637,7 @@ spec:
               echo "Redis is ready!"
       containers:
         - name: gibson
-          image: "ghcr.io/zeroroot-ai/gibson:v0.138.3@sha256:db5b8ce1adb7063718cc02b06ef382ac327ade8207f4a7165926d2fc81c21e51"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.139.0@sha256:22a8bd9227cfe3cdc8ea32f229c40f8bbaacc41a1dc30e8db62a37ce95855bc9"
           imagePullPolicy: Always
           ports:
             - name: callback
@@ -19836,7 +19741,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: openbao-jwt-auth-init
   annotations:
@@ -20053,13 +19958,13 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-fga-init-614415a1
+  name: gibson-gibson-workloads-fga-init-fb028dff
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: fga-init
   annotations:
@@ -20111,7 +20016,7 @@ spec:
         # The entrypoint is the gibson binary, so command overrides it to get a
         # shell for the redirect. The runtime image is alpine-based and has one.
         - name: dump-model
-          image: "ghcr.io/zeroroot-ai/gibson:v0.138.3@sha256:db5b8ce1adb7063718cc02b06ef382ac327ade8207f4a7165926d2fc81c21e51"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.139.0@sha256:22a8bd9227cfe3cdc8ea32f229c40f8bbaacc41a1dc30e8db62a37ce95855bc9"
           imagePullPolicy: Always
           command: ['/bin/sh', '-c']
           args:
@@ -20331,19 +20236,29 @@ spec:
               # health paths needed to render the sign-in screen; tuples are
               # only required for the platform_operator admin RPCs.
               # Platform SAs that must hold a platform_operator tuple on
-              # system_tenant:_system. This is intentionally a SUPERSET of
-              # .Values.serviceAccounts.required (the dashboard's allowed-caller
-              # list, trimmed in deploy#826): the dashboard's OWN service
-              # identity (gibson-dashboard-service) needs the tuple to call the
-              # platform BillingService webhook RPCs (dashboard#780), even
-              # though it is not in the allowed-caller list.
+              # system_tenant:_system. Only two gRPC services check this
+              # relation: DaemonOperatorService (called by the operators
+              # and the daemon itself, never by the dashboard) and
+              # AdminTenantService (whose admin RPCs the dashboard always
+              # calls with the SIGNED-IN HUMAN's own forwarded session,
+              # never with its own service identity).
+              #
+              # gibson-dashboard-service is deliberately NOT in this list
+              # (hosted#191). It used to be, on the theory that it needed
+              # the tuple for platform BillingService webhook RPCs
+              # (dashboard#780) — BillingService no longer exists in
+              # gibson, and an audit of every RPC the dashboard's own
+              # service identity actually calls (SignupService,
+              # UserService.*SignupProgress, TenantProvisioningService,
+              # MembershipService invite flows) found none that need
+              # platform_operator. It is internet-facing; giving it a
+              # cross-tenant relation it never uses was pure exposure.
               #
               # NOTE: gibson-tool-runner-sa was REMOVED — its MACHINE_USER
               # OIDCClient no longer exists, so it never appears in the
               # sa-identity-map. Listing it here previously wedged the
-              # all-or-nothing wait below and silently skipped EVERY tuple,
-              # including the dashboard's (dashboard#780).
-              REQUIRED='gibson-iam-admin gibson-tenant-operator gibson-dashboard-service'
+              # all-or-nothing wait below and silently skipped EVERY tuple.
+              REQUIRED='gibson-iam-admin gibson-tenant-operator'
               MAP_JSON=""
               ALL_SET="false"
               i=0
@@ -20369,11 +20284,11 @@ spec:
 
               if [ "$ALL_SET" != "true" ]; then
                 # Do NOT skip everything: one missing SA (e.g. a removed
-                # MACHINE_USER) must not silently disable the dashboard's
-                # platform_operator tuple and re-break billing (dashboard#780).
-                # The bounded wait above already gave the post-install Zitadel
-                # Job time to populate the map; now seed whatever IS present
-                # and warn (not skip) on whatever is not.
+                # MACHINE_USER) must not silently disable every OTHER
+                # platform_operator tuple. The bounded wait above already
+                # gave the post-install Zitadel Job time to populate the
+                # map; now seed whatever IS present and warn (not skip) on
+                # whatever is not.
                 echo "  WARNING: sa-identity-map not fully populated after 60s — seeding present SAs, warning on absent ones."
               fi
 
@@ -20446,13 +20361,13 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-active-session-backfill-614415a1
+  name: gibson-gibson-workloads-active-session-backfill-fb028dff
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: active-session-backfill
   annotations:
@@ -20534,7 +20449,7 @@ spec:
               memory: 64Mi
       containers:
         - name: active-session-backfill
-          image: "ghcr.io/zeroroot-ai/gibson:v0.138.3@sha256:db5b8ce1adb7063718cc02b06ef382ac327ade8207f4a7165926d2fc81c21e51"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.139.0@sha256:22a8bd9227cfe3cdc8ea32f229c40f8bbaacc41a1dc30e8db62a37ce95855bc9"
           imagePullPolicy: Always
           # allowlist-bringup-job-idempotency (deploy#928): the command is a
           # single Go binary, not a shell script — there is no multi-step shell
@@ -20617,7 +20532,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: dashboard-shell-gc
 spec:
@@ -20643,7 +20558,7 @@ spec:
             - name: ghcr-credentials
           containers:
             - name: shell-gc
-              image: "ghcr.io/zeroroot-ai/dashboard:v0.121.0@sha256:532a55c110be31390f65fac19a22e7a784e85e630c541e9aed96e6010baedadd"
+              image: "ghcr.io/zeroroot-ai/dashboard:v0.121.1@sha256:ca32cee940d39cc65c11814bc508817c72a36c47ca90cdd7c803633bb74f4bd6"
               imagePullPolicy: IfNotPresent
               command:
                 - node
@@ -20689,7 +20604,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: redis-rotation
 spec:
@@ -21098,7 +21013,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: envoy
 spec:
@@ -21130,7 +21045,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: cert-manager-issuer
 spec:
@@ -21157,7 +21072,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: daemon-tls
 spec:
@@ -21188,7 +21103,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: daemon-tls
 spec:
@@ -21218,7 +21133,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ext-authz-tls
 spec:
@@ -21249,7 +21164,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ext-authz-tls
 spec:
@@ -21279,7 +21194,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: openfga-tls
 spec:
@@ -21313,7 +21228,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: setec-frontend-tls
 spec:
@@ -21343,7 +21258,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: setec-frontend-tls
 spec:
@@ -21380,7 +21295,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: setec-frontend-tls
 spec:
@@ -21433,7 +21348,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: setec-frontend-tls
 spec:
@@ -21593,7 +21508,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: cert-manager-issuer
 spec:
@@ -21623,7 +21538,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: cert-manager-issuer
 spec:
@@ -21656,7 +21571,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: cert-manager-issuer
 spec:
@@ -21671,7 +21586,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: cert-manager-issuer
 spec:
@@ -21691,7 +21606,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spire-controller-manager
 spec:
@@ -21717,7 +21632,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spire-controller-manager
 spec:
@@ -21745,7 +21660,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spire-controller-manager
 spec:
@@ -21771,7 +21686,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spire-controller-manager
 spec:
@@ -21797,7 +21712,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spire-controller-manager
 spec:
@@ -21823,7 +21738,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spire-controller-manager
 spec:
@@ -21849,7 +21764,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spire-controller-manager
 spec:
@@ -21875,7 +21790,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spire-controller-manager
 spec:
@@ -21901,7 +21816,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spire-controller-manager
 spec:
@@ -22077,32 +21992,6 @@ spec:
       - spire-server
       - spire-system
 ---
-# Source: gibson/charts/gibson-operators/templates/cross-namespace-eso-rbac.yaml
-# ESO is required infrastructure (one-code-path #203); the chart-wide
-# on/off conditional that used to wrap this ClusterSecretStore was
-# deleted along with the toggle.
-apiVersion: external-secrets.io/v1
-kind: ClusterSecretStore
-metadata:
-  name: gibson-cross-ns-zitadel
-  labels:
-    app.kubernetes.io/name: gibson-cross-ns-zitadel
-    app.kubernetes.io/part-of: gibson
-spec:
-  provider:
-    kubernetes:
-      remoteNamespace: zitadel
-      server:
-        caProvider:
-          type: ConfigMap
-          name: kube-root-ca.crt
-          key: ca.crt
-          namespace: gibson
-      auth:
-        serviceAccount:
-          name: gibson-zitadel-admin-reader
-          namespace: zitadel
----
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/cluster-secret-store.yaml
 apiVersion: external-secrets.io/v1
 kind: ClusterSecretStore
@@ -22124,10 +22013,13 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: external-secrets
 spec:
+  conditions:
+    - namespaces:
+        - "gibson"
   provider:
     vault:
       server: "http://gibson-openbao.gibson.svc.cluster.local:8200"
@@ -22153,7 +22045,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: setec-cert-bridge
 spec:
@@ -22181,7 +22073,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: dashboard
 spec:
@@ -22225,7 +22117,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ext-authz
 spec:
@@ -22266,7 +22158,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: zitadel
 spec:
@@ -22303,7 +22195,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: zitadel
 spec:
@@ -22340,7 +22232,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: zitadel
 spec:
@@ -22382,7 +22274,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
 spec:
   refreshInterval: 60s
@@ -22415,7 +22307,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
 spec:
   refreshInterval: 60s
@@ -22464,7 +22356,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: redis
 spec:
@@ -22516,7 +22408,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
 spec:
   refreshInterval: 60s
@@ -22563,7 +22455,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: zitadel
 spec:
@@ -22605,7 +22497,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: secrets
 spec:
@@ -22634,7 +22526,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: secrets
 spec:
@@ -22666,7 +22558,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: secrets
 spec:
@@ -22704,7 +22596,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: secrets
 spec:
@@ -22733,7 +22625,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: secrets
 spec:
@@ -22776,7 +22668,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: setec-cert-bridge
 spec:
@@ -23097,7 +22989,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: cert-manager-issuer
 spec:
@@ -23114,7 +23006,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: setec-frontend-tls
 spec:
@@ -23350,7 +23242,7 @@ metadata:
     helm.sh/chart: gibson-operators-0.3.0
     app.kubernetes.io/name: gibson-operators
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     # Desired state, excluded from the Velero backup (deploy#1735, CONTEXT.md
     # § Velero backup). The chart renders this CR on every sync, so a restore
@@ -23376,37 +23268,23 @@ spec:
       systemUserName: "gibson-system-bot"
       trustedClusterDomain: "gibson-zitadel.gibson.svc.cluster.local"
       apiURL: "http://gibson-zitadel.gibson.svc.cluster.local:8080"
-    serviceUsers:
-      - name: "gibson-iam-admin"
-        roles:
-          - "IAM_OWNER"
-        patSecretRef:
-          name: "gibson-iam-admin-pat"
-          key: "pat"
-      - name: "gibson-tenant-operator"
-        roles:
-          - "IAM_USER_MANAGER"
-        patSecretRef:
-          name: "gibson-zitadel-tenant-operator-pat"
-          key: "pat"
-      - name: "gibson-signup-bot"
-        roles:
-          - "IAM_USER_MANAGER"
-        patSecretRef:
-          name: "gibson-zitadel-signup-bot-pat"
-          key: "pat"
   oidcClients:
     - name: "gibson-daemon"
       applicationType: "MACHINE_USER"
+      roles:
+        - "IAM_OWNER"
       secretRef:
         name: "idp-admin-credentials"
         key: "client_secret"
     - name: "gibson-tenant-operator"
       applicationType: "MACHINE_USER"
+      roles:
+        - "IAM_OWNER"
       secretRef:
         name: "gibson-zitadel-tenant-operator"
         key: "ZITADEL_CLIENT_SECRET"
     - name: "gibson-dashboard"
+      roles: []
       redirectURIs:
         - "https://app.selfhosted.example.com/api/auth/callback/zitadel"
       postLogoutRedirectURIs:
@@ -23416,11 +23294,13 @@ spec:
         key: "client_secret"
     - name: "gibson-dashboard-service"
       applicationType: "MACHINE_USER"
+      roles: []
       secretRef:
         name: "gibson-zitadel-dashboard"
         key: "ZITADEL_CLIENT_SECRET"
     - name: "gibson-native-login"
       applicationType: "NATIVE"
+      roles: []
       grantTypes:
         - "DEVICE_CODE"
         - "AUTHORIZATION_CODE"
@@ -23672,7 +23552,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: redis
 spec:
@@ -23713,7 +23593,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: sandbox-slo
   annotations:
@@ -23870,7 +23750,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ratelimit
 spec:
@@ -23950,7 +23830,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: envoy
 spec:
@@ -23974,7 +23854,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ext-authz
 spec:
@@ -23998,7 +23878,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: daemon
 spec:
@@ -24037,7 +23917,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: tenant-neo4j
     # Match the Prometheus Operator's serviceMonitorSelector if configured.
@@ -24319,7 +24199,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spire-controller-manager
 spec:
@@ -24377,7 +24257,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spire-controller-manager
 spec:
@@ -24522,7 +24402,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spire-controller-manager
 spec:
@@ -24550,7 +24430,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: spire-controller-manager
 spec:
@@ -24976,7 +24856,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
     app.kubernetes.io/component: helm-test
@@ -24995,7 +24875,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
     app.kubernetes.io/component: helm-test
@@ -25036,29 +24916,6 @@ metadata:
     argocd.argoproj.io/hook: Sync
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     argocd.argoproj.io/sync-wave: "-2"
----
-# Source: gibson/templates/jobs/gibson-workloads-signup-bot-pat-minter.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: signup-bot-pat-minter
-  namespace: gibson
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: '3'
-    helm.sh/hook-delete-policy: before-hook-creation
-    # Argo: Sync-phase at wave 0, NOT PostSync. In the single umbrella
-    # Application PostSync only fires once the app is Healthy — but the
-    # dashboard's wait-for-signup-bot-pat init NEEDS this Job's output to
-    # become Ready, so PostSync deadlocks (same class as the openfga
-    # migrate, gitops#140 / deploy#820). The Job self-waits in-pod for
-    # iam-admin-pat + Zitadel, so running concurrently with the wave-0
-    # batch is safe, and it is idempotent (re-validates the existing PAT).
-    # SA/Role/RoleBinding ride the same wave; kind-ordering applies them
-    # before the Job. helm.sh hooks kept for plain-helm installs.
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
 ---
 # Source: gibson/templates/jobs/platform-primitives-exec-rbac.yaml
 apiVersion: v1
@@ -25338,7 +25195,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
   annotations:
@@ -25346,9 +25203,16 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
     "helm.sh/hook-weight": "-10"
 rules:
+  # Exactly the Secrets tests 02 and 07 read: named gets, no list.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list"]
+    resourceNames:
+      - gibson-openbao-keys
+      - "gibson-master-key"
+      - gibson-dashboard-oidc
+      - "gibson-zitadel-dashboard"
+      - "gibson-zitadel-dashboard"
+    verbs: ["get"]
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list"]
@@ -25363,7 +25227,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
   annotations:
@@ -25435,54 +25299,6 @@ rules:
   # "waiting for iam-admin" with the Secret present and this list naming
   # the PAT alone. The Job now refuses to wait on a Secret it may not read.
   resourceNames: [iam-admin-pat, iam-admin, login-client]
----
-# Source: gibson/templates/jobs/gibson-workloads-signup-bot-pat-minter.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: signup-bot-pat-minter
-  namespace: gibson
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: '3'
-    helm.sh/hook-delete-policy: before-hook-creation
-    # Argo: Sync-phase at wave 0, NOT PostSync. In the single umbrella
-    # Application PostSync only fires once the app is Healthy — but the
-    # dashboard's wait-for-signup-bot-pat init NEEDS this Job's output to
-    # become Ready, so PostSync deadlocks (same class as the openfga
-    # migrate, gitops#140 / deploy#820). The Job self-waits in-pod for
-    # iam-admin-pat + Zitadel, so running concurrently with the wave-0
-    # batch is safe, and it is idempotent (re-validates the existing PAT).
-    # SA/Role/RoleBinding ride the same wave; kind-ordering applies them
-    # before the Job. helm.sh hooks kept for plain-helm installs.
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
-rules:
-- apiGroups:
-  - ''
-  resources:
-  - secrets
-  verbs:
-  - get
-  resourceNames:
-  - iam-admin-pat
-- apiGroups:
-  - ''
-  resources:
-  - secrets
-  verbs:
-  - create
-- apiGroups:
-  - ''
-  resources:
-  - secrets
-  verbs:
-  - get
-  - update
-  - patch
-  resourceNames:
-  - gibson-zitadel-signup-bot-pat
 ---
 # Source: gibson/templates/jobs/platform-primitives-exec-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -25596,7 +25412,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
   annotations:
@@ -25622,7 +25438,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
   annotations:
@@ -25687,37 +25503,6 @@ roleRef:
   name: iam-admin-pat-escrow
   apiGroup: rbac.authorization.k8s.io
 ---
-# Source: gibson/templates/jobs/gibson-workloads-signup-bot-pat-minter.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: signup-bot-pat-minter
-  namespace: gibson
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: '3'
-    helm.sh/hook-delete-policy: before-hook-creation
-    # Argo: Sync-phase at wave 0, NOT PostSync. In the single umbrella
-    # Application PostSync only fires once the app is Healthy — but the
-    # dashboard's wait-for-signup-bot-pat init NEEDS this Job's output to
-    # become Ready, so PostSync deadlocks (same class as the openfga
-    # migrate, gitops#140 / deploy#820). The Job self-waits in-pod for
-    # iam-admin-pat + Zitadel, so running concurrently with the wave-0
-    # batch is safe, and it is idempotent (re-validates the existing PAT).
-    # SA/Role/RoleBinding ride the same wave; kind-ordering applies them
-    # before the Job. helm.sh hooks kept for plain-helm installs.
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
-subjects:
-- kind: ServiceAccount
-  name: signup-bot-pat-minter
-  namespace: gibson
-roleRef:
-  kind: Role
-  name: signup-bot-pat-minter
-  apiGroup: rbac.authorization.k8s.io
----
 # Source: gibson/templates/jobs/platform-primitives-exec-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -25775,7 +25560,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
     app.kubernetes.io/component: helm-test
@@ -25942,7 +25727,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
   annotations:
@@ -26005,12 +25790,11 @@ spec:
           secret_has_key "$NS" "gibson-dashboard-oidc" "client_id"
           secret_has_key "$NS" "gibson-dashboard-oidc" "client_secret"
 
-          # Zitadel admin PAT — Secret referenced by PlatformBootstrap.zitadel.adminTokenRef.
-          # Default name `iam-admin-pat` matches the gibson-operators default;
-          # overlays can override via .tests.bootstrap.zitadelAdminPatSecret.
-          ADMIN_PAT_SECRET='iam-admin-pat'
-          ADMIN_PAT_KEY='pat'
-          secret_has_key "$NS" "$ADMIN_PAT_SECRET" "$ADMIN_PAT_KEY"
+          # The Zitadel owner credentials (iam-admin-pat, iam-admin, the System
+          # API key) are not checked here. Only bootstrap may read them
+          # (scripts/check-owner-credential-readers.py), and a test that
+          # reads them would be one more reader. The platform-operator's
+          # PlatformBootstrap conditions prove the owner PAT works.
 
           # Dashboard MACHINE_USER PAT.
           # Default `gibson-zitadel-dashboard` matches gibson-operators
@@ -26023,26 +25807,6 @@ spec:
             secret_has_key "$NS" "$DASH_PAT_SECRET" "$DASH_PAT_KEY"
           else
             echo "[bootstrap-secrets] SKIP $DASH_PAT_SECRET (no dashboard MACHINE_USER configured in overlay)"
-          fi
-
-          # ESO credential backend Secrets (deploy#567 S4: per-credential
-          # individual Secrets replaced the deleted flat gibson-secrets-backend
-          # Secret). Verify one representative credential from each logical group.
-          ESO_NS="external-secrets-backend"
-          if kubectl get namespace "$ESO_NS" >/dev/null 2>&1 ; then
-            secret_has_key "$ESO_NS" "gibson-dashboard-postgres-password" "password"
-            secret_has_key "$ESO_NS" "gibson-impersonation-key"           "value"
-            secret_has_key "$ESO_NS" "gibson-vault-admin-token"           "token"
-            # Capability-Grant signing key (GHSA-3957). Both keys checked, not
-            # one: with the seed present and the kid missing the daemon errors
-            # out of the Minter and disables capability grants; with neither it
-            # silently falls back to deriving from the master KEK, which is the
-            # unrotatable posture this secret exists to end. The fallback is
-            # non-fatal by design, so nothing else in a bringup goes red.
-            secret_has_key "$ESO_NS" "gibson-cg-signing-key"              "kid"
-            secret_has_key "$ESO_NS" "gibson-cg-signing-key"              "key"
-          else
-            echo "[bootstrap-secrets] SKIP ESO backend namespace missing (external SecretStore overlay)"
           fi
 
           echo ""
@@ -26083,7 +25847,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
     app.kubernetes.io/component: helm-test
@@ -26186,7 +25950,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
     app.kubernetes.io/component: helm-test
@@ -26300,7 +26064,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
     # Matches the podSelector of the `gibson-platform-helm-test`
@@ -26437,7 +26201,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
     app.kubernetes.io/component: helm-test
@@ -26581,7 +26345,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
     app.kubernetes.io/component: helm-test
@@ -26703,7 +26467,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
     app.kubernetes.io/component: helm-test
@@ -26888,7 +26652,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
     app.kubernetes.io/component: helm-test
@@ -26902,7 +26666,7 @@ spec:
       # The daemon image itself — same repo@digest the StatefulSet runs — so
       # `gibson --version` reports the toolchain the DEPLOYED binary was built
       # with, not some proxy. The runtime image is alpine-based (has /bin/sh).
-      image: "ghcr.io/zeroroot-ai/gibson:v0.138.3@sha256:db5b8ce1adb7063718cc02b06ef382ac327ade8207f4a7165926d2fc81c21e51"
+      image: "ghcr.io/zeroroot-ai/gibson:v0.139.0@sha256:22a8bd9227cfe3cdc8ea32f229c40f8bbaacc41a1dc30e8db62a37ce95855bc9"
       imagePullPolicy: Always
       command: ["/bin/sh", "-c"]
       args:
@@ -26963,7 +26727,7 @@ metadata:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.138.3"
+    app.kubernetes.io/version: "0.139.0"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
     app.kubernetes.io/component: helm-test
@@ -27796,7 +27560,7 @@ spec:
         fsGroup: 65532
       containers:
         - name: first-admin
-          image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-c48813c@sha256:d398d678db8dc1882a91859f8b417d001db3ca319e156191083ed21f52b4bbea"
+          image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-74094fa@sha256:eed20f9a61897a8e8a7cb65026022bcaf324bd6cf22ff5d28750dfe544e5b1ad"
           imagePullPolicy: IfNotPresent
           env:
             - name: BOOTSTRAP_ADMIN_EMAIL
@@ -28053,61 +27817,6 @@ spec:
         args:
         - "# Wait for primary pod\necho \"waiting for platform-postgres primary...\"\n# Source the primary instance name from CNPG's authoritative\n# Cluster.status.currentPrimary field instead of pod labels.\n# The `role=primary` label is applied by CNPG AFTER promotion,\n# which races this hook at sync-wave -5. Cluster status is set\n# by CNPG the moment the primary is elected. deploy#322\n# finding 9.\nPOD=\"\"\nfor i in $(seq 1 90); do\n  P=$(kubectl -n gibson get cluster.postgresql.cnpg.io platform-postgres \\\n      -o jsonpath='{.status.currentPrimary}' 2>/dev/null || true)\n  if [ -n \"$P\" ] && \\\n     kubectl -n gibson get pod \"$P\" \\\n      -o jsonpath='{.status.phase}' 2>/dev/null | grep -q Running; then\n    POD=$P\n    break\n  fi\n  sleep 2\ndone\nif [ -z \"$POD\" ]; then\n  echo \"ERROR: platform-postgres has no Running currentPrimary after 180s \u2014 Argo will retry\"\n  exit 1\nfi\necho \"primary pod: $POD\"\n\nEXEC=\"kubectl exec -n gibson $POD -c postgres --\"\nEXEC_I=\"kubectl exec -i -n gibson $POD -c postgres --\"\n\n# role:db:role_opts:secret_name\n#\n# gitops#99: tenant_admin needs CREATEROLE in addition to\n# CREATEDB. The tenant-operator's per-tenant Postgres\n# provisioner creates BOTH the per-tenant database AND a\n# per-tenant `<tenant>_app` role inside it. Without\n# CREATEROLE the saga step \"Postgres\" fails at the role-\n# creation stage with SQLSTATE 42501.\nENTRIES=(\n  \"gibson_platform:gibson_platform:LOGIN:gibson-platform-postgres-credentials\"\n  \"dashboard:dashboard:LOGIN:dashboard-postgres-credentials\"\n  \"tenant_admin:tenant_admin:LOGIN CREATEDB CREATEROLE:tenant-admin-postgres-credentials\"\n)\n\nfor entry in \"${ENTRIES[@]}\"; do\n  IFS=\":\" read -r ROLE DB ROLE_OPTS SECRET_NAME <<< \"$entry\"\n  echo \"[$ROLE] starting setup...\"\n\n  # Wait for Secret\n  until PW=$(kubectl -n gibson get secret \"$SECRET_NAME\" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d) && [ -n \"$PW\" ]; do\n    echo \"[$ROLE] waiting for Secret $SECRET_NAME...\"\n    sleep 2\n  done\n  echo \"[$ROLE] secret materialised\"\n\n  # CREATE ROLE if new, then ALWAYS apply the declared\n  # ROLE_OPTS via ALTER ROLE \u2014 this makes the setup Job\n  # idempotent on attribute changes too, not just on\n  # role-presence. Previously, an existing role's options\n  # could drift from the declared set forever (the case\n  # that caused gitops#99: tenant_admin's CREATEROLE flag\n  # was missing on a cluster created before the update).\n  cat <<SQL | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1\n  DO \\$\\$\n  BEGIN\n    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '$ROLE') THEN\n      EXECUTE 'CREATE ROLE \"' || '$ROLE' || '\" WITH $ROLE_OPTS';\n    ELSE\n      EXECUTE 'ALTER ROLE \"' || '$ROLE' || '\" WITH $ROLE_OPTS';\n    END IF;\n  END\n  \\$\\$;\nSQL\n\n  # CREATE DATABASE (no IF NOT EXISTS)\n  if ! $EXEC psql -U postgres -tAc \"SELECT 1 FROM pg_database WHERE datname='$DB'\" | grep -q '^1$'; then\n    $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"CREATE DATABASE \\\"$DB\\\" OWNER \\\"$ROLE\\\";\"\n  else\n    $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"ALTER DATABASE \\\"$DB\\\" OWNER TO \\\"$ROLE\\\";\"\n  fi\n\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"GRANT ALL PRIVILEGES ON DATABASE \\\"$DB\\\" TO \\\"$ROLE\\\";\"\n  # The password is a SQL string literal: double every single quote.\nPW_SQL=$(printf '%s' \"$PW\" | sed \"s/'/''/g\")\nprintf \"%s\\n\" \"ALTER ROLE \\\"$ROLE\\\" WITH PASSWORD '$PW_SQL';\" | $EXEC_I psql -U postgres -v ON_ERROR_STOP=1 -d postgres\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d \"$DB\" -c \"ALTER SCHEMA public OWNER TO \\\"$ROLE\\\"; GRANT ALL ON SCHEMA public TO \\\"$ROLE\\\";\"\n\n  echo \"[$ROLE] setup complete\"\ndone\n\n# gitops#101: per-tenant DBs require pg_trgm for the\n# missions_name_trgm_idx GIN index in migration 003.\n# CREATE DATABASE doesn't carry extensions over from\n# template1 unless they're installed there. Seed it in\n# template1 so every NEW per-tenant DB inherits it;\n# backfill any existing tenant_* DBs in-place so the\n# current cluster recovers without manual operator work.\necho \"\
           [pg_trgm] installing in template1...\"\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d template1 \\\n  -c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\"\necho \"[pg_trgm] template1 done.\"\n\necho \"[pg_trgm] backfilling existing per-tenant DBs...\"\nfor tdb in $($EXEC psql -U postgres -tAc \\\n    \"SELECT datname FROM pg_database WHERE datname LIKE 'tenant\\\\_%' ESCAPE '\\\\\\\\' AND datname <> 'tenant_admin'\"); do\n  echo \"  [pg_trgm] $tdb\"\n  $EXEC psql -U postgres -v ON_ERROR_STOP=1 -d \"$tdb\" \\\n    -c \"CREATE EXTENSION IF NOT EXISTS pg_trgm;\"\ndone\necho \"[pg_trgm] backfill complete.\"\n\n# tenant-operator#69: the operator's Neo4j data-plane step\n# writes one row per tenant into the tenant_neo4j_endpoints\n# registry table (bolt URI + secret name + tier). The table\n# lives in the platform postgres `postgres` database that\n# `tenant_admin` connects to via DATAPLANE_PG_ADMIN_DSN.\n# The CREATE TABLE migration ships in\n# tenant-operator/migrations/001_create_tenant_neo4j_endpoints.up.sql\n# but the operator never runs it on startup, so every\n# signup's Neo4j step failed at registry-insert with\n# SQLSTATE 42P01 (\"relation does not exist\"). This bash\n# CREATE is the gitops-side counterpart of that migration\n# so signup works on a fresh cluster; tenant-operator#69\n# tracks moving this to a proper embed.FS + golang-migrate\n# pass at operator startup.\n# D1-G (deploy#256): tenant-operator's DATAPLANE_PG_ADMIN_DSN\n# connects as `tenant_admin` to the BUILT-IN `postgres` DB,\n# NOT the `tenant_admin` DB. The operator's platform-db\n# migrations try CREATE TABLE in `public` of `postgres` and\n# fail with `permission denied for schema public`\n# (SQLSTATE 42501) because PostgreSQL 15+ owns `public` in\n# the `postgres` DB as `pg_database_owner` and revoked\n# default CREATE for non-owners. The other DBs (gibson_platform,\n# tenant_admin) get the ownership flip via the loop above\n# (line 94), but `postgres` is not in ENTRIES \u2014 it's the\n# cluster's built-in DB.\n#\n# Fix: explicit GRANT CREATE,USAGE on the postgres-DB public\n# schema for tenant_admin. Idempotent \u2014 re-running with\n# privileges already granted is a no-op.\necho \"[postgres-db] granting tenant_admin CREATE on public schema of postgres DB...\"\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres \\\n  -c \"GRANT CREATE, USAGE ON SCHEMA public TO tenant_admin;\"\necho \"[postgres-db] grant complete.\"\n\necho \"[neo4j-registry] ensuring tenant_neo4j_endpoints exists...\"\n$EXEC psql -U postgres -v ON_ERROR_STOP=1 -d postgres -c \"\n  CREATE TABLE IF NOT EXISTS tenant_neo4j_endpoints (\n      tenant_id   TEXT        PRIMARY KEY,\n      bolt_uri    TEXT        NOT NULL,\n      secret_name TEXT        NOT NULL,\n      tier        TEXT        NOT NULL,\n      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n      ready_at    TIMESTAMPTZ,\n      version     INT         NOT NULL DEFAULT 1\n  );\n  GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_neo4j_endpoints TO tenant_admin;\n\"\necho \"[neo4j-registry] table ready.\"\n\necho \"ALL_ROLES_SETUP_OK\"\n"
----
-# Source: gibson/templates/jobs/gibson-workloads-signup-bot-pat-minter.yaml
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: signup-bot-pat-minter
-  namespace: gibson
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    # Weight 3, directly after zitadel-setup (weight 2) which mints the
-    # iam-admin-pat this Job self-waits for — and BEFORE first-admin
-    # (weight 10). Helm runs post-install hooks serially by weight, so at
-    # the old weight 100 this Job could not run until first-admin
-    # finished, while the dashboard's wait-for-signup-bot-pat init
-    # blocked on this Job's output for first-admin's whole deadline.
-    # On a fresh install the dashboard could not become Ready before the
-    # hook that installs the owner had already timed out (deploy#1766).
-    # Producers run before consumers; the Argo path is unchanged
-    # (Sync wave 0, concurrent, self-waiting).
-    helm.sh/hook-weight: '3'
-    helm.sh/hook-delete-policy: before-hook-creation
-    # Argo: Sync-phase at wave 0, NOT PostSync. In the single umbrella
-    # Application PostSync only fires once the app is Healthy — but the
-    # dashboard's wait-for-signup-bot-pat init NEEDS this Job's output to
-    # become Ready, so PostSync deadlocks (same class as the openfga
-    # migrate, gitops#140 / deploy#820). The Job self-waits in-pod for
-    # iam-admin-pat + Zitadel, so running concurrently with the wave-0
-    # batch is safe, and it is idempotent (re-validates the existing PAT).
-    # SA/Role/RoleBinding ride the same wave; kind-ordering applies them
-    # before the Job. helm.sh hooks kept for plain-helm installs.
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "0"
-spec:
-  backoffLimit: 10
-  ttlSecondsAfterFinished: 600
-  template:
-    metadata:
-      labels:
-        # deploy#1365: pod-template label so the bringup-jobs
-        # NetworkPolicy can select this Job's pods under the
-        # gibson namespace default-deny (unlabelled = severed).
-        app.kubernetes.io/component: signup-bot-pat-minter
-    spec:
-      restartPolicy: OnFailure
-      serviceAccountName: signup-bot-pat-minter
-      containers:
-      - name: minter
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
-        command:
-        - bash
-        - -ec
-        args:
-        - "set -euo pipefail\n\n# Wait for iam-admin-pat Secret to be available (may not exist yet\n# on a fresh cluster while Zitadel + PlatformBootstrap reconcile for\n# the first time). 180\xD75s = 15m tolerates a cold-start Zitadel on a\n# loaded host; the old 5m window exhausted before iam-admin-pat\n# appeared and churned the hook through its backoffLimit (deploy#773).\necho \"waiting for iam-admin-pat...\"\nfor i in $(seq 1 180); do\n  if kubectl -n gibson get secret iam-admin-pat > /dev/null 2>&1; then\n    echo \"iam-admin-pat ready\"\n    break\n  fi\n  echo \"  attempt $i/180...\"\n  sleep 5\ndone\n\nPAT=$(kubectl -n gibson get secret iam-admin-pat -o jsonpath='{.data.pat}' | base64 -d | tr -d '\\r\\n')\nZH=\"app.selfhosted.example.com\"\nZ=\"http://gibson-zitadel:8080\"\nROLES_JSON='[\"IAM_USER_MANAGER\",\"IAM_LOGIN_CLIENT\"]'\n\n# --- Step 1: look up or create the machine user ---\necho \"looking up gibson-signup-bot...\"\nRESP=$(curl -sS -X POST \\\n  -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"queries\":[{\"userNameQuery\":{\"userName\":\"gibson-signup-bot\"}}]}' \\\n  \"$Z/v2/users\")\nUSER_ID=$(echo \"$RESP\" | jq -r '.result[0].userId // empty')\n\nif [ -z \"$USER_ID\" ]; then\n  echo \"creating gibson-signup-bot machine user...\"\n  CREATE=$(curl -sS -X POST \\\n    -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n    -H \"Content-Type: application/json\" \\\n    -d '{\"userName\":\"gibson-signup-bot\",\"name\":\"Gibson Signup Bot\",\"description\":\"IAM_USER_MANAGER + IAM_LOGIN_CLIENT for dashboard signup flow\",\"accessTokenType\":\"ACCESS_TOKEN_TYPE_BEARER\"}' \\\n    \"$Z/management/v1/users/machine\")\n  USER_ID=$(echo \"$CREATE\" | jq -r '.userId // empty')\n  if [ -z \"$USER_ID\" ]; then\n    echo \"ERROR: machine user create failed: $CREATE\"; exit 1\n  fi\n  echo \"created user: $USER_ID\"\nelse\n  echo \"signup-bot user exists: $USER_ID\"\nfi\n\n# --- Step 2: reconcile IAM roles (idempotent) ---\necho \"reconciling IAM roles: $ROLES_JSON...\"\nGRANT=$(curl -sS -w \"%{http_code}\" -o /tmp/grant.out -X POST \\\n  -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n  -H \"Content-Type: application/json\" \\\n  -d \"{\\\"userId\\\":\\\"$USER_ID\\\",\\\"roles\\\":$ROLES_JSON}\" \\\n  \"$Z/admin/v1/members\")\nif [ \"$GRANT\" = \"200\" ]; then\n  echo \"IAM member created with roles $ROLES_JSON\"\nelif [ \"$GRANT\" = \"409\" ] || grep -qi \"already exist\" /tmp/grant.out; then\n  echo \"IAM member exists; updating role set to $ROLES_JSON...\"\n  UPDATE=$(curl -sS -w \"%{http_code}\" -o /tmp/update.out -X PUT \\\n    -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\\\"roles\\\":$ROLES_JSON}\" \\\n    \"$Z/admin/v1/members/$USER_ID\")\n  if [ \"$UPDATE\" != \"200\" ]; then\n    echo \"ERROR: IAM member update returned HTTP $UPDATE: $(cat /tmp/update.out)\"; exit 1\n  fi\n  echo \"IAM member roles updated to $ROLES_JSON\"\nelse\n  echo \"ERROR: IAM member grant returned HTTP $GRANT: $(cat /tmp/grant.out)\"; exit 1\nfi\n\n# --- Step 3: validate existing PAT against Zitadel ---\n# The old minter used a length-only check that accepted\n# the invalid 8_ZQ\u2026 format. Validate live instead.\nEXISTING=$(kubectl -n gibson get secret gibson-zitadel-signup-bot-pat \\\n  -o jsonpath='{.data.pat}' 2>/dev/null | base64 -d 2>/dev/null \\\n  | tr -d '\\r\\n' || true)\n\nif [ -n \"$EXISTING\" ] && [ ${#EXISTING} -gt 20 ]; then\n  STATUS=$(curl -sS -o /dev/null -w \"%{http_code}\" \\\n    -H \"Host: $ZH\" -H \"Authorization: Bearer $EXISTING\" \\\n    \"$Z/auth/v1/policies/passwords/complexity\")\n  if [ \"$STATUS\" = \"200\" ]; then\n    echo \"Existing PAT valid (HTTP 200) \u2014 skipping re-mint.\"\n    echo \"SIGNUP_BOT_ROLES_RECONCILED user_id=$USER_ID\"\n    exit 0\n  fi\n  echo \"Existing PAT invalid (HTTP $STATUS) \u2014 re-minting.\"\nelse\n  echo \"No existing PAT found \u2014 minting fresh.\"\nfi\n\n# --- Step 4: mint a new PAT ---\necho \"minting PAT (5-year expiry)...\"\nMINT=$(curl\
-          \ -sS -X POST \\\n  -H \"Host: $ZH\" -H \"Authorization: Bearer $PAT\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"expirationDate\":\"2031-01-01T00:00:00Z\"}' \\\n  \"$Z/management/v1/users/$USER_ID/pats\")\nNEW_PAT=$(echo \"$MINT\" | jq -r '.token // empty')\nif [ -z \"$NEW_PAT\" ]; then\n  echo \"ERROR: PAT mint failed: $MINT\"; exit 1\nfi\n\n# --- Step 5: write to Secret ---\necho \"writing gibson-zitadel-signup-bot-pat Secret...\"\nkubectl -n gibson create secret generic gibson-zitadel-signup-bot-pat \\\n  --from-literal=pat=\"$NEW_PAT\" \\\n  --dry-run=client -o yaml | kubectl apply -f -\n\necho \"SIGNUP_BOT_PAT_MINTED user_id=$USER_ID pat_len=${#NEW_PAT} roles=$ROLES_JSON\"\n"
 ---
 # Source: gibson/templates/jobs/openfga-postgres-setup-job.yaml
 apiVersion: batch/v1

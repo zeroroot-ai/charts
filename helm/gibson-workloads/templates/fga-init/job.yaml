@@ -331,19 +331,29 @@ spec:
               # health paths needed to render the sign-in screen; tuples are
               # only required for the platform_operator admin RPCs.
               # Platform SAs that must hold a platform_operator tuple on
-              # system_tenant:_system. This is intentionally a SUPERSET of
-              # .Values.serviceAccounts.required (the dashboard's allowed-caller
-              # list, trimmed in deploy#826): the dashboard's OWN service
-              # identity (gibson-dashboard-service) needs the tuple to call the
-              # platform BillingService webhook RPCs (dashboard#780), even
-              # though it is not in the allowed-caller list.
+              # system_tenant:_system. Only two gRPC services check this
+              # relation: DaemonOperatorService (called by the operators
+              # and the daemon itself, never by the dashboard) and
+              # AdminTenantService (whose admin RPCs the dashboard always
+              # calls with the SIGNED-IN HUMAN's own forwarded session,
+              # never with its own service identity).
+              #
+              # gibson-dashboard-service is deliberately NOT in this list
+              # (hosted#191). It used to be, on the theory that it needed
+              # the tuple for platform BillingService webhook RPCs
+              # (dashboard#780) — BillingService no longer exists in
+              # gibson, and an audit of every RPC the dashboard's own
+              # service identity actually calls (SignupService,
+              # UserService.*SignupProgress, TenantProvisioningService,
+              # MembershipService invite flows) found none that need
+              # platform_operator. It is internet-facing; giving it a
+              # cross-tenant relation it never uses was pure exposure.
               #
               # NOTE: gibson-tool-runner-sa was REMOVED — its MACHINE_USER
               # OIDCClient no longer exists, so it never appears in the
               # sa-identity-map. Listing it here previously wedged the
-              # all-or-nothing wait below and silently skipped EVERY tuple,
-              # including the dashboard's (dashboard#780).
-              REQUIRED='gibson-iam-admin gibson-tenant-operator gibson-dashboard-service'
+              # all-or-nothing wait below and silently skipped EVERY tuple.
+              REQUIRED='gibson-iam-admin gibson-tenant-operator'
               MAP_JSON=""
               ALL_SET="false"
               i=0
@@ -369,11 +379,11 @@ spec:
 
               if [ "$ALL_SET" != "true" ]; then
                 # Do NOT skip everything: one missing SA (e.g. a removed
-                # MACHINE_USER) must not silently disable the dashboard's
-                # platform_operator tuple and re-break billing (dashboard#780).
-                # The bounded wait above already gave the post-install Zitadel
-                # Job time to populate the map; now seed whatever IS present
-                # and warn (not skip) on whatever is not.
+                # MACHINE_USER) must not silently disable every OTHER
+                # platform_operator tuple. The bounded wait above already
+                # gave the post-install Zitadel Job time to populate the
+                # map; now seed whatever IS present and warn (not skip) on
+                # whatever is not.
                 echo "  WARNING: sa-identity-map not fully populated after 60s — seeding present SAs, warning on absent ones."
               fi
 

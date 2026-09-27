@@ -106,28 +106,25 @@ spec:
       apiURL: {{ . | quote }}
       {{- end }}
     {{- end }}
-    {{- if .Values.platformBootstrap.zitadel.serviceUsers }}
-    serviceUsers:
-      {{- range .Values.platformBootstrap.zitadel.serviceUsers }}
-      - name: {{ .name | quote }}
-        roles:
-          {{- range .roles }}
-          - {{ . | quote }}
-          {{- end }}
-        patSecretRef:
-          name: {{ .patSecretRef.name | quote }}
-          key: {{ .patSecretRef.key | default "pat" | quote }}
-          {{- if .patSecretRef.namespace }}
-          namespace: {{ .patSecretRef.namespace | quote }}
-          {{- end }}
-      {{- end }}
-    {{- end }}
   {{- if .Values.platformBootstrap.oidcClients }}
   oidcClients:
     {{- range .Values.platformBootstrap.oidcClients }}
     - name: {{ .name | quote }}
       {{- if .applicationType }}
       applicationType: {{ .applicationType | quote }}
+      {{- end }}
+      {{- /* hosted#191: the operator grants a machine user exactly these
+             Zitadel roles and revokes any other. An empty list means no
+             role, so the key is always rendered, never dropped. */}}
+      {{- if hasKey . "roles" }}
+      {{- if .roles }}
+      roles:
+        {{- range .roles }}
+        - {{ . | quote }}
+        {{- end }}
+      {{- else }}
+      roles: []
+      {{- end }}
       {{- end }}
       {{- /* The gibson-dashboard client's URIs derive from global.domain
              (deploy#682): when an overlay leaves them empty, default to the

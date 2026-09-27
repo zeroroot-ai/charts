@@ -41,7 +41,7 @@ tenantOperator:
     # Tenant CR never reached Ready (deploy#1766, run 33600876035). The
     # package publishes main/latest/sha-* only, so the commit sha tag is the
     # honest provenance.
-    tag: "v0.138.3@sha256:4160cdaae5920e196af941d52aa554159b0b4a75c729c866fb372dd93eb2c752"
+    tag: "v0.139.0@sha256:65da1c3ad71b829ab33a60fcb1e6beb70f061c992d6172dd8c116a2afb87e00a"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     digest: ""
@@ -192,7 +192,7 @@ platformOperator:
     # deploy#789: digest-pinned for staging/prod immutability.
     # The digest below is the current `latest`. kind keeps :main, exempt.
     # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/platform-operator/versions
-    tag: "v0.138.3@sha256:0a1f64502f63459c60bf72b2b0618d2e2b0f466838f51cb775f75a6231539aa9"
+    tag: "v0.139.0@sha256:38d0a52cf604c298fefafc7593dd41c1ced8b5a0b4798dc2afde7136aba757b9"
     # digest (deploy#1066) — see tenantOperator.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -246,7 +246,7 @@ connectorOperator:
     # name:tag@digest reference kubelet pulls by digest; the `main` tag is
     # cosmetic). kind keeps the floating :main tag (values-kind.yaml), exempt.
     # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/connector-operator/versions
-    tag: "v0.138.3@sha256:d83c049e1ee546c97e3d8b23897119652d12575f5d0e9d1d6272c398e4a109ca"
+    tag: "v0.139.0@sha256:bbb9a024321142d54789e1f59047e257f036016ac151097fb0f33aff4fba13e3"
     # digest (deploy#1066) — see tenantOperator.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -266,18 +266,6 @@ connectorOperator:
   # from gibson.daemonAddress (gibson-common). Override per environment only
   # when the trust domain differs.
   daemonSpiffeID: "spiffe://zeroroot.ai/platform/daemon"
-
-# Cross-namespace ESO bridge — zitadel ns reader RBAC consumed by ESO to
-# pull the iam-admin-pat Secret from zitadel ns into gibson ns. Required
-# infrastructure (one-code-path epic / deploy#187); the previous
-# `.enabled` toggle was a degradation surface and has been deleted. The
-# sub-keys below are substitution selectors for namespaces / SA / Secret
-# name only.
-crossNamespaceESO:
-  zitadelNamespace: zitadel
-  workloadNamespace: gibson
-  serviceAccountName: gibson-zitadel-admin-reader
-  patSecretName: iam-admin-pat
 
 # Image pull secret for ghcr.io private images. Materialised by ESO.
 imagePullSecrets:
@@ -583,17 +571,6 @@ platformBootstrap:
       # Leave empty: the template derives http://<trustedClusterDomain>:8080.
       # Set it only for a non-8080 port or an off-chart Zitadel.
       apiURL: ""
-    serviceUsers:
-      - name: "gibson-iam-admin"
-        roles: ["IAM_OWNER"]
-        patSecretRef:
-          name: "gibson-iam-admin-pat"
-          key: "pat"
-      - name: "gibson-tenant-operator"
-        roles: ["IAM_USER_MANAGER"]
-        patSecretRef:
-          name: "gibson-zitadel-tenant-operator-pat"
-          key: "pat"
 
   # OIDC clients to reconcile as child OIDCClient CRs.
   oidcClients: []
