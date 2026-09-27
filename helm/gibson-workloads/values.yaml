@@ -362,7 +362,7 @@ gibson:
     # on the SPIRE socket — so the fga-init Job hangs in dump-model until
     # its deadline and the whole install wedges. Verified on this digest:
     # `gibson dump-fga-model` exits 0 in under a second with the model.
-    tag: "v0.141.0@sha256:df80136a8b3881fd350eee9e3e668e59347f246a8ab61baaab2c3ad9dd5ca2cb"
+    tag: "v0.142.0@sha256:3edda1f19c631ea4b2ccaa7d882db5e87d164bae82734ff1f552e1f8689523be"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     # Empty by default: first-party pins are hand-committed in the combined
@@ -1089,7 +1089,7 @@ dashboard:
     # kind keeps a moving :main tag (values-kind.yaml), exempt on purpose.
     # Bump: scripts/bump-image-digest.py --image dashboard --ref v<x.y.z> \
     #         --digest "$(HEAD /v2/zeroroot-ai/dashboard/manifests/v<x.y.z>)"
-    tag: "v0.121.1@sha256:ca32cee940d39cc65c11814bc508817c72a36c47ca90cdd7c803633bb74f4bd6"
+    tag: "v0.122.0@sha256:55b571c042f7a9578a6f2153f7c80c6e6c568d82570f7ea43cc93afb7882a4ee"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -2151,7 +2151,7 @@ extAuthz:
     # EXT_AUTHZ_CGJWT_KEYS_URL. It moves in lockstep with the daemon pin above
     # and with the https/:8086 value in ext-authz/deployment.yaml (deploy#1386)
     # — the three are one change, in both directions.
-    tag: "v0.141.0@sha256:5b0a99abf3c26fd89a82b77a97d0bcba71eaac1d4debe9fe1e347b0bec0932b2"
+    tag: "v0.142.0@sha256:ea937e0e1d847334d29b1dbfd41191ad35b7e971f067659b0f0c086cb85ea642"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -3702,7 +3702,7 @@ tenantOperator:
     # Tenant CR never reached Ready (deploy#1766, run 33600876035). The
     # package publishes main/latest/sha-* only, so the commit sha tag is the
     # honest provenance.
-    tag: "v0.141.0@sha256:65d32fc49eaa0d0cec0002af1dcb072e53aa3c8a4b43193653094862c6c0cc99"
+    tag: "v0.142.0@sha256:d201ddc1eea6aa3590d4567f916b434d050e9131ed251bee45d65e7b922abc9e"
     pullPolicy: IfNotPresent
   # ServiceAccount — IRSA annotations injected via serviceAccount.annotations
   # in the prod overlay. The SA name is fixed to "gibson-tenant-operator"
@@ -4807,7 +4807,7 @@ bootstrap:
     # reached Ready with no first admin (staging, 2026-09-23). Since
     # gibson#224 it dials Zitadel by Service name and claims the host by
     # header (ADR-0092), and it needs ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN.
-    tag: "sha-da025b0@sha256:109630db0217300e74ea8cb669b65c6d1d358b6ef9543a66be7a106b23519766"
+    tag: "sha-cd65f90@sha256:91d05cf179d2d456145728a9928d6ac412f23c22a6c05fdec4f9198d0469d283"
     pullPolicy: IfNotPresent
 
   # activeDeadlineSeconds caps the Job runtime. 10 min covers a fresh
