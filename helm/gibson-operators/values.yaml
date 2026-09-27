@@ -604,12 +604,18 @@ platformBootstrap:
       fromAddress: ""       # e.g. no-reply@<domain> — same as gibson.email.from
       fromName: "Zero Root"
       tls: true
-      # userSecretRef / passwordSecretRef — Secret + key holding the SMTP
-      # username / password. Point both at the SAME Secret
-      # gibson-workloads.gibson.email.smtp uses (its externalSecret path
-      # materialises one Secret with both "username" and "password" keys).
-      # Leave userSecretRef unset for a relay that accepts anonymous
-      # submission (e.g. an in-cluster kind/k3d Mailpit with no auth).
+      # credentialsSecretName — the common case: gibson-workloads' own
+      # externalSecret path materialises ONE Secret ("<release>-email-smtp")
+      # carrying both a "username" and a "password" key. Name it here and
+      # both userSecretRef and passwordSecretRef below default to it, so an
+      # overlay states this once instead of repeating a name in two blocks.
+      credentialsSecretName: ""
+      # userSecretRef / passwordSecretRef override credentialsSecretName
+      # field-by-field — needed for gibson.email.smtp's OTHER path (a plain
+      # username value + an operator-created Secret holding only the
+      # password: the username is not a Secret key there at all). Leave both
+      # unset (and credentialsSecretName empty) for a relay that accepts
+      # anonymous submission, e.g. an in-cluster kind/k3d Mailpit.
       userSecretRef:
         name: ""
         key: "username"

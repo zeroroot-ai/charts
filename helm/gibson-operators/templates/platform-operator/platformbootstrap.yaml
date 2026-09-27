@@ -129,6 +129,20 @@ spec:
            render if gibson-workloads.gibson.email.provider is "smtp" while
            this block is unset.
 
+           credentialsSecretName is the convenience form for the common case
+           (gibson-workloads.gibson.email.smtp.externalSecret.enabled: true,
+           the ONLY path staging and prod use): it names ONE Secret carrying
+           both a "username" and a "password" key — the exact shape
+           gibson.emailSmtpSecret.name (helm/gibson-workloads/templates/
+           _helpers.tpl) materialises, "<release>-email-smtp" — so an overlay
+           states the daemon's mail settings once and points Zitadel at the
+           SAME already-materialised Secret by name, rather than repeating a
+           userSecretRef/passwordSecretRef pair. userSecretRef/
+           passwordSecretRef, set explicitly, override it field-by-field —
+           needed for gibson.email.smtp's OTHER path (a plain username value
+           + an operator-created Secret holding only the password), where the
+           username is not a Secret key at all.
+
            Omitted entirely (not rendered empty) when unset: the CRD reads a
            nil spec.zitadel.smtp as an explicit offline install (ADR-0093
            decision 11) and does nothing, exactly like the guard's
@@ -150,19 +164,24 @@ spec:
       {{- if hasKey $smtp "tls" }}
       tls: {{ $smtp.tls }}
       {{- end }}
-      {{- if ($smtp.userSecretRef | default dict).name }}
+      {{- $userRef := $smtp.userSecretRef | default dict }}
+      {{- $passRef := $smtp.passwordSecretRef | default dict }}
+      {{- $sharedName := $smtp.credentialsSecretName }}
+      {{- $userName := $userRef.name | default $sharedName }}
+      {{- if $userName }}
       userSecretRef:
-        name: {{ $smtp.userSecretRef.name | quote }}
-        key: {{ $smtp.userSecretRef.key | default "username" | quote }}
-        {{- with $smtp.userSecretRef.namespace }}
+        name: {{ $userName | quote }}
+        key: {{ $userRef.key | default "username" | quote }}
+        {{- with $userRef.namespace }}
         namespace: {{ . | quote }}
         {{- end }}
       {{- end }}
-      {{- if ($smtp.passwordSecretRef | default dict).name }}
+      {{- $passName := $passRef.name | default $sharedName }}
+      {{- if $passName }}
       passwordSecretRef:
-        name: {{ $smtp.passwordSecretRef.name | quote }}
-        key: {{ $smtp.passwordSecretRef.key | default "password" | quote }}
-        {{- with $smtp.passwordSecretRef.namespace }}
+        name: {{ $passName | quote }}
+        key: {{ $passRef.key | default "password" | quote }}
+        {{- with $passRef.namespace }}
         namespace: {{ . | quote }}
         {{- end }}
       {{- end }}
