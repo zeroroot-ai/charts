@@ -21,6 +21,13 @@ kind: NetworkPolicy
 metadata:
   name: gibson-bringup-jobs
   namespace: gibson
+  annotations:
+    # Argo runs the bringup Jobs as Sync hooks in early waves (postgres-setup
+    # at -6). A resource with no wave is wave 0, so on an upgrade the Jobs
+    # ran under the OLD version of this policy and could not reach Postgres
+    # (staging, 2026-09-27: the postgres-setup rename waited forever). This
+    # policy applies first. scripts/check-netpol-before-hooks.py enforces it.
+    argocd.argoproj.io/sync-wave: "-20"
   labels:
     app.kubernetes.io/component: bringup-jobs-isolation
 spec:

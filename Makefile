@@ -129,6 +129,10 @@ signin-policy: ## The first Zitadel instance starts with MFA forced, no external
 	@python3 scripts/check-signin-policy.py --selftest
 	@python3 scripts/check-signin-policy.py
 
+netpol-before-hooks: ## Every hook Job's NetworkPolicy applies in an earlier Argo wave than the Job
+	@python3 scripts/check-netpol-before-hooks.py --selftest
+	@python3 scripts/check-netpol-before-hooks.py
+
 reloader-namespaced: ## Reloader reads Secrets in its own namespace only: KUBERNETES_NAMESPACE set, no ClusterRole
 	@python3 scripts/check-reloader-namespaced.py --selftest
 	@python3 scripts/check-reloader-namespaced.py
@@ -252,7 +256,7 @@ operator-rbac-fresh: ## The vendored cert-manager and External Secrets RBAC matc
 	@python3 scripts/vendor-operator-rbac.py --selftest
 	@python3 scripts/vendor-operator-rbac.py --check
 
-check: golden attribution cloud-free chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates probes netpol-coverage daemon-netpol-admits-callers edge-strips-instance-headers hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes ## Everything that runs without a cluster
+check: golden attribution cloud-free chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates probes netpol-coverage daemon-netpol-admits-callers edge-strips-instance-headers hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes  netpol-before-hooks## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context

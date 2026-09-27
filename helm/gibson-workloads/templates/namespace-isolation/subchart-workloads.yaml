@@ -34,6 +34,8 @@ profile are inert.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
   name: {{ .Release.Name }}-openfga
   namespace: {{ .Release.Namespace }}
   labels:
@@ -104,6 +106,8 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
   name: {{ .Release.Name }}-zitadel
   namespace: {{ .Release.Namespace }}
   labels:
@@ -154,6 +158,8 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
   name: {{ .Release.Name }}-zitadel-login
   namespace: {{ .Release.Namespace }}
   labels:
@@ -189,6 +195,8 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
   name: {{ .Release.Name }}-platform-neo4j
   namespace: {{ .Release.Namespace }}
   labels:
@@ -243,6 +251,8 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
   name: {{ .Release.Name }}-cnpg-jobs
   namespace: {{ .Release.Namespace }}
   labels:
@@ -297,6 +307,8 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
   name: {{ .Release.Name }}-cnpg-instances
   namespace: {{ .Release.Namespace }}
   labels:
