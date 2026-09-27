@@ -337,18 +337,7 @@ https
 {{- end -}}
 {{- end }}
 
-{{- define "gibson.dashboard.dbHost" -}}
-{{- if .Values.dashboard.postgres.host }}
-{{- .Values.dashboard.postgres.host }}
-{{- else }}
-{{- include "gibson.dashboard.postgresql.host" . }}
-{{- end }}
-{{- end }}
 
-
-{{- define "gibson.dashboard.postgresql.host" -}}
-{{- printf "%s-dashboard-postgresql" .Release.Name }}
-{{- end }}
 
 {{- define "gibson.dashboardSecrets.name" -}}
 {{- printf "%s-dashboard-secrets" (include "gibson.fullname" .) }}
