@@ -14,6 +14,8 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
   name: {{ .Release.Name }}-platform-operator
   namespace: {{ .Release.Namespace }}
   labels:
