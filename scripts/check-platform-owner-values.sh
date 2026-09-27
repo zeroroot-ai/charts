@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# check-platform-owner-values.sh — the Platform owner install values are
-# required, must differ, and always have a way to reach their owner
-# (ADR-0093 decisions 6/8, hosted#201).
+# check-platform-owner-values.sh — the Platform owner AND the seeded first
+# tenant's Owner install values are required, must differ, and always have a
+# way to reach their owner (ADR-0093 decisions 6/8, hosted#201/#202). Both
+# people are provisioned with no password, ever, and both reuse the exact
+# same setup-link mechanism — never a second one (ADR-0027) — so one script
+# proves both halves of the same guard.
 #
 # The render guard is helm/gibson/templates/platform-owner-guard.yaml. This
 # proves it actually fires on every rule it claims to enforce, and that the
@@ -83,5 +86,33 @@ must_fail "offlineSetup=true with no setupSecretRef.key" \
   "setupSecretRef.key is empty" \
   --set global.platformOwner.setupSecretRef.key=
 
-[ "$fail" -eq 0 ] && echo "✓ platform-owner-values: required, must-differ and mail/offline rules all fire, and the baseline satisfies every one of them"
+# --- the same three rules, for the seeded first tenant's Owner (hosted#202) --
+# The baseline ships firstTenant.enabled=true, email.provider=log (no
+# delivering transport) and firstTenant.offlineSetup=true.
+
+must_fail "firstTenant: no mail transport and offlineSetup=false" \
+  "has no way to reach its Owner" \
+  --set global.firstTenant.offlineSetup=false
+
+must_pass "firstTenant: smtp transport and offlineSetup=false" \
+  --set global.firstTenant.offlineSetup=false \
+  --set gibson-workloads.gibson.email.provider=smtp \
+  --set gibson-workloads.gibson.email.smtp.host=smtp.example.com
+
+must_fail "firstTenant: offlineSetup=true with no setupSecretRef.name" \
+  "global.firstTenant.setupSecretRef.name is empty" \
+  --set global.firstTenant.setupSecretRef.name=
+
+must_fail "firstTenant: offlineSetup=true with no setupSecretRef.key" \
+  "global.firstTenant.setupSecretRef.key is empty" \
+  --set global.firstTenant.setupSecretRef.key=
+
+# firstTenant disabled: the mail/offline rule does not apply at all — no
+# Owner is being seeded, so there is nothing to reach.
+must_pass "firstTenant disabled: no mail transport and offlineSetup=false is fine" \
+  --set global.firstTenant.enabled=false \
+  --set global.firstTenant.ownerEmail= \
+  --set global.firstTenant.offlineSetup=false
+
+[ "$fail" -eq 0 ] && echo "✓ platform-owner-values: required, must-differ and mail/offline rules all fire for both the Platform owner and the first tenant's Owner, and the baseline satisfies every one of them"
 exit "$fail"

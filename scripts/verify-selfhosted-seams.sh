@@ -4,7 +4,7 @@
 # Covers deploy#1039's acceptance criteria on a running self-hosted cluster:
 #   - GET / resolves to the login page (no marketing surface)
 #   - the SignupService self-serve path agrees with the deployed signup seam
-#   - the operator-seeded first tenant converges and its admin credential exists
+#   - the operator-seeded first tenant converges and its Owner bootstrap Job succeeded
 #   - docs are served at docs.<domain>, version-matched to the install
 #   - www/marketing is not served by this cluster at all (404, no vhost)
 #
@@ -36,7 +36,8 @@
 #   DOMAIN         platform domain                   (default: from the gibson-domains ConfigMap)
 #   EDGE_ADDR      override derived edge <ip>:<port> (default: from the Envoy Service)
 #   FIRST_TENANT       operator-seeded first tenant slug   (default: the one seeded Tenant CR)
-#   FIRST_ADMIN_SECRET first-admin credential Secret name  (default: gibson-first-admin)
+#   FIRST_ADMIN_SECRET offline setup-link Secret name, checked only if present
+#                      (default: gibson-first-tenant-owner-setup)
 # Exit: 0 all assertions passed · 1 an assertion failed · 2 preflight failed
 #
 # Preflight failure is exit 2 and is NOT a pass.
@@ -70,7 +71,7 @@ if [ -z "${FIRST_TENANT:-}" ]; then
   FIRST_TENANT="$(kubectl get tenants.gibson.zeroroot.ai     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
 fi
 [ -n "${FIRST_TENANT:-}" ] || FIRST_TENANT="default"
-FIRST_ADMIN_SECRET="${FIRST_ADMIN_SECRET:-gibson-first-admin}"
+FIRST_ADMIN_SECRET="${FIRST_ADMIN_SECRET:-gibson-first-tenant-owner-setup}"
 
 WWW_HOST="www.${DOMAIN}"
 DOCS_HOST="docs.${DOMAIN}"
@@ -265,12 +266,27 @@ else
     fail "tenant ${FIRST_TENANT} has no status.zitadelOrgID — the first-admin Job cannot create the owner"
   fi
 
-  # The first-admin Job's proof of completion: the generated credential Secret.
-  # Create-only, so its mere existence means the owner was provisioned.
-  if kubectl -n "$NAMESPACE" get secret "$FIRST_ADMIN_SECRET" >/dev/null 2>&1; then
-    pass "first-admin credential Secret ${FIRST_ADMIN_SECRET} exists (owner provisioned; operator is told to read then delete it)"
+  # The first-admin Job's proof of completion (ADR-0093, hosted#202): the Job
+  # itself succeeded. No password Secret exists to check for any more — the
+  # owner is created with no password, and Zitadel's own invite-code flow
+  # delivers the one-time setup link (emailed, or written to
+  # FIRST_ADMIN_SECRET only in offline mode).
+  JOB_SUCCEEDED="$(kubectl -n "$NAMESPACE" get job gibson-gibson-workloads-first-admin \
+    -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
+  if [ "$JOB_SUCCEEDED" = "1" ]; then
+    pass "first-admin Job succeeded (owner provisioned with no password; a one-time setup link was sent)"
   else
-    fail "first-admin credential Secret ${FIRST_ADMIN_SECRET} is absent — the first-admin Job did not complete, so nobody can log in"
+    fail "first-admin Job did not report success (status.succeeded=${JOB_SUCCEEDED:-<absent>}) — the first-admin Job did not complete, so nobody can log in"
+  fi
+
+  # Offline installs only: the setup-link Secret exists and holds a link,
+  # never a password.
+  if kubectl -n "$NAMESPACE" get secret "$FIRST_ADMIN_SECRET" >/dev/null 2>&1; then
+    if kubectl -n "$NAMESPACE" get secret "$FIRST_ADMIN_SECRET" -o jsonpath='{.data.password}' 2>/dev/null | grep -q .; then
+      fail "offline setup-link Secret ${FIRST_ADMIN_SECRET} carries a password field — no password may ever be written to a Secret (ADR-0093)"
+    else
+      pass "offline setup-link Secret ${FIRST_ADMIN_SECRET} exists and carries no password"
+    fi
   fi
 fi
 

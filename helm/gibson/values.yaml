@@ -162,6 +162,21 @@ global:
     # creates its first tenant through self-serve signup instead
     # (firstTenant.enabled: false — SaaS/staging/prod).
     ownerEmail: ""
+    # offlineSetup: true skips emailing the seeded Owner's setup link and
+    # instead writes a one-time, expiring link to a Secret readable only by
+    # cluster administrators (ADR-0093 decision 8, hosted#202) — the exact
+    # same mechanism global.platformOwner.offlineSetup uses, reused here
+    # rather than a second one (ADR-0027). Set this explicitly on a profile
+    # with no delivering mail transport
+    # (gibson-workloads.gibson.email.provider != "smtp") — the render fails
+    # otherwise, naming both keys. Ignored when firstTenant.enabled is false.
+    offlineSetup: false
+    # setupSecretRef names the Secret (and the key within it) the
+    # first-admin Job writes the offline setup link into. Required when
+    # offlineSetup is true; ignored otherwise.
+    setupSecretRef:
+      name: ""
+      key: "setup-link"
     # The plan the seeded tenant lands on. It must be a canonical plan id
     # (internal/platform/plans), and on any cluster that enforces billing it
     # must be an UNPAID one: the daemon withholds a paid tier with no active
