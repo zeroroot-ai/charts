@@ -3964,11 +3964,15 @@ data:
                             #      /api/admin/provisioning/ any more (the
                             #      entitlements endpoints were retired).
                             #   3. Its only caller, the tenant operator's
-                            #      EntitlementsHTTPClient, posts to DASHBOARD_URL
-                            #      (http://gibson-dashboard:3000 — helm/
+                            #      EntitlementsHTTPClient, posted straight at the
+                            #      dashboard Service (formerly DASHBOARD_URL,
+                            #      http://gibson-dashboard:3000, in helm/
                             #      gibson-operators/templates/tenant-operator/
-                            #      deployment.yaml), i.e. straight at the
-                            #      dashboard Service. It never traversed this edge.
+                            #      deployment.yaml — that env var has since been
+                            #      replaced by GIBSON_APP_URL, which the
+                            #      tenant-operator now uses only for its
+                            #      human-facing email links). It never traversed
+                            #      this edge.
                             #
                             # Deleting it drops an unreachable dashboard-admin
                             # prefix off the public api host; requests now fall to
@@ -13461,13 +13465,20 @@ spec:
             # credential write.
             - name: DAEMON_SERVICE_ACCOUNT_NAME
               value: "gibson"
-            # Dashboard base URL the operator's entitlements client posts to
-            # (/api/admin/provisioning/entitlements/upsert-quota etc.). SPIFFE
-            # JWT-SVIDs handle auth — no shared secret. Without this the
-            # entitlements step fails with `unsupported protocol scheme ""`
-            # because the client builds the request URL relative to "".
-            - name: DASHBOARD_URL
-              value: "http://gibson-dashboard:3000"
+            # GIBSON_APP_URL — the PRODUCT-surface origin (app.<domain>) the
+            # tenant-operator reads to build the two human-facing links it
+            # emails: the tenant-member invitation accept-link and the new
+            # tenant's welcome-email link. Same pattern as the daemon's
+            # GIBSON_APP_URL (gibson-workloads/templates/gibson/
+            # statefulset.yaml): an explicit override, defaulting to the
+            # product-surface origin via gibson.externalOrigin, so a link a
+            # human's browser must open never resolves to nothing.
+            #
+            # Replaces the former DASHBOARD_URL var, an in-cluster Service
+            # address (http://gibson-dashboard:3000) that the same two links
+            # were wrongly built from: a human's browser cannot reach it.
+            - name: GIBSON_APP_URL
+              value: "https://app.selfhosted.example.com"
             # Phase 5.1 of spec tenant-provisioning-unification-phase2:
             # when GIBSON_DAEMON_GRPC_ADDRESS is set, the operator uses
             # Connect-RPC against the daemon's PlatformOperatorService
@@ -15155,7 +15166,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: a9cb81f42dd5478d161c4e6b793bbd69dcb6b42168a12bc4b480062766f68141
+        checksum/config: f794a45e440104863375794a263a7ea269ea2764b73c4648354a0aa5c26e8a82
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -18487,6 +18498,15 @@ spec:
             # (api.<domain>), and it serves no product routes — a verification
             # link built from it resolves to nothing. The fallback
             # (gibson.externalOrigin) is unconditional, so this always resolves.
+            #
+            # The daemon is not the only reader. The tenant-operator
+            # (gibson-operators/templates/tenant-operator/deployment.yaml)
+            # reads the same env var name, wired from its own
+            # gibson.appUrl value, to build its two human-facing email
+            # links: the tenant-member invitation accept-link and the new
+            # tenant's welcome-email link. Both consumers exist because a
+            # link a human's browser must open can never point at an
+            # API-plane or in-cluster address.
             - name: GIBSON_APP_URL
               value: "https://app.selfhosted.example.com"
             # gibson#632 — invitation accept-link email transport; ALSO, as of

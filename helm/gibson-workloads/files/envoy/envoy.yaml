@@ -763,11 +763,15 @@ static_resources:
                         #      /api/admin/provisioning/ any more (the
                         #      entitlements endpoints were retired).
                         #   3. Its only caller, the tenant operator's
-                        #      EntitlementsHTTPClient, posts to DASHBOARD_URL
-                        #      (http://gibson-dashboard:3000 — helm/
+                        #      EntitlementsHTTPClient, posted straight at the
+                        #      dashboard Service (formerly DASHBOARD_URL,
+                        #      http://gibson-dashboard:3000, in helm/
                         #      gibson-operators/templates/tenant-operator/
-                        #      deployment.yaml), i.e. straight at the
-                        #      dashboard Service. It never traversed this edge.
+                        #      deployment.yaml — that env var has since been
+                        #      replaced by GIBSON_APP_URL, which the
+                        #      tenant-operator now uses only for its
+                        #      human-facing email links). It never traversed
+                        #      this edge.
                         #
                         # Deleting it drops an unreachable dashboard-admin
                         # prefix off the public api host; requests now fall to
