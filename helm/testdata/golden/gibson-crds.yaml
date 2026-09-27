@@ -2174,20 +2174,31 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .status.hostId
-      name: HostID
-      priority: 10
-      type: string
-    - jsonPath: .status.lastHeartbeat
-      name: LastHeartbeat
-      type: date
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: AgentEnrollment represents an external agent registration.
+        description: |-
+          AgentEnrollment represents an external agent registration.
+
+          It carries AUTHORIZATION, not credentials. Reconciling one issues the FGA
+          grants that let an already-identified component do its work; it does not mint,
+          publish or expire anything the component authenticates with.
+
+          A component's bootstrap credential comes from `gibson agent enroll`, run by a
+          human against a logged-in CLI session, and is used for exactly one check-in;
+          the host key persisted at that moment re-registers the host unattended
+          thereafter (ADR-0045). That step is deliberately human-in-the-loop and once.
+
+          This resource therefore has no BootstrapReady phase and no bootstrap secret
+          reference. It used to declare both, plus a HostID and a LastHeartbeat that no
+          controller ever wrote, which read as a second, Kubernetes-native issuance path
+          — one where holding RBAC on this namespace would be enough to mint a component
+          credential without the device flow. That is a wider authority question than a
+          CRD field, and until it is answered deliberately, the resource must not look
+          like the answer is yes (gibson#1188).
         properties:
           apiVersion:
             description: |-
@@ -2265,11 +2276,6 @@ spec:
           status:
             description: AgentEnrollmentStatus defines the observed state.
             properties:
-              bootstrapExpiresAt:
-                format: date-time
-                type: string
-              bootstrapSecretRef:
-                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -2331,13 +2337,6 @@ spec:
                 x-kubernetes-list-type: map
               grantsAppliedCount:
                 type: integer
-              hostId:
-                description: HostID is populated after the agent's first /register
-                  call.
-                type: string
-              lastHeartbeat:
-                format: date-time
-                type: string
               observedGeneration:
                 format: int64
                 type: integer
@@ -2345,10 +2344,7 @@ spec:
                 description: AgentEnrollmentPhase represents the lifecycle phase.
                 enum:
                 - Pending
-                - BootstrapReady
-                - Enrolling
                 - Active
-                - Degraded
                 - Revoked
                 - Failed
                 - Terminated
@@ -2893,9 +2889,13 @@ spec:
             description: OIDCClientSpec is the desired state of one Zitadel OIDC client.
             properties:
               accessTokenLifetimeSeconds:
-                description: AccessTokenLifetimeSeconds sets the Zitadel app's
-                  per-application access-token lifetime (e.g. 900 for the CLI
-                  device-grant app). 0/unset leaves the Zitadel instance default.
+                description: |-
+                  AccessTokenLifetimeSeconds overrides the per-application access-token
+                  lifetime (Zitadel OIDC app config `accessTokenLifetime`). 0 / unset
+                  leaves the instance default. Set to 900 (15m) for the gibson CLI
+                  device-grant app so the gibson#622 session-revocation window is bounded:
+                  revoking blocks new tokens immediately and the target's current stateless
+                  access JWT ages out within this lifetime.
                 format: int32
                 minimum: 0
                 type: integer
@@ -3180,7 +3180,7 @@ spec:
               fgaModel:
                 description: |-
                   FGAModel describes the OpenFGA model load. Required — OpenFGA is
-                  structural infrastructure (one-code-path); no skip toggle.
+                  structural infrastructure (ADR-0003 one-code-path); no skip toggle.
                 properties:
                   apiEndpoint:
                     description: APIEndpoint is the OpenFGA HTTP base URL.
@@ -3388,6 +3388,58 @@ spec:
                 required:
                 - plansConfigMapRef
                 type: object
+              platformOwner:
+                description: |-
+                  PlatformOwner declares the ONE human Zitadel administrator this install
+                  creates (ADR-0093 decision 6/8, hosted#201).
+                properties:
+                  email:
+                    description: |-
+                      Email is the Platform owner's address. Required — an empty value skips
+                      the whole reconcile step (ConditionPlatformOwnerReady=True, reason
+                      NotConfigured), which exists only so an older PlatformBootstrap CR
+                      (rendered before this field existed) keeps reconciling everything else
+                      while the chart catches up; a real install always sets it.
+                    type: string
+                  offlineSetup:
+                    description: |-
+                      OfflineSetup, when true, skips emailing the setup link: the operator
+                      creates a one-time, expiring invite code and writes it as a URL into
+                      SetupSecretRef instead (readable only by cluster administrators). Set
+                      this on an install with no working mail transport (ADR-0093 decision 8).
+                    type: boolean
+                  setupGeneration:
+                    description: |-
+                      SetupGeneration is the Platform owner's reset: raising this integer
+                      makes the operator clear every second factor currently on file and
+                      mint a new setup link (sent, or written to SetupSecretRef in offline
+                      mode). It is a reviewed change to an install value, never a live-cluster
+                      action (ADR-0093 decision 12). Defaults to 0 — the first reconcile
+                      (status.observedSetupGeneration starts at 0 too) still sends the
+                      initial link, because a brand-new Platform owner has no prior link.
+                    format: int64
+                    type: integer
+                  setupSecretRef:
+                    description: |-
+                      SetupSecretRef names the Secret the operator writes the offline setup
+                      link into. Required when OfflineSetup is true; ignored otherwise.
+                    properties:
+                      key:
+                        description: Key is the entry within the Secret's data map.
+                        minLength: 1
+                        type: string
+                      name:
+                        description: Name is the Secret name.
+                        minLength: 1
+                        type: string
+                      namespace:
+                        description: Namespace overrides the default namespace.
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                type: object
               postgresBundle:
                 description: |-
                   PostgresBundle describes the CNPG database ownership + public-schema
@@ -3487,6 +3539,14 @@ spec:
                     description: |-
                       SourceSecret is the Secret the openbao-auto-init sidecar mints the
                       unseal key into. Defaults to <release>-openbao-unseal-keys / unsealKey.
+
+                      A POINTER on purpose (deploy#1737). As a value type, omitempty never
+                      omits a struct, so every operator write marshaled
+                      sourceSecret:{name:"",key:""} and the CRD's minLength validation
+                      rejected the write. A PlatformBootstrap rendered without a
+                      sourceSecret (every profile since the static seal, deploy#1750) could
+                      then never be written by the operator at all: even adding the
+                      finalizer failed, and nothing bootstrapped.
                     properties:
                       key:
                         description: Key is the entry within the Secret's data map.
@@ -3598,6 +3658,27 @@ spec:
                       and in-cluster traffic (forge Host header as needed).
                     pattern: ^https?://
                     type: string
+                  loginBranding:
+                    description: |-
+                      LoginBranding is the declared brand of the login pages. The
+                      reconciler keeps the instance's active label policy and its marks
+                      equal to it, compared by content. When nil, Zitadel's stock brand
+                      stays.
+                    properties:
+                      configMap:
+                        description: |-
+                          ConfigMap names a ConfigMap with three keys: label-policy.json (the
+                          instance label policy, in Zitadel admin API field names), logo.svg
+                          and icon.svg. The logo fills the light and the dark logo slot, and the
+                          icon fills both icon slots.
+                        minLength: 1
+                        type: string
+                      namespace:
+                        description: Namespace overrides the default namespace.
+                        type: string
+                    required:
+                    - configMap
+                    type: object
                   project:
                     description: Project is the per-cluster Zitadel project the platform
                       owns.
@@ -3615,55 +3696,6 @@ spec:
                     required:
                     - name
                     type: object
-                  serviceUsers:
-                    description: |-
-                      ServiceUsers is the list of machine users the platform mints + the
-                      roles each carries.
-                    items:
-                      description: |-
-                        ZitadelServiceUserSpec describes one machine user the platform mints
-                        at bootstrap.
-                      properties:
-                        name:
-                          description: Name is the Zitadel username for the service
-                            account.
-                          minLength: 1
-                          type: string
-                        patSecretRef:
-                          description: |-
-                            PATSecretRef points at the Secret + key where the minted Personal
-                            Access Token is materialised.
-                          properties:
-                            key:
-                              description: Key is the entry within the Secret's data
-                                map.
-                              minLength: 1
-                              type: string
-                            name:
-                              description: Name is the Secret name.
-                              minLength: 1
-                              type: string
-                            namespace:
-                              description: Namespace overrides the default namespace.
-                              type: string
-                          required:
-                          - key
-                          - name
-                          type: object
-                        roles:
-                          description: |-
-                            Roles is the list of Zitadel role keys assigned to this user
-                            (e.g. ["IAM_USER_MANAGER"]).
-                          items:
-                            type: string
-                          minItems: 1
-                          type: array
-                      required:
-                      - name
-                      - patSecretRef
-                      - roles
-                      type: object
-                    type: array
                   systemClient:
                     description: |-
                       SystemClient configures the System API client used to register the
@@ -3797,6 +3829,13 @@ spec:
                   "spec changed, not yet reconciled".
                 format: int64
                 type: integer
+              observedSetupGeneration:
+                description: |-
+                  ObservedSetupGeneration mirrors spec.platformOwner.setupGeneration once
+                  the reconciler has minted a setup link for that generation. A mismatch
+                  with the spec value is what tells the reconciler a reset was requested.
+                format: int64
+                type: integer
               oidcClients:
                 description: OIDCClients summarises each child OIDCClient's Ready
                   state.
@@ -3819,6 +3858,12 @@ spec:
                   - ready
                   type: object
                 type: array
+              platformOwnerUserID:
+                description: |-
+                  PlatformOwnerUserID is the Zitadel user id of the Platform owner, once
+                  created. Empty until spec.platformOwner.email is set and the reconciler
+                  has run.
+                type: string
             type: object
         type: object
     served: true
@@ -4182,7 +4227,7 @@ spec:
               tuple writes: the controller reconciles the tenant's platform relationships
               by delegating to the shared grants.Provisioner (which wraps the SAME
               fga.Client the Tenant saga's RegisterTenantWithPlatform step uses — one
-              codepath). On every reconcile the controller drift-corrects: any
+              codepath, ADR-0027). On every reconcile the controller drift-corrects: any
               declared tuple deleted out-of-band is re-written.
 
               By default (PlatformRegistration true, no ExtraTuples) it reconciles exactly
@@ -4464,7 +4509,7 @@ spec:
               The CRD is a thin declarative wrapper over the existing identity-provisioning
               code: the controller reconciles the tenant identity by delegating to the same
               zitadel.Client the Tenant saga's EnsureZitadelOrg / RemoveZitadelOrg steps use
-              (via the shared identity.Provisioner — one codepath). The Zitadel
+              (via the shared identity.Provisioner — one codepath, ADR-0027). The Zitadel
               org name/slug are derived from the tenant the same way the saga derives them
               (display name + tenant id slug); the spec carries the tenant id plus the
               display name used as the org name and an optional OIDC-client request.
@@ -5401,7 +5446,7 @@ spec:
                 description: |-
                   AuthRole optionally overrides the per-tenant JWT-auth role name. When
                   empty the operator derives the conventional "gibson-plugin-<tenantID>"
-                  role, matching the saga. Informational today; recorded on the
+                  role (ADR-0009), matching the saga. Informational today; recorded on the
                   CR for observability.
                 type: string
               mountPath:

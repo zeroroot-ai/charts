@@ -60,7 +60,7 @@ tenantOperator:
     # Tenant CR never reached Ready (deploy#1766, run 33600876035). The
     # package publishes main/latest/sha-* only, so the commit sha tag is the
     # honest provenance.
-    tag: "v0.139.0@sha256:65da1c3ad71b829ab33a60fcb1e6beb70f061c992d6172dd8c116a2afb87e00a"
+    tag: "v0.141.0@sha256:65d32fc49eaa0d0cec0002af1dcb072e53aa3c8a4b43193653094862c6c0cc99"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     digest: ""
@@ -210,7 +210,7 @@ platformOperator:
     # deploy#789: digest-pinned for staging/prod immutability.
     # The digest below is the current `latest`. kind keeps :main, exempt.
     # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/platform-operator/versions
-    tag: "v0.139.0@sha256:38d0a52cf604c298fefafc7593dd41c1ced8b5a0b4798dc2afde7136aba757b9"
+    tag: "v0.141.0@sha256:996a5ab1ca2e328295f6066944e3540202c657f89e7440d717d0de2a9b6ebe11"
     # digest (deploy#1066) — see tenantOperator.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -264,7 +264,7 @@ connectorOperator:
     # name:tag@digest reference kubelet pulls by digest; the `main` tag is
     # cosmetic). kind keeps the floating :main tag (values-kind.yaml), exempt.
     # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/connector-operator/versions
-    tag: "v0.139.0@sha256:bbb9a024321142d54789e1f59047e257f036016ac151097fb0f33aff4fba13e3"
+    tag: "v0.141.0@sha256:598e6b6e946aba55893a4f66214abb533f02d7ae2d643e9fd1123de6ad8b94e7"
     # digest (deploy#1066) — see tenantOperator.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -356,13 +356,8 @@ envoy:
 # pod that silently no-ops the entire IAM provisioning saga (NoopClient
 # injection at the operator end). Whether Zitadel runs as an in-cluster
 # subchart (kind/dev) or as an external instance (prod) is now expressed
-# only by `tenantOperator.zitadelURL`, the chart-level `dashboard.zitadel.issuer`,
-# and the iam-admin-pat Secret reference. There is no "Zitadel off" state.
+# only by `tenantOperator.zitadelURL` and the chart-level `dashboard.zitadel.issuer`. There is no "Zitadel off" state.
 zitadel:
-  # Secret name holding the IAM_OWNER Personal Access Token the operator
-  # mounts at /etc/zitadel/pat. Created by the post-install zitadel-bootstrap
-  # Job; can be overridden when the PAT lives in a customer-owned Secret.
-  adminPatSecretName: "iam-admin-pat"
   zitadel:
     configmapConfig:
       ExternalDomain: ""
@@ -578,6 +573,11 @@ platformBootstrap:
     # these to register the cluster Service hostname as an additional
     # trusted Zitadel domain so every Gibson pod can dial Zitadel by
     # Service name without the per-pod hostAliases workaround.
+    # loginBranding.configMap — the ConfigMap that holds the login brand
+    # (label-policy.json, logo.svg, icon.svg). The umbrella chart renders it
+    # from helm/gibson/files/branding and sets this name. Empty: no brand.
+    loginBranding:
+      configMap: ""
     systemClient:
       systemUserName: ""
       trustedClusterDomain: ""

@@ -1,9 +1,11 @@
 # Zitadel login branding — declared brand source
 
 These files are the single declared source for the hosted-login branding.
-The `zitadel-login-branding` hook Job (templates/jobs/zitadel-login-branding-job.yaml)
-mounts them via ConfigMap, PUTs `label-policy.json` to Zitadel's instance label
-policy, uploads the SVG marks as logo/icon assets, and activates the policy.
+The chart renders them into the `zitadel-login-branding` ConfigMap
+(templates/zitadel-login-branding.yaml). The platform-operator applies it as a
+bootstrap step: it writes `label-policy.json` to Zitadel's instance label
+policy, uploads the SVG marks into the logo and icon slots, activates the
+policy, and reads it back (condition `LoginBrandingReady`).
 
 ## Token → hex mapping
 
