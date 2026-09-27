@@ -115,6 +115,58 @@ spec:
       apiURL: {{ . | quote }}
       {{- end }}
     {{- end }}
+    {{- /* hosted#189: Zitadel has no mail server of its own. Every
+           Zitadel-sent email (the Platform owner's setup link below, a
+           tenant Owner's setup link, invitations, an MFA reset routed
+           through Zitadel) is silently undeliverable until the instance has
+           an active SMTP provider — Zitadel's own invite-code call still
+           succeeds and logs as sent either way.
+
+           Point this at the SAME credentials gibson-workloads' own mail
+           settings use (gibson-workloads.gibson.email.smtp), so there is one
+           mail transport per install, never a second one configured only
+           for Zitadel. The umbrella's zitadel-smtp-guard template fails the
+           render if gibson-workloads.gibson.email.provider is "smtp" while
+           this block is unset.
+
+           Omitted entirely (not rendered empty) when unset: the CRD reads a
+           nil spec.zitadel.smtp as an explicit offline install (ADR-0093
+           decision 11) and does nothing, exactly like the guard's
+           `platformOwner.offlineSetup` escape hatch.
+
+           Gated on `.host` (not a bare `with` on the map), because the
+           chart's own default value is the map {host: "", port: 587, ...} —
+           `with` treats any non-empty map as truthy regardless of its
+           values, which would render this block, and its `required`
+           checks would fail, on every install that never touches SMTP at
+           all (every kind/CI render today). */}}
+    {{- $smtp := .Values.platformBootstrap.zitadel.smtp | default dict }}
+    {{- if $smtp.host }}
+    smtp:
+      host: {{ $smtp.host | quote }}
+      port: {{ required "platformBootstrap.zitadel.smtp.port is required when platformBootstrap.zitadel.smtp.host is set." $smtp.port }}
+      fromAddress: {{ required "platformBootstrap.zitadel.smtp.fromAddress is required when platformBootstrap.zitadel.smtp.host is set." $smtp.fromAddress | quote }}
+      fromName: {{ required "platformBootstrap.zitadel.smtp.fromName is required when platformBootstrap.zitadel.smtp.host is set." $smtp.fromName | quote }}
+      {{- if hasKey $smtp "tls" }}
+      tls: {{ $smtp.tls }}
+      {{- end }}
+      {{- if ($smtp.userSecretRef | default dict).name }}
+      userSecretRef:
+        name: {{ $smtp.userSecretRef.name | quote }}
+        key: {{ $smtp.userSecretRef.key | default "username" | quote }}
+        {{- with $smtp.userSecretRef.namespace }}
+        namespace: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      {{- if ($smtp.passwordSecretRef | default dict).name }}
+      passwordSecretRef:
+        name: {{ $smtp.passwordSecretRef.name | quote }}
+        key: {{ $smtp.passwordSecretRef.key | default "password" | quote }}
+        {{- with $smtp.passwordSecretRef.namespace }}
+        namespace: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
   {{- /* ADR-0093 decisions 5, 8 and 12 (hosted#201): the one human Zitadel
          administrator. The platform-operator creates this account with no
          password and sends a one-time setup link, or writes it to

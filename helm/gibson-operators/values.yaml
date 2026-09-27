@@ -589,6 +589,33 @@ platformBootstrap:
       # Leave empty: the template derives http://<trustedClusterDomain>:8080.
       # Set it only for a non-8080 port or an off-chart Zitadel.
       apiURL: ""
+    # smtp — Zitadel's own SMTP email provider (hosted#189). Nil/absent
+    # (leave `host` empty) means an explicit offline install: Zitadel sends
+    # no mail at all, and both global.platformOwner.offlineSetup and
+    # global.firstTenant.offlineSetup MUST be true, or the umbrella's guards
+    # fail the render. Point this at the SAME credentials
+    # gibson-workloads.gibson.email.smtp uses — one mail transport per
+    # install. The umbrella's zitadel-smtp-guard template fails the render
+    # if gibson-workloads.gibson.email.provider is "smtp" while host here is
+    # empty.
+    smtp:
+      host: ""              # e.g. email-smtp.us-east-1.amazonaws.com — no port
+      port: 587
+      fromAddress: ""       # e.g. no-reply@<domain> — same as gibson.email.from
+      fromName: "Zero Root"
+      tls: true
+      # userSecretRef / passwordSecretRef — Secret + key holding the SMTP
+      # username / password. Point both at the SAME Secret
+      # gibson-workloads.gibson.email.smtp uses (its externalSecret path
+      # materialises one Secret with both "username" and "password" keys).
+      # Leave userSecretRef unset for a relay that accepts anonymous
+      # submission (e.g. an in-cluster kind/k3d Mailpit with no auth).
+      userSecretRef:
+        name: ""
+        key: "username"
+      passwordSecretRef:
+        name: ""
+        key: "password"
 
   # OIDC clients to reconcile as child OIDCClient CRs.
   oidcClients: []
