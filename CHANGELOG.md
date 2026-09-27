@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.132.2](https://github.com/zeroroot-ai/charts/compare/v0.132.1...v0.132.2) (2026-09-27)
+
+
+### Bug Fixes
+
+* **fga-init:** remove platform_operator holders outside the required list ([#193](https://github.com/zeroroot-ai/charts/issues/193)) ([c9c25b8](https://github.com/zeroroot-ai/charts/commit/c9c25b8b9cb60689950951aaf80a4a1c95e84ea3))
+* **images:** pin gibson v0.142.3 ([#194](https://github.com/zeroroot-ai/charts/issues/194)) ([9d9c496](https://github.com/zeroroot-ai/charts/commit/9d9c496f0958e395e1fd6545b2a1723915f6df51))
+* **velero:** the Schedule and storage location are ordinary resources, so a bump reaches Argo ([#191](https://github.com/zeroroot-ai/charts/issues/191)) ([469bc06](https://github.com/zeroroot-ai/charts/commit/469bc067bb2a97c60dc9f0ff011b720c666bd89f))
+
 ## [0.132.1](https://github.com/zeroroot-ai/charts/compare/v0.132.0...v0.132.1) (2026-09-27)
 
 
