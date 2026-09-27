@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.131.0](https://github.com/zeroroot-ai/charts/compare/v0.130.3...v0.131.0) (2026-09-27)
+
+
+### Features
+
+* **chart:** give the tenant-operator GIBSON_APP_URL so invitation and welcome links reach a human ([#172](https://github.com/zeroroot-ai/charts/issues/172)) ([32bf9d5](https://github.com/zeroroot-ai/charts/commit/32bf9d55d7abea285521272cacc9c38c290d1c43))
+* **chart:** require and validate the Platform owner install values ([#169](https://github.com/zeroroot-ai/charts/issues/169)) ([6bf850b](https://github.com/zeroroot-ai/charts/commit/6bf850b7056c8b5b46fe0187766b111158a7f708))
+
+
+### Bug Fixes
+
+* **gibson:** gibson v0.140.0 with the Platform owner, role sync and scoped operator credentials ([#173](https://github.com/zeroroot-ai/charts/issues/173)) ([91d207f](https://github.com/zeroroot-ai/charts/commit/91d207fba578f46af8dbbf5022db9bb7cfa531fd))
+
 ## [0.130.3](https://github.com/zeroroot-ai/charts/compare/v0.130.2...v0.130.3) (2026-09-26)
 
 
