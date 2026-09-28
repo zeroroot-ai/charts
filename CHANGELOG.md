@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.7](https://github.com/zeroroot-ai/charts/compare/v0.132.6...v0.132.7) (2026-09-28)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.142.6, MFA reset and profile calls reach users in any org ([#208](https://github.com/zeroroot-ai/charts/issues/208)) ([b5fbeb6](https://github.com/zeroroot-ai/charts/commit/b5fbeb6c19aa2a72c5196b07295fec9ca49c39f0))
+
 ## [0.132.6](https://github.com/zeroroot-ai/charts/compare/v0.132.5...v0.132.6) (2026-09-28)
 
 
