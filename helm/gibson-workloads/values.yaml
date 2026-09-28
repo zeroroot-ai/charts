@@ -362,7 +362,7 @@ gibson:
     # on the SPIRE socket — so the fga-init Job hangs in dump-model until
     # its deadline and the whole install wedges. Verified on this digest:
     # `gibson dump-fga-model` exits 0 in under a second with the model.
-    tag: "v0.142.3@sha256:dc677c1d58d6818339690a9b655ba331216d6f1421e8e5f8b48f499474bf96db"
+    tag: "v0.142.4@sha256:2b54cb6f2e086aabaf31bca5df8bd1b31f616211a1489daddd24b5586c008f40"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     # Empty by default: first-party pins are hand-committed in the combined
@@ -2121,7 +2121,7 @@ extAuthz:
     # EXT_AUTHZ_CGJWT_KEYS_URL. It moves in lockstep with the daemon pin above
     # and with the https/:8086 value in ext-authz/deployment.yaml (deploy#1386)
     # — the three are one change, in both directions.
-    tag: "v0.142.3@sha256:e9bc7791c17e06c1f82fe4488db25c561a3dba959e33b086a2d287a72c112893"
+    tag: "v0.142.4@sha256:b55711a45d0af9ba05641bac81f88e431944ce4d2415a19503e2436ba4d71b67"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -3672,7 +3672,7 @@ tenantOperator:
     # Tenant CR never reached Ready (deploy#1766, run 33600876035). The
     # package publishes main/latest/sha-* only, so the commit sha tag is the
     # honest provenance.
-    tag: "v0.142.3@sha256:a5c0f272728f2c066a7168768862fc00371f7d84398d45576e34251e67b6951f"
+    tag: "v0.142.4@sha256:632a98cdf00e8ff79fda94f26b1e97c2c4a17e46a9e7325dbc312a05a8f9cc1e"
     pullPolicy: IfNotPresent
   # ServiceAccount — IRSA annotations injected via serviceAccount.annotations
   # in the prod overlay. The SA name is fixed to "gibson-tenant-operator"
@@ -4779,7 +4779,7 @@ bootstrap:
     # reached Ready with no first admin (staging, 2026-09-23). Since
     # gibson#224 it dials Zitadel by Service name and claims the host by
     # header (ADR-0092), and it needs ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN.
-    tag: "sha-d142418@sha256:0bebffce769c69623c9f2e46067f9d044238ad49a5f5117e8175745c65880438"
+    tag: "sha-a451c5d@sha256:b8824febdc727cd7e3904eef67356f2fbcc9548018f3fe8c00d0bd706faa1cf4"
     pullPolicy: IfNotPresent
 
   # activeDeadlineSeconds caps the Job runtime. 10 min covers a fresh
