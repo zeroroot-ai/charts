@@ -4548,6 +4548,19 @@ data:
                             # the rest of /gibson. keeps the hard Zitadel requirement.
                             # Expand this prefix set as more client RPCs move onto the
                             # CG-JWT (gibson#647); start with inspect (WhoAmI).
+                            # Invitation acceptance (gibson#255): the invitee holds
+                            # no session yet. The single-use token in the request
+                            # body is the whole capability, the daemon verifies it,
+                            # and the authz registry marks the method
+                            # unauthenticated, so ext_authz lets it through. Without
+                            # this rule the /gibson. catch-all answered "Jwt is
+                            # missing" and no invitation could be accepted
+                            # (hosted identity exit test run 36402315279). An exact
+                            # path, never a prefix: the rest of MembershipService
+                            # keeps the hard Zitadel requirement.
+                            - match: { path: "/gibson.tenant.v1.MembershipService/AcceptInvitation" }
+                              requires:
+                                allow_missing: {}
                             - match: { prefix: "/gibson.identity.v1.IdentityService/" }
                               requires:
                                 allow_missing_or_failed: {}
@@ -15677,7 +15690,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 201fb5d37167acd2b6be24708708f4330adf5839561c1dcac1896ca0b37b177c
+        checksum/config: d81cd66360e75be264207e23fb6f9cd09cf9042e35f5fd2c4eea7b59bc43294a
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
