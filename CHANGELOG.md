@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.132.5](https://github.com/zeroroot-ai/charts/compare/v0.132.4...v0.132.5) (2026-09-28)
+
+
+### Bug Fixes
+
+* **edge:** an invitee can accept an invitation without a session ([#202](https://github.com/zeroroot-ai/charts/issues/202)) ([7a01369](https://github.com/zeroroot-ai/charts/commit/7a0136954f3a56c0cdaf41b7af2ab28a2ddd2348))
+* **images:** pin gibson v0.142.4, invitees are created as active users ([#205](https://github.com/zeroroot-ai/charts/issues/205)) ([e8c3409](https://github.com/zeroroot-ai/charts/commit/e8c34099046bb9bd7430228653b4e431192b26c0))
+* **pins:** dashboard v0.122.2, the event stream releases its daemon subscription ([#199](https://github.com/zeroroot-ai/charts/issues/199)) ([8379fc5](https://github.com/zeroroot-ai/charts/commit/8379fc533d00a7dbe6c587068b56dd6274c0447a))
+* **pins:** dashboard v0.122.3, the membership lookup no longer recurses into itself ([#201](https://github.com/zeroroot-ai/charts/issues/201)) ([17a3d7b](https://github.com/zeroroot-ai/charts/commit/17a3d7b0b41eb98e75a2306709a5d37894cbb990))
+* **pins:** dashboard v0.122.4, authorization understands self-mode RPCs ([#204](https://github.com/zeroroot-ai/charts/issues/204)) ([8548235](https://github.com/zeroroot-ai/charts/commit/85482355ebbdd6b2b54153d40321161bca38327c))
+
+
+### Reverts
+
+* **edge:** drop the anonymous AcceptInvitation rule, no real path needs it ([#203](https://github.com/zeroroot-ai/charts/issues/203)) ([5afa100](https://github.com/zeroroot-ai/charts/commit/5afa100370c730aadb258fc3c07620d1d132ffd4))
+
 ## [0.132.4](https://github.com/zeroroot-ai/charts/compare/v0.132.3...v0.132.4) (2026-09-28)
 
 
