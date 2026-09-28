@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.8](https://github.com/zeroroot-ai/charts/compare/v0.132.7...v0.132.8) (2026-09-28)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.142.7, an MFA reset refuses the target's old tokens ([#210](https://github.com/zeroroot-ai/charts/issues/210)) ([c9cda24](https://github.com/zeroroot-ai/charts/commit/c9cda242eafe79496509413f30403c25da176c54))
+
 ## [0.132.7](https://github.com/zeroroot-ai/charts/compare/v0.132.6...v0.132.7) (2026-09-28)
 
 
