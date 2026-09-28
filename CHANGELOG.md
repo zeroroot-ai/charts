@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.4](https://github.com/zeroroot-ai/charts/compare/v0.132.3...v0.132.4) (2026-09-28)
+
+
+### Bug Fixes
+
+* **pins:** dashboard v0.122.1, the transport stops leaking HTTP/2 sessions ([#197](https://github.com/zeroroot-ai/charts/issues/197)) ([c6b06ab](https://github.com/zeroroot-ai/charts/commit/c6b06abee3f9d5253faf2da2984e0837dd2e905c))
+
 ## [0.132.3](https://github.com/zeroroot-ai/charts/compare/v0.132.2...v0.132.3) (2026-09-27)
 
 
