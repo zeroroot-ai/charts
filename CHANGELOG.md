@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.6](https://github.com/zeroroot-ai/charts/compare/v0.132.5...v0.132.6) (2026-09-28)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.142.5, an accepted invitee gets session records ([#206](https://github.com/zeroroot-ai/charts/issues/206)) ([e64bc64](https://github.com/zeroroot-ai/charts/commit/e64bc64249ea28ab24fa7f5d7576a3a6a68565c3))
+
 ## [0.132.5](https://github.com/zeroroot-ai/charts/compare/v0.132.4...v0.132.5) (2026-09-28)
 
 
