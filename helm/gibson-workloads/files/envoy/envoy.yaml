@@ -1041,19 +1041,6 @@ static_resources:
                         # the rest of /gibson. keeps the hard Zitadel requirement.
                         # Expand this prefix set as more client RPCs move onto the
                         # CG-JWT (gibson#647); start with inspect (WhoAmI).
-                        # Invitation acceptance (gibson#255): the invitee holds
-                        # no session yet. The single-use token in the request
-                        # body is the whole capability, the daemon verifies it,
-                        # and the authz registry marks the method
-                        # unauthenticated, so ext_authz lets it through. Without
-                        # this rule the /gibson. catch-all answered "Jwt is
-                        # missing" and no invitation could be accepted
-                        # (hosted identity exit test run 36402315279). An exact
-                        # path, never a prefix: the rest of MembershipService
-                        # keeps the hard Zitadel requirement.
-                        - match: { path: "/gibson.tenant.v1.MembershipService/AcceptInvitation" }
-                          requires:
-                            allow_missing: {}
                         - match: { prefix: "/gibson.identity.v1.IdentityService/" }
                           requires:
                             allow_missing_or_failed: {}
