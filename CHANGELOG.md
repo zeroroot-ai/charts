@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.23](https://github.com/zeroroot-ai/charts/compare/v0.132.22...v0.132.23) (2026-09-29)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.143.7, sdk v0.183.1, a Viewer never writes ([#243](https://github.com/zeroroot-ai/charts/issues/243)) ([65fd49a](https://github.com/zeroroot-ai/charts/commit/65fd49a0f4dafda501a1322cb0e17fad44a7d1b8))
+
 ## [0.132.22](https://github.com/zeroroot-ai/charts/compare/v0.132.21...v0.132.22) (2026-09-29)
 
 
