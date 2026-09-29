@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.22](https://github.com/zeroroot-ai/charts/compare/v0.132.21...v0.132.22) (2026-09-29)
+
+
+### Bug Fixes
+
+* **images:** pin dashboard v0.124.2, one tenant resolver and no picker ([#241](https://github.com/zeroroot-ai/charts/issues/241)) ([4edb76e](https://github.com/zeroroot-ai/charts/commit/4edb76e6cf7043c3527ee9a27206456f74e97418))
+
 ## [0.132.21](https://github.com/zeroroot-ai/charts/compare/v0.132.20...v0.132.21) (2026-09-29)
 
 
