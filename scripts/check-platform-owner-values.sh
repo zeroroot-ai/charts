@@ -58,7 +58,7 @@ must_fail "platformOwner.email equals firstTenant.ownerEmail" \
 
 must_fail "the equality check is case-insensitive" \
   "must be different addresses" \
-  --set global.platformOwner.email=ADMIN@SELFHOSTED.EXAMPLE.COM
+  --set global.platformOwner.email=ADMIN@LOCALHOST.ZEROROOT.AI
 
 # --- mail vs. offline mode ---------------------------------------------------
 # The baseline ships email.provider=log (no delivering transport) and
