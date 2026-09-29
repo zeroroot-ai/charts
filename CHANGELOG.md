@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.132.16](https://github.com/zeroroot-ai/charts/compare/v0.132.15...v0.132.16) (2026-09-29)
+
+
+### Bug Fixes
+
+* **edge:** answer a coalesced HTTP/2 request with 421 on both browser-facing chains ([#226](https://github.com/zeroroot-ai/charts/issues/226)) ([a2ba025](https://github.com/zeroroot-ai/charts/commit/a2ba02515d333ddd99fd94654b83d571a0abb872))
+* **edge:** the access log keeps the Authorization scheme word, never the token ([#230](https://github.com/zeroroot-ai/charts/issues/230)) ([f7723de](https://github.com/zeroroot-ai/charts/commit/f7723de587f70df1bf5aaf19a2016a292810a64a))
+
 ## [0.132.15](https://github.com/zeroroot-ai/charts/compare/v0.132.14...v0.132.15) (2026-09-29)
 
 
