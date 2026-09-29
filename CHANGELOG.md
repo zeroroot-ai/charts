@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.132.24](https://github.com/zeroroot-ai/charts/compare/v0.132.23...v0.132.24) (2026-09-29)
+
+
+### Bug Fixes
+
+* **images:** pin dashboard v0.125.0, Editor gates on mission actions ([#245](https://github.com/zeroroot-ai/charts/issues/245)) ([f1fbd56](https://github.com/zeroroot-ai/charts/commit/f1fbd564a13e24f0f499c38456b8f25eda42803b))
+* **images:** pin dashboard v0.125.0, one tenant resolver and no picker ([f1fbd56](https://github.com/zeroroot-ai/charts/commit/f1fbd564a13e24f0f499c38456b8f25eda42803b))
+
 ## [0.132.23](https://github.com/zeroroot-ai/charts/compare/v0.132.22...v0.132.23) (2026-09-29)
 
 
