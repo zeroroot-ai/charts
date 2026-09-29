@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.19](https://github.com/zeroroot-ai/charts/compare/v0.132.18...v0.132.19) (2026-09-29)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.143.5, tenant role changes land within seconds ([#235](https://github.com/zeroroot-ai/charts/issues/235)) ([8980eee](https://github.com/zeroroot-ai/charts/commit/8980eee68b0be21085e742918ba74b16da523594))
+
 ## [0.132.18](https://github.com/zeroroot-ai/charts/compare/v0.132.17...v0.132.18) (2026-09-29)
 
 
