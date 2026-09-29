@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.21](https://github.com/zeroroot-ai/charts/compare/v0.132.20...v0.132.21) (2026-09-29)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.143.6, the Platform owner becomes ready when its status write races ([#239](https://github.com/zeroroot-ai/charts/issues/239)) ([5a2a007](https://github.com/zeroroot-ai/charts/commit/5a2a0077b6ebc8126bf7d50a960f26f88002c18f))
+
 ## [0.132.20](https://github.com/zeroroot-ai/charts/compare/v0.132.19...v0.132.20) (2026-09-29)
 
 
