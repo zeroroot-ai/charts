@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.11](https://github.com/zeroroot-ai/charts/compare/v0.132.10...v0.132.11) (2026-09-29)
+
+
+### Bug Fixes
+
+* **images:** pin dashboard v0.123.0 for the intelligence-layer queue UIs ([#216](https://github.com/zeroroot-ai/charts/issues/216)) ([e14c422](https://github.com/zeroroot-ai/charts/commit/e14c422e0ab458c1a161ced9b941377f0bdaa32e))
+
 ## [0.132.10](https://github.com/zeroroot-ai/charts/compare/v0.132.9...v0.132.10) (2026-09-29)
 
 
