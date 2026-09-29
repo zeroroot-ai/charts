@@ -36,11 +36,11 @@ must_pass "baseline alone"
 # --- API-plane host ----------------------------------------------------------
 must_fail "gibson-workloads override set to the API-plane host" \
   "which is the API-plane host" \
-  --set gibson-workloads.gibson.appUrl=https://api.selfhosted.example.com
+  --set gibson-workloads.gibson.appUrl=https://api.localhost.zeroroot.ai
 
 must_fail "gibson-operators override set to the API-plane host" \
   "which is the API-plane host" \
-  --set gibson-operators.gibson.appUrl=https://api.selfhosted.example.com
+  --set gibson-operators.gibson.appUrl=https://api.localhost.zeroroot.ai
 
 # --- in-cluster address ------------------------------------------------------
 # The literal old broken default the tenant-operator's DASHBOARD_URL var
@@ -59,10 +59,10 @@ must_fail "gibson-operators override set to a .svc.cluster.local address" \
 
 # --- a normal public override must pass --------------------------------------
 must_pass "gibson-workloads override set to a normal product-surface origin" \
-  --set gibson-workloads.gibson.appUrl=https://app.selfhosted.example.com
+  --set gibson-workloads.gibson.appUrl=https://app.localhost.zeroroot.ai
 
 must_pass "gibson-operators override set to a normal product-surface origin" \
-  --set gibson-operators.gibson.appUrl=https://app.selfhosted.example.com
+  --set gibson-operators.gibson.appUrl=https://app.localhost.zeroroot.ai
 
 [ "$fail" -eq 0 ] && echo "✓ app-url-links: the API-plane-host and in-cluster-address rules both fire on either subchart, and the baseline plus a real product origin both render clean"
 exit "$fail"

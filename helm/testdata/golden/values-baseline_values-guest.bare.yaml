@@ -2533,22 +2533,22 @@ metadata:
     app.kubernetes.io/version: "0.143.1"
     app.kubernetes.io/managed-by: Helm
 data:
-  domain: "selfhosted.example.com"
+  domain: "localhost.zeroroot.ai"
   scheme: "https"
-  appHost: "app.selfhosted.example.com"
-  apiHost: "api.selfhosted.example.com"
-  wwwHost: "www.selfhosted.example.com"
-  externalOrigin: "https://app.selfhosted.example.com"
-  apiOrigin: "https://api.selfhosted.example.com"
-  wwwOrigin: "https://www.selfhosted.example.com"
-  oidcIssuer: "https://app.selfhosted.example.com"
-  zitadelExternalDomain: "app.selfhosted.example.com"
+  appHost: "app.localhost.zeroroot.ai"
+  apiHost: "api.localhost.zeroroot.ai"
+  wwwHost: "www.localhost.zeroroot.ai"
+  externalOrigin: "https://app.localhost.zeroroot.ai"
+  apiOrigin: "https://api.localhost.zeroroot.ai"
+  wwwOrigin: "https://www.localhost.zeroroot.ai"
+  oidcIssuer: "https://app.localhost.zeroroot.ai"
+  zitadelExternalDomain: "app.localhost.zeroroot.ai"
   tlsSans: |
-    - "app.selfhosted.example.com"
-    - "api.selfhosted.example.com"
-    - "www.selfhosted.example.com"
-    - "docs.selfhosted.example.com"
-    - "selfhosted.example.com"
+    - "app.localhost.zeroroot.ai"
+    - "api.localhost.zeroroot.ai"
+    - "www.localhost.zeroroot.ai"
+    - "docs.localhost.zeroroot.ai"
+    - "localhost.zeroroot.ai"
 ---
 # Source: gibson/charts/gibson-workloads/templates/envoy/configmap.yaml
 apiVersion: v1
@@ -2645,7 +2645,7 @@ data:
             # browser clients hitting /.well-known/.
             # =====================================================================
             - filter_chain_match:
-                server_names: ["api.selfhosted.example.com"]
+                server_names: ["api.localhost.zeroroot.ai"]
               transport_socket:
                 name: envoy.transport_sockets.tls
                 typed_config:
@@ -2784,7 +2784,7 @@ data:
                           # clients hitting a non-443 port (dev Kind uses
                           # :30443) send the port in Host and Envoy doesn't
                           # strip it by default.
-                          domains: ["api.selfhosted.example.com", "api.selfhosted.example.com:443"]
+                          domains: ["api.localhost.zeroroot.ai", "api.localhost.zeroroot.ai:443"]
                           routes:
                             # ---------------------------------------------------
                             # Daemon gRPC services. Each RPC method falls under
@@ -3060,7 +3060,7 @@ data:
                             - match: { prefix: "/.well-known/openid-configuration" }
                               route:
                                 cluster: zitadel_upstream
-                                host_rewrite_literal: "app.selfhosted.example.com"
+                                host_rewrite_literal: "app.localhost.zeroroot.ai"
                                 timeout: 30s
                                 # Per-client quota (deploy#1659):
                                 # envoy.rateLimit.perClient.apiDiscovery, by address.
@@ -3455,7 +3455,7 @@ data:
                           # a leaked dashboard JWT cannot call S2S RPCs.
                           providers:
                             zitadel_s2s:
-                              issuer: "https://app.selfhosted.example.com"
+                              issuer: "https://app.localhost.zeroroot.ai"
                               forward: true
                               forward_payload_header: "x-jwt-payload"
                               payload_in_metadata: zitadel
@@ -3469,7 +3469,7 @@ data:
                                   # `zitadel_jwks` cluster terminates TLS with
                                   # a validation_context against the in-cluster
                                   # trust bundle.
-                                  uri: "http://app.selfhosted.example.com:443/oauth/v2/keys"
+                                  uri: "http://app.localhost.zeroroot.ai:443/oauth/v2/keys"
                                   cluster: zitadel_jwks
                                   timeout: 5s
                                 cache_duration: { seconds: 600 }
@@ -3480,7 +3480,7 @@ data:
                                     max_interval: 30s
                                   num_retries: 60
                             zitadel_dashboard:
-                              issuer: "https://app.selfhosted.example.com"
+                              issuer: "https://app.localhost.zeroroot.ai"
                               forward: true
                               forward_payload_header: "x-jwt-payload"
                               payload_in_metadata: zitadel
@@ -3511,7 +3511,7 @@ data:
                                   # Spec eliminate-permissive-authz Req 1 — JWKS
                                   # fetch over HTTPS unconditionally (parallel to
                                   # the zitadel_s2s provider above).
-                                  uri: "http://app.selfhosted.example.com:443/oauth/v2/keys"
+                                  uri: "http://app.localhost.zeroroot.ai:443/oauth/v2/keys"
                                   cluster: zitadel_jwks
                                   timeout: 5s
                                 cache_duration: { seconds: 600 }
@@ -3739,9 +3739,9 @@ data:
             # =====================================================================
             - filter_chain_match:
                 server_names:
-                  - "app.selfhosted.example.com"
-                  - "selfhosted.example.com"
-                  - "docs.selfhosted.example.com"
+                  - "app.localhost.zeroroot.ai"
+                  - "localhost.zeroroot.ai"
+                  - "docs.localhost.zeroroot.ai"
     # =====================================================================
             # app.<domain> — dashboard. Pure TLS termination + HTTP proxy. The
             # dashboard runs its own OIDC flow against Zitadel via Auth.js;
@@ -3812,7 +3812,7 @@ data:
                         - forwarded
                       virtual_hosts:
                         - name: app
-                          domains: ["app.selfhosted.example.com", "app.selfhosted.example.com:443"]
+                          domains: ["app.localhost.zeroroot.ai", "app.localhost.zeroroot.ai:443"]
                           routes:
                             # -------------------------------------------------------
                             # Single-host consolidation (deploy#630): the whole
@@ -4182,7 +4182,7 @@ data:
                         # yields no endpoints → 503. The fail-safe (public docs link)
                         # is surfaced by the dashboard's DOCS_URL env var.
                         - name: docs
-                          domains: ["docs.selfhosted.example.com", "docs.selfhosted.example.com:443"]
+                          domains: ["docs.localhost.zeroroot.ai", "docs.localhost.zeroroot.ai:443"]
                           routes:
                             - match: { prefix: "/" }
                               route:
@@ -4190,7 +4190,7 @@ data:
                                 timeout: 30s
                         # apex (e.g. zeroroot.ai) — permanent 301 → app.<domain>.
                         - name: apex
-                          domains: ["selfhosted.example.com", "selfhosted.example.com:443"]
+                          domains: ["localhost.zeroroot.ai", "localhost.zeroroot.ai:443"]
                           routes:
                             - match: { prefix: "/" }
                               redirect:
@@ -4198,7 +4198,7 @@ data:
                                 # send a self-hosted visitor to a marketing site
                                 # that does not exist there. The apex goes to the
                                 # product front door, which is the login page.
-                                host_redirect: "app.selfhosted.example.com"
+                                host_redirect: "app.localhost.zeroroot.ai"
                                 response_code: MOVED_PERMANENTLY
                                 https_redirect: true
                     http_filters:
@@ -4429,17 +4429,17 @@ data:
                             - match: { prefix: "/.well-known/" }
                               route:
                                 cluster: zitadel_upstream
-                                host_rewrite_literal: "app.selfhosted.example.com"
+                                host_rewrite_literal: "app.localhost.zeroroot.ai"
                                 timeout: 30s
                             - match: { prefix: "/oauth/v2/" }
                               route:
                                 cluster: zitadel_upstream
-                                host_rewrite_literal: "app.selfhosted.example.com"
+                                host_rewrite_literal: "app.localhost.zeroroot.ai"
                                 timeout: 30s
                             - match: { prefix: "/management/v1/" }
                               route:
                                 cluster: zitadel_upstream
-                                host_rewrite_literal: "app.selfhosted.example.com"
+                                host_rewrite_literal: "app.localhost.zeroroot.ai"
                                 timeout: 30s
                     http_filters:
                       - name: envoy.filters.http.router
@@ -5125,7 +5125,7 @@ data:
       # laptop) has never been able to use the internal name either. Envoy
       # already routes gibson.harness.v1.HarnessCallbackService for exactly
       # these callers, so both reach the daemon by the same path.
-      advertise_address: "api.selfhosted.example.com:443"
+      advertise_address: "api.localhost.zeroroot.ai:443"
 
     registration:
       enabled: true
@@ -6133,7 +6133,7 @@ data:
   .env: |-
       ZITADEL_SERVICE_USER_TOKEN_FILE="/login-client/pat"
       ZITADEL_API_URL="http://gibson-zitadel:8080"
-      CUSTOM_REQUEST_HEADERS="Host:app.selfhosted.example.com,X-Zitadel-Public-Host:app.selfhosted.example.com"
+      CUSTOM_REQUEST_HEADERS="Host:app.localhost.zeroroot.ai,X-Zitadel-Public-Host:app.localhost.zeroroot.ai"
 ---
 # Source: gibson/charts/zitadel/templates/configmap_zitadel.yaml
 apiVersion: v1
@@ -6179,7 +6179,7 @@ data:
         ForceMFALocalOnly: false
         MfaInitSkipLifetime: 0s
         PasswordlessType: 1
-    ExternalDomain: app.selfhosted.example.com
+    ExternalDomain: app.localhost.zeroroot.ai
     ExternalPort: 443
     ExternalSecure: true
     FirstInstance:
@@ -8554,7 +8554,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: envoy
   annotations:
-    external-dns.alpha.kubernetes.io/hostname: selfhosted.example.com,app.selfhosted.example.com,api.selfhosted.example.com,docs.selfhosted.example.com
+    external-dns.alpha.kubernetes.io/hostname: localhost.zeroroot.ai,app.localhost.zeroroot.ai,api.localhost.zeroroot.ai,docs.localhost.zeroroot.ai
 spec:
   type: LoadBalancer
   # Client-IP contract. Local stops kube-proxy from SNATing the
@@ -9609,10 +9609,10 @@ spec:
       hostAliases:
         - ip: "10.96.0.250"
           hostnames:
-            - "app.selfhosted.example.com"
-            - "api.selfhosted.example.com"
-            - "www.selfhosted.example.com"
-            - "docs.selfhosted.example.com"
+            - "app.localhost.zeroroot.ai"
+            - "api.localhost.zeroroot.ai"
+            - "www.localhost.zeroroot.ai"
+            - "docs.localhost.zeroroot.ai"
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -9678,14 +9678,14 @@ spec:
             - name: SSL_CERT_DIR
               value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
             - name: ZITADEL_EXTERNAL_DOMAIN
-              value: "app.selfhosted.example.com"
+              value: "app.localhost.zeroroot.ai"
             # ZITADEL_ISSUER: public OIDC issuer URL used by the ZitadelProbe
             # readiness check (hits <issuer>/debug/ready). Must match the URL
             # Zitadel emits in the `iss` claim. Uses dashboard.zitadel.issuer
             # (the same value tenant-operator uses) — hostAliases above make
             # app.<domain> resolve to Envoy's ClusterIP inside the pod.
             - name: ZITADEL_ISSUER
-              value: "https://app.selfhosted.example.com"
+              value: "https://app.localhost.zeroroot.ai"
             # ZITADEL_INTERNAL_ADDRESS: in-cluster Zitadel Service URL used by
             # the readiness ZitadelProbe (GET <addr>/debug/ready). MUST be the
             # cluster service, not ZITADEL_ISSUER (app.<domain>): the external
@@ -9948,10 +9948,10 @@ spec:
       hostAliases:
         - ip: "10.96.0.250"
           hostnames:
-            - "app.selfhosted.example.com"
-            - "api.selfhosted.example.com"
-            - "www.selfhosted.example.com"
-            - "docs.selfhosted.example.com"
+            - "app.localhost.zeroroot.ai"
+            - "api.localhost.zeroroot.ai"
+            - "www.localhost.zeroroot.ai"
+            - "docs.localhost.zeroroot.ai"
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -10183,7 +10183,7 @@ spec:
             # address (http://gibson-dashboard:3000) that the same two links
             # were wrongly built from: a human's browser cannot reach it.
             - name: GIBSON_APP_URL
-              value: "https://app.selfhosted.example.com"
+              value: "https://app.localhost.zeroroot.ai"
             # Phase 5.1 of spec tenant-provisioning-unification-phase2:
             # when GIBSON_DAEMON_GRPC_ADDRESS is set, the operator uses
             # Connect-RPC against the daemon's PlatformOperatorService
@@ -10215,7 +10215,7 @@ spec:
             - name: FIRST_TENANT_DISPLAY_NAME
               value: "Primary Workspace"
             - name: FIRST_TENANT_OWNER_EMAIL
-              value: "admin@selfhosted.example.com"
+              value: "admin@localhost.zeroroot.ai"
             # The operator has always read FIRST_TENANT_TIER; the chart never
             # rendered it, so every seed enqueued an empty tier and the daemon
             # defaulted it to a PAID plan. On a cluster that enforces billing
@@ -10344,7 +10344,7 @@ spec:
             # wrong issuer hostname. Chart render now fails with an
             # actionable message naming the value.
             - name: ZITADEL_ISSUER
-              value: "https://app.selfhosted.example.com"
+              value: "https://app.localhost.zeroroot.ai"
             # SSL_CERT_DIR is colon-separated; Go skips missing dirs and
             # /etc/ssl/certs keeps the system bundle. envoy-ca trusts the
             # Envoy edge cert (deploy#200); fga-ca trusts the OpenFGA
@@ -10359,7 +10359,7 @@ spec:
             # registered instance — without this forge Zitadel returns 404
             # for every endpoint.
             - name: ZITADEL_EXTERNAL_DOMAIN
-              value: "app.selfhosted.example.com"
+              value: "app.localhost.zeroroot.ai"
             # ADR-0093 decision 2: the gibson project each tenant org is
             # granted and whose four tenant roles the role sync reads. The
             # operator refuses to start without it. The platform-operator
@@ -10915,10 +10915,10 @@ spec:
       hostAliases:
         - ip: "10.96.0.250"
           hostnames:
-            - "app.selfhosted.example.com"
-            - "api.selfhosted.example.com"
-            - "www.selfhosted.example.com"
-            - "docs.selfhosted.example.com"
+            - "app.localhost.zeroroot.ai"
+            - "api.localhost.zeroroot.ai"
+            - "www.localhost.zeroroot.ai"
+            - "docs.localhost.zeroroot.ai"
       initContainers:
         - name: wait-for-spire-socket
           image: ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
@@ -11184,7 +11184,7 @@ spec:
             # terminates TLS, validates the SPIFFE JWT-SVID the dashboard
             # mints, and forwards to the daemon. Spec: dashboard-admin-via-envoy.
             - name: ADMIN_ENVOY_BASE_URL
-              value: "https://api.selfhosted.example.com:443"
+              value: "https://api.localhost.zeroroot.ai:443"
             # Spec in-cluster-mtls-restoration Phase 4 (Track B) backout flag.
             # When "true" (default): gibson-client.ts routes ALL daemon RPCs
             # through Envoy via JWT-SVID, mirroring gibson-admin-client.ts.
@@ -11235,7 +11235,7 @@ spec:
             # callbackUrl is built correctly (default 0.0.0.0:3000 from the
             # in-pod listen address breaks browser-side redirects).
             - name: AUTH_URL
-              value: "https://app.selfhosted.example.com"
+              value: "https://app.localhost.zeroroot.ai"
             # Marketing host origin (deploy#630 S11, deploy#1061 / dashboard#920).
             # The dashboard middleware host-split serves marketing on www.<domain>
             # and the product on app.<domain> (AUTH_URL).
@@ -11264,7 +11264,7 @@ spec:
             # (no in-cluster docs-svc), falls back to publicFallbackUrl so the
             # dashboard can still link operators to the canonical public docs.
             - name: DOCS_URL
-              value: "https://docs.selfhosted.example.com"
+              value: "https://docs.localhost.zeroroot.ai"
             # RP-initiated logout sends this exact URI to Zitadel's
             # /oidc/v1/end_session as post_logout_redirect_uri. The
             # dashboard does NOT synthesize the URI from request origin
@@ -11275,7 +11275,7 @@ spec:
             # gibson-dashboard OIDC client via the gibson-operators
             # chart for Zitadel to accept the logout request.
             - name: POST_LOGOUT_REDIRECT_URI
-              value: "https://app.selfhosted.example.com"
+              value: "https://app.localhost.zeroroot.ai"
             - name: AUTH_TRUST_HOST
               value: "true"
             - name: AUTH_SECRET
@@ -11300,7 +11300,7 @@ spec:
             # silent fallback has been deleted — it was a workstation-only
             # URL that production overlays could inherit by accident.
             - name: ZITADEL_ISSUER
-              value: "https://app.selfhosted.example.com"
+              value: "https://app.localhost.zeroroot.ai"
             # Same URL the browser uses — hostAliases (above) makes
             # app.<domain> resolve to Envoy's pinned ClusterIP from inside
             # the pod, so server-side OIDC discovery + token exchange hit
@@ -11311,7 +11311,7 @@ spec:
             # MUST differ. When unset it inherits the (required) ZITADEL_ISSUER;
             # there is no `http://localhost:30080` silent fallback.
             - name: ZITADEL_INTERNAL_ISSUER
-              value: "https://app.selfhosted.example.com"
+              value: "https://app.localhost.zeroroot.ai"
             # The Zitadel-generated OIDC clientId is written by the
             # zitadel-bootstrap Job into this Secret after Zitadel creates
             # the app. If the Job re-runs (e.g. after a DB wipe), it
@@ -11355,7 +11355,7 @@ spec:
             # Host headers when the admin-client's apiUrl points at the
             # in-cluster Zitadel Service (same trick as Envoy routing).
             - name: ZITADEL_EXTERNAL_DOMAIN
-              value: "app.selfhosted.example.com"
+              value: "app.localhost.zeroroot.ai"
             # OIDC client secret for the dashboard's browser-side
             # authorization_code flow against Zitadel. Paired with
             # ZITADEL_CLIENT_ID above; both MUST point at the same
@@ -11398,7 +11398,7 @@ spec:
             # Required by the dashboard to render user-facing links to the platform
             # API. Points to the Envoy ingress URL operators use from browsers.
             - name: GIBSON_PLATFORM_PUBLIC_URL
-              value: "https://api.selfhosted.example.com"
+              value: "https://api.localhost.zeroroot.ai"
 
             # GIBSON_PUBLIC_URL — required by the dashboard's env-validator
             # (src/lib/env-validator.ts). Surfaced to agents/tools/plugins via
@@ -11406,14 +11406,14 @@ spec:
             # practice. Kept as a distinct env name for the wizard's mental
             # model.
             - name: GIBSON_PUBLIC_URL
-              value: "https://api.selfhosted.example.com"
+              value: "https://api.localhost.zeroroot.ai"
 
             # PUBLIC_URL — required by the dashboard's env-validator.
             # Public base URL of the dashboard (matches AUTH_URL in
             # single-origin deploys). Used for Stripe checkout return_url,
             # billing-portal success_url, transactional emails.
             - name: PUBLIC_URL
-              value: "https://app.selfhosted.example.com"
+              value: "https://app.localhost.zeroroot.ai"
 
             # LOKI_URL — required by the dashboard's env-validator.
             # Loki query endpoint for the mission-log viewer. Default points
@@ -11758,9 +11758,9 @@ spec:
             # (deploy#630). Old images ignore them; new images default to the
             # prod origins when absent, so chart and image roll independently.
             - name: APP_ORIGIN
-              value: "https://app.selfhosted.example.com"
+              value: "https://app.localhost.zeroroot.ai"
             - name: WWW_ORIGIN
-              value: "https://www.selfhosted.example.com"
+              value: "https://www.localhost.zeroroot.ai"
           startupProbe:
             httpGet:
               path: /
@@ -11839,7 +11839,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 6b9974b347dc39f5bc4b1502d5c0ed76ee58f10c1655afdd29e95a5c3b659efe
+        checksum/config: c5bd962f9e6722aca6a05829ea43efe14e0c224e7b3dcf5b3febf0bddf39412d
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -12365,9 +12365,9 @@ spec:
                   name: gibson-fga-config
                   key: model_id
             - name: EXT_AUTHZ_CGJWT_ISSUER
-              value: "https://api.selfhosted.example.com"
+              value: "https://api.localhost.zeroroot.ai"
             - name: EXT_AUTHZ_CGJWT_COMPONENT_AUDIENCE
-              value: "https://api.selfhosted.example.com/gibson.component.v1.ComponentService,https://api.selfhosted.example.com/gibson.harness.v1.HarnessCallbackService,https://api.selfhosted.example.com/gibson.identity.v1.IdentityService,https://api.selfhosted.example.com,https://api.selfhosted.example.com:50051/gibson.component.v1.ComponentService,https://api.selfhosted.example.com:50051/gibson.harness.v1.HarnessCallbackService"
+              value: "https://api.localhost.zeroroot.ai/gibson.component.v1.ComponentService,https://api.localhost.zeroroot.ai/gibson.harness.v1.HarnessCallbackService,https://api.localhost.zeroroot.ai/gibson.identity.v1.IdentityService,https://api.localhost.zeroroot.ai,https://api.localhost.zeroroot.ai:50051/gibson.component.v1.ComponentService,https://api.localhost.zeroroot.ai:50051/gibson.harness.v1.HarnessCallbackService"
             # Default (deploy#852): fetch the registry from the daemon's mTLS
             # authz-registry endpoint, pinning the daemon's SVID so a
             # poisoned/impersonated source can never feed ext-authz a forged
@@ -12483,7 +12483,7 @@ spec:
               # hop. scripts/check-extauthz-transport.py cannot read the
               # resolved value out of the template (it is one Helm expression),
               # so this render-time check is the control it defers to.
-              value: "https://app.selfhosted.example.com"
+              value: "https://app.localhost.zeroroot.ai"
             # SPIFFE Workload API socket the binary connects to in order to
             # mint/verify identities. Mounted from the host path the SPIRE
             # agent DaemonSet writes to. Required by main.go.
@@ -13197,7 +13197,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/configmap: 1d745efdc7281e49719a78f897028be3486f1f4d1fbdfc3879a02c9992e7271f
+        checksum/configmap: 47b198086ef3a66de908bf1306dc2cfaec8d9f94438225a6213fa674923693f7
       labels:
         helm.sh/chart: zitadel-9.34.1
         app.kubernetes.io/name: zitadel-login
@@ -13322,7 +13322,7 @@ spec:
     metadata:
       annotations:
         secret.reloader.stakater.com/reload: gibson-zitadel-system-key
-        checksum/configmap: 91bd0d0e36d94897f73223bae6bed4b9f0b923be1ae06ddfe5f979a390f9a145
+        checksum/configmap: ecb0493fcf933c8dbaaa389516dd21384d47df0a839fe5cea2ee605e18be2356
         checksum/secret-db-ssl-ca-crt: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         checksum/secret-zitadel-secrets: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
       labels:
@@ -13389,7 +13389,7 @@ spec:
               port: http2-server
               httpHeaders:
                 - name: Host
-                  value: app.selfhosted.example.com
+                  value: app.localhost.zeroroot.ai
               scheme: HTTP
             initialDelaySeconds: 0
             periodSeconds: 5
@@ -13400,7 +13400,7 @@ spec:
               port: http2-server
               httpHeaders:
                 - name: Host
-                  value: app.selfhosted.example.com
+                  value: app.localhost.zeroroot.ai
               scheme: HTTP
             initialDelaySeconds: 0
             periodSeconds: 5
@@ -13411,7 +13411,7 @@ spec:
               port: http2-server
               httpHeaders:
                 - name: Host
-                  value: app.selfhosted.example.com
+                  value: app.localhost.zeroroot.ai
               scheme: HTTP
             periodSeconds: 1
             failureThreshold: 30
@@ -14878,7 +14878,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "tmp,spire-agent-socket"
-        checksum/config: e415d3d0a377bd26a2b0b1417735397ce50cf1ac70841b2874d90d3b8fec8352
+        checksum/config: 56e252a0aa8d1c6a08332d80bbcbb2c365e5cbe549628157420e9a77a4eaa642
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). Consumer envFrom
         # resolution is frozen for the pod's lifetime; Reloader watches the
         # named Secrets and triggers a rolling restart when any changes.
@@ -15159,7 +15159,7 @@ spec:
             # surfaces advertise the identical public URL (same override key,
             # same global.domain default). deploy#662.
             - name: GIBSON_PUBLIC_URL
-              value: "https://api.selfhosted.example.com"
+              value: "https://api.localhost.zeroroot.ai"
             # GIBSON_LOKI_URL — the daemon's LogsService queries Loki
             # server-side and serves mission/daemon logs to the dashboard over
             # Envoy + ext-authz (dashboard#811). The dashboard no longer dials
@@ -15198,7 +15198,7 @@ spec:
             # link a human's browser must open can never point at an
             # API-plane or in-cluster address.
             - name: GIBSON_APP_URL
-              value: "https://app.selfhosted.example.com"
+              value: "https://app.localhost.zeroroot.ai"
             # gibson#632 — invitation accept-link email transport; ALSO, as of
             # gibson#1228, the ONLY transport the self-serve signup email
             # verification flow may use. Defaults to the "log" provider, which
@@ -15224,7 +15224,7 @@ spec:
             - name: GIBSON_EMAIL_PROVIDER
               value: "log"
             - name: GIBSON_EMAIL_FROM
-              value: "no-reply@selfhosted.example.com"
+              value: "no-reply@localhost.zeroroot.ai"
             # Provider catalogue hot-reload path (spec: gibson#296).
             # When set, the daemon reads the operator-mounted YAML instead of
             # the embedded copy and hot-reloads it every 5 minutes.
@@ -15285,11 +15285,11 @@ spec:
             - name: GIBSON_IDP_PROVIDER
               value: "zitadel"
             - name: GIBSON_IDP_ADMIN_ISSUER
-              value: "https://app.selfhosted.example.com"
+              value: "https://app.localhost.zeroroot.ai"
             - name: ZITADEL_URL
               value: "http://gibson-zitadel.gibson.svc.cluster.local:8080"
             - name: ZITADEL_EXTERNAL_DOMAIN
-              value: "app.selfhosted.example.com"
+              value: "app.localhost.zeroroot.ai"
             - name: GIBSON_IDP_ADMIN_CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -17318,13 +17318,13 @@ spec:
     name: "selfsigned-ca"
     kind: "Issuer"
     group: cert-manager.io
-  commonName: "app.selfhosted.example.com"
+  commonName: "app.localhost.zeroroot.ai"
   dnsNames:
-    - app.selfhosted.example.com
-    - api.selfhosted.example.com
-    - www.selfhosted.example.com
-    - docs.selfhosted.example.com
-    - selfhosted.example.com
+    - app.localhost.zeroroot.ai
+    - api.localhost.zeroroot.ai
+    - www.localhost.zeroroot.ai
+    - docs.localhost.zeroroot.ai
+    - localhost.zeroroot.ai
     - gibson-envoy.gibson.svc.cluster.local
   privateKey:
     algorithm: ECDSA
@@ -19357,7 +19357,7 @@ spec:
     # (it dials Service DNS via platformBootstrap.zitadel.issuer but Zitadel
     # routes by Host). Derives from global.domain (app host + external port);
     # override only for an off-domain Zitadel edge.
-    externalDomain: "app.selfhosted.example.com"
+    externalDomain: "app.localhost.zeroroot.ai"
     adminTokenRef:
       name: "iam-admin-pat"
       key: "pat"
@@ -19371,7 +19371,7 @@ spec:
       trustedClusterDomain: "gibson-zitadel.gibson.svc.cluster.local"
       apiURL: "http://gibson-zitadel.gibson.svc.cluster.local:8080"
   platformOwner:
-    email: "owner@selfhosted.example.com"
+    email: "owner@localhost.zeroroot.ai"
     offlineSetup: true
     setupGeneration: 1
     setupSecretRef:
@@ -19395,9 +19395,9 @@ spec:
     - name: "gibson-dashboard"
       roles: []
       redirectURIs:
-        - "https://app.selfhosted.example.com/api/auth/callback/zitadel"
+        - "https://app.localhost.zeroroot.ai/api/auth/callback/zitadel"
       postLogoutRedirectURIs:
-        - "https://app.selfhosted.example.com"
+        - "https://app.localhost.zeroroot.ai"
       secretRef:
         name: "gibson-dashboard-oidc"
         key: "client_secret"
@@ -22689,17 +22689,17 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - name: BOOTSTRAP_ADMIN_EMAIL
-              value: "admin@selfhosted.example.com"
+              value: "admin@localhost.zeroroot.ai"
             - name: BOOTSTRAP_TENANT_ID
               value: "primary"
             - name: BOOTSTRAP_TENANT_DISPLAY_NAME
               value: "Primary Workspace"
             - name: GIBSON_IDP_ADMIN_ISSUER
-              value: "https://app.selfhosted.example.com"
+              value: "https://app.localhost.zeroroot.ai"
             - name: ZITADEL_URL
               value: "http://gibson-zitadel.gibson.svc.cluster.local:8080"
             - name: ZITADEL_EXTERNAL_DOMAIN
-              value: "app.selfhosted.example.com"
+              value: "app.localhost.zeroroot.ai"
             - name: GIBSON_IDP_ADMIN_CLIENT_ID
               valueFrom:
                 secretKeyRef:
