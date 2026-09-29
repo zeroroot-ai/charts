@@ -54,7 +54,7 @@ must_pass "firstTenant disabled: ownerEmail may stay empty" \
 # --- equal addresses ---------------------------------------------------------
 must_fail "platformOwner.email equals firstTenant.ownerEmail" \
   "must be different addresses" \
-  --set global.platformOwner.email=admin@selfhosted.example.com
+  --set global.platformOwner.email=admin@localhost.zeroroot.ai
 
 must_fail "the equality check is case-insensitive" \
   "must be different addresses" \
@@ -73,7 +73,7 @@ must_pass "smtp transport and offlineSetup=false" \
   --set gibson-workloads.gibson.email.provider=smtp \
   --set gibson-workloads.gibson.email.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
-  --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@selfhosted.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@localhost.zeroroot.ai \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=Gibson
 
 # offlineSetup=true with no place to write the link must fail.
@@ -102,7 +102,7 @@ must_pass "firstTenant: smtp transport and offlineSetup=false" \
   --set gibson-workloads.gibson.email.provider=smtp \
   --set gibson-workloads.gibson.email.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
-  --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@selfhosted.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@localhost.zeroroot.ai \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=Gibson
 
 must_fail "firstTenant: offlineSetup=true with no setupSecretRef.name" \
@@ -150,7 +150,7 @@ must_fail "gibson-operators smtp.host set but .fromName empty" \
   --set gibson-workloads.gibson.email.provider=smtp \
   --set gibson-workloads.gibson.email.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
-  --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@selfhosted.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@localhost.zeroroot.ai \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=
 
 # The daemon's mail off (provider=log, the baseline) never requires Zitadel's

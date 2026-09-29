@@ -61,7 +61,7 @@ gibson-workloads:
       workloadCreators:
         - "system:serviceaccount:argocd:argocd-application-controller"
   global:
-    domain: "selfhosted.example.com"
+    domain: "localhost.zeroroot.ai"
     imagePullSecrets:
       - name: ghcr-credentials
   externalSecrets:
@@ -244,7 +244,7 @@ gibson-workloads:
     #       passwordSecretKey: "password"
     email:
       provider: "log"
-      from: "no-reply@selfhosted.example.com"
+      from: "no-reply@localhost.zeroroot.ai"
   dashboard:
     # Self-hosted profile: signup page accessible (matches signupSelfServe above).
     # signup-seam.bats asserts SIGNUP_SELF_SERVE=true on the dashboard in this render.
@@ -496,7 +496,7 @@ gibson-workloads:
   # first-party image onboarding lifecycle documented in scripts/baseline-up.sh.
 gibson-operators:
   global:
-    domain: "selfhosted.example.com"
+    domain: "localhost.zeroroot.ai"
   tenantOperator:
     image:
       pullPolicy: IfNotPresent
@@ -698,7 +698,7 @@ global:
   # namespace and a reader ServiceAccount that only our own Terraform created,
   # so on a customer cluster the store came up InvalidProviderConfig and every
   # workload blocked on a Secret that could never materialize.
-  domain: selfhosted.example.com
+  domain: localhost.zeroroot.ai
   # Headless first-admin: the operator seeds this tenant (session-less, over
   # its SPIFFE identity) and the first-admin Job creates its owner once the
   # Zitadel org exists. Read by gibson-operators AND gibson-workloads.
@@ -711,7 +711,7 @@ global:
     enabled: true
     tenantId: "primary"
     displayName: "Primary Workspace"
-    ownerEmail: "admin@selfhosted.example.com"
+    ownerEmail: "admin@localhost.zeroroot.ai"
     # This profile ships gibson-workloads.email.provider: "log" below (no
     # delivering mail transport), so offlineSetup is explicit, the same way
     # global.platformOwner.offlineSetup is below (ADR-0093 decision 8,
@@ -728,7 +728,7 @@ global:
   # platform-operator writes a one-time setup link to the named Secret
   # instead of emailing it.
   platformOwner:
-    email: "owner@selfhosted.example.com"
+    email: "owner@localhost.zeroroot.ai"
     offlineSetup: true
     setupSecretRef:
       name: "gibson-platform-owner-setup"
@@ -755,7 +755,7 @@ spire:
 zitadel:
   zitadel:
     configmapConfig:
-      ExternalDomain: app.selfhosted.example.com
+      ExternalDomain: app.localhost.zeroroot.ai
       # 443, NOT the base's 30443. Zitadel computes its issuer/audience as
       # BuildHTTP(ExternalDomain, ExternalPort, ExternalSecure) and INCLUDES
       # the port unless it is the scheme default. With 30443 every self-signed

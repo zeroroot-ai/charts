@@ -21,7 +21,7 @@
 #
 #   first-tenant seed enqueue failed; will retry
 #     error: entitlements: fetch token: OAuth2TokenSource:
-#     Post "https://app.selfhosted.example.com/oauth/v2/token":
+#     Post "https://app.localhost.zeroroot.ai/oauth/v2/token":
 #     dial tcp 10.96.0.250:443: i/o timeout
 #
 # so no tenant was ever enqueued, no Tenant CR was created, and the first-admin
