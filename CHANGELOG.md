@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.10](https://github.com/zeroroot-ai/charts/compare/v0.132.9...v0.132.10) (2026-09-29)
+
+
+### Bug Fixes
+
+* **images:** pin gibson-belief-sidecar sha-f1b4f0b for the intelligence layer ([#214](https://github.com/zeroroot-ai/charts/issues/214)) ([a97e0e9](https://github.com/zeroroot-ai/charts/commit/a97e0e91896a8ffab0b625b447be8e1b502c44e3))
+
 ## [0.132.9](https://github.com/zeroroot-ai/charts/compare/v0.132.8...v0.132.9) (2026-09-29)
 
 
