@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.14](https://github.com/zeroroot-ai/charts/compare/v0.132.13...v0.132.14) (2026-09-29)
+
+
+### Bug Fixes
+
+* **images:** pin dashboard v0.123.1, one membership verdict per person instead of one daemon call per request ([#224](https://github.com/zeroroot-ai/charts/issues/224)) ([20643b7](https://github.com/zeroroot-ai/charts/commit/20643b7368e18a55386c52127418944d636927b1))
+
 ## [0.132.13](https://github.com/zeroroot-ai/charts/compare/v0.132.12...v0.132.13) (2026-09-29)
 
 
