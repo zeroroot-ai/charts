@@ -183,6 +183,10 @@ edge-misdirected-authority: ## Every browser-facing edge chain answers a coalesc
 
 edge-misdirected-authority-live: ## The same against a running edge: EDGE_URL=https://app.<domain>[:port] API_HOST=api.<domain> [EDGE_RESOLVE=a,b] [EDGE_INSECURE=1]
 	@python3 scripts/check-edge-misdirected-authority.py --live
+.PHONY: edge-access-log-no-credentials
+edge-access-log-no-credentials: ## No Envoy access log records a credential header's value (Authorization keeps its scheme word only, cookies never)
+	@python3 scripts/check-edge-access-log-no-credentials.py --selftest
+	@python3 scripts/check-edge-access-log-no-credentials.py
 
 hostnames: ## No literal platform hostname; every host derives from global.domain (charts#17)
 	@python3 scripts/check-hostnames.py --selftest
@@ -267,7 +271,7 @@ operator-rbac-fresh: ## The vendored cert-manager and External Secrets RBAC matc
 	@python3 scripts/vendor-operator-rbac.py --selftest
 	@python3 scripts/vendor-operator-rbac.py --check
 
-check: golden attribution cloud-free chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates probes netpol-coverage daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes  netpol-before-hooks## Everything that runs without a cluster
+check: golden attribution cloud-free chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates probes netpol-coverage daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes  netpol-before-hooks## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context
