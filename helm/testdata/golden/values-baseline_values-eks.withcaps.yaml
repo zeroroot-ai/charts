@@ -3681,9 +3681,13 @@ data:
                               upstream_host: "%UPSTREAM_HOST%"
                               upstream_cluster: "%UPSTREAM_CLUSTER%"
                               # Presence-only indicator: "-" when no Authorization,
-                              # anything else means one was attached. We deliberately
-                              # do NOT log the bearer value.
-                              authorization_present: "%REQ(AUTHORIZATION)%"
+                              # the scheme word ("Bearer") when one was attached.
+                              # The :6 truncates the header to its first six
+                              # characters, so the token itself never reaches the
+                              # log. Measured 2026-09-29 on staging: without the
+                              # truncation this field carried every caller's whole
+                              # JWT into the pod log.
+                              authorization_present: "%REQ(AUTHORIZATION):6%"
                               # Decoded Zitadel JWT claims surfaced by jwt_authn under
                               # the `zitadel` metadata key.
                               zitadel_sub: "%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:zitadel:sub)%"
@@ -15733,7 +15737,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 5f0fe09015500e2dff46d792844d34849b652ed8931bf3f0eba120ad5fd68e61
+        checksum/config: 6e441a87e7c509cbe824fa5076c90eff30a7680a3617435a52e71ec49e3ce797
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #

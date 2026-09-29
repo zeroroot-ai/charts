@@ -174,9 +174,13 @@ static_resources:
                           upstream_host: "%UPSTREAM_HOST%"
                           upstream_cluster: "%UPSTREAM_CLUSTER%"
                           # Presence-only indicator: "-" when no Authorization,
-                          # anything else means one was attached. We deliberately
-                          # do NOT log the bearer value.
-                          authorization_present: "%REQ(AUTHORIZATION)%"
+                          # the scheme word ("Bearer") when one was attached.
+                          # The :6 truncates the header to its first six
+                          # characters, so the token itself never reaches the
+                          # log. Measured 2026-09-29 on staging: without the
+                          # truncation this field carried every caller's whole
+                          # JWT into the pod log.
+                          authorization_present: "%REQ(AUTHORIZATION):6%"
                           # Decoded Zitadel JWT claims surfaced by jwt_authn under
                           # the `zitadel` metadata key.
                           zitadel_sub: "%DYNAMIC_METADATA(envoy.filters.http.jwt_authn:zitadel:sub)%"
