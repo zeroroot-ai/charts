@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.20](https://github.com/zeroroot-ai/charts/compare/v0.132.19...v0.132.20) (2026-09-29)
+
+
+### Bug Fixes
+
+* **images:** pin dashboard v0.124.1, a denial from inside an RPC reads as permission denied ([#237](https://github.com/zeroroot-ai/charts/issues/237)) ([85ce048](https://github.com/zeroroot-ai/charts/commit/85ce048a27875bbbe7e9f18a90a35044eeeb753c))
+
 ## [0.132.19](https://github.com/zeroroot-ai/charts/compare/v0.132.18...v0.132.19) (2026-09-29)
 
 
