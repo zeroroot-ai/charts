@@ -214,6 +214,20 @@ spec:
             {{- $fgaAddr = $fgaAddr | trimPrefix "http://" | trimPrefix "https://" }}
             - name: EXT_AUTHZ_FGA_ADDR
               value: "https://{{ $fgaAddr }}"
+            # FGA write events (hosted#204): the daemon and the tenant-operator
+            # announce every tenant-role tuple they write on the Redis channel
+            # gibson:fga.write, and ext-authz evicts that user's cached
+            # decisions on each event, so a demoted or removed user is refused
+            # on their next request. Same Redis and the same password Secret
+            # as the daemon; a password rotation restarts ext-authz with the
+            # daemon. Without the URL the decision cache TTL is the only bound.
+            - name: EXT_AUTHZ_REDIS_URL
+              value: {{ include "gibson.redis.url" . | quote }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.redisPasswordSecretName" . }}
+                  key: {{ include "gibson.redisPasswordSecretKey" . }}
             {{- /* Go's crypto/x509 reads SSL_CERT_DIR as a colon-separated
                   list and skips missing entries: /etc/ssl/certs keeps the
                   distro bundle (public roots for any other TLS dial), the

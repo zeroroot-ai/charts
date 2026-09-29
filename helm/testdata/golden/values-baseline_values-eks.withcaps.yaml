@@ -16246,6 +16246,20 @@ spec:
               value: ":9002"
             - name: EXT_AUTHZ_FGA_ADDR
               value: "https://gibson-openfga:8080"
+            # FGA write events (hosted#204): the daemon and the tenant-operator
+            # announce every tenant-role tuple they write on the Redis channel
+            # gibson:fga.write, and ext-authz evicts that user's cached
+            # decisions on each event, so a demoted or removed user is refused
+            # on their next request. Same Redis and the same password Secret
+            # as the daemon; a password rotation restarts ext-authz with the
+            # daemon. Without the URL the decision cache TTL is the only bound.
+            - name: EXT_AUTHZ_REDIS_URL
+              value: "redis://:${REDIS_PASSWORD}@gibson-redis-stack:6379"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-redis-stack
+                  key: redis-password
             - name: SSL_CERT_DIR
               value: "/etc/ssl/certs:/etc/extauthz/tls/fga-ca"
             # deploy#190 M4: `optional: true` removed. The wait-for-fga-config
