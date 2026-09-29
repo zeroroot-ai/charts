@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.18](https://github.com/zeroroot-ai/charts/compare/v0.132.17...v0.132.18) (2026-09-29)
+
+
+### Bug Fixes
+
+* **images:** pin dashboard v0.124.0, Editor on invite and role change and a Viewer gate on the mission editor ([#232](https://github.com/zeroroot-ai/charts/issues/232)) ([b596649](https://github.com/zeroroot-ai/charts/commit/b596649e585b22bb1126e360d1443a0b88081c60))
+
 ## [0.132.17](https://github.com/zeroroot-ai/charts/compare/v0.132.16...v0.132.17) (2026-09-29)
 
 
