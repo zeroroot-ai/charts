@@ -34,6 +34,21 @@ def render() -> list[dict]:
     return [d for d in yaml.safe_load_all(out) if d]
 
 
+# Variables that are not trust fetches, each with the schemes it may carry.
+# EXT_AUTHZ_REDIS_URL is the FGA write event feed (hosted#204): ext-authz
+# only ever EVICTS cached decisions on what arrives there, so a forged or
+# replayed event costs one extra FGA check and grants nothing. It is the
+# same in-cluster Redis address the daemon uses. Keyed by name, never by
+# position, so a reflow of the Deployment cannot widen the allowance.
+PLAIN_ALLOWED = {
+    "EXT_AUTHZ_REDIS_URL": ("redis", "rediss"),
+}
+
+
+def allowed_plain(name: str, scheme: str) -> bool:
+    return scheme in PLAIN_ALLOWED.get(name, ())
+
+
 def judge(docs: list[dict]) -> list[str]:
     out = []
     seen = False
@@ -49,7 +64,7 @@ def judge(docs: list[dict]) -> list[str]:
                 m = SCHEME.match(v)
                 # spiffe:// values are identities the peer must present, not
                 # addresses ext-authz fetches from.
-                if m and m.group(1).lower() not in ("https", "spiffe"):
+                if m and m.group(1).lower() not in ("https", "spiffe") and not allowed_plain(e["name"], m.group(1).lower()):
                     out.append(f"{d['metadata']['name']}: {e['name']}={v} is not https")
     if not seen:
         out.append("no ext-authz Deployment in the render; the guard has nothing to judge")
@@ -70,11 +85,13 @@ spec:
             - {name: EXT_AUTHZ_ZITADEL_ISSUER, value: "https://app.example.test"}
             - {name: EXT_AUTHZ_DAEMON_SVID, value: "spiffe://zeroroot.ai/platform/daemon"}
             - {name: EXT_AUTHZ_CGJWT_KEYS_URL, value: "http://gibson:8086/capabilitygrant/v1/keys"}
+            - {name: EXT_AUTHZ_REDIS_URL, value: "redis://gibson-redis-master:6379/0"}
 """
 
 
 def selftest() -> int:
     got = judge([d for d in yaml.safe_load_all(FIXTURE) if d])
+    # Exactly the keys URL, never the Redis feed (PLAIN_ALLOWED).
     if len(got) != 1 or "EXT_AUTHZ_CGJWT_KEYS_URL" not in got[0]:
         print(f"SELFTEST FAIL: want exactly the http keys URL flagged, got {got}")
         return 1
