@@ -4042,6 +4042,44 @@ data:
                                 body:
                                   inline_string: |
                                     {"error":"unknown route","message":"no Envoy route matched. Verify the gRPC method FQN starts with /gibson.* or the HTTP path is one of the documented surfaces."}
+                        # ---------------------------------------------------
+                        # Misdirected request (RFC 9113 section 9.1.2). Every
+                        # public hostname on this edge shares one certificate and
+                        # one address, so a browser reuses (coalesces) the HTTP/2
+                        # connection it opened to app.<domain> for a request to
+                        # api.<domain>, and the other way round. Envoy picks the
+                        # filter chain by the connection's SNI, so that request
+                        # lands on a chain with an :authority the chain does not
+                        # serve. Measured 2026-09-29 on staging: the GitLab
+                        # connector's OAuth redirect to
+                        # api.<domain>/connectors/oauth/callback rode the browser's
+                        # app.<domain> connection and got the public chain's 404.
+                        # The answer is 421: a browser retries the request on a new
+                        # connection with the right SNI, and every other client
+                        # learns it is on the wrong connection. Nothing routes from
+                        # here: a "*" virtual host that reached an upstream would
+                        # be an unauthenticated route (deploy#1204). jwt_authn and
+                        # ext_authz are off for this virtual host, because the
+                        # request carries no token for THIS host and a 401 would
+                        # end the browser's retry before it starts. The public
+                        # chain carries the same virtual host for the reverse
+                        # case. check-edge-misdirected-authority.py guards both.
+                        # ---------------------------------------------------
+                        - name: misdirected
+                          domains: ["*"]
+                          typed_per_filter_config:
+                            envoy.filters.http.jwt_authn:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.PerRouteConfig
+                              disabled: true
+                            envoy.filters.http.ext_authz:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                              disabled: true
+                          routes:
+                            - match: { prefix: "/" }
+                              direct_response:
+                                status: 421
+                                body:
+                                  inline_string: "misdirected request: this connection does not serve the requested host. Retry on a new connection.\n"
                     http_filters:
                       # 0. Edge rate limiting (deploy#1189). FIRST in the chain, on
                       # purpose: a refused request must cost a JWKS verification, an
@@ -4450,8 +4488,11 @@ data:
             #
             # SAFE to merge: none of these carry auth filters — ext_authz /
             # jwt_authn live ONLY on the api.<domain> chain, on the edge_tls
-            # listener. (api coalescing is tracked separately in deploy#865: it
-            # would surface as 401/403, not this 404.)
+            # listener. That chain cannot merge in here, so a browser that
+            # coalesces across api.<domain> and one of these hosts still lands
+            # on the wrong chain. Both chains answer that case with 421
+            # (the `misdirected` virtual host below, and its twin on the api
+            # chain), and the browser retries on a connection with the right SNI.
             #
             # Where this chain is MOUNTED varies by environment (deploy#1196) and
             # nothing below depends on it: routing is by :authority throughout.
@@ -4885,6 +4926,21 @@ data:
                                 host_redirect: "app.localhost.zeroroot.ai"
                                 response_code: MOVED_PERMANENTLY
                                 https_redirect: true
+                        # Misdirected request (RFC 9113 section 9.1.2): a browser
+                        # that coalesced its app./apex/docs connection onto a
+                        # request for api.<domain> lands here with an :authority
+                        # this chain does not serve (the certificate covers every
+                        # public host). 421 makes it retry on a new connection with
+                        # the right SNI. The api chain answers the reverse case the
+                        # same way. Nothing routes from here (deploy#1204).
+                        - name: misdirected
+                          domains: ["*"]
+                          routes:
+                            - match: { prefix: "/" }
+                              direct_response:
+                                status: 421
+                                body:
+                                  inline_string: "misdirected request: this connection does not serve the requested host. Retry on a new connection.\n"
                     http_filters:
                       # 0. Edge rate limiting (deploy#1242). Until this filter
                       # existed, the merged public chain's http_filters was JUST
@@ -15421,7 +15477,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: f04db700b0d8d0587cdad896fad8754fa87f4c38d977e60ec00aaf52f447d42a
+        checksum/config: 5f0fe09015500e2dff46d792844d34849b652ed8931bf3f0eba120ad5fd68e61
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #

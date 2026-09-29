@@ -39,8 +39,11 @@ item whose `-` and whose filter_chain_match the CALLER writes.
         #
         # SAFE to merge: none of these carry auth filters — ext_authz /
         # jwt_authn live ONLY on the api.<domain> chain, on the edge_tls
-        # listener. (api coalescing is tracked separately in deploy#865: it
-        # would surface as 401/403, not this 404.)
+        # listener. That chain cannot merge in here, so a browser that
+        # coalesces across api.<domain> and one of these hosts still lands
+        # on the wrong chain. Both chains answer that case with 421
+        # (the `misdirected` virtual host below, and its twin on the api
+        # chain), and the browser retries on a connection with the right SNI.
         #
         # Where this chain is MOUNTED varies by environment (deploy#1196) and
         # nothing below depends on it: routing is by :authority throughout.
@@ -477,6 +480,21 @@ item whose `-` and whose filter_chain_match the CALLER writes.
 {{- end }}
                             response_code: MOVED_PERMANENTLY
                             https_redirect: true
+                    # Misdirected request (RFC 9113 section 9.1.2): a browser
+                    # that coalesced its app./apex/docs connection onto a
+                    # request for api.<domain> lands here with an :authority
+                    # this chain does not serve (the certificate covers every
+                    # public host). 421 makes it retry on a new connection with
+                    # the right SNI. The api chain answers the reverse case the
+                    # same way. Nothing routes from here (deploy#1204).
+                    - name: misdirected
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          direct_response:
+                            status: 421
+                            body:
+                              inline_string: "misdirected request: this connection does not serve the requested host. Retry on a new connection.\n"
                 http_filters:
                   # 0. Edge rate limiting (deploy#1242). Until this filter
                   # existed, the merged public chain's http_filters was JUST
