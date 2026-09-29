@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.17](https://github.com/zeroroot-ai/charts/compare/v0.132.16...v0.132.17) (2026-09-29)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.143.4, the mission-draft RPCs gate on writer and all four tenant roles are reported ([#231](https://github.com/zeroroot-ai/charts/issues/231)) ([a39bbc6](https://github.com/zeroroot-ai/charts/commit/a39bbc616479924d755de62e9c6ac9c72ddbe9cb))
+
 ## [0.132.16](https://github.com/zeroroot-ai/charts/compare/v0.132.15...v0.132.16) (2026-09-29)
 
 
