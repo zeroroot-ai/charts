@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.0](https://github.com/zeroroot-ai/charts/compare/v0.132.25...v0.133.0) (2026-09-29)
+
+
+### Features
+
+* **ext-authz:** the FGA write event feed, so a role change is refused at once ([#249](https://github.com/zeroroot-ai/charts/issues/249)) ([e4a53a7](https://github.com/zeroroot-ai/charts/commit/e4a53a7b836118f4e36e7ce05535e135bf2c9cee))
+
 ## [0.132.25](https://github.com/zeroroot-ai/charts/compare/v0.132.24...v0.132.25) (2026-09-29)
 
 
