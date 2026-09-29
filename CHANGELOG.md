@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.25](https://github.com/zeroroot-ai/charts/compare/v0.132.24...v0.132.25) (2026-09-29)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.143.8, the FGA cache TTL runs at its 5 s default ([#247](https://github.com/zeroroot-ai/charts/issues/247)) ([1b251db](https://github.com/zeroroot-ai/charts/commit/1b251db3c1e1cf9ead7e5127314efd1e36f12181))
+
 ## [0.132.24](https://github.com/zeroroot-ai/charts/compare/v0.132.23...v0.132.24) (2026-09-29)
 
 
