@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.15](https://github.com/zeroroot-ai/charts/compare/v0.132.14...v0.132.15) (2026-09-29)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.143.3, MFA reset audit record and provisioned-tenant owner ([#227](https://github.com/zeroroot-ai/charts/issues/227)) ([d095b3e](https://github.com/zeroroot-ai/charts/commit/d095b3e60f8b054600f9a9bca6b96448f7749fab))
+
 ## [0.132.14](https://github.com/zeroroot-ai/charts/compare/v0.132.13...v0.132.14) (2026-09-29)
 
 
