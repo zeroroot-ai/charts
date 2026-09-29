@@ -128,7 +128,21 @@ wait_external_secrets
 # ready-and-unsealed with no human action and no unseal key in the cluster.
 # Rendering the chart proves nothing; only the round trip does.
 log "restart round-trip: killing OpenBao and expecting it back unsealed"
+old_uid="$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.metadata.uid}')"
 kubectl -n "$NS" delete pod "$POD" --wait=true --timeout=180s
+# The StatefulSet recreates the pod under the same name a moment later.
+# `kubectl wait` on a name that does not exist yet fails at once with
+# NotFound instead of waiting (hosted run 36570607570), so wait for a
+# pod with a new UID first.
+recreate_deadline=$(( $(date +%s) + 120 ))
+until new_uid="$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.metadata.uid}' 2>/dev/null)" \
+    && [ -n "$new_uid" ] && [ "$new_uid" != "$old_uid" ]; do
+  if [ "$(date +%s)" -ge "$recreate_deadline" ]; then
+    fail "the StatefulSet did not recreate $POD within 120 s"
+    exit 1
+  fi
+  sleep 2
+done
 kubectl -n "$NS" wait --for=condition=Ready "pod/$POD" --timeout=300s
 
 restart_deadline=$(( $(date +%s) + 180 ))
