@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.132.12](https://github.com/zeroroot-ai/charts/compare/v0.132.11...v0.132.12) (2026-09-29)
+
+
+### Bug Fixes
+
+* **baseline:** use localhost.zeroroot.ai instead of selfhosted.example.com ([#218](https://github.com/zeroroot-ai/charts/issues/218)) ([b84a713](https://github.com/zeroroot-ai/charts/commit/b84a713bb452629814b9a99981651cedb4e68953))
+* **envoy:** stop the browser WAF from reading first-party session cookies and gRPC-web bodies as attacks ([#220](https://github.com/zeroroot-ai/charts/issues/220)) ([dd6ab80](https://github.com/zeroroot-ai/charts/commit/dd6ab80bc9579c10e82f41d868a1774f93375ac4))
+
 ## [0.132.11](https://github.com/zeroroot-ai/charts/compare/v0.132.10...v0.132.11) (2026-09-29)
 
 
