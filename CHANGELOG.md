@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.9](https://github.com/zeroroot-ai/charts/compare/v0.132.8...v0.132.9) (2026-09-29)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.143.1, a conditioned tuple update reaches OpenFGA as two writes ([#212](https://github.com/zeroroot-ai/charts/issues/212)) ([706b326](https://github.com/zeroroot-ai/charts/commit/706b326a64d7604815829bc097c4698325501903))
+
 ## [0.132.8](https://github.com/zeroroot-ai/charts/compare/v0.132.7...v0.132.8) (2026-09-28)
 
 
