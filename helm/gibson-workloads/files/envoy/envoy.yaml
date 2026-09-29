@@ -791,6 +791,44 @@ static_resources:
                             body:
                               inline_string: |
                                 {"error":"unknown route","message":"no Envoy route matched. Verify the gRPC method FQN starts with /gibson.* or the HTTP path is one of the documented surfaces."}
+                    # ---------------------------------------------------
+                    # Misdirected request (RFC 9113 section 9.1.2). Every
+                    # public hostname on this edge shares one certificate and
+                    # one address, so a browser reuses (coalesces) the HTTP/2
+                    # connection it opened to app.<domain> for a request to
+                    # api.<domain>, and the other way round. Envoy picks the
+                    # filter chain by the connection's SNI, so that request
+                    # lands on a chain with an :authority the chain does not
+                    # serve. Measured 2026-09-29 on staging: the GitLab
+                    # connector's OAuth redirect to
+                    # api.<domain>/connectors/oauth/callback rode the browser's
+                    # app.<domain> connection and got the public chain's 404.
+                    # The answer is 421: a browser retries the request on a new
+                    # connection with the right SNI, and every other client
+                    # learns it is on the wrong connection. Nothing routes from
+                    # here: a "*" virtual host that reached an upstream would
+                    # be an unauthenticated route (deploy#1204). jwt_authn and
+                    # ext_authz are off for this virtual host, because the
+                    # request carries no token for THIS host and a 401 would
+                    # end the browser's retry before it starts. The public
+                    # chain carries the same virtual host for the reverse
+                    # case. check-edge-misdirected-authority.py guards both.
+                    # ---------------------------------------------------
+                    - name: misdirected
+                      domains: ["*"]
+                      typed_per_filter_config:
+                        envoy.filters.http.jwt_authn:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.PerRouteConfig
+                          disabled: true
+                        envoy.filters.http.ext_authz:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                          disabled: true
+                      routes:
+                        - match: { prefix: "/" }
+                          direct_response:
+                            status: 421
+                            body:
+                              inline_string: "misdirected request: this connection does not serve the requested host. Retry on a new connection.\n"
                 http_filters:
                   # 0. Edge rate limiting (deploy#1189). FIRST in the chain, on
                   # purpose: a refused request must cost a JWKS verification, an
