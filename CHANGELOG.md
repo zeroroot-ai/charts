@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.132.13](https://github.com/zeroroot-ai/charts/compare/v0.132.12...v0.132.13) (2026-09-29)
+
+
+### Bug Fixes
+
+* **baseline-verify:** wait for the recreated OpenBao pod before waiting for Ready ([#222](https://github.com/zeroroot-ai/charts/issues/222)) ([c71b559](https://github.com/zeroroot-ai/charts/commit/c71b559aef34efc66a34d2fd8b4693a4bccf465d))
+
 ## [0.132.12](https://github.com/zeroroot-ai/charts/compare/v0.132.11...v0.132.12) (2026-09-29)
 
 
