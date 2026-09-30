@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.133.4](https://github.com/zeroroot-ai/charts/compare/v0.133.3...v0.133.4) (2026-09-30)
+
+
+### Bug Fixes
+
+* **images:** pin dashboard v0.126.0, one tenant resolver and no picker ([b40e006](https://github.com/zeroroot-ai/charts/commit/b40e006439b40da897b940b2323dbd398b51e376))
+* **images:** pin dashboard v0.126.0, people named on missions, findings and jobs ([#258](https://github.com/zeroroot-ai/charts/issues/258)) ([b40e006](https://github.com/zeroroot-ai/charts/commit/b40e006439b40da897b940b2323dbd398b51e376))
+
 ## [0.133.3](https://github.com/zeroroot-ai/charts/compare/v0.133.2...v0.133.3) (2026-09-30)
 
 
