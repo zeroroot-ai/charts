@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.3](https://github.com/zeroroot-ai/charts/compare/v0.133.2...v0.133.3) (2026-09-30)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.146.0, missions record their creator, ResolveUsers names people ([#256](https://github.com/zeroroot-ai/charts/issues/256)) ([b7af566](https://github.com/zeroroot-ai/charts/commit/b7af5664e68ec05ed1d36319505ad56ec6c25520))
+
 ## [0.133.2](https://github.com/zeroroot-ai/charts/compare/v0.133.1...v0.133.2) (2026-09-30)
 
 
