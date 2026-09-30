@@ -3870,31 +3870,21 @@ data:
                             # -------------------------------------------------------
                             # OAuth 2.0 Device Authorization verification page
                             # (deploy#715). The device_authorization response
-                            # advertises verification_uri = {issuer}/device; Zitadel
-                            # core serves it and 302s to its EMBEDDED v1 login at
-                            # /ui/login/device. Zitadel v4 has no Login-V2 device
-                            # page wired into the device redirect (verified on
-                            # v4.13.1 + v4.14.0: the instance loginV2 feature and the
-                            # per-app loginVersion do not move the device flow off
-                            # /ui/login/*), so the device flow runs on the core
-                            # binary. These two prefixes therefore go to core, NOT
-                            # the V2 login container — and MUST precede the broad
-                            # /ui/ rule below, which otherwise swallows /ui/login/*
-                            # and 404s `gibson login`'s approval page.
-                            - match: { prefix: "/device" }
-                              route:
-                                cluster: zitadel_upstream
-                                timeout: 30s
-                                # Per-client quota (deploy#1659):
-                                # envoy.rateLimit.perClient.appLogin, by address.
-                                rate_limits:
-                                  - actions:
-                                      - generic_key:
-                                          descriptor_key: route
-                                          descriptor_value: app_login
-                                      - masked_remote_address:
-                                          v4_prefix_mask_len: 32
-                                          v6_prefix_mask_len: 64
+                            # advertises verification_uri = {issuer}/device. Zitadel
+                            # core answers that path with a 302 to its embedded v1
+                            # login at /ui/login/device. The v1 login cannot verify a
+                            # passkey or security key that Login V2 registered: it
+                            # starts WebAuthn with an empty relying-party ID, so it
+                            # drops every key that carries one, and the second
+                            # factor fails with Errors.User.WebAuthN.BeginLoginFailed
+                            # (Zitadel v4.18.0, upstream zitadel#8282). Login V2
+                            # ships its own device page, so the edge sends the
+                            # browser there. The redirect keeps the query string,
+                            # so ?user_code= reaches the page. A 302, not a 301, so
+                            # no browser caches it. This route MUST
+                            # precede the broad /ui/ rule below.
+                            - match: { path: "/device" }
+                              redirect: { path_redirect: "/ui/v2/login/device", response_code: FOUND }
                             - match: { prefix: "/ui/login/" }
                               route:
                                 cluster: zitadel_upstream
@@ -11899,7 +11889,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 5528e9b977f185f351b1bcafe319749c0d90469cb5d2a23986f9ef985e9efeb6
+        checksum/config: d8f65c540faf866c93ef7b9421562e5baa7d3e9dfa9ba312bb017da5bed42352
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
