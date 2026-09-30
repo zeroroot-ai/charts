@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.7](https://github.com/zeroroot-ai/charts/compare/v0.133.6...v0.133.7) (2026-09-30)
+
+
+### Bug Fixes
+
+* **edge:** send the device approval page to Login V2 ([#265](https://github.com/zeroroot-ai/charts/issues/265)) ([0c70810](https://github.com/zeroroot-ai/charts/commit/0c7081048526198d1188daf2e87102efd2e8e0db))
+
 ## [0.133.6](https://github.com/zeroroot-ai/charts/compare/v0.133.5...v0.133.6) (2026-09-30)
 
 
