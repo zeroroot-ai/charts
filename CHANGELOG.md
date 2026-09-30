@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.5](https://github.com/zeroroot-ai/charts/compare/v0.133.4...v0.133.5) (2026-09-30)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.146.1, the Platform owner reaches system_tenant RPCs through the edge ([#260](https://github.com/zeroroot-ai/charts/issues/260)) ([217f1fe](https://github.com/zeroroot-ai/charts/commit/217f1fe0f60ede8349857ebbe0beb1684fd10db8))
+
 ## [0.133.4](https://github.com/zeroroot-ai/charts/compare/v0.133.3...v0.133.4) (2026-09-30)
 
 
