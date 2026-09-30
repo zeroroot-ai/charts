@@ -19129,20 +19129,6 @@ spec:
             # and GIBSON_SETEC_KVM_REQUIRED env vars; those code paths and
             # the env vars themselves were dropped. SANDBOXED tools still
             # route through Setec; PLUGIN/AGENT tools dispatch unchanged.
-            # ----------------------------------------------------------------
-            # Belief-field pgmpy sidecar (gibson#750, deploy#936).
-            # The daemon's brain.PgmpyBeliefProvider POSTs host evidence to the
-            # sidecar's /score endpoint (2nd container in this pod, reached over
-            # pod loopback) and records the returned model version on each host
-            # so replay reproduces. The sidecar runs exact, read-only Bayesian
-            # inference over versioned model artifacts baked into its image.
-            # GIBSON_BELIEF_MODEL_VERSION pins the artifact version the mission
-            # runs under; base-v1 is the OSS minimal base model shipped in the
-            # sidecar image's models/ directory.
-            - name: GIBSON_BELIEF_SIDECAR_URL
-              value: "http://127.0.0.1:8087/score"
-            - name: GIBSON_BELIEF_MODEL_VERSION
-              value: "base-v1"
           resources:
             limits:
               cpu: 2000m
@@ -19253,99 +19239,6 @@ spec:
             # Spec 3 R4 — readOnlyRootFilesystem hardens against arbitrary
             # writes if the daemon is compromised. /tmp is the only writable
             # path (emptyDir) and the data volume is RW under /var/lib/gibson.
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            runAsNonRoot: true
-            runAsUser: 65532
-            capabilities:
-              drop:
-                - ALL
-        # ----------------------------------------------------------------
-        # Belief-field pgmpy sidecar (gibson#750, deploy#936).
-        #
-        # The daemon never does probability math itself; its
-        # brain.PgmpyBeliefProvider POSTs host evidence to this sidecar's
-        # /score endpoint on evidence change and records the returned model
-        # version on each host so replay reproduces. The sidecar
-        # runs exact, read-only Bayesian inference (pgmpy VariableElimination)
-        # over versioned model artifacts BAKED INTO ITS IMAGE — the OSS image
-        # ships base-v1; the commercial layer drops additional models/*.json
-        # into its own image build. Baking the artifacts (not mounting/
-        # fetching them) is what makes a given image tag deterministic and
-        # replay-reproducible.
-        #
-        # Runs as a 2nd container in the daemon pod so the daemon reaches it
-        # over pod loopback (127.0.0.1) with no NetworkPolicy hop. The
-        # GIBSON_BELIEF_SIDECAR_URL env on the daemon container (above) points
-        # here; GIBSON_BELIEF_MODEL_VERSION pins the artifact version the
-        # mission runs under.
-        - name: belief-sidecar
-          image: "ghcr.io/zeroroot-ai/gibson-belief-sidecar:sha-f1b4f0b@sha256:0eedc2ccb6fd7a227c1ada2124429f157f3039130aeb68cba6b73d7f7f47dcb1"
-          imagePullPolicy: IfNotPresent
-          ports:
-            - name: belief
-              containerPort: 8087
-              protocol: TCP
-          env:
-            # The sidecar shares the daemon's pod network namespace and the
-            # daemon reaches it on 127.0.0.1 (GIBSON_BELIEF_SIDECAR_URL above).
-            # /score has no authentication, so the bind is loopback and the
-            # port is reachable from inside the pod only. The probes below
-            # exec inside the container for the same reason: kubelet cannot
-            # reach a loopback bind over HTTP.
-            - name: BELIEF_HOST
-              value: "127.0.0.1"
-            - name: BELIEF_PORT
-              value: "8087"
-            - name: BELIEF_MODELS_DIR
-              value: /app/models
-          startupProbe:
-            # Loading the pgmpy model can exceed the liveness window on a cold or
-            # loaded kind node; gate liveness+readiness behind startup so the
-            # model has up to ~5min to load before kubelet SIGKILLs it. The tight
-            # liveness (5 + 3*10 = 35s) was killing it mid-load, looping it out of
-            # the daemon Service endpoints (deploy#971-adjacent).
-            exec:
-              command:
-                - /usr/bin/python3
-                - -c
-                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8087/healthz', timeout=2)"
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 60
-          livenessProbe:
-            exec:
-              command:
-                - /usr/bin/python3
-                - -c
-                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8087/healthz', timeout=2)"
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 3
-          readinessProbe:
-            # /healthz returns 200 only once a model artifact is loaded, so it
-            # doubles as readiness (the daemon should not POST /score before a
-            # model is available).
-            exec:
-              command:
-                - /usr/bin/python3
-                - -c
-                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8087/healthz', timeout=2)"
-            initialDelaySeconds: 3
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 3
-          resources:
-            limits:
-              cpu: 250m
-              memory: 1Gi
-            requests:
-              cpu: 25m
-              memory: 512Mi
-          securityContext:
-            # The image bakes its models read-only; nothing writes to disk at
-            # runtime, so the root FS is read-only like the daemon container.
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
             runAsNonRoot: true

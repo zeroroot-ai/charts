@@ -115,7 +115,6 @@ NOTES: dict[str, dict[str, str]] = {
     "ghcr.io/zeroroot-ai/platform-operator": {
         "role": "platform operator (Zitadel OIDC apps, FGA aggregate root)"
     },
-    "ghcr.io/zeroroot-ai/gibson-belief-sidecar": {"role": "ECS-brain belief field sidecar"},
     "ghcr.io/zeroroot-ai/docs-site": {"role": "customer documentation site"},
     "ghcr.io/zeroroot-ai/zitadel-login": {
         "role": "branded Login V2 fork (thin fork of ghcr.io/zitadel/zitadel-login)"
