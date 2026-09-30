@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.133.1](https://github.com/zeroroot-ai/charts/compare/v0.133.0...v0.133.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **ci:** link-check checks only the Markdown a PR touched (.github v0.7.2) ([#252](https://github.com/zeroroot-ai/charts/issues/252)) ([49db15c](https://github.com/zeroroot-ai/charts/commit/49db15c0a13971f9e46073e82e06796f3c86f490))
+* **images:** pin gibson v0.144.0, a role change reaches ext-authz at once ([#251](https://github.com/zeroroot-ai/charts/issues/251)) ([6e3f432](https://github.com/zeroroot-ai/charts/commit/6e3f432a3c90e82ae94deeadf6d6adb749b9e426))
+
 ## [0.133.0](https://github.com/zeroroot-ai/charts/compare/v0.132.25...v0.133.0) (2026-09-29)
 
 
