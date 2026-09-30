@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.8](https://github.com/zeroroot-ai/charts/compare/v0.133.7...v0.133.8) (2026-09-30)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.146.4, the platform-operator reads its CR uncached and never loses a status write ([#267](https://github.com/zeroroot-ai/charts/issues/267)) ([7ac230f](https://github.com/zeroroot-ai/charts/commit/7ac230f67b129b9090f0c7fa76d4314cfc072779))
+
 ## [0.133.7](https://github.com/zeroroot-ai/charts/compare/v0.133.6...v0.133.7) (2026-09-30)
 
 
