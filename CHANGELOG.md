@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.6](https://github.com/zeroroot-ai/charts/compare/v0.133.5...v0.133.6) (2026-09-30)
+
+
+### Bug Fixes
+
+* **images:** pin docs-site docs-site-v0.6.11, the domain-packs page exists ([#263](https://github.com/zeroroot-ai/charts/issues/263)) ([92d68f9](https://github.com/zeroroot-ai/charts/commit/92d68f9ab18ddeee6aaffbb1fdbc564f86f95642))
+
 ## [0.133.5](https://github.com/zeroroot-ai/charts/compare/v0.133.4...v0.133.5) (2026-09-30)
 
 
