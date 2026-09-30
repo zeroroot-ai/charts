@@ -658,56 +658,6 @@ gibson:
       cpu: 1000m
       memory: 1Gi
 
-  # Belief-field pgmpy sidecar (gibson#750, deploy#936).
-  #
-  # Runs as a 2nd container in the daemon pod. The daemon's
-  # brain.PgmpyBeliefProvider POSTs host evidence to the sidecar's /score
-  # endpoint over pod loopback on evidence change and records the returned
-  # model version on each host so replay reproduces. The sidecar runs exact,
-  # read-only Bayesian inference (pgmpy VariableElimination) over versioned
-  # model artifacts BAKED INTO ITS IMAGE — the OSS image ships base-v1; the
-  # commercial layer drops additional models/*.json into its own image build.
-  # Baking the artifacts (not mounting/fetching them) makes a given image tag
-  # deterministic + replay-reproducible.
-  #
-  # Always on (no enabled toggle — one-code-path): the sidecar is a
-  # small read-only inference container, and running it everywhere makes the
-  # belief field deterministic-by-default rather than falling back to the
-  # daemon's Go placeholder provider.
-  belief:
-    image:
-      # Built + published by the gibson repo's gibson-belief-sidecar.yml
-      # workflow. Pin a concrete tag here (validateNoLatestTags / chart-audit
-      # reject ':latest'); overlays may track a moving tag (kind uses :main).
-      repository: ghcr.io/zeroroot-ai/gibson-belief-sidecar
-      # v0.1.1: fixes the pgmpy DiscreteBayesianNetwork->BayesianNetwork import
-      # crash that pinned the daemon pod 1/2 NotReady (gibson#982 / deploy#826).
-      # deploy#789: digest-pinned to the published v0.1.1 for
-      # staging/prod immutability (kind keeps :main, exempt). Re-resolve via
-      #   gh api /orgs/zeroroot-ai/packages/container/gibson-belief-sidecar/versions
-      tag: "sha-f1b4f0b@sha256:0eedc2ccb6fd7a227c1ada2124429f157f3039130aeb68cba6b73d7f7f47dcb1"
-      # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
-      digest: ""
-      pullPolicy: IfNotPresent
-    # HTTP port the sidecar's exact-inference server binds (server.py default).
-    port: 8087
-    # Model artifact version the daemon pins missions to (must exist in the
-    # sidecar image's models/ directory). base-v1 is the OSS minimal base model.
-    modelVersion: "base-v1"
-    # Sidecar is a read-only inference service, but its Python ML runtime
-    # (xgboost + pgmpy + numpy/scipy) resident-imports to several hundred MB
-    # before the tiny base-v1 net is even loaded. 256Mi OOMKills the container
-    # at startup (exit 137) on a from-zero standup — verified on staging EKS
-    # (deploy#826). 1Gi limit / 512Mi request is the floor that lets it start;
-    # still modest enough for the all-components-on-kind rule.
-    resources:
-      requests:
-        cpu: 25m
-        memory: 512Mi
-      limits:
-        cpu: 250m
-        memory: 1Gi
-
   persistence:
     enabled: false
     size: 10Gi
