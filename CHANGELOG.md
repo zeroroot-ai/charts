@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.2](https://github.com/zeroroot-ai/charts/compare/v0.133.1...v0.133.2) (2026-09-30)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.145.0, session gates share one FGA call per token ([#254](https://github.com/zeroroot-ai/charts/issues/254)) ([1969021](https://github.com/zeroroot-ai/charts/commit/1969021c463f1b8cc1870ac75f6df9360cb55e5a))
+
 ## [0.133.1](https://github.com/zeroroot-ai/charts/compare/v0.133.0...v0.133.1) (2026-09-30)
 
 
