@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.13](https://github.com/zeroroot-ai/charts/compare/v0.133.12...v0.133.13) (2026-10-01)
+
+
+### Bug Fixes
+
+* **platform-operator:** show Gibson CLI on the device consent page ([#276](https://github.com/zeroroot-ai/charts/issues/276)) ([4cd44a5](https://github.com/zeroroot-ai/charts/commit/4cd44a56d4786259073d5a476a94f6e93341c0f6))
+
 ## [0.133.12](https://github.com/zeroroot-ai/charts/compare/v0.133.11...v0.133.12) (2026-10-01)
 
 
