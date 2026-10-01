@@ -188,10 +188,6 @@ Prometheus host
 */}}
 
 {{/*
-Grafana host
-*/}}
-
-{{/*
 Loki host
 */}}
 
