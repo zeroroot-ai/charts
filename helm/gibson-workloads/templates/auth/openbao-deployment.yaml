@@ -288,6 +288,27 @@ spec:
           #
           # So dropping sealedcode costs nothing on first boot and buys a real
           # signal for the failure mode a bad audit device produces.
+          #
+          # BOTH PROBES DECLARE timeoutSeconds, because the default is 1 and 1 is
+          # not enough here. Measured on gibson exit-test-bank run 36922487157
+          # (2026-10-01): every probe failed with
+          #
+          #   Get "http://10.244.0.28:8200/v1/sys/health?...": context deadline
+          #   exceeded (Client.Timeout exceeded while awaiting headers)
+          #
+          # A deadline, not a refusal: the socket accepted and no header came
+          # back in time. The pod read 2/2 Running throughout, which is why
+          # every look at the pod list said nothing was wrong.
+          #
+          # What that cost: ESO's ClusterSecretStore is a sync hook, it could not
+          # build a client against an OpenBao that would not answer, Argo spent
+          # its five retries on that one task, and every resource behind it —
+          # the daemon included — was never created. Three gibson exit tests
+          # failed at "Stand up the setec+gvisor cluster" for three days with no
+          # further detail.
+          #
+          # The whole bringup waits on this one endpoint, so it gets the longest
+          # timeout in the chart rather than the shortest.
           livenessProbe:
             httpGet:
               path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
@@ -295,6 +316,7 @@ spec:
               scheme: HTTP
             initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /v1/sys/health?standbyok=true&uninitcode=204
@@ -302,6 +324,7 @@ spec:
               scheme: HTTP
             initialDelaySeconds: 10
             periodSeconds: 5
+            timeoutSeconds: 3
             # A sealed server is not a blip: the static seal could not open
             # the store (wrong keyring) or the audit-device sanity check
             # failed. Fail readiness reasonably fast, but not so fast that a
@@ -1301,6 +1324,10 @@ spec:
               command: ["test", "-f", "/tmp/openbao-auto-init-ready"]
             initialDelaySeconds: 5
             periodSeconds: 5
+            # An exec probe forks a process. Under CPU throttling that is not
+            # reliably inside the default 1s, and this marker is what the store's
+            # own readiness waits on.
+            timeoutSeconds: 3
           env:
             - name: BAO_ADDR
               value: "http://127.0.0.1:8200"
