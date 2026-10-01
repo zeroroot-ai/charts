@@ -47,6 +47,6 @@ make render-diff      # resource-level delta against a ref
 ## Links
 
 - Org-level workflow: [`AGENTS.md`](https://github.com/zeroroot-ai/.github/blob/main/AGENTS.md)
-- The consumer of this chart: [`zeroroot-ai/hosted`](https://github.com/zeroroot-ai/hosted) (private)
+- The consumer of this chart is the private `hosted` repository, which installs a published version of it and holds no chart source.
 - Air-gap mirroring: [`airgap/README.md`](airgap/README.md)
 - Glossary and settled decisions: [`CONTEXT.md`](CONTEXT.md)
