@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.134.1](https://github.com/zeroroot-ai/charts/compare/v0.134.0...v0.134.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* **docs:** combined image pin shape (unblocks version-links fan-out) ([#285](https://github.com/zeroroot-ai/charts/issues/285)) ([e257443](https://github.com/zeroroot-ai/charts/commit/e25744356ecacb836ac59ba3cf12f31a87ee7bc3))
+* **images:** pin gibson v0.148.3, WhoAmI reports kind user for a person ([#287](https://github.com/zeroroot-ai/charts/issues/287)) ([ad216d3](https://github.com/zeroroot-ai/charts/commit/ad216d38b6a2d606bcd028d3c9850dcb05e856c4))
+
 ## [0.134.0](https://github.com/zeroroot-ai/charts/compare/v0.133.14...v0.134.0) (2026-10-01)
 
 
