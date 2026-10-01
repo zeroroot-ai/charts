@@ -6,12 +6,12 @@ component — present in BOTH self-hosted and SaaS deployments. Default-on:
 a self-hosted operator may disable local docs via .Values.docs.enabled=false
 to link to public docs.zeroroot.ai instead.
 
-image.tag falls back to .Chart.AppVersion when unset, but base values always
-sets a digest (see the docs: block comment in values.yaml, deploy#1438) and
-digest wins below whenever it is non-empty — so that fallback is dead code
-on the default path. The docs image is kept current by the automated
-image-published fan-out instead, not by a chart-version match. Per-env
-overlays may still override tag/digest (gitops staging tracks `main`).
+The image is pinned with the combined `tag: "v<semver>@sha256:<digest>"` shape,
+the one first-party pin shape, rendered via the shared gibson.image helper (see
+the docs: block comment in values.yaml). kubelet pulls by the embedded digest;
+the v<semver> is provenance. The pin is kept current by the version-links
+fan-out, not by a chart-version match. Per-env overlays may still override the
+tag (gitops staging tracks `main`).
 
  component taxonomy: Core, optional-by-toggle.
 Contrast: billing/www-svc are SaaS-only (absent self-hosted, separate overlay).
@@ -63,14 +63,10 @@ spec:
           type: RuntimeDefault
       containers:
         - name: docs-svc
-          {{- $repo := ((.Values.docs).image).repository | default "ghcr.io/zeroroot-ai/docs-site" }}
-          {{- $tag := ((.Values.docs).image).tag | default .Chart.AppVersion }}
-          {{- $digest := ((.Values.docs).image).digest }}
-          {{- if $digest }}
-          image: {{ printf "%s@%s" $repo $digest | quote }}
-          {{- else }}
-          image: {{ printf "%s:%s" $repo $tag | quote }}
-          {{- end }}
+          {{- /* Combined v<semver>@sha256:<digest> tag, rendered via the shared
+                 helper like every other first-party image (gains registry
+                 substitution). digest is empty: the digest rides the tag. */}}
+          image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" (((.Values.docs).image).repository | default "ghcr.io/zeroroot-ai/docs-site") "tag" ((.Values.docs).image).tag "digest" ((.Values.docs).image).digest "appVersion" .Chart.AppVersion) | quote }}
           imagePullPolicy: {{ ((.Values.docs).image).pullPolicy | default "IfNotPresent" }}
           securityContext:
             allowPrivilegeEscalation: false
