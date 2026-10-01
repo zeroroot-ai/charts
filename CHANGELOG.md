@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.135.1](https://github.com/zeroroot-ai/charts/compare/v0.135.0...v0.135.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* **env:** an env var a first-party container never reads now fails the build ([#302](https://github.com/zeroroot-ai/charts/issues/302)) ([0f435c7](https://github.com/zeroroot-ai/charts/commit/0f435c753e5c8e76230667230b9f1ba13dd50342)), closes [#294](https://github.com/zeroroot-ai/charts/issues/294)
+* **guards:** an invoked Helm define that renders nothing now fails the build ([#297](https://github.com/zeroroot-ai/charts/issues/297)) ([9d02f47](https://github.com/zeroroot-ai/charts/commit/9d02f47b2ad3d07d8a7bc35609859f4f0805b172)), closes [#293](https://github.com/zeroroot-ai/charts/issues/293)
+* **observability:** delete the Grafana the chart ships for a Grafana it never ships ([#305](https://github.com/zeroroot-ai/charts/issues/305)) ([cb33fa1](https://github.com/zeroroot-ai/charts/commit/cb33fa1a4b1cc8cda3fc7af05df7c947eeca7b62)), closes [#301](https://github.com/zeroroot-ai/charts/issues/301)
+* **rungs:** shrink the zitadel-login request the baseline just gained ([#298](https://github.com/zeroroot-ai/charts/issues/298)) ([7338f8d](https://github.com/zeroroot-ai/charts/commit/7338f8d410c9236ac08d63bc6dbfd3de5f71f549))
+* **values:** a declared values key with no consumer now fails the build ([#300](https://github.com/zeroroot-ai/charts/issues/300)) ([bbdc5d9](https://github.com/zeroroot-ai/charts/commit/bbdc5d999632406556fa578c0991802193d716cd)), closes [#292](https://github.com/zeroroot-ai/charts/issues/292)
+
 ## [0.135.0](https://github.com/zeroroot-ai/charts/compare/v0.134.1...v0.135.0) (2026-10-01)
 
 
