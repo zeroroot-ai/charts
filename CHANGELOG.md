@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.134.0](https://github.com/zeroroot-ai/charts/compare/v0.133.14...v0.134.0) (2026-10-01)
+
+
+### Features
+
+* **guards:** a client can never supply x-jwt-payload ([#282](https://github.com/zeroroot-ai/charts/issues/282)) ([5216f65](https://github.com/zeroroot-ai/charts/commit/5216f658c5603ef79a971f9cd5411eab38486976))
+
 ## [0.133.14](https://github.com/zeroroot-ai/charts/compare/v0.133.13...v0.133.14) (2026-10-01)
 
 
