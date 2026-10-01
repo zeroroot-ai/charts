@@ -492,14 +492,12 @@ greps the rendered output for the same regression on every PR.
 
 {{- define "gibson.validateNoLatestTags" -}}
 {{- $offenders := list -}}
-{{- range $alias := list "dashboard-postgresql" "tenant-postgresql" "fga-postgresql" "zitadel-postgresql" -}}
-{{- $sub := index $.Values $alias | default dict -}}
-{{- $img := $sub.image | default dict -}}
-{{- $tag := $img.tag | default "" -}}
-{{- if eq $tag "latest" -}}
-{{- $offenders = append $offenders (printf "%s.image.tag=latest" $alias) -}}
-{{- end -}}
-{{- end -}}
+{{- /* The four Bitnami Postgres aliases this loop used to walk
+       (dashboard-postgresql, tenant-postgresql, fga-postgresql,
+       zitadel-postgresql) are not dependencies of any chart, so the loop could
+       never find an image tag and never report an offender. Deleted with their
+       values blocks in charts#292. SPIRE's in-pod Postgres is a real subchart
+       and is still checked. */ -}}
 {{- /* SPIRE in-pod Postgres */ -}}
 {{- $spirePg := ((.Values.spire).postgresql) | default dict -}}
 {{- $spirePgImg := $spirePg.image | default dict -}}

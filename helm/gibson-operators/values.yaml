@@ -6,11 +6,6 @@
 # (`webhook.enabled`, `metrics.enabled`, `podDisruptionBudget.enabled`,
 # `rbac.create`, etc.) are legitimate and stay.
 
-# Render-time precondition — fails install if gibson-crds Helm release
-# is not present in the same cluster. Set to "" to disable.
-preconditions:
-  requireCRDs: true
-
 # Product-surface origin (app.<domain>). This chart's own copy of the same
 # override key gibson-workloads.gibson.appUrl exists for
 # (helm/gibson-workloads/values.yaml) — it is per-chart, not a Helm global,
@@ -307,13 +302,6 @@ global:
     - name: ghcr-credentials
   environment: ""
 
-# ESO (External Secrets Operator) is REQUIRED infrastructure
-# (one-code-path #203). The legacy on/off toggle for this block was
-# deleted; the operator must be installed in every environment. Only the
-# refresh cadence substitution is configurable.
-eso:
-  refreshInterval: "60s"
-
 # SPIRE workload identity — REQUIRED infrastructure for tenant-operator
 # and platform-operator deployments (deploy#201 / epic deploy#186). Both
 # operators dial the daemon over SPIFFE mTLS and authenticate to the
@@ -520,19 +508,10 @@ aws:
 kms:
   keyARN: ""
 
-# Zitadel service account OIDC secrets — optional BYO secret references.
-zitadelServiceAccounts:
-  tenantOperator:
-    secretName: ""
-
 # Dashboard sub-block needed by tenant-operator deployment for ZITADEL_ISSUER.
 dashboard:
   zitadel:
     issuer: ""
-
-# Legacy externalRedis compat (used by gibson.redis.host helper).
-externalRedis:
-  host: ""
 
 # -----------------------------------------------------------------------------
 # PlatformBootstrap CR (Phase 7.8 + masterKey/postgresBundle extension).

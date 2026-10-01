@@ -9,7 +9,7 @@
 GREEN := \033[0;32m
 NC    := \033[0m
 
-.PHONY: help chart-deps chart-deps-retry golden golden-update render-diff baseline-up baseline-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords login-brand \
+.PHONY: help values-consumed chart-deps chart-deps-retry golden golden-update render-diff baseline-up baseline-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords login-brand \
         check attribution vendor-operators cloud-free
 
 help: ## Show available targets
@@ -155,6 +155,10 @@ orphan-templates: ## No Helm named template that nothing invokes, and none invok
 	@python3 scripts/check-orphan-templates.py --selftest
 	@python3 scripts/check-orphan-templates.py
 
+values-consumed: ## No values key that no template reads (ADR-0094, charts#292)
+	@python3 scripts/check-values-consumed.py --selftest
+	@python3 scripts/check-values-consumed.py
+
 probes: ## No smoke or verify probe whose failure is swallowed by || true (charts#17)
 	@python3 scripts/check-probes.py --selftest
 	@python3 scripts/check-probes.py
@@ -283,7 +287,7 @@ operator-rbac-fresh: ## The vendored cert-manager and External Secrets RBAC matc
 	@python3 scripts/vendor-operator-rbac.py --selftest
 	@python3 scripts/vendor-operator-rbac.py --check
 
-check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates probes netpol-coverage daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes edge-jwt-payload-unforgeable netpol-before-hooks ## Everything that runs without a cluster
+check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed probes netpol-coverage daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow reaper-fails-closed seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes edge-jwt-payload-unforgeable netpol-before-hooks ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context
