@@ -33,9 +33,8 @@ together.
 ```
 
 A hand-maintained copy of a rendered artifact always drifts, and it drifts
-invisibly: the failure lands in a disconnected customer environment
-(deploy#1171). By the time the generator landed, not one first-party entry
-matched the chart.
+invisibly: the failure lands in a disconnected customer environment. By the
+time the generator landed, not one first-party entry matched the chart.
 
 `images.txt` also carries the `dispatchTime` group: the images setec pulls when
 a mission dispatches a tool, an agent or a connector. Those never appear in a
