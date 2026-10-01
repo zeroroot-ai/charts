@@ -172,15 +172,6 @@ Disabled in production overlays (stripeMock.enabled: false).
 {{- end }}
 
 {{/*
-mailpit host — dev-only delivering SMTP sink that satisfies the daemon's
-mailer.RequireDelivering gate on kind (signup-email-delivery, gibson#1228
-companion). Disabled outside kind (mailpit.enabled: false).
-*/}}
-{{- define "gibson.mailpit.host" -}}
-{{- printf "%s-mailpit" .Release.Name }}
-{{- end }}
-
-{{/*
 gibson.emailSmtpSecret.name — the K8s Secret name the daemon's SMTP
 credentials ExternalSecret materialises (gibson.email.smtp.externalSecret).
 */}}

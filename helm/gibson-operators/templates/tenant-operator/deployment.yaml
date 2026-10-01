@@ -377,15 +377,19 @@ spec:
               internal/saga/flows/), but the boot check still enforces
               non-empty SMTP_HOST.
 
-              Kind dev defaults below point at the chart's mailpit
-              Service (deployed under gibson-workloads — TODO: see
-              deploy-side follow-up issue for the actual mailpit
-              Deployment + Service). Prod overlays must override via
-              `tenantOperator.smtp.host` (and the matching ESO Secret
-              for credentials).
+              The kind dev defaults below point at the chart's mailpit
+              Service, which gibson-workloads renders. Its name comes from
+              the shared gibson.mailpit.host helper, so the dialer and the
+              Service cannot drift: this default was the literal
+              "gibson-workloads-mailpit" until charts#114, and no release
+              ever rendered a Service by that name, so every welcome email
+              failed with "server misbehaving" on a kind install.
+
+              Prod overlays must override via `tenantOperator.smtp.host`
+              (and the matching ESO Secret for credentials).
             */}}
             - name: SMTP_HOST
-              value: {{ ((.Values.tenantOperator).smtp).host | default "gibson-workloads-mailpit" | quote }}
+              value: {{ ((.Values.tenantOperator).smtp).host | default (include "gibson.mailpit.host" .) | quote }}
             - name: SMTP_PORT
               value: {{ ((.Values.tenantOperator).smtp).port | default "1025" | quote }}
             - name: SMTP_USERNAME
