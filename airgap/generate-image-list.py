@@ -65,7 +65,7 @@ import urllib.error
 import urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
-ROOT = HERE.parent.parent
+ROOT = HERE.parent
 IMAGES_TXT = HERE / "images.txt"
 IMAGES_YAML = HERE / "images.yaml"
 MANIFEST = ROOT / ".release-please-manifest.json"
@@ -73,7 +73,6 @@ CATALOG_REF = HERE / "gibson-catalog.ref"
 GIBSON_REPO = "zeroroot-ai/gibson"
 GIBSON_CATALOG_DIR = "internal/platform/componentcatalog/manifests"
 GITHUB_API = "https://api.github.com"
-OCIREPOSITORY = ROOT / "bigbang" / "package" / "ocirepository.yaml"
 
 # Ordered: gibson-common must exist before gibson-workloads can be packaged,
 # and both subcharts before the umbrella.
@@ -218,25 +217,16 @@ def run(cmd: list[str], cwd: pathlib.Path) -> str:
 
 
 def chart_version() -> str:
-    """The released chart version, cross-checked against the package's own pin.
+    """The released chart version, from the one file release-please manages.
 
-    Both are release-please-managed (`.release-please-manifest.json` and the
-    `x-release-please-version` annotation on ocirepository.yaml's `ref.tag`),
-    so they cannot disagree unless someone hand-edited one. If they ever do,
-    the image list would describe a different chart than the package deploys —
-    which is deploy#1171 in miniature — so fail loudly rather than pick one.
+    This used to be cross-checked against a second pin, the
+    `x-release-please-version` annotation on the Flux OCIRepository's
+    `ref.tag`. That package is gone: an operator installs the chart with
+    `helm`, or with their own Argo or Flux, and pins the version there. The
+    manifest is now the only copy, so there is nothing left to disagree with
+    it.
     """
-    version = json.loads(MANIFEST.read_text(encoding="utf-8"))["."]
-    m = re.search(r'^\s*tag:\s*"([^"]+)"', OCIREPOSITORY.read_text(encoding="utf-8"), re.M)
-    if not m:
-        raise SystemExit(f"no ref.tag found in {OCIREPOSITORY.relative_to(ROOT)}")
-    if m.group(1) != version:
-        raise SystemExit(
-            f"version drift: {MANIFEST.name} says {version}, "
-            f"{OCIREPOSITORY.relative_to(ROOT)} pins {m.group(1)}. "
-            "Both are release-please-managed — do not hand-edit either."
-        )
-    return version
+    return json.loads(MANIFEST.read_text(encoding="utf-8"))["."]
 
 
 def build_dependencies() -> None:
@@ -347,8 +337,8 @@ EXCLUSIONS = """\
 # DELIBERATELY ABSENT — checked, not forgotten:
 #
 #   ghcr.io/zeroroot-ai/{billing,www}
-#       SaaS-only. They ship in helm/saas-overlay/*, which this Big Bang
-#       package does not deploy — it deploys the umbrella chart only. billing
+#       SaaS-only. They ship in helm/saas-overlay/*, which an air-gapped
+#       install does not deploy — it deploys the umbrella chart only. billing
 #       is the closed seam and is bypassable on-prem (no-op provider); www is
 #       absent from any self-hosted install by design.
 #
@@ -369,10 +359,10 @@ EXCLUSIONS = """\
 """
 
 HEADER_TXT = """\
-# Flat air-gap mirror list for the Gibson Big Bang package.
+# Flat air-gap mirror list for the Gibson umbrella chart.
 #
 # GENERATED — do not hand-edit. Regenerate with:
-#     ./bigbang/images/generate-image-list.py
+#     ./airgap/generate-image-list.py
 # CI (`airgap-image-list`) fails the build when this file is stale, because a
 # hand-maintained copy of a rendered artifact always drifts, and it drifts
 # invisibly: the failure lands in a disconnected customer environment
@@ -399,10 +389,10 @@ HEADER_TXT = """\
 
 HEADER_YAML = """\
 ---
-# Structured air-gap image manifest for the Gibson Big Bang package.
+# Structured air-gap image manifest for the Gibson umbrella chart.
 #
 # GENERATED — do not hand-edit. Regenerate with:
-#     ./bigbang/images/generate-image-list.py
+#     ./airgap/generate-image-list.py
 # CI (`airgap-image-list`) fails the build when this file is stale
 # (deploy#1171).
 #
@@ -465,7 +455,7 @@ def build_yaml(version: str, groups: dict[str, list[str]], catalog_ref: str) -> 
              '    digest: ""',
              "    role: umbrella-helm-chart", "",
              "# The gibson commit whose component catalog the dispatchTime group is",
-             "# derived from (bigbang/images/gibson-catalog.ref).",
+             "# derived from (airgap/gibson-catalog.ref).",
              f"gibsonCatalogRef: {catalog_ref}"]
     for kind in GROUP_ORDER:
         refs = groups.get(kind, [])
@@ -542,7 +532,7 @@ def main(argv: list[str]) -> int:
             print(
                 "\n[airgap-image-list] the air-gap manifest no longer matches the chart.\n\n"
                 "Regenerate and commit:\n"
-                "    ./bigbang/images/generate-image-list.py\n\n"
+                "    ./airgap/generate-image-list.py\n\n"
                 "This is generated output — an air-gapped install is built from it, and\n"
                 "a missing image surfaces in a disconnected customer environment\n"
                 "(deploy#1171).\n",

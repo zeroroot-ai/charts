@@ -20,7 +20,7 @@ description: |
 
   The umbrella is the whole deployable. The ExternalSecrets, the bringup
   Jobs and the CNPG cluster render here too. Every consumer installs the
-  one artifact: `helm install gibson`, Argo, Flux, or a Big Bang package.
+  one artifact: `helm install gibson`, Argo, or Flux.
 
   The umbrella is controller-agnostic: no Argo/Flux/Istio dependency is
   assumed.
@@ -124,7 +124,7 @@ dependencies:
     repository: "https://charts.jetstack.io"
   # OPERATOR-SUBSTITUTION SEAM. This condition selects WHOSE cert-manager runs, never
   # WHETHER one runs. Every install still runs exactly one. A cluster that
-  # already owns it — Big Bang, or any brownfield estate — sets this false and
+  # already owns it — OpenShift, or any brownfield estate — sets this false and
   # the platform uses theirs. This is not an optional service and not a feature
   # flag: there is one code path and two possible owners.
     condition: certManager.enabled
@@ -133,7 +133,7 @@ dependencies:
     repository: "https://charts.external-secrets.io"
   # OPERATOR-SUBSTITUTION SEAM. This condition selects WHOSE External Secrets Operator runs, never
   # WHETHER one runs. Every install still runs exactly one. A cluster that
-  # already owns it — Big Bang, or any brownfield estate — sets this false and
+  # already owns it — OpenShift, or any brownfield estate — sets this false and
   # the platform uses theirs. This is not an optional service and not a feature
   # flag: there is one code path and two possible owners.
     condition: externalSecrets.enabled
@@ -142,7 +142,7 @@ dependencies:
     repository: "https://kubernetes-sigs.github.io/external-dns/"
   # OPERATOR-SUBSTITUTION SEAM. This condition selects WHOSE ExternalDNS runs, never
   # WHETHER one runs. Every install still runs exactly one. A cluster that
-  # already owns it — Big Bang, or any brownfield estate — sets this false and
+  # already owns it — OpenShift, or any brownfield estate — sets this false and
   # the platform uses theirs. This is not an optional service and not a feature
   # flag: there is one code path and two possible owners.
     condition: externalDns.enabled
@@ -175,7 +175,7 @@ dependencies:
   # helm/gibson-velero/Chart.yaml.
   # OPERATOR-SUBSTITUTION SEAM. This condition selects WHOSE the CloudNativePG operator runs, never
   # WHETHER one runs. Every install still runs exactly one. A cluster that
-  # already owns it — Big Bang, or any brownfield estate — sets this false and
+  # already owns it — OpenShift, or any brownfield estate — sets this false and
   # the platform uses theirs. This is not an optional service and not a feature
   # flag: there is one code path and two possible owners.
     condition: cnpg.enabled

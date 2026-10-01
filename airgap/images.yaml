@@ -1,8 +1,8 @@
 ---
-# Structured air-gap image manifest for the Gibson Big Bang package.
+# Structured air-gap image manifest for the Gibson umbrella chart.
 #
 # GENERATED — do not hand-edit. Regenerate with:
-#     ./bigbang/images/generate-image-list.py
+#     ./airgap/generate-image-list.py
 # CI (`airgap-image-list`) fails the build when this file is stale
 # (deploy#1171).
 #
@@ -21,8 +21,8 @@
 # DELIBERATELY ABSENT — checked, not forgotten:
 #
 #   ghcr.io/zeroroot-ai/{billing,www}
-#       SaaS-only. They ship in helm/saas-overlay/*, which this Big Bang
-#       package does not deploy — it deploys the umbrella chart only. billing
+#       SaaS-only. They ship in helm/saas-overlay/*, which an air-gapped
+#       install does not deploy — it deploys the umbrella chart only. billing
 #       is the closed seam and is bypassable on-prem (no-op provider); www is
 #       absent from any self-hosted install by design.
 #
@@ -48,7 +48,7 @@ chart:
     role: umbrella-helm-chart
 
 # The gibson commit whose component catalog the dispatchTime group is
-# derived from (bigbang/images/gibson-catalog.ref).
+# derived from (airgap/gibson-catalog.ref).
 gibsonCatalogRef: 83842b2ae1e59fabd43987ee5762a31e38987846
 
 # First-party platform images (private; ELv2 + the closed billing seam).

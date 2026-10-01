@@ -71,7 +71,7 @@ _Avoid_: optional service, feature flag, toggle
 
 **Guest install**:
 Installing onto a cluster that already runs cluster services — cert-manager,
-External Secrets, Prometheus Operator. Big Bang is one. The operator-substitution
+External Secrets, Prometheus Operator. OpenShift is one. The operator-substitution
 seams exist for this shape.
 _Avoid_: brownfield, existing cluster
 
@@ -108,7 +108,7 @@ _Avoid_: pull secret setup, image auth
 
 ## Example dialog
 
-> **Dev:** "The customer is on Big Bang and already runs cert-manager. Do we
+> **Dev:** "The customer is on OpenShift and already runs cert-manager. Do we
 > ship a profile that turns observability and cert-manager off?"
 > **Owner:** "Observability is never on, in any profile. That is not a toggle,
 > it is gone. cert-manager is an **operator-substitution seam**: they set
