@@ -389,6 +389,13 @@ spec:
               containerPort: 3000
               protocol: TCP
           env:
+            # NODE_OPTIONS — the V8 heap ceiling tracks this container's memory
+            # limit. Node reads the HOST's memory, so without this the ceiling
+            # is wrong by the ratio between the node and the container, and a
+            # render that outgrows the cgroup dies with nothing naming memory
+            # (dashboard#150). See gibson.nodeHeapMiB for the arithmetic.
+            - name: NODE_OPTIONS
+              value: {{ printf "--max-old-space-size=%s" (include "gibson.nodeHeapMiB" .Values.dashboard.resources.limits.memory) | quote }}
             # Gibson API Configuration — both vars resolve to the same unified
             # URL. GIBSON_API_URL is retained because next.config.ts:58 still
             # reads it explicitly for its dev-proxy rewrite destination.
