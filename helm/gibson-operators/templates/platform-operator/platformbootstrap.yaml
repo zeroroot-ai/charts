@@ -209,6 +209,11 @@ spec:
   oidcClients:
     {{- range .Values.platformBootstrap.oidcClients }}
     - name: {{ .name | quote }}
+      {{- /* gibson#452: the name Zitadel shows (device consent page).
+             Empty keeps name; the child OIDCClient CR keeps name. */}}
+      {{- with .displayName }}
+      displayName: {{ . | quote }}
+      {{- end }}
       {{- if .applicationType }}
       applicationType: {{ .applicationType | quote }}
       {{- end }}
