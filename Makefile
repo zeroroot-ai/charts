@@ -151,7 +151,7 @@ mirror-digests: ## Every mirror image in every rendered profile carries its dige
 	@python3 scripts/check-mirror-digests.py --selftest
 	@python3 scripts/check-mirror-digests.py
 
-orphan-templates: ## No Helm named template that nothing invokes (charts#17)
+orphan-templates: ## No Helm named template that nothing invokes, and none invoked that does nothing (charts#17, charts#293)
 	@python3 scripts/check-orphan-templates.py --selftest
 	@python3 scripts/check-orphan-templates.py
 

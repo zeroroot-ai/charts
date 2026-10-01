@@ -379,14 +379,6 @@ last consumer.
 {{/* =========================== SPIRE Precondition =========================== */}}
 
 {{/*
-gibson.validateSpire — placeholder validator in the operators chart. SPIRE
-is required infrastructure (deploy#201) but the SPIRE server itself is
-managed by the workloads chart (or a sibling Application), so this
-operators-chart copy of the validator does nothing today. Kept for symmetry
-with the workloads chart's version.
-*/}}
-
-{{/*
 gibson.waitForSpireSocket — init container that blocks pod start until the
 SPIRE agent's Workload API socket is present on the node. See the workloads
 chart's helper of the same name for the canonical documentation; this copy
@@ -426,61 +418,15 @@ under the pod's initContainers list.
 */}}
 
 {{/*
-gibson.validateEnvoyGateway — no-op stub kept for caller backward compat.
-
-Spec: zitadel-envoy-gateway-migration, task 12 (Requirements 3.7, 5.5).
-
-This helper historically failed the render when the daemon required the
-Envoy gateway path (gibson.config.identity.requireEnvoy=true) but
-extAuthz.enabled was false. Both Envoy (deploy#200) and ext-authz
-(deploy#188; the `extAuthz.enabled` toggle was deleted as part of the
-one-code-path epic) are now structural / unconditionally-deployed
-infrastructure. There is no longer any combination of values that can
-satisfy requireEnvoy=true without also deploying both pieces, so the
-helper has nothing to fail on.
-
-The define is retained as a no-op so callers
-(templates/gibson/statefulset.yaml) keep rendering without change. Safe
-to remove once no caller invokes it.
-*/}}
-
-{{/*
-gibson.validateSpiffeRequired — fails the render when gibson.auth.spiffe is
-null/empty in any overlay. Memorialises the "SPIFFE stays ON" invariant from
-memory feedback_spiffe_mtls_required.md as a structural chart guard.
-
-Spec: in-cluster-mtls-restoration, Component 2 / Requirement 1.
-
-PHASE 0 STATE (Task 1): NO-OP. The body is comment-only so the failure
-message is committed BEFORE activation in Task 18. Any chart render that
-happens between Task 1 and Task 18 behaves identically with or without this
-helper. Once Task 18 lands, the comment is replaced with a real `fail` call
-and any overlay that nulls gibson.auth.spiffe stops rendering.
-
-Invocation will land alongside activation in Task 18 (templates/_pre-render.yaml
-or the daemon statefulset, same place gibson.validateEnvoyGateway is invoked).
-Until then, defining the helper without invoking it is intentional.
-*/}}
-
-{{/*
-gibson.validateEnvoySdsWired — fails the render when gibson.auth.spiffe is
-populated BUT the rendered Envoy daemon cluster lacks the SDS
-UpstreamTlsContext. (Envoy is unconditionally enabled — deploy#200.)
-
-Catches the inverse mistake of "I disabled SDS to debug something but forgot
-to disable daemon SPIFFE too" — exactly the failure mode that produced commit
-1d11963 ("kind overlay disables daemon SPIFFE mTLS + reverts envoy upstream
-TLS"). Without this guard, daemon SPIFFE on + Envoy SDS off renders cleanly
-but every gateway-routed RPC fails at runtime with "no certificate".
-
-Spec: in-cluster-mtls-restoration, Component 9 / Requirement 2.
-
-PHASE 0 STATE (Task 2): NO-OP. The body is comment-only so the failure
-message is committed BEFORE activation in Task 19. Once Task 19 lands the
-body is replaced with a real `fail` invocation that inspects the rendered
-Envoy configmap for the transport_socket block on the gibson_daemon_grpc
-cluster. The activated check is a render-time string match (helm template
-output piped through yq) — no live cluster dependency.
+The daemon SPIFFE render guards live in gibson-common and are invoked by the
+workloads chart's daemon statefulset: `gibson.validateSpiffeRequired` (fails on
+an absent or incomplete gibson.auth.spiffe) and `gibson.validateEnvoySdsWired`
+(fails when SPIFFE is on and the Envoy daemon cluster declares no
+transport_socket). Both are ACTIVE. The operators chart invokes neither, so it
+carried no copy of the logic, only prose that had gone stale in both directions
+— it described each as a comment-only no-op after both had been activated, and
+named two helpers that charts#293 deleted. See gibson-common for the canonical
+documentation; a duplicated description is how the two drift apart.
 */}}
 
 {{/* =========================== Component Health Probes =========================== */}}

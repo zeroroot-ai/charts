@@ -27,16 +27,11 @@ can reach the daemon ports. Liveness/readiness probes use HTTP /healthz on
 the dedicated `health` (8080) container port — kubelet reaches that from
 the node IP and is not subject to the daemon NetworkPolicy.
 
-When gibson.config.identity.requireEnvoy=true the chart fails to render
-unless Envoy and ext_authz are both deployed; see
-gibson.validateEnvoyGateway in templates/_helpers.tpl.
-
 When gibson.auth.spiffe is missing or empty the chart fails to render
 (guard added by spec in-cluster-mtls-restoration Phase 6); see
 gibson.validateSpiffeRequired in templates/_helpers.tpl. Daemon SPIFFE
 mTLS stays ON in every overlay, with no debugging shortcuts permitted.
 */}}
-{{- include "gibson.validateEnvoyGateway" . }}
 {{- include "gibson.validateSpiffeRequired" . }}
 {{- include "gibson.validateEnvoySdsWired" . }}
 {{- /* Phase H/8.4 validators (templates/_validators.tpl) */ -}}

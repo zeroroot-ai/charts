@@ -345,39 +345,21 @@ last consumer.
 {{/* =========================== SPIRE Precondition =========================== */}}
 
 {{/*
-gibson.validateSpire — no-op stub kept for caller backward compat.
+SPIRE is rendered by exactly one mechanism: the umbrella chart's own `spire`
+sub-chart dependency (helm/gibson/Chart.yaml). Single ownership is enforced
+structurally by cross-chart-check Check 19 (component-ownership), and SPIRE
+remains REQUIRED (deploy#201): every SPIFFE-consuming pod's
+wait-for-spire-socket init container fails fast if the agent socket is absent.
 
-The SPIRE server is now rendered by exactly one mechanism: the umbrella
-chart's own `spire` sub-chart dependency (helm/gibson/Chart.yaml). A
-standalone gitops Argo Application (apps/prod/spire.yaml) briefly held
-that role after deploy#751 (PRD deploy#750) removed the in-chart SPIRE
-server template and its `dev.externallyManagedSpire` toggle (split brain,
-deploy#742/#743) — that Application was itself retired with the
-single-main gitops collapse. With a
-single owner there is no in-chart-vs-external choice left for this
-validator to police; single-ownership is enforced structurally by
-cross-chart-check Check 19 (component-ownership). SPIRE remains REQUIRED
-(deploy#201): every SPIFFE-consuming pod's wait-for-spire-socket init
-container fails fast if the agent socket is absent.
-*/}}
-
-{{/*
-gibson.validateEnvoyGateway — no-op stub kept for caller backward compat.
-
-Spec: zitadel-envoy-gateway-migration, task 12 (Requirements 3.7, 5.5).
-
-This helper historically failed the render when the daemon required the
-Envoy gateway path (gibson.config.identity.requireEnvoy=true) but
-extAuthz.enabled was false. Both Envoy (deploy#200) and ext-authz
-(deploy#188; the `extAuthz.enabled` toggle was deleted as part of the
-one-code-path epic) are now structural / unconditionally-deployed
-infrastructure. There is no longer any combination of values that can
-satisfy requireEnvoy=true without also deploying both pieces, so the
-helper has nothing to fail on.
-
-The define is retained as a no-op so callers
-(templates/gibson/statefulset.yaml) keep rendering without change. Safe
-to remove once no caller invokes it.
+The `gibson.validateSpire` and `gibson.validateEnvoyGateway` helpers that used
+to police those choices are DELETED (charts#293, ADR-0094). Both had been
+reduced to a comment-only body while still being invoked, so the `include` line
+read as coverage while the helper asserted nothing. There is no longer any
+combination of values either could fail on: Envoy (deploy#200) and ext-authz
+(deploy#188) are unconditionally deployed, and the `extAuthz.enabled` toggle was
+deleted with the one-code-path epic. `check-orphan-templates.py` now fails the
+build on any invoked define whose body renders nothing, so neither can come
+back as a stub.
 */}}
 
 {{/*
@@ -387,15 +369,10 @@ memory feedback_spiffe_mtls_required.md as a structural chart guard.
 
 Spec: in-cluster-mtls-restoration, Component 2 / Requirement 1.
 
-PHASE 0 STATE (Task 1): NO-OP. The body is comment-only so the failure
-message is committed BEFORE activation in Task 18. Any chart render that
-happens between Task 1 and Task 18 behaves identically with or without this
-helper. Once Task 18 lands, the comment is replaced with a real `fail` call
-and any overlay that nulls gibson.auth.spiffe stops rendering.
-
-Invocation will land alongside activation in Task 18 (templates/_pre-render.yaml
-or the daemon statefulset, same place gibson.validateEnvoyGateway is invoked).
-Until then, defining the helper without invoking it is intentional.
+ACTIVE (Task 18 landed). The body calls `fail` when gibson.auth.spiffe is
+absent or missing workloadAPISocket/trustDomain, and the daemon statefulset
+invokes it. The `dev.disableSPIFFE` escape hatch is kind-only and is rejected in
+production overlays by CI lint.
 */}}
 
 {{/*
@@ -411,12 +388,10 @@ but every gateway-routed RPC fails at runtime with "no certificate".
 
 Spec: in-cluster-mtls-restoration, Component 9 / Requirement 2.
 
-PHASE 0 STATE (Task 2): NO-OP. The body is comment-only so the failure
-message is committed BEFORE activation in Task 19. Once Task 19 lands the
-body is replaced with a real `fail` invocation that inspects the rendered
-Envoy configmap for the transport_socket block on the gibson_daemon_grpc
-cluster. The activated check is a render-time string match (helm template
-output piped through yq) — no live cluster dependency.
+ACTIVE (Task 19 landed). The body calls `fail` when gibson.auth.spiffe is
+populated and the gibson_daemon_grpc cluster in files/envoy/envoy.yaml declares
+no transport_socket. The check is a render-time match with no live cluster
+dependency.
 */}}
 
 {{/* =========================== SPIFFE Socket Wait Init =========================== */}}
