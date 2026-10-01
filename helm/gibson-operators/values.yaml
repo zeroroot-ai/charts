@@ -118,8 +118,11 @@ tenantOperator:
   daemonGrpcAddress: "gibson-workloads:50051"
   # Zitadel in-cluster Service URL. Overlays set per-environment.
   zitadelURL: ""
-  # Billing controls. devAutoConfirm skips payment confirmation in dev
-  # environments; must be false (default) in production.
+  # Billing controls. devAutoConfirm was deleted in charts#294: the chart set
+  # BILLING_DEV_AUTOCONFIRM from it and no code in gibson or billing ever read
+  # that variable, so the bypass the comment promised did not exist. The lint
+  # the chart claimed would "reject any values file that sets this with a
+  # non-Kind context" did not exist either.
   # stripeAPIBaseURL: when set, routes all Stripe API calls to the given
   # base URL instead of api.stripe.com. Use with the gibson-workloads
   # stripe-mock service in kind (stripeMock.enabled: true). Leave empty
@@ -130,7 +133,6 @@ tenantOperator:
     # overlays must declare it (one-code-path; the template
     # `required` fails the install if an overlay leaves it empty).
     stripeExpectedMode: ""
-    devAutoConfirm: false
     stripeAPIBaseURL: ""
   # devMode was deleted in deploy#205 (one-code-path epic): the operator
   # binary boots identically in every environment. Capability misses always

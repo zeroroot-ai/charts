@@ -467,10 +467,6 @@ app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
-{{- define "gibson.loki.host" -}}
-{{- printf "%s-loki" .Release.Name }}
-{{- end }}
-
 {{- define "gibson.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}

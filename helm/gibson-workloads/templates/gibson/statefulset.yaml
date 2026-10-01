@@ -349,8 +349,6 @@ spec:
             # from the StatefulSet's data volume.
             - name: GIBSON_HOME
               value: /var/lib/gibson/.gibson
-            - name: GIBSON_CONFIG
-              value: /etc/gibson/gibson.yaml
             # GIBSON_PUBLIC_URL — the public Envoy URL the daemon stamps into
             # the CreateAgentIdentity response (gibson_url + the copy-pasteable
             # `gibson component register` enroll command). server.go reads this
@@ -503,13 +501,6 @@ spec:
                   key: {{ .Values.gibson.email.smtp.passwordSecretKey | default "password" | quote }}
             {{- end }}
             {{- end }}
-            {{- /* Optional override for the FGA RPC registry — see spec 21 */}}
-            {{- with .Values.gibson.authz.rpcRegistry }}
-            {{- if .override }}
-            - name: GIBSON_AUTHZ_RPC_REGISTRY_PATH
-              value: /etc/gibson/authz/rpc_registry.yaml
-            {{- end }}
-            {{- end }}
             # Provider catalogue hot-reload path (spec: gibson#296).
             # When set, the daemon reads the operator-mounted YAML instead of
             # the embedded copy and hot-reloads it every 5 minutes.
@@ -573,10 +564,11 @@ spec:
             # the in-chart tenant-postgresql subchart is enabled (Task 25).
             # Sourced from dataPlane.postgres.admin_password_secret_ref (name +
             # key pair) so the plaintext password never appears in the ConfigMap.
-            # The default secret is the chart-managed gibson-db-secrets, key
-            # TENANT_POSTGRES_ADMIN_PASSWORD, populated by templates/secrets/
-            # db-secrets.yaml under the same key the tenant-postgresql Bitnami
-            # subchart uses for its userPasswordKey.
+            # The default secret is the chart-managed one gibson.dbSecrets.name
+            # names, "<fullname>-db-secrets", key TENANT_POSTGRES_ADMIN_PASSWORD,
+            # populated by templates/external-secrets/missing-secrets.yaml.
+            # The tenant-postgresql Bitnami alias that shared the key is not a
+            # Chart.yaml dependency, so its values are discarded (charts#292).
             # Spec: per-tenant-data-plane-completion Req 6.3, D1; Tasks 24, 25.
             {{- if include "gibson.tenant.dbHost" . }}
             - name: TENANT_POSTGRES_ADMIN_PASSWORD
@@ -902,13 +894,6 @@ spec:
             - name: spire-agent-socket
               mountPath: /run/spire/sockets
               readOnly: true
-            {{- with .Values.gibson.authz.rpcRegistry }}
-            {{- if .override }}
-            - name: rpc-registry
-              mountPath: /etc/gibson/authz
-              readOnly: true
-            {{- end }}
-            {{- end }}
             {{- /* identity-hmac volumeMount removed — Spec 3 R14. SPIFFE-mTLS replaces HMAC. */}}
             # Spec: canonical-service-identity Req 8.2 — sa-identity-map
             # projected one-file-per-key for the log-enrichment resolver
@@ -1111,14 +1096,6 @@ spec:
           csi:
             driver: csi.spiffe.io
             readOnly: true
-        {{- with .Values.gibson.authz.rpcRegistry }}
-        {{- if .override }}
-        - name: rpc-registry
-          configMap:
-            name: {{ include "gibson.fullname" $ }}-authz-rpc-registry
-            defaultMode: 0444
-        {{- end }}
-        {{- end }}
         # Provider catalogue ConfigMap (spec: gibson#296).
         # Mounted at /etc/gibson-providers/provider-catalogue.yaml (outside /etc/gibson)
         # so the daemon can hot-reload the model list via GIBSON_PROVIDERS_CATALOGUE_PATH.

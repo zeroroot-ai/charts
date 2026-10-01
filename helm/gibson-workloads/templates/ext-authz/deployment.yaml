@@ -25,7 +25,6 @@ Mounts:
     The same path is used regardless — the main container does not know
     which mode the chart rendered.
     Spec: unified-identity-and-authorization Phase H/8.6.
-  - API keys DSN → EXT_AUTHZ_API_KEYS_DB_DSN env from gibson-db-secrets
                    (added to db-secrets.yaml in this task). Points at the
                    dashboard-postgresql DB where the api_keys table lives.
 
@@ -294,8 +293,6 @@ spec:
             */}}
             {{- $api := include "gibson.apiOrigin" . }}
             {{- $apiHost := include "gibson.apiHost" . }}
-            - name: EXT_AUTHZ_CGJWT_COMPONENT_AUDIENCE
-              value: {{ .Values.extAuthz.cgjwt.componentAudience | default (printf "%s/gibson.component.v1.ComponentService,%s/gibson.harness.v1.HarnessCallbackService,%s/gibson.identity.v1.IdentityService,%s,https://%s:50051/gibson.component.v1.ComponentService,https://%s:50051/gibson.harness.v1.HarnessCallbackService" $api $api $api $api $apiHost $apiHost) | quote }}
             {{- if and .Values.sdk.bypassRegistryValidation .Values.sdk.embeddedRegistry }}
             # Air-gapped: read the registry from the ConfigMap mounted at
             # /etc/gibson (no daemon dependency). deploy#852.
@@ -314,8 +311,6 @@ spec:
             - name: EXT_AUTHZ_REGISTRY_FETCH_TIMEOUT
               value: {{ .Values.extAuthz.registryFetchTimeout | default "600s" | quote }}
             {{- end }}
-            - name: EXT_AUTHZ_GRANT_KEY_DIR
-              value: "/etc/ext-authz/grant-key"
             # Per-kid Capability-Grant key descriptor endpoint (ext-authz#103). ext-authz fetches GET {KEYS_URL}/{kid} to verify a
             # component's self-signed agent+jwt and resolve its daemon-asserted
             # principal + tenant. Reached DIRECTLY on the pod network — the
@@ -440,12 +435,6 @@ spec:
                    path removed by Spec 3 R14 (SPIFFE-mTLS roots trust now). The
                    legacyHmacEnabled toggle was a transitional shim and is
                    removed in spec helm-eks-readiness-and-pg-split Phase 6. */}}
-            # Postgres DSN for the api_keys table (read-only at auth time).
-            - name: EXT_AUTHZ_API_KEYS_DB_DSN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.extAuthz.apiKeysDb.secretName | default "gibson-db-secrets" }}
-                  key: {{ .Values.extAuthz.apiKeysDb.secretKey | default "EXT_AUTHZ_API_KEYS_DB_DSN" }}
           volumeMounts:
             - name: grant-key
               mountPath: /etc/ext-authz/grant-key

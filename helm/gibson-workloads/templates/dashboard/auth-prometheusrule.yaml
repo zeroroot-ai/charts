@@ -102,8 +102,9 @@ spec:
             description: |
               The dashboard is making daemon RPCs via the SPIFFE
               workload-JWT fallback. Per-user FGA is disabled and audit
-              attribution is wrong. Either the soak hot-revert is active
-              (intentional) or USE_USER_TOKEN_FORWARDING=false slipped
-              into the deployed env. Verify
-              dashboard.userTokenForwarding=true in the live values.
+              attribution is wrong. The USE_USER_TOKEN_FORWARDING env var
+              and the dashboard.userTokenForwarding knob are both gone
+              (charts#294 — the dashboard stopped reading the flag), so a
+              non-zero rate here is a transport fault, not a soak revert.
+              Read the dashboard logs for the SPIFFE fallback reason.
 {{- end }}
