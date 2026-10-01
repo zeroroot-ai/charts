@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.135.0](https://github.com/zeroroot-ai/charts/compare/v0.134.1...v0.135.0) (2026-10-01)
+
+
+### Features
+
+* **airgap:** delete the Big Bang package, move the image list to airgap/ ([#288](https://github.com/zeroroot-ai/charts/issues/288)) ([2fc5440](https://github.com/zeroroot-ai/charts/commit/2fc54401ad2435cade995681afb80c62cff09294))
+
+
+### Bug Fixes
+
+* **dashboard:** bind the V8 heap ceiling to the container memory limit ([#295](https://github.com/zeroroot-ai/charts/issues/295)) ([548aa16](https://github.com/zeroroot-ai/charts/commit/548aa16c455838306e7455c6d0a70dc73a00bc70))
+* **tenant-operator:** SMTP_HOST names the mailpit Service the release renders ([#290](https://github.com/zeroroot-ai/charts/issues/290)) ([dfb14dc](https://github.com/zeroroot-ai/charts/commit/dfb14dccb2cd89081c372c9898c76734301dfd3f)), closes [#114](https://github.com/zeroroot-ai/charts/issues/114)
+
 ## [0.134.1](https://github.com/zeroroot-ai/charts/compare/v0.134.0...v0.134.1) (2026-10-01)
 
 
