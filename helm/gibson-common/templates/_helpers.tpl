@@ -822,10 +822,6 @@ tolerations:
 {{- if kindIs "invalid" . -}}true{{- else -}}{{ toString . }}{{- end -}}
 {{- end -}}
 
-{{- define "gibson.validateEnvoyGateway" -}}
-{{- /* intentional no-op: requireEnvoy↔ext-authz coupling is now structural */ -}}
-{{- end }}
-
 {{- define "gibson.validateEnvoySdsWired" -}}
 {{- /*
   Phase 6 / Task 19: ACTIVE. When gibson.auth.spiffe is populated
@@ -926,10 +922,6 @@ tolerations:
 {{- define "gibson.redis.url" -}}
 {{- $port := int (.Values.redis.service.port | default 6379) -}}
 {{- printf "redis://:${REDIS_PASSWORD}@%s:%d" (include "gibson.redis.host" .) $port -}}
-{{- end }}
-
-{{- define "gibson.validateSpire" -}}
-{{- /* intentionally empty */ -}}
 {{- end }}
 
 {{- define "gibson.validateSpiffeRequired" -}}

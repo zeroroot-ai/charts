@@ -8,11 +8,12 @@ state is correct and `{{ fail "..." }}`s with a precise, actionable message
 when something is broken. Invoke once per template that depends on the
 invariant — duplicates are safe and cheap.
 
-The legacy validators (`gibson.validateSpire`, `gibson.validateEnvoyGateway`,
-`gibson.validateSpiffeRequired`, `gibson.validateEnvoySdsWired`) live in
-templates/_helpers.tpl and stay there for backward compat. New validators
-land here so the file count stays bounded and the new contract is easy to
-discover.
+Two older validators, `gibson.validateSpiffeRequired` and
+`gibson.validateEnvoySdsWired`, live in gibson-common's _helpers.tpl rather than
+here, for no reason beyond where they were first written. `gibson.validateSpire`
+and `gibson.validateEnvoyGateway` were deleted by charts#293: each had been
+reduced to a comment-only body while still being invoked, so the `include` line
+read as coverage while the helper asserted nothing. New validators land here.
 
 Validators added in Phase H/8.4:
   - gibson.validateAllPathsViaEnvoy
