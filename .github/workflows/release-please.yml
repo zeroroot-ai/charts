@@ -38,7 +38,7 @@ jobs:
           # has neither failure mode. See zeroroot-ai/.github#263.
           token: ${{ steps.app-token.outputs.token }}
 
-  # deploy#1358. bigbang/images/{images.txt,images.yaml} pin the umbrella
+  # deploy#1358. airgap/{images.txt,images.yaml} pin the umbrella
   # chart's OWN version (`ghcr.io/zeroroot-ai/charts/gibson:<version>`),
   # copied from .release-please-manifest.json at generation time. A release
   # bumps the manifest but nothing regenerated the copy, so the two drifted
@@ -91,23 +91,23 @@ jobs:
       # is gitignored, so a fresh checkout has no packaged dependencies and the
       # generator must build them. GH_TOKEN lifts the GitHub API rate limit
       # for the gibson component-catalog read; a plain run also moves
-      # bigbang/images/gibson-catalog.ref to gibson's current main.
+      # airgap/gibson-catalog.ref to gibson's current main.
       - name: Regenerate the air-gap image manifest
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./bigbang/images/generate-image-list.py
+        run: ./airgap/generate-image-list.py
 
       - name: Commit and push if the manifest changed
         env:
           BRANCH: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- bigbang/images/images.txt bigbang/images/images.yaml bigbang/images/gibson-catalog.ref; then
+          if git diff --quiet -- airgap/images.txt airgap/images.yaml airgap/gibson-catalog.ref; then
             echo "air-gap manifest already matches this release — nothing to commit"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bigbang/images/images.txt bigbang/images/images.yaml bigbang/images/gibson-catalog.ref
-          git commit -m "chore(bigbang): regenerate air-gap image manifest for this release"
+          git add airgap/images.txt airgap/images.yaml airgap/gibson-catalog.ref
+          git commit -m "chore(airgap): regenerate air-gap image manifest for this release"
           git push origin "HEAD:${BRANCH}"

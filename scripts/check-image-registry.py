@@ -10,7 +10,7 @@ docker.io, quay.io, registry.k8s.io, cgr.dev and a bare `busybox:` all fail.
 
 Scope is what THIS repository authors: helm/*/templates and helm/*/values*.yaml.
 Vendored sub-charts (helm/*/charts/*.tgz) carry their upstream defaults; the
-air-gap image list (bigbang/images) is where those are mirrored.
+air-gap image list (airgap/) is where those are mirrored.
 
   check-image-registry.py             exit 1 on a reference off ghcr.io, 0 when clean
   check-image-registry.py --selftest  prove a planted docker.io reference fails and the tree passes
