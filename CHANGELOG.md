@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.12](https://github.com/zeroroot-ai/charts/compare/v0.133.11...v0.133.12) (2026-10-01)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.148.0, gibson v0.148.0 for the OIDC client display name (gibson[#452](https://github.com/zeroroot-ai/charts/issues/452)) ([#274](https://github.com/zeroroot-ai/charts/issues/274)) ([c273f3b](https://github.com/zeroroot-ai/charts/commit/c273f3bd8f3f42a784f06327298c86a8a24c1e7b))
+
 ## [0.133.11](https://github.com/zeroroot-ai/charts/compare/v0.133.10...v0.133.11) (2026-10-01)
 
 
