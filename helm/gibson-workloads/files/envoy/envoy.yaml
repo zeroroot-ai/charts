@@ -1083,9 +1083,21 @@ static_resources:
                         # the rest of /gibson. keeps the hard Zitadel requirement.
                         # Expand this prefix set as more client RPCs move onto the
                         # CG-JWT (gibson#647); start with inspect (WhoAmI).
+                        #
+                        # A person also calls WhoAmI (`gibson inspect` after
+                        # `gibson login`). A bare allow_missing_or_failed checks
+                        # no provider, so jwt_authn never writes x-jwt-payload
+                        # and ext_authz answers Unauthenticated for every person.
+                        # Trying both Zitadel providers first verifies a present
+                        # JWT and forwards its payload; allow_missing_or_failed
+                        # still lets a component with only a CG-JWT through.
                         - match: { prefix: "/gibson.identity.v1.IdentityService/" }
                           requires:
-                            allow_missing_or_failed: {}
+                            requires_any:
+                              requirements:
+                                - provider_name: zitadel_dashboard
+                                - provider_name: zitadel_s2s
+                                - allow_missing_or_failed: {}
                         # Component (plugin / tool / agent / connector) runtime
                         # channel: a CG component registers via ComponentService
                         # and polls work + resolves credentials + searches tools
