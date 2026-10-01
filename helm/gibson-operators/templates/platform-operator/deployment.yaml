@@ -166,8 +166,6 @@ spec:
             # config block (gitops apps/zitadel.yaml).
             - name: ZITADEL_SYSTEM_KEY_PATH
               value: "/etc/zitadel-system/private-key.pem"
-            - name: ZITADEL_SYSTEM_USER_NAME
-              value: {{ default "gibson-system-bot" ((.Values.platformBootstrap).zitadel).systemUserName | quote }}
             {{- /*
               Vault / OpenBao admin token — required by platform-clients
               vaulttoken.Renewer introduced in platform-operator#45. Without

@@ -9771,8 +9771,6 @@ spec:
             # config block (gitops apps/zitadel.yaml).
             - name: ZITADEL_SYSTEM_KEY_PATH
               value: "/etc/zitadel-system/private-key.pem"
-            - name: ZITADEL_SYSTEM_USER_NAME
-              value: "gibson-system-bot"
             - name: VAULT_ADDR
               value: "http://gibson-openbao.gibson.svc:8200"
             # Vault/OpenBao admin token via an OPTIONAL projected-Secret FILE,
@@ -11246,38 +11244,12 @@ spec:
             # reads it explicitly for its dev-proxy rewrite destination.
             - name: GIBSON_API_URL
               value: "https://gibson-gibson-workloads.gibson.svc.cluster.local:50051"
-            - name: GIBSON_DAEMON_URL
-              value: "https://gibson-gibson-workloads.gibson.svc.cluster.local:50051"
             # Admin RPCs from the dashboard go through Envoy's api.<domain>
             # edge — same URL any external SDK caller would hit. Envoy
             # terminates TLS, validates the SPIFFE JWT-SVID the dashboard
             # mints, and forwards to the daemon. Spec: dashboard-admin-via-envoy.
             - name: ADMIN_ENVOY_BASE_URL
               value: "https://api.localhost.zeroroot.ai:443"
-            # Spec in-cluster-mtls-restoration Phase 4 (Track B) backout flag.
-            # When "true" (default): gibson-client.ts routes ALL daemon RPCs
-            # through Envoy via JWT-SVID, mirroring gibson-admin-client.ts.
-            # When "false": gibson-client.ts falls back to the Track A direct
-            # mTLS path (X.509 SVID from /spire/svids). Retained for 30-day
-            # soak; removed by Phase 9. See values.yaml dashboard.useEnvoyForDaemon.
-            - name: USE_ENVOY_FOR_DAEMON
-              # Use ternary so explicit false is respected (Helm `default` treats
-              # falsy values as missing). Boolean-coerced via "%v" then quoted.
-              value: "true"
-            # Spec dashboard-fga-user-identity (R8) — user-token forwarding
-            # backout flag. When "true" (default): gibson-client.ts forwards
-            # the user's Zitadel access token to Envoy for per-user FGA. When
-            # "false": gibson-client.ts falls back to a SPIFFE workload
-            # JWT-SVID — degraded mode, per-user FGA disabled, audit
-            # attribution wrong. Retained for the 30-day soak hot-revert;
-            # Phase 9 deletes both the flag and the fallback branch.
-            - name: USE_USER_TOKEN_FORWARDING
-              value: "true"
-            # Audience claim written into the JWT-SVID and expected by
-            # Envoy's `spiffe` provider in envoy.yaml. Keep in sync with
-            # both sides; the chart default handles it.
-            - name: GIBSON_DAEMON_SPIFFE_AUDIENCE
-              value: "spiffe://zeroroot.ai/platform/daemon"
             # SPIFFE Workload API socket (deploy#1532). The dashboard IS a
             # SPIFFE consumer: src/lib/gibson-client/transport.ts calls
             # spiffeNodeOptions() on every outbound admin RPC to Envoy and
@@ -11484,14 +11456,6 @@ spec:
             - name: PUBLIC_URL
               value: "https://app.localhost.zeroroot.ai"
 
-            # LOKI_URL — required by the dashboard's env-validator.
-            # Loki query endpoint for the mission-log viewer. Default points
-            # at the in-cluster Loki service rendered by this chart. The
-            # viewer dies fast and loud rather than silently dialing the
-            # wrong host.
-            - name: LOKI_URL
-              value: "http://gibson-loki:3100"
-
             # Neo4j connection URI for the dashboard knowledge-graph client.
             # Required — the dashboard Neo4j driver uses this at startup.
             - name: NEO4J_URI
@@ -11582,10 +11546,6 @@ spec:
 
             - name: DASHBOARD_CAPTCHA_PROVIDER
               value: "disabled"
-            - name: NEXT_PUBLIC_DASHBOARD_CAPTCHA_PROVIDER
-              value: "disabled"
-            - name: NEXT_PUBLIC_DASHBOARD_CAPTCHA_SITE_KEY
-              value: "" 
             - name: DASHBOARD_CAPTCHA_SECRET_KEY
               valueFrom:
                 secretKeyRef:
@@ -11604,6 +11564,11 @@ spec:
                 secretKeyRef:
                   name: gibson-gibson-workloads-dashboard-secrets
                   key: email-resend-api-key
+            # smtp.ts reads its From: header from `_SMTP_FROM`, a name the
+            # chart never shipped, and it requires the value. Same source as
+            # DASHBOARD_EMAIL_FROM above.
+            - name: DASHBOARD_EMAIL_SMTP_FROM
+              value: "no-reply@zeroroot.ai"
             - name: DASHBOARD_EMAIL_SMTP_HOST
               value: "" 
             - name: DASHBOARD_EMAIL_SMTP_PORT
@@ -11613,12 +11578,17 @@ spec:
                 secretKeyRef:
                   name: gibson-gibson-workloads-dashboard-secrets
                   key: email-smtp-user
-            - name: DASHBOARD_EMAIL_SMTP_PASSWORD
+            # The reader is `_PASS`, not `_PASSWORD`. The chart shipped
+            # `DASHBOARD_EMAIL_SMTP_PASSWORD` until charts#294, and
+            # src/lib/email/providers/smtp.ts reads
+            # `DASHBOARD_EMAIL_SMTP_PASS`, so the SMTP provider threw on a
+            # missing password wherever dashboard.email.provider was "smtp".
+            # The Secret key keeps its own name.
+            - name: DASHBOARD_EMAIL_SMTP_PASS
               valueFrom:
                 secretKeyRef:
                   name: gibson-gibson-workloads-dashboard-secrets
                   key: email-smtp-password
-
             - name: DASHBOARD_METRICS_ALLOWED_CIDRS
               value: "" 
 
@@ -12449,8 +12419,6 @@ spec:
                   key: model_id
             - name: EXT_AUTHZ_CGJWT_ISSUER
               value: "https://api.localhost.zeroroot.ai"
-            - name: EXT_AUTHZ_CGJWT_COMPONENT_AUDIENCE
-              value: "https://api.localhost.zeroroot.ai/gibson.component.v1.ComponentService,https://api.localhost.zeroroot.ai/gibson.harness.v1.HarnessCallbackService,https://api.localhost.zeroroot.ai/gibson.identity.v1.IdentityService,https://api.localhost.zeroroot.ai,https://api.localhost.zeroroot.ai:50051/gibson.component.v1.ComponentService,https://api.localhost.zeroroot.ai:50051/gibson.harness.v1.HarnessCallbackService"
             # Default (deploy#852): fetch the registry from the daemon's mTLS
             # authz-registry endpoint, pinning the daemon's SVID so a
             # poisoned/impersonated source can never feed ext-authz a forged
@@ -12462,8 +12430,6 @@ spec:
               value: "spiffe://zeroroot.ai/platform/daemon"
             - name: EXT_AUTHZ_REGISTRY_FETCH_TIMEOUT
               value: "600s"
-            - name: EXT_AUTHZ_GRANT_KEY_DIR
-              value: "/etc/ext-authz/grant-key"
             # Per-kid Capability-Grant key descriptor endpoint (ext-authz#103). ext-authz fetches GET {KEYS_URL}/{kid} to verify a
             # component's self-signed agent+jwt and resolve its daemon-asserted
             # principal + tenant. Reached DIRECTLY on the pod network — the
@@ -12578,12 +12544,6 @@ spec:
             # separated list also accepted.
             - name: EXT_AUTHZ_ENVOY_SVID
               value: "spiffe://zeroroot.ai/platform/envoy"
-            # Postgres DSN for the api_keys table (read-only at auth time).
-            - name: EXT_AUTHZ_API_KEYS_DB_DSN
-              valueFrom:
-                secretKeyRef:
-                  name: gibson-db-secrets
-                  key: EXT_AUTHZ_API_KEYS_DB_DSN
           volumeMounts:
             - name: grant-key
               mountPath: /etc/ext-authz/grant-key
@@ -15238,8 +15198,6 @@ spec:
             # from the StatefulSet's data volume.
             - name: GIBSON_HOME
               value: /var/lib/gibson/.gibson
-            - name: GIBSON_CONFIG
-              value: /etc/gibson/gibson.yaml
             # GIBSON_PUBLIC_URL — the public Envoy URL the daemon stamps into
             # the CreateAgentIdentity response (gibson_url + the copy-pasteable
             # `gibson component register` enroll command). server.go reads this
@@ -15353,10 +15311,11 @@ spec:
             # the in-chart tenant-postgresql subchart is enabled (Task 25).
             # Sourced from dataPlane.postgres.admin_password_secret_ref (name +
             # key pair) so the plaintext password never appears in the ConfigMap.
-            # The default secret is the chart-managed gibson-db-secrets, key
-            # TENANT_POSTGRES_ADMIN_PASSWORD, populated by templates/secrets/
-            # db-secrets.yaml under the same key the tenant-postgresql Bitnami
-            # subchart uses for its userPasswordKey.
+            # The default secret is the chart-managed one gibson.dbSecrets.name
+            # names, "<fullname>-db-secrets", key TENANT_POSTGRES_ADMIN_PASSWORD,
+            # populated by templates/external-secrets/missing-secrets.yaml.
+            # The tenant-postgresql Bitnami alias that shared the key is not a
+            # Chart.yaml dependency, so its values are discarded (charts#292).
             # Spec: per-tenant-data-plane-completion Req 6.3, D1; Tasks 24, 25.
             - name: TENANT_POSTGRES_ADMIN_PASSWORD
               valueFrom:
@@ -18479,44 +18438,6 @@ spec:
   data:
     - secretKey: pat
       remoteRef: { key: gibson-zitadel-login-client-pat, property: pat }
----
-# Source: gibson/charts/gibson-workloads/templates/external-secrets/missing-secrets.yaml
-# ext-authz API keys DB DSN. ExtAuthz reads dashboard's api_keys table to
-# resolve gibson API keys → tenant context. Same Postgres cluster as
-# dashboard's Auth.js DB.
-#
-# Host + sslmode track the platform Postgres tier via the helpers so the DSN
-# follows the overlay's external toggle: kind → CNPG Service / sslmode=disable;
-# EKS → Aurora (RDS) writer endpoint / sslmode=require (deploy#572). The DSN
-# always targets the `dashboard` database, where the api_keys table lives.
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: gibson-db-secrets
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-spec:
-  refreshInterval: 60s
-  secretStoreRef:
-    name: "gibson-secrets"
-    kind: ClusterSecretStore
-  target:
-    name: gibson-db-secrets
-    creationPolicy: Owner
-    template:
-      type: Opaque
-      data:
-        EXT_AUTHZ_API_KEYS_DB_DSN: "postgres://dashboard:{{ .dashboard_password }}@platform-postgres-rw.gibson.svc.cluster.local:5432/dashboard?sslmode=require"
-  data:
-    - secretKey: dashboard_password
-      remoteRef:
-        key: gibson-dashboard-postgres-password
-        property: password
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/missing-secrets.yaml
 # gibson-workloads-db-secrets — referenced by gibson daemon for tenant

@@ -298,7 +298,7 @@ Single source of truth consumed by:
   - templates/gibson/configmap.yaml  (daemon.grpc_address)
   - templates/gibson/statefulset.yaml (grpc containerPort)
   - templates/gibson/service.yaml    (grpc port + targetPort backfill)
-  - templates/dashboard/deployment.yaml (GIBSON_DAEMON_URL)
+  - templates/dashboard/deployment.yaml (GIBSON_API_URL)
 
 Rendered as a bare integer (no quotes, no colon prefix).
 See .spec-workflow/specs/spiffe-helm-integration/.
@@ -336,10 +336,9 @@ the new world — re-landed by Task 4.
 
 Note: callers that route through Envoy (gibson-admin-client.ts and, post
 Track B, gibson-client.ts) ignore this URL entirely — they dial Envoy at
-ADMIN_ENVOY_BASE_URL with a JWT-SVID. This helper feeds GIBSON_DAEMON_URL /
-GIBSON_API_URL, which gibson-client.ts uses for the direct path. After Track
-B + the soak (Phase 9) GIBSON_DAEMON_URL is removed and so is this helper's
-last consumer.
+ADMIN_ENVOY_BASE_URL with a JWT-SVID. GIBSON_DAEMON_URL is gone (charts#294,
+the dashboard dropped the read), so this helper's one remaining consumer is
+GIBSON_API_URL, which next.config.ts reads for its dev-proxy rewrite.
 */}}
 
 {{/* =========================== SPIRE Precondition =========================== */}}

@@ -641,15 +641,6 @@ gibson:
     # the daemon ignores any value other than "fga".
     enforcementSource: "fga"
 
-    # Optional override of the daemon's embedded RPC authorization registry.
-    # When non-empty, this YAML is rendered into a ConfigMap, mounted at
-    # /etc/gibson/authz/rpc_registry.yaml, and the daemon loads it INSTEAD
-    # OF the embedded default. Empty (the default) means "use the embedded
-    # registry shipped with the binary". A missing or invalid override file
-    # fails the daemon Pod boot loudly — there is no silent fallback.
-    rpcRegistry:
-      override: ""
-
   resources:
     requests:
       cpu: 200m
@@ -1051,30 +1042,6 @@ dashboard:
     # Wait for Gibson daemon to be ready before starting
     waitForGibson: true
 
-  # Backout flag for spec in-cluster-mtls-restoration Phase 4 (Track B).
-  # When true (default): dashboard's gibson-client.ts dials the daemon through
-  # Envoy at ADMIN_ENVOY_BASE_URL using a JWT-SVID minted via the SPIRE
-  # Workload API, identical to gibson-admin-client.ts.
-  # When false (backout): dashboard falls back to the direct daemon path
-  # using the X.509 SVID transport from Track A (Phase 2). This branch is
-  # retained ONLY for the 30-day soak (Requirement 6.1) and is removed by
-  # Phase 9 along with this flag itself.
-  # DO NOT introduce additional feature flags on this dimension — see design
-  # Non-Functional Architecture: "One transport implementation in
-  # gibson-client.ts after the change — not a feature flag picking between
-  # two." This is the ONE permitted exception, scoped to backout safety.
-  useEnvoyForDaemon: true
-
-  # Spec dashboard-fga-user-identity (R8) — backout flag for the user-token
-  # forwarding rollout. Default true: dashboard forwards the user's Zitadel
-  # access token to the daemon (per-user FGA enforced; audit attribution
-  # records the real user). When false: dashboard falls back to minting a
-  # SPIFFE workload JWT-SVID, which means per-user FGA decisions degrade to
-  # workload-level grants and `audit_log.acting_user` records the dashboard
-  # SPIFFE URI instead of the real user. The fallback is ONLY for the
-  # 30-day soak hot-revert; Phase 9 deletes the flag entirely.
-  userTokenForwarding: true
-
   # Service configuration
   service:
     type: ClusterIP
@@ -1099,12 +1066,13 @@ dashboard:
 
     # Bot protection on signup / login / password-reset forms.
     # provider: turnstile | hcaptcha | disabled
-    # siteKey is a public value (rendered in the browser); secretKey should
-    # be supplied via the dashboard Secret. In dev the provider is
-    # "disabled" so forms submit without a CAPTCHA round-trip.
+    # secretKey is supplied via the dashboard Secret. In dev the provider is
+    # "disabled" so forms submit without a CAPTCHA round-trip. The owner
+    # decided against a captcha, so the site key the browser would need is
+    # not plumbed: the dashboard reads no NEXT_PUBLIC_DASHBOARD_CAPTCHA_*
+    # name (charts#294).
     captcha:
       provider: "disabled"   # DASHBOARD_CAPTCHA_PROVIDER
-      siteKey: ""            # NEXT_PUBLIC_DASHBOARD_CAPTCHA_SITE_KEY
       secretKey: ""          # DASHBOARD_CAPTCHA_SECRET_KEY (Secret ref)
 
     # Transactional email — ALL dashboard outbound mail rides this one
@@ -1293,7 +1261,7 @@ dashboard:
 
   # Environment variable overrides for the dashboard container
   env: {}
-    # GIBSON_DAEMON_URL: "http://gibson:50051"
+    # GIBSON_API_URL: "http://gibson:50051"
 
   # Extra environment variables (optional)
   extraConfig: {}
@@ -1327,7 +1295,10 @@ dashboard:
   # platformPostgres tier helpers.
   postgres:
     enabled: true
-    # password is sourced from DASHBOARD_DB_PASSWORD in gibson-db-secrets
+    # password is sourced from DASHBOARD_DB_PASSWORD in the Secret
+    # gibson.dbSecrets.name names, "<fullname>-db-secrets". The literal
+    # gibson-db-secrets no longer exists: its one key was an ext-authz DSN
+    # nothing read (charts#294).
     # NOTE: sslmode is hardcoded `require` in chart templates (Spec
     # first-deploy-unblock-and-ha R7); no sslMode/sslmode knob here.
     maxConns: 10
@@ -1774,18 +1745,6 @@ extAuthz:
   cgjwt:
     issuer: ""    # default: gibson.apiOrigin
     audience: ""  # default: ext-authz's own (gibson-daemon)
-    # componentAudience: comma-separated allowlist of component CG-JWT `aud`
-    # values (gibson#1282 / deploy#1245). REQUIRED by the binary whenever
-    # EXT_AUTHZ_CGJWT_KEYS_URL is set — which this chart always sets — so the
-    # template renders it unconditionally, defaulting to the apiOrigin crossed
-    # with the three services Envoy exposes to component tokens
-    # (ComponentService, HarnessCallbackService, IdentityService), the bare
-    # apiOrigin (sdk-ts mints `aud` = platform origin, no service path), and
-    # the :50051 variants (sdk plugin.Serve rewrites the platform URL port to
-    # 50051 — sdk#452; drop those entries when that fix ships). An empty EFFECTIVE value is a deliberate ext-authz
-    # startup crash upstream: a pin that accepts anything is the defect the
-    # variable exists to prevent. Matching is exact-string, no wildcards.
-    componentAudience: ""
 
   # Spec 3 §3 — HA primitives (autoscaling, PDB, NetworkPolicy).
   autoscaling:
@@ -1858,9 +1817,6 @@ extAuthz:
     # not the gRPC port (8081). The chart template rejects gRPC-port values
     # at render time — see deploy#140.
     addr: ""  # Defaults to "{{ .Release.Name }}-openfga:{{ .Values.openfga.service.httpPort }}" (8080) if empty
-  apiKeysDb:
-    secretName: "gibson-db-secrets"
-    secretKey: "EXT_AUTHZ_API_KEYS_DB_DSN"  # Key is rendered by templates/secrets/db-secrets.yaml
   issuer: ""  # Defaults to "https://api.{{ .Values.global.domain | default "zeroroot.ai" }}"
 
 # -----------------------------------------------------------------------------

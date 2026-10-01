@@ -401,38 +401,12 @@ spec:
             # reads it explicitly for its dev-proxy rewrite destination.
             - name: GIBSON_API_URL
               value: {{ include "gibson.dashboard.daemonURL" . | quote }}
-            - name: GIBSON_DAEMON_URL
-              value: {{ include "gibson.dashboard.daemonURL" . | quote }}
             # Admin RPCs from the dashboard go through Envoy's api.<domain>
             # edge — same URL any external SDK caller would hit. Envoy
             # terminates TLS, validates the SPIFFE JWT-SVID the dashboard
             # mints, and forwards to the daemon. Spec: dashboard-admin-via-envoy.
             - name: ADMIN_ENVOY_BASE_URL
               value: {{ .Values.dashboard.adminEnvoyBaseUrl | default (printf "https://api.%s:%v" (.Values.global.domain | default "zeroroot.ai") (.Values.envoy.service.httpsPort | default 443)) | quote }}
-            # Spec in-cluster-mtls-restoration Phase 4 (Track B) backout flag.
-            # When "true" (default): gibson-client.ts routes ALL daemon RPCs
-            # through Envoy via JWT-SVID, mirroring gibson-admin-client.ts.
-            # When "false": gibson-client.ts falls back to the Track A direct
-            # mTLS path (X.509 SVID from /spire/svids). Retained for 30-day
-            # soak; removed by Phase 9. See values.yaml dashboard.useEnvoyForDaemon.
-            - name: USE_ENVOY_FOR_DAEMON
-              # Use ternary so explicit false is respected (Helm `default` treats
-              # falsy values as missing). Boolean-coerced via "%v" then quoted.
-              value: {{ ternary "true" "false" (hasKey .Values.dashboard "useEnvoyForDaemon" | ternary .Values.dashboard.useEnvoyForDaemon true) | quote }}
-            # Spec dashboard-fga-user-identity (R8) — user-token forwarding
-            # backout flag. When "true" (default): gibson-client.ts forwards
-            # the user's Zitadel access token to Envoy for per-user FGA. When
-            # "false": gibson-client.ts falls back to a SPIFFE workload
-            # JWT-SVID — degraded mode, per-user FGA disabled, audit
-            # attribution wrong. Retained for the 30-day soak hot-revert;
-            # Phase 9 deletes both the flag and the fallback branch.
-            - name: USE_USER_TOKEN_FORWARDING
-              value: {{ ternary "true" "false" (hasKey .Values.dashboard "userTokenForwarding" | ternary .Values.dashboard.userTokenForwarding true) | quote }}
-            # Audience claim written into the JWT-SVID and expected by
-            # Envoy's `spiffe` provider in envoy.yaml. Keep in sync with
-            # both sides; the chart default handles it.
-            - name: GIBSON_DAEMON_SPIFFE_AUDIENCE
-              value: {{ printf "spiffe://%s/platform/daemon" (.Values.spire.server.trustDomain | default "zeroroot.ai") | quote }}
             # SPIFFE Workload API socket (deploy#1532). The dashboard IS a
             # SPIFFE consumer: src/lib/gibson-client/transport.ts calls
             # spiffeNodeOptions() on every outbound admin RPC to Envoy and
@@ -657,14 +631,6 @@ spec:
             - name: PUBLIC_URL
               value: {{ .Values.dashboard.authUrl | default (include "gibson.externalOrigin" .) | quote }}
 
-            # LOKI_URL — required by the dashboard's env-validator.
-            # Loki query endpoint for the mission-log viewer. Default points
-            # at the in-cluster Loki service rendered by this chart. The
-            # viewer dies fast and loud rather than silently dialing the
-            # wrong host.
-            - name: LOKI_URL
-              value: {{ .Values.dashboard.lokiUrl | default (printf "http://%s:3100" (include "gibson.loki.host" .)) | quote }}
-
             # Neo4j connection URI for the dashboard knowledge-graph client.
             # Required — the dashboard Neo4j driver uses this at startup.
             - name: NEO4J_URI
@@ -771,10 +737,6 @@ spec:
 
             - name: DASHBOARD_CAPTCHA_PROVIDER
               value: {{ .captcha.provider | default "disabled" | quote }}
-            - name: NEXT_PUBLIC_DASHBOARD_CAPTCHA_PROVIDER
-              value: {{ .captcha.provider | default "disabled" | quote }}
-            - name: NEXT_PUBLIC_DASHBOARD_CAPTCHA_SITE_KEY
-              value: {{ .captcha.siteKey | default "" | quote }} {{/* allowlist-silent-default: empty when captcha.provider=disabled (dev). */}}
             - name: DASHBOARD_CAPTCHA_SECRET_KEY
               valueFrom:
                 secretKeyRef:
@@ -793,6 +755,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "gibson.dashboardSecrets.name" $ }}
                   key: email-resend-api-key
+            # smtp.ts reads its From: header from `_SMTP_FROM`, a name the
+            # chart never shipped, and it requires the value. Same source as
+            # DASHBOARD_EMAIL_FROM above.
+            - name: DASHBOARD_EMAIL_SMTP_FROM
+              value: {{ .email.from | default "no-reply@zeroroot.ai" | quote }}
             - name: DASHBOARD_EMAIL_SMTP_HOST
               value: {{ .email.smtp.host | default "" | quote }} {{/* allowlist-silent-default: empty when email.provider=log/resend (dev). */}}
             - name: DASHBOARD_EMAIL_SMTP_PORT
@@ -802,12 +769,17 @@ spec:
                 secretKeyRef:
                   name: {{ include "gibson.dashboardSecrets.name" $ }}
                   key: email-smtp-user
-            - name: DASHBOARD_EMAIL_SMTP_PASSWORD
+            # The reader is `_PASS`, not `_PASSWORD`. The chart shipped
+            # `DASHBOARD_EMAIL_SMTP_PASSWORD` until charts#294, and
+            # src/lib/email/providers/smtp.ts reads
+            # `DASHBOARD_EMAIL_SMTP_PASS`, so the SMTP provider threw on a
+            # missing password wherever dashboard.email.provider was "smtp".
+            # The Secret key keeps its own name.
+            - name: DASHBOARD_EMAIL_SMTP_PASS
               valueFrom:
                 secretKeyRef:
                   name: {{ include "gibson.dashboardSecrets.name" $ }}
                   key: email-smtp-password
-
             - name: DASHBOARD_METRICS_ALLOWED_CIDRS
               value: {{ .metrics.allowedCIDRs | default "" | quote }} {{/* allowlist-silent-default: empty disables CIDR filtering (cluster-internal only). */}}
             {{- end }}

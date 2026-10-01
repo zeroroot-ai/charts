@@ -400,15 +400,6 @@ spec:
               value: {{ ((.Values.tenantOperator).smtp).from | default "no-reply@zeroroot.ai" | quote }}
             - name: SMTP_TLS
               value: {{ ((.Values.tenantOperator).smtp).tls | default "false" | quote }}
-            {{- if ((.Values.tenantOperator).billing).devAutoConfirm }}
-            # DEV ONLY — auto-confirm billing without a real Stripe webhook,
-            # so Kind clusters with no `stripe listen` tunnel can complete
-            # tenant provisioning end-to-end. Production overlays must NOT
-            # set this (chart's NOTES.txt warns; CI lint should reject any
-            # values file that sets this with a non-Kind context).
-            - name: BILLING_DEV_AUTOCONFIRM
-              value: "true"
-            {{- end }}
             {{- with (((.Values.tenantOperator).billing).stripeAPIBaseURL) }}
             # DEV ONLY — redirects all Stripe API calls to the in-cluster
             # stripe-mock server (deployed by the gibson-workloads chart when
