@@ -1416,22 +1416,17 @@ components:
 # online self-hosted operator may disable the bundled docs and the dashboard
 # will link to publicFallbackUrl instead.
 #
-# Pin shape is digest-first, not "version-matched" (deploy#789 /
-# corrected deploy#1438). docs-site (Apache-2.0) publishes no tag that ever
-# matches .Chart.AppVersion — only commit shas and `main` — so the
-# `image.tag | default .Chart.AppVersion` fallback in
-# templates/docs/deployment.yaml is dead code on every profile that leaves
-# `digest` set, which base values always does. Do not clear `digest` to try
-# to reach that fallback: scripts/bump-image-digest.py's resolver treats an
-# empty tag as "nothing to resolve" and silently stops re-pinning this
-# component (deploy#1438 verification). tag+digest below are kept current by
-# the event-driven fan-out (.github/workflows/bump-image-digests.yml,
-# deploy#1391) the same way every other first-party image is — docs-site
-# dispatches `image-published` on each release, which opens a
-# `chore(deps): bump docs-site to <ref>` PR here. This is the one first-party
-# component pinned via a separate `digest:` field instead of `ref@sha256:...`
-# embedded in `tag:` (see bump-image-digest.py's "PIN SHAPES IT UNDERSTANDS");
-# per-env overlays may still override to track `main` (gitops staging does).
+# Pin shape is the combined `tag: "v<semver>@sha256:<digest>"` — the ONE
+# first-party pin shape every image uses (kubelet pulls by the embedded digest;
+# the v<semver> is provenance). docs-site was formerly the lone exception,
+# pinned via a separate `digest:` field; that broke the version-links fan-out,
+# whose before:@ image path rewrites the combined tag, not a sibling digest
+# (it failed with "bump-image-digest.py did not rewrite docs.image.tag").
+# Aligning docs-site to the combined shape fixed it. The pin is kept current by
+# the version-links fan-out (zeroroot-ai/.github version-links.yaml, link
+# `docs-site`): each docs-site release resolves the digest and opens a
+# `chore(deps): bump docs-site` PR here. Per-env overlays may still override to
+# track `main` (gitops staging does).
 docs:
   # enabled: true (default) renders the docs-svc Deployment + Service.
   # Set to false to suppress local docs; the Envoy docs vhost 503s and the
@@ -1444,16 +1439,11 @@ docs:
   publicFallbackUrl: "https://docs.zeroroot.ai"
   image:
     repository: ghcr.io/zeroroot-ai/docs-site
-    # tag — provenance only (the docs-site commit this digest was built
-    # from); kubelet pulls by digest below. Kept in sync by the fan-out, not
-    # hand-edited — see the block comment above for why clearing it does not
-    # activate AppVersion version-matching.
-    tag: "docs-site-v0.6.11"
-    # digest — set, so it overrides tag: image: repo@digest (kubelet pull
-    # target). Bumped automatically by the image-published fan-out; see the
-    # block comment above. Manual resolve/audit:
-    # `gh api /orgs/zeroroot-ai/packages/container/docs-site/versions`.
-    digest: "sha256:cc7b7731ba7f5593e86d375bda5fa846d9d1fd09ac569732ec05b5b7766df451"
+    # tag — combined v<semver>@sha256:<digest>, the one first-party pin shape.
+    # Kubelet pulls by the embedded digest; v<semver> is provenance. Kept
+    # current by the version-links fan-out (link `docs-site`), not hand-edited.
+    # Manual resolve/audit: `gh api /orgs/zeroroot-ai/packages/container/docs-site/versions`.
+    tag: "v0.6.13@sha256:d778dd2f5c13833b2ae18353335d90e6690a4e6cc7a449924deae8cb6c5e72b4"
     pullPolicy: IfNotPresent
   replicas: 1
   resources:
