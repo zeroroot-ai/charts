@@ -54,6 +54,24 @@
     - .Values.tenantOperator.daemonGrpcAddress (legacy override)
     - .Release.Name                      (used to construct the default)
 */}}
+{{/*
+mailpit host — the dev-only delivering SMTP sink that satisfies the daemon's
+mailer.RequireDelivering gate on kind. Disabled outside kind
+(mailpit.enabled: false).
+
+It lives here, not in gibson-workloads, because two charts name it: the
+workloads chart renders the Service, and the operators chart's
+tenant-operator dials it as its default SMTP_HOST. The operators chart used
+to hardcode "gibson-workloads-mailpit", which is a Service no release
+renders — the name is keyed off the RELEASE name, so it is "gibson-mailpit"
+for every install (charts#114). One definition, two callers.
+
+Values read: none. Derived from .Release.Name.
+*/}}
+{{- define "gibson.mailpit.host" -}}
+{{- printf "%s-mailpit" .Release.Name }}
+{{- end }}
+
 {{- define "gibson.daemonAddress" -}}
 {{- $override := "" -}}
 {{- if and (hasKey .Values "gibson") .Values.gibson -}}
