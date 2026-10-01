@@ -1133,6 +1133,29 @@ zitadel:
       # re-resolved from the tag at chart publish (bump-image-digest.py).
       repository: "ghcr.io/zeroroot-ai/zitadel-login"
       tag: "v4.18.0@sha256:bdc170df9555e7377ba1299ed3b8f6cec796becfd26dedfdf24c96a627a72051"
+    # The login UI is a Next.js server, so it needs a memory bound and a heap
+    # ceiling inside that bound. It shipped with neither: measured on staging
+    # 2026-10-01 the container had `resources: {}` — no request, no limit — so
+    # one runaway render could take the whole node, and Node sized its heap from
+    # the node's 32GiB rather than from any bound (the same root cause as
+    # dashboard#150).
+    #
+    # 1Gi against a 108MiB idle working set, so a render has room without the
+    # container being able to starve its neighbours. NODE_OPTIONS must stay at
+    # 75% of the limit; `make node-heap-tracks-limit` fails when the two drift.
+    # The dashboard derives its own value from its limit, but this subchart's
+    # values are data and cannot call a template, so here both are written and
+    # the guard holds them together.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+    env:
+      - name: NODE_OPTIONS
+        value: "--max-old-space-size=768"
     # deploy#943: declarative, Reloader-driven cache-bust. The login UI caches
     # the Zitadel label policy in process memory, so a rebrand needs a pod
     # restart. The login Deployment opts into Stakater Reloader keyed on the

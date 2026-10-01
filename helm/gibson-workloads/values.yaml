@@ -1273,14 +1273,23 @@ dashboard:
 
   logLevel: info
 
-  # Resource limits and requests
+  # Resource limits and requests.
+  #
+  # The memory limit is also the V8 heap knob: the Deployment sets
+  # NODE_OPTIONS=--max-old-space-size to 75% of this number
+  # (gibson.nodeHeapMiB), because Node otherwise sizes its heap from the host's
+  # memory and never learns the cgroup it lives in. Raise the limit and the
+  # heap follows; there is no second value to keep in step.
+  #
+  # 1Gi is the floor for a signed-in render. 512Mi was the shipped value and a
+  # signed-in page exhausted the heap on every request (dashboard#150).
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 512Mi
     limits:
       cpu: 1000m
-      memory: 512Mi
+      memory: 1Gi
 
   # Environment variable overrides for the dashboard container
   env: {}

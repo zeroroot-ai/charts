@@ -15079,6 +15079,13 @@ spec:
               containerPort: 3000
               protocol: TCP
           env:
+            # NODE_OPTIONS — the V8 heap ceiling tracks this container's memory
+            # limit. Node reads the HOST's memory, so without this the ceiling
+            # is wrong by the ratio between the node and the container, and a
+            # render that outgrows the cgroup dies with nothing naming memory
+            # (dashboard#150). See gibson.nodeHeapMiB for the arithmetic.
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=768"
             # Gibson API Configuration — both vars resolve to the same unified
             # URL. GIBSON_API_URL is retained because next.config.ts:58 still
             # reads it explicitly for its dev-proxy rewrite destination.
@@ -17147,6 +17154,8 @@ spec:
           env:
             - name: NEXT_PUBLIC_BASE_PATH
               value: /ui/v2/login
+            - name: NODE_OPTIONS
+              value: --max-old-space-size=768
           ports:
           - containerPort: 3000
             name: http-server
@@ -17175,7 +17184,12 @@ spec:
             mountPath: /login-client
             readOnly: true
           resources:
-              {}
+              limits:
+                cpu: 500m
+                memory: 1Gi
+              requests:
+                cpu: 50m
+                memory: 256Mi
       initContainers:
         # This initContainer acts as a dependency check, ensuring the Login UI pod
         # does not start until the main Zitadel API is fully initialized and ready

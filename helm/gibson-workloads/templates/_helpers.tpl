@@ -729,3 +729,42 @@ place. Usage: include "gibson.envoy.wafDirectives" (dict "ctx" . "file" "files/c
 {{- end -}}
 {{- toJson $lines -}}
 {{- end -}}
+
+{{/*
+gibson.nodeHeapMiB — the --max-old-space-size value for a Node container,
+derived from that container's own memory limit.
+
+Node sizes its old-space heap from the HOST's memory, not from the cgroup it
+runs in. On a 32GiB node a 1GiB container therefore gets a heap ceiling several
+times its own limit, so a heavy render grows past the cgroup and the process
+dies with no V8 heap error to read. That is dashboard#150: every signed-in page
+returned 503, the pod restarted, and nothing named memory as the cause.
+
+So the ceiling has to be stated, and it has to be the same number the limit
+states, or the two drift apart silently. One knob: the limit. The heap takes
+75% of it and the rest covers the Node binary, buffers and native allocations,
+so the process trips the heap ceiling before the cgroup kills it, and fails with
+a stack instead of a bare kill.
+
+Usage: include "gibson.nodeHeapMiB" .Values.dashboard.resources.limits.memory
+*/}}
+{{- define "gibson.nodeHeapMiB" -}}
+{{- $q := . | toString -}}
+{{- $mib := 0.0 -}}
+{{- if hasSuffix "Gi" $q -}}
+{{- $mib = mulf (trimSuffix "Gi" $q | float64) 1024 -}}
+{{- else if hasSuffix "Mi" $q -}}
+{{- $mib = trimSuffix "Mi" $q | float64 -}}
+{{- else if hasSuffix "G" $q -}}
+{{- $mib = divf (mulf (trimSuffix "G" $q | float64) 1000000000) 1048576 -}}
+{{- else if hasSuffix "M" $q -}}
+{{- $mib = divf (mulf (trimSuffix "M" $q | float64) 1000000) 1048576 -}}
+{{- else -}}
+{{- fail (printf "gibson.nodeHeapMiB: memory limit %q needs a Mi/Gi/M/G suffix. A bare or unknown unit would produce the wrong heap ceiling without saying so." $q) -}}
+{{- end -}}
+{{- $heap := mulf $mib 0.75 | floor | int64 -}}
+{{- if lt $heap 256 -}}
+{{- fail (printf "gibson.nodeHeapMiB: memory limit %q leaves a %dMiB heap, under the 256MiB a Next.js server needs to render one page." $q $heap) -}}
+{{- end -}}
+{{- $heap -}}
+{{- end -}}
