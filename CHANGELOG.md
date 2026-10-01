@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.14](https://github.com/zeroroot-ai/charts/compare/v0.133.13...v0.133.14) (2026-10-01)
+
+
+### Bug Fixes
+
+* **edge:** verify a Zitadel JWT on the IdentityService route ([#280](https://github.com/zeroroot-ai/charts/issues/280)) ([6788a4f](https://github.com/zeroroot-ai/charts/commit/6788a4f3a039f4c27276ce61a59d19cd9967f63c)), closes [#279](https://github.com/zeroroot-ai/charts/issues/279)
+
 ## [0.133.13](https://github.com/zeroroot-ai/charts/compare/v0.133.12...v0.133.13) (2026-10-01)
 
 
