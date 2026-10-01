@@ -1382,42 +1382,6 @@ ingress:
     # The backend-protocol: GRPC annotation is always added automatically.
     annotations: {}
 
-# -----------------------------------------------------------------------------
-# Component Authentication
-# -----------------------------------------------------------------------------
-# Components authenticate via K8s ServiceAccount tokens (auto-detected
-# when running in-cluster) or API keys (gsk_ prefix, provisioned per-tenant).
-# The platformUrl field is used by deployment templates.
-componentAuth:
-  # Platform URL override for components
-  # Defaults to cluster-internal: http://<release>-gibson:50051
-  # For external components, set to the componentIngress host:
-  #   platformUrl: "https://grpc.gibson.example.com"
-  platformUrl: ""
-
-# -----------------------------------------------------------------------------
-# Component Health Probes
-# -----------------------------------------------------------------------------
-# Shared health probe configuration for all component deployments (agents, tools, plugins).
-# All components expose /healthz (liveness) and /readyz (readiness) on this port.
-components:
-  health:
-    # HTTP port for health endpoints. Must match the SDK's health server port.
-    port: 8080
-    livenessProbe:
-      initialDelaySeconds: 10
-      periodSeconds: 10
-      timeoutSeconds: 5
-      failureThreshold: 3
-      successThreshold: 1
-    readinessProbe:
-      initialDelaySeconds: 5
-      periodSeconds: 10
-      timeoutSeconds: 5
-      failureThreshold: 3
-      successThreshold: 1
-
-
 # docs-svc — core optional-by-toggle docs surface (/ deploy#1034).
 #
 # Component taxonomy: Core, optional-by-toggle. Ships in BOTH self-hosted
@@ -1637,122 +1601,6 @@ platformPostgres:
     passwordSecretName: ""
     passwordSecretKey: "password"
 
-thirdPartyPostgres:
-  # Connection params for external-managed Postgres that hosts zitadel
-  # and openfga databases. Overlays set host/port/sslmode.
-  host: ""
-  port: 5432
-  sslmode: "disable"
-  # `thirdPartyPostgres.enabled` removed (deploy#187 /) — the
-  # field had no template consumers; per-database fields below are
-  # always read by the gibson.thirdPartyPostgres.* helpers.
-  # Per-database fields default to each app's name (zitadel, openfga);
-  # see _helpers.tpl gibson.thirdPartyPostgres.* helpers.
-  databases:
-    zitadel:
-      passwordSecretName: gibson-db-secrets
-      passwordSecretKey: ZITADEL_POSTGRES_PASSWORD
-    openfga:
-      passwordSecretName: gibson-db-secrets
-      passwordSecretKey: FGA_POSTGRES_PASSWORD
-  persistence:
-    size: 10Gi
-  resources:
-    requests: { cpu: 100m, memory: 256Mi }
-    limits:   { cpu: 1000m, memory: 1Gi }
-  external:
-    enabled: false
-    host: ""
-    port: 5432
-    sslMode: "require"
-
-# -----------------------------------------------------------------------------
-# External Postgres used exclusively by the dashboard service (Auth.js
-# adapter). In kind, the in-chart CNPG cluster is used; in EKS, overlays
-# set host/port/database/user/passwordSecretName/sslmode to point at RDS.
-# Leave empty to fall back to in-chart CNPG defaults.
-# -----------------------------------------------------------------------------
-dashboardPostgres:
-  host: ""
-  port: 5432
-  database: ""
-  user: ""
-  passwordSecretName: ""
-  passwordSecretKey: ""
-  sslmode: "disable"
-
-# -----------------------------------------------------------------------------
-# PostgreSQL for Dashboard (Auth.js adapter + tenant provisioning)
-# Bitnami Subchart, alias: dashboard-postgresql — LEGACY, replaced by
-# platformPostgres above. Kept for one release cycle so existing kind
-# clusters can helm upgrade without losing data.
-#
-# The previous `enabled: true|false` substitution toggle has been deleted
-# (one-code-path / deploy#187): no template gates on it. Sub-feature
-# toggles (`primary.networkPolicy.enabled`, `readReplicas.networkPolicy.enabled`)
-# remain legitimate.
-# -----------------------------------------------------------------------------
-dashboard-postgresql:
-  # Disable the Bitnami subchart's bundled per-pod NetworkPolicies:
-  # the chart's own templates/databases/postgres-networkpolicies.yaml
-  # renders a gibson-aware NetworkPolicy with the SAME name
-  # (gibson-dashboard-postgresql) but stricter ingress rules scoped to
-  # specific gibson components. Leaving both enabled produces two
-  # manifests with the same name/namespace and helm install fails with
-  # "no NetworkPolicy with the name ... found" mid-apply. Spec
-  # gibson-postgres-migrations cluster-verification fix.
-  primary:
-    networkPolicy:
-      enabled: false
-    persistence:
-      enabled: true
-      size: 5Gi
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-    service:
-      ports:
-        postgresql: 5432
-  readReplicas:
-    networkPolicy:
-      enabled: false
-
-  image:
-    registry: ghcr.io
-    repository: zeroroot-ai/mirror/bitnami-postgresql
-    # Spec 2 R13 — pin every Bitnami Postgres alias to a concrete tag.
-    # Bumped together; CI's chart-audit gate fails if any tag resolves to :latest.
-    tag: "16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
-
-  auth:
-    username: dashboard
-    database: dashboard
-    existingSecret: "gibson-db-secrets"
-    secretKeys:
-      adminPasswordKey: "postgres-password"
-      userPasswordKey: "DASHBOARD_DB_PASSWORD"
-
-  service:
-    type: ClusterIP
-    port: 5432
-
-# -----------------------------------------------------------------------------
-# External Postgres used as the tenant-admin data-plane pool (RDS in EKS).
-# Leave empty to use the in-chart tenant-postgresql Bitnami subchart.
-# Overlays set host/port/user/passwordSecretName/sslmode.
-# -----------------------------------------------------------------------------
-tenantPostgres:
-  host: ""
-  port: 5432
-  user: ""
-  passwordSecretName: ""
-  passwordSecretKey: ""
-  sslmode: "disable"
-
 # -----------------------------------------------------------------------------
 # PostgreSQL for the per-tenant data-plane admin pool (Bitnami Subchart,
 # alias: tenant-postgresql).
@@ -1856,51 +1704,6 @@ openfga:
   datastore:
     engine: postgres  # postgres | memory
 
-# PostgreSQL for OpenFGA (Bitnami Subchart, alias: fga-postgresql).
-# OpenFGA is structural infrastructure (one-code-path / deploy#187 deleted
-# `openfga.enabled`); its Postgres is too. The previous
-# `enabled: true|false` substitution toggle has been deleted; no template
-# gates on it.
-# -----------------------------------------------------------------------------
-fga-postgresql:
-  # Bitnami subchart for the FGA Postgres alias. Prod overlays point the
-  # FGA pod at RDS via openfga.datastore.uri; the in-chart values stay
-  # available for kind/dev wiring.
-
-  image:
-    registry: ghcr.io
-    repository: zeroroot-ai/mirror/bitnami-postgresql
-    # Spec 2 R13 — pin every Bitnami Postgres alias to a concrete tag.
-    # Bumped together; CI's chart-audit gate fails if any tag resolves to :latest.
-    tag: "16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
-
-  auth:
-    username: openfga
-    database: openfga
-    existingSecret: "gibson-db-secrets"
-    secretKeys:
-      adminPasswordKey: "postgres-password"
-      userPasswordKey: "FGA_POSTGRES_PASSWORD"
-
-  primary:
-    persistence:
-      enabled: true
-      size: 5Gi
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-    service:
-      ports:
-        postgresql: 5432
-
-  service:
-    type: ClusterIP
-    port: 5432
-
 # -----------------------------------------------------------------------------
 # Zitadel — sole identity provider (spec: zitadel-envoy-gateway-migration)
 #
@@ -1945,50 +1748,6 @@ zitadel:
       # (deploy#630). Read directly by templates/dashboard/deployment.yaml;
       # empty falls back to gibson.zitadelExternalDomain (global.domain-derived).
       ExternalDomain: ""
-
-# PostgreSQL for Zitadel (Bitnami Subchart, alias: zitadel-postgresql).
-# The `zitadel.enabled` master switch was deleted by deploy#196; the
-# per-alias `enabled` toggle that followed has also been deleted
-# (one-code-path / deploy#187) — no template gates on it. The kind/dev
-# overlay points Zitadel at the consolidated thirdparty-postgresql tier
-# rather than bringing up a dedicated Bitnami Postgres for Zitadel; prod
-# points zitadel.zitadel.database.host at RDS.
-# -----------------------------------------------------------------------------
-zitadel-postgresql:
-  # Bitnami subchart for the Zitadel Postgres alias.
-  image:
-    registry: ghcr.io
-    repository: zeroroot-ai/mirror/bitnami-postgresql
-    # Spec 2 R13 — pin every Bitnami Postgres alias to a concrete tag.
-    # Bumped together; CI's chart-audit gate fails if any tag resolves to :latest.
-    tag: "16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
-
-  auth:
-    username: zitadel
-    database: zitadel
-    existingSecret: "gibson-db-secrets"
-    secretKeys:
-      adminPasswordKey: "postgres-password"
-      userPasswordKey: "ZITADEL_POSTGRES_PASSWORD"
-
-  primary:
-    persistence:
-      enabled: true
-      size: 5Gi
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-    service:
-      ports:
-        postgresql: 5432
-
-  service:
-    type: ClusterIP
-    port: 5432
 
 # -----------------------------------------------------------------------------
 # ext_authz — sole authorization-decision service (spec: zitadel-envoy-gateway-migration)
@@ -2687,28 +2446,6 @@ mailpit:
 # Dashboard PostgreSQL connection settings are under dashboard.postgres
 # in the main dashboard: block above (line ~194). Do NOT add a second
 # dashboard: key here — YAML duplicate keys cause silent override.
-
-# =============================================================================
-# Zitadel service-account credentials (Phase H/8.8)
-# =============================================================================
-# One Zitadel service account per in-cluster consumer that performs
-# OAuth2 client_credentials calls (dashboard, tenant-operator, each
-# tool-runner deployment). The chart renders one Secret per consumer at
-# install time with placeholder values; operators replace the values
-# out-of-band (Zitadel admin API call from the bootstrap Job, Terraform,
-# or ExternalSecrets).
-#
-# Each consumer can opt out of chart-managed Secret creation by setting
-# .secretName — in that case the chart does NOT render a Secret for that
-# consumer and the consumer Deployment must reference the
-# operator-supplied Secret directly.
-zitadelServiceAccounts:
-  dashboard:
-    secretName: ""        # bring-your-own; empty → chart creates gibson-zitadel-dashboard
-  tenantOperator:
-    secretName: ""        # bring-your-own; empty → chart creates gibson-zitadel-tenant-operator
-  # (toolRunner removed — the tool-runner's Zitadel service account went away
-  # with the client_credentials runtime model; sdk#306.)
 
 # =============================================================================
 # SDK release artifact pin (Phase H/8.6, Req 4.7)
@@ -3680,24 +3417,6 @@ tenantOperator:
     mountPath: /etc/gibson/plans
 
 # =============================================================================
-# tenantOwnerBackfill — one-shot migration Job
-#
-# Spec: tenant-role-taxonomy task 4.2 (Req 5).
-#
-# Runs the gibson image's `/usr/local/bin/tenant-owner-backfill` binary
-# after fga-init has applied the new model. For each Tenant CR, the Job
-# finds the earliest TenantMember (the de-facto founder) and writes
-# `(user:<sub>, owner, tenant:<slug>)` to FGA if missing. Idempotent —
-# subsequent helm upgrades create a fresh Job that emits
-# `outcome=already_owner` for every previously-backfilled tenant.
-#
-# The Job is structural (one-code-path / deploy#187): every tenant cluster
-# walks the backfill exactly once, and the Job is idempotent. The previous
-# `enabled: true|false` substitution toggle has been deleted; no template
-# referenced it anyway.
-tenantOwnerBackfill: {}
-
-# =============================================================================
 # activeSessionBackfill — one-shot repair Job (SECURITY, deploy#1186)
 #
 # Spec: instant-session-revocation (gibson#627 Slice 2).
@@ -4625,18 +4344,6 @@ setec:
     tlsCertSecretName: "setec-frontend-tls"
     tlsClientCASecretName: "setec-frontend-tls"
 
-# upgrade — one-time post-upgrade migration hooks.
-# These values control cleanup jobs that run once per helm upgrade.
-upgrade:
-  # cleanupLegacyMissionFinding controls the legacy-mission-finding-cleanup Job.
-  # Default: false — the Job only SCANS and LOGS the key count; no data is deleted.
-  # Set to true on the next helm upgrade AFTER the daemon cutover to delete the
-  # orphaned mission/run/finding keys from the shared Redis that predate the
-  # per-tenant data-plane migration.
-  # Idempotent: re-running with cleanupLegacyMissionFinding=true on a clean
-  # cluster is a no-op (SCAN returns 0 keys, nothing is deleted).
-  cleanupLegacyMissionFinding: false
-
 # =============================================================================
 # bootstrap-secrets Job + ESO stores
 # =============================================================================
@@ -4827,35 +4534,6 @@ bootstrap:
       generator: "rand32"
 
 
-# =============================================================================
-# External Secrets Operator (ESO) ClusterSecretStore configuration
-# =============================================================================
-# ESO is REQUIRED infrastructure (one-code-path #203): the on/off toggle
-# for this block was deleted — every environment that installs
-# gibson-workloads MUST have external-secrets-operator running. Only
-# provider / store-name / backend / IRSA substitution remains
-# configurable below.
-# =============================================================================
-eso:
-  # Provider: kubernetes (Kind dev) or aws (EKS staging/prod).
-  # Default `kubernetes` keeps Kind dev self-contained; EKS overlays
-  # set `provider: aws` + `eso.aws.region` + `eso.aws.irsaRoleArn`.
-  provider: "kubernetes"
-
-  refreshInterval: "60s"
-
-  kubernetes:
-    backendNamespace: external-secrets-backend
-
-  aws:
-    region: ""
-    # Same IRSA role the bootstrap Job uses works here (reads only).
-    irsaRoleArn: ""
-
-preconditions:
-  requireCRDs: true
-  requireOperators: true
-
 # -----------------------------------------------------------------------------
 # helm-test Pod images
 # -----------------------------------------------------------------------------
@@ -4917,26 +4595,6 @@ tests:
     issuer: "http://gibson-zitadel:8080"
     dashboardPatSecret: "gibson-zitadel-dashboard"
     dashboardPatKey: "pat"
-
-# -----------------------------------------------------------------------------
-# AWS configuration
-# aws.region must be non-empty for the chart's cluster-secret-store.yaml
-# AWS-provider template to render. In kind dev the field is set to a dummy
-# value (us-east-1) because the render path requires it even though the
-# kubernetes-provider store is used instead.
-# -----------------------------------------------------------------------------
-aws:
-  region: ""
-  env: ""
-
-# -----------------------------------------------------------------------------
-# Component Ingress
-# When enabled, renders per-component Ingress objects (used in EKS prod to
-# expose internal services via an ALB/NLB ingress controller). Kind dev and
-# most staging overlays leave this false; Envoy owns the external LB.
-# -----------------------------------------------------------------------------
-componentIngress:
-  enabled: false
 
 # -----------------------------------------------------------------------------
 # First-party plugins (R5: plugin deploy = CI-built image + Helm +
