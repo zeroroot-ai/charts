@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.11](https://github.com/zeroroot-ai/charts/compare/v0.133.10...v0.133.11) (2026-10-01)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.147.0, a created mission is listed before it runs ([#272](https://github.com/zeroroot-ai/charts/issues/272)) ([4f0f762](https://github.com/zeroroot-ai/charts/commit/4f0f762e2ef9b8f7986403003a800c2fbcb21c32))
+
 ## [0.133.10](https://github.com/zeroroot-ai/charts/compare/v0.133.9...v0.133.10) (2026-10-01)
 
 
