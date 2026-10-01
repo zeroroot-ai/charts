@@ -142,6 +142,25 @@ gibson-workloads:
           cpu: 5m
           memory: 24Mi
 
+# The Zitadel login UI (umbrella key `zitadel.login`, a vendored subchart). It
+# gained a request in charts 0.135.0, where it had shipped `resources: {}` — no
+# bound at all on a Next.js server. The baseline's 50m is right for an operator
+# and is 50m this rung does not have: the CI node sits at 1880m of a 1900m
+# budget, so the baseline request took the rung to 1930m and failed the guard.
+#
+# 5m, not the dashboard's 10m below, although both are Next.js servers. At 10m
+# the signup overlay rung lands at exactly 1900m of 1900m, and a rung with no
+# slack left is a scheduling coin-flip for whatever is added next. Staging
+# measured this container at 5m idle, so 5m is the measurement rather than a
+# number chosen to fit. A request reserves scheduling room and bounds nothing at
+# runtime — the limit still comes from the baseline, so the pod bursts as before.
+zitadel:
+  login:
+    resources:
+      requests:
+        cpu: 5m
+        memory: 128Mi
+
 gibson-operators:
   tenantOperator:
     resources:
