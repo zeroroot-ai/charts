@@ -379,10 +379,6 @@ https
 {{- end }}
 {{- end }}
 
-{{- define "gibson.grafana.host" -}}
-{{- printf "%s-grafana" .Release.Name }}
-{{- end }}
-
 {{- define "gibson.grpc.port" -}}
 {{- .Values.gibson.service.grpc.port | default 50051 -}}
 {{- end }}
