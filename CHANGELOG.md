@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.9](https://github.com/zeroroot-ai/charts/compare/v0.133.8...v0.133.9) (2026-10-01)
+
+
+### Bug Fixes
+
+* **images:** pin gibson v0.146.5, CreateMission answers with its creator ([#269](https://github.com/zeroroot-ai/charts/issues/269)) ([963f444](https://github.com/zeroroot-ai/charts/commit/963f444e6e156eb33bf2a52837d20d2b7949b90e))
+
 ## [0.133.8](https://github.com/zeroroot-ai/charts/compare/v0.133.7...v0.133.8) (2026-09-30)
 
 
