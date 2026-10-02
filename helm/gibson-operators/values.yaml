@@ -140,7 +140,12 @@ tenantOperator:
     host: ""              # e.g. email-smtp.us-east-1.amazonaws.com — no port
     port: 587
     from: ""              # defaults to no-reply@zeroroot.ai; set it per env
-    tls: true
+    # starttls (port 587, dial plaintext then upgrade) or implicit (port 465,
+    # TLS from the first byte). Both encrypt. This replaced a boolean `tls`
+    # whose false value meant STARTTLS rather than plaintext (gibson#561), which
+    # read as "no TLS" and cost a staging outage against SES on 587. An unknown
+    # value fails the render.
+    tlsMode: starttls
     # Credentials are READ FROM A SECRET, never from these values. The chart
     # used to render SMTP_USERNAME and SMTP_PASSWORD as plain values with a
     # comment saying prod overlays "inject a real value from ESO-backed

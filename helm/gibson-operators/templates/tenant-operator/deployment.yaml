@@ -461,8 +461,29 @@ spec:
             {{- end }}
             - name: SMTP_FROM
               value: {{ ((.Values.tenantOperator).smtp).from | default "no-reply@zeroroot.ai" | quote }}
-            - name: SMTP_TLS
-              value: {{ ((.Values.tenantOperator).smtp).tls | default "false" | quote }}
+            {{- /*
+              The transport is NAMED, not a boolean (gibson#561). "false" never
+              meant plaintext: it meant STARTTLS, because the operator's
+              UseTLS=false branch went through net/smtp.SendMail, which issues
+              STARTTLS and refuses PlainAuth over an unencrypted link. Both
+              branches encrypted, so the flag's name was the whole defect — it
+              cost a staging outage reading "smtp tls dial: tls: first record
+              does not look like a TLS handshake" against SES on 587, which is
+              STARTTLS and not implicit TLS.
+
+              starttls  dial plaintext, then STARTTLS. Port 587. The default.
+              implicit  TLS from the first byte. Port 465.
+
+              An unknown value fails the RENDER here, so a typo never reaches a
+              pod. The operator also refuses it at startup, naming the mode, the
+              host and the port.
+            */}}
+            {{- $mode := ((.Values.tenantOperator).smtp).tlsMode | default "starttls" }}
+            {{- if not (has $mode (list "starttls" "implicit")) }}
+            {{- fail (printf "tenantOperator.smtp.tlsMode is %q — it must be \"starttls\" (port 587, dial plaintext then upgrade) or \"implicit\" (port 465, TLS from the first byte). The old boolean tenantOperator.smtp.tls is gone: tls=false was STARTTLS, not plaintext, so set tlsMode: starttls to keep that behaviour." $mode) }}
+            {{- end }}
+            - name: SMTP_TLS_MODE
+              value: {{ $mode | quote }}
             {{- with (((.Values.tenantOperator).billing).stripeAPIBaseURL) }}
             # DEV ONLY — redirects all Stripe API calls to the in-cluster
             # stripe-mock server (deployed by the gibson-workloads chart when
