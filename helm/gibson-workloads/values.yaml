@@ -1063,36 +1063,12 @@ dashboard:
       provider: "disabled"   # DASHBOARD_CAPTCHA_PROVIDER
       secretKey: ""          # DASHBOARD_CAPTCHA_SECRET_KEY (Secret ref)
 
-    # Transactional email — ALL dashboard outbound mail rides this one
-    # provider: signup verification, password reset, magic links, billing
-    # notifications (Stripe webhook events), and contact-sales lead
-    # notifications. There is exactly ONE provider env
-    # (DASHBOARD_EMAIL_PROVIDER) in the dashboard runtime, so there is
-    # exactly one block here (deploy#854 removed the dead `billingEmail`
-    # duplicate).
-    #
-    # provider: resend | smtp | log
-    # "log" prints email bodies to stdout — useful for kind clusters, but
-    # users will never actually receive their verification links.
-    # "smtp" is the relay the daemon uses too: host and port here, the
-    # username and password from the one OpenBao key `ses-smtp-credentials`
-    # (gibson.email.smtp.externalSecret names the same key). The `ses`
-    # provider is gone: it sent through IRSA on the dashboard
-    # ServiceAccount, and stage 1 mints no workload role (deploy#1744).
-    email:
-      provider: "log"        # DASHBOARD_EMAIL_PROVIDER
-      from: "no-reply@zeroroot.ai"   # DASHBOARD_EMAIL_FROM
-      # Destination inbox for contact-sales form submissions. This is OUR
-      # inbox (a lead notification), not customer-facing mail.
-      contactSalesInbox: "sales@zeroroot.ai"   # CONTACT_SALES_INBOX
-      resend:
-        apiKey: ""           # DASHBOARD_EMAIL_RESEND_API_KEY (Secret ref)
-      smtp:
-        host: ""             # DASHBOARD_EMAIL_SMTP_HOST
-        port: 587
-        # DASHBOARD_EMAIL_SMTP_USER and DASHBOARD_EMAIL_SMTP_PASSWORD come
-        # from the dashboard Secret, which the ExternalSecret fills from
-        # OpenBao key ses-smtp-credentials (username, password).
+    # NO email block. The dashboard sends no mail (dashboard#181): src/lib/email
+    # is deleted along with nodemailer, resend and @aws-sdk/client-ses. The
+    # daemon sends signup verification and invitations and Zitadel owns password
+    # reset and address verification, so the platform's one relay credential
+    # reaches the daemon through gibson.email.smtp and never this chart's
+    # dashboard. A provider knob here described a sender that did not exist.
 
     # Post-logout redirect URI(s) — RP-initiated OIDC logout
     # (`/oidc/v1/end_session`). The dashboard's federated-signout route
@@ -1191,10 +1167,12 @@ dashboard:
     # declared per plan in plans.yaml), identical across every Stripe account
     # and test/live mode (dashboard#872). No per-env price_xxx IDs in git.
 
-  # Billing notifications use the same transactional email provider as the
-  # rest of the dashboard — configured at dashboard.auth.email above.
-  # (deploy#854 removed the dead `billingEmail` block that claimed the same
-  # DASHBOARD_EMAIL_PROVIDER env var but was never rendered by any template.)
+  # No billing email is configured here, and none was ever sent from here.
+  # This block used to point at dashboard.auth.email, which dashboard#181
+  # deleted together with the dashboard's whole mailer. The platform's one
+  # relay credential reaches the daemon through gibson.email.smtp. Whether a
+  # billing notification is sent at all is the daemon's question, not this
+  # chart's, and no template here renders one.
 
   # Public URL for checkout success/cancel redirects.
   # Should match the dashboard's external URL (NEXTAUTH_URL).

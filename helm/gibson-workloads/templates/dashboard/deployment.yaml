@@ -743,43 +743,20 @@ spec:
                   name: {{ include "gibson.dashboardSecrets.name" $ }}
                   key: captcha-secret-key
 
-            - name: DASHBOARD_EMAIL_PROVIDER
-              value: {{ .email.provider | default "log" | quote }}
-            - name: DASHBOARD_EMAIL_FROM
-              value: {{ .email.from | default "no-reply@zeroroot.ai" | quote }}
-            # Destination inbox for contact-sales form leads (deploy#854).
-            - name: CONTACT_SALES_INBOX
-              value: {{ .email.contactSalesInbox | default "sales@zeroroot.ai" | quote }}
-            - name: DASHBOARD_EMAIL_RESEND_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "gibson.dashboardSecrets.name" $ }}
-                  key: email-resend-api-key
-            # smtp.ts reads its From: header from `_SMTP_FROM`, a name the
-            # chart never shipped, and it requires the value. Same source as
-            # DASHBOARD_EMAIL_FROM above.
-            - name: DASHBOARD_EMAIL_SMTP_FROM
-              value: {{ .email.from | default "no-reply@zeroroot.ai" | quote }}
-            - name: DASHBOARD_EMAIL_SMTP_HOST
-              value: {{ .email.smtp.host | default "" | quote }} {{/* allowlist-silent-default: empty when email.provider=log/resend (dev). */}}
-            - name: DASHBOARD_EMAIL_SMTP_PORT
-              value: {{ .email.smtp.port | default 587 | quote }}
-            - name: DASHBOARD_EMAIL_SMTP_USER
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "gibson.dashboardSecrets.name" $ }}
-                  key: email-smtp-user
-            # The reader is `_PASS`, not `_PASSWORD`. The chart shipped
-            # `DASHBOARD_EMAIL_SMTP_PASSWORD` until charts#294, and
-            # src/lib/email/providers/smtp.ts reads
-            # `DASHBOARD_EMAIL_SMTP_PASS`, so the SMTP provider threw on a
-            # missing password wherever dashboard.email.provider was "smtp".
-            # The Secret key keeps its own name.
-            - name: DASHBOARD_EMAIL_SMTP_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "gibson.dashboardSecrets.name" $ }}
-                  key: email-smtp-password
+            {{- /*
+              THE DASHBOARD SENDS NO MAIL, so it takes no mail configuration
+              (dashboard#181). src/lib/email is deleted, along with nodemailer,
+              resend and @aws-sdk/client-ses. Nine env vars and three Secret
+              keys came out with it: DASHBOARD_EMAIL_PROVIDER, _FROM,
+              _RESEND_API_KEY, _SMTP_FROM, _SMTP_HOST, _SMTP_PORT, _SMTP_USER,
+              _SMTP_PASS and CONTACT_SALES_INBOX.
+
+              Who does send mail: the daemon sends signup verification and
+              invitations, and Zitadel owns password reset and its own address
+              verification. One mail transport per install, and the dashboard
+              was never on it — the chart carried a provider knob, an SMTP host,
+              a port and two credentials for a sender that did not exist.
+            */}}
             - name: DASHBOARD_METRICS_ALLOWED_CIDRS
               value: {{ .metrics.allowedCIDRs | default "" | quote }} {{/* allowlist-silent-default: empty disables CIDR filtering (cluster-internal only). */}}
             {{- end }}
