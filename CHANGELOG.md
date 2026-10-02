@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.136.0](https://github.com/zeroroot-ai/charts/compare/v0.135.6...v0.136.0) (2026-10-02)
+
+
+### Features
+
+* **guard:** the daemon's SMTP ExternalSecret is proven in both states ([#335](https://github.com/zeroroot-ai/charts/issues/335)) ([72c4aeb](https://github.com/zeroroot-ai/charts/commit/72c4aebce24451eff654fce1239d5161a9acc778))
+
+
+### Bug Fixes
+
+* **dashboard:** three env vars with no reader, and a Redis credential with no user ([#333](https://github.com/zeroroot-ai/charts/issues/333)) ([b8d7fca](https://github.com/zeroroot-ai/charts/commit/b8d7fca90c12036f4f1bdca236b9ff407a1e6e05))
+* **pins:** gibson v0.150.0, the CRD the chart ships and the image agree again ([#337](https://github.com/zeroroot-ai/charts/issues/337)) ([2a70cf7](https://github.com/zeroroot-ai/charts/commit/2a70cf75d38ae93174611fe12ad8859a6854d455))
+
 ## [0.135.6](https://github.com/zeroroot-ai/charts/compare/v0.135.5...v0.135.6) (2026-10-02)
 
 
