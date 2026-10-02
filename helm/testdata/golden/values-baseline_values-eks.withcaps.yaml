@@ -14822,7 +14822,7 @@ spec:
               mountPath: /shared
       containers:
         - name: dashboard
-          image: "ghcr.io/zeroroot-ai/dashboard:v0.127.1@sha256:db11293cbd71f747d6457799eb9f9277dbecde5a7b429c222a3672602352b33b"
+          image: "ghcr.io/zeroroot-ai/dashboard:v0.127.2@sha256:b3eb592cf477461d8ce57db7f4a9e5af0a7aa5865dc0bc9c96e7d7277634f059"
           imagePullPolicy: IfNotPresent
           # Spec: canonical-service-identity Req 5 — the resolve-sa-identity-map
           # init container writes the comma-joined numeric subs to
@@ -23587,8 +23587,11 @@ spec:
           # The condition is real and now has a producer: spiffeNodeOptions()
           # returns undefined when the SPIFFE Workload API socket is absent or
           # the SVID cache is cold, and the RPC then reaches Envoy with only its
-          # Bearer token. dashboard v0.127.1 emits both names for one release, so
-          # this expr has a writer the moment the pin above lands.
+          # Bearer token. The counter is emitted by src/lib/metrics/auth.ts and
+          # asserted by its own test since v0.127.2, so this expr has a writer
+          # that cannot quietly disappear. It is deliberately NOT written against
+          # a release: a comment that says "as of vX" goes stale at the next pin
+          # and reads as doubt about whether the rule still fires.
           expr: |
             increase(dashboard_workload_svid_fallback_total[5m]) > 0
           for: 10m

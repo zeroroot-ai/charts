@@ -102,8 +102,11 @@ spec:
           # The condition is real and now has a producer: spiffeNodeOptions()
           # returns undefined when the SPIFFE Workload API socket is absent or
           # the SVID cache is cold, and the RPC then reaches Envoy with only its
-          # Bearer token. dashboard v0.127.1 emits both names for one release, so
-          # this expr has a writer the moment the pin above lands.
+          # Bearer token. The counter is emitted by src/lib/metrics/auth.ts and
+          # asserted by its own test since v0.127.2, so this expr has a writer
+          # that cannot quietly disappear. It is deliberately NOT written against
+          # a release: a comment that says "as of vX" goes stale at the next pin
+          # and reads as doubt about whether the rule still fires.
           expr: |
             increase(dashboard_workload_svid_fallback_total[5m]) > 0
           for: 10m
