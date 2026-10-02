@@ -32,7 +32,9 @@ spec:
               restart mid-saga; a sustained rate indicates an upstream
               problem (saga-path failures, or clients creating child CRs
               without owner references and deleting parents quickly).
-              Runbook: docs/runbooks/stuck-terminating-namespaces.md
+              First step: read the reaper's logs for the resource kinds it
+              stripped, then find the controller that created them without an
+              owner reference.
         - alert: TenantOperatorStuckTerminatingNamespaces
           expr: gibson_tenant_operator_stuck_terminating_namespaces > 0
           for: 15m
@@ -47,7 +49,10 @@ spec:
               orphan finalizers; if this alert fires, either the reaper is
               disabled or the stuck resources have unknown finalizers that
               require operator intervention.
-              Runbook: docs/runbooks/stuck-terminating-namespaces.md
+              First step: `kubectl get ns <ns> -o jsonpath='{.spec.finalizers}'`
+              and the namespace's remaining resources. A finalizer the reaper
+              does not know is removed by fixing its controller, never by
+              editing the namespace.
     - name: tenant-operator.daemon-calls
       rules:
         - alert: TenantOperatorDaemonCallsFailing

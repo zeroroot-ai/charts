@@ -30,8 +30,7 @@
      on the mirrored aws-cli image, handed over on a shared emptyDir.
 
      INVARIANT — do not reintroduce a run-time package install, and do not
-     let any stage swallow a failure. Guarded by
-     tests/openbao-backup-cronjob.bats.
+     let any stage swallow a failure.
 
      HOW IT REACHES THE DATA. The PVC is ReadWriteOnce, so the Job is
      pinned by a REQUIRED podAffinity to the node already running
@@ -48,8 +47,9 @@
      own file via a temp-file + rename, so no single entry can be torn;
      an archive taken while the server is writing can still mix entry
      versions across files. That is the accepted cost of the file
-     backend. The restore procedure and its limits are in
-     docs/runbooks/backup-restore.md — read it before relying on this. */}}
+     backend: an archive is a point-in-time copy of the file tree, and the
+     restore is to stop the server, replace the tree, and start it with the
+     keyring it was sealed with. */}}
 {{- if default false ((.Values.openbao).backup).enabled }}
 {{- $backup := .Values.openbao.backup }}
 {{- $bucket := required "openbao.backup.s3Bucket is REQUIRED when openbao.backup.enabled — the platform backups bucket (<workspace>-backups-<account>). deploy#1496." $backup.s3Bucket }}

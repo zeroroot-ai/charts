@@ -51,7 +51,9 @@ spec:
                 2. Verify rotation state: kubectl get secret {{ .Release.Name }}-redis-rotation-state -n {{ .Release.Namespace }}
                 3. If rotation is in progress, the CronJob {{ .Release.Name }}-redis-rotation
                    handles ordered restarts automatically — check its recent job runs.
-                4. Manual recovery: see docs/runbooks/redis-password-rotation.md
+                4. Manual recovery: restart redis-stack first, then the daemon,
+                   then the tenant-operator. Out of that order, every client
+                   that reconnects first gets WRONGPASS.
         {{- end }}
 
         # Fires when the redis-stack StatefulSet has 0 ready replicas for >2m.

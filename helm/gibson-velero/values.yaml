@@ -38,7 +38,7 @@ bucket:
 # ---------------------------------------------------------------------------
 schedule:
   # Hourly is the recovery point objective for Neo4j graphs, OpenBao and the
-  # tenant CRs (docs/bringup.md § Cadence). Postgres has a five minute RPO
+  # tenant CRs. Postgres has a five minute RPO
   # through its own WAL archive and is excluded from this backup.
   cron: "0 * * * *"
   # Velero's garbage collector deletes a backup whose ttl expired. Retention
@@ -76,8 +76,7 @@ velero:
   # THE deploy#1193 SETTING. The upstream default binds this ServiceAccount
   # to cluster-admin AND gives it apiGroups/resources/verbs `*` in its own
   # namespace. Both are off, and templates/rbac.yaml carries the scoped
-  # replacement. tests/velero-rbac.bats fails the render if either comes
-  # back.
+  # replacement.
   rbac:
     create: false
 
@@ -120,7 +119,7 @@ velero:
     # by Velero on its own clock. The default ttl for a backup that states
     # none is therefore the SAME 180 day horizon the lifecycle rule owns and
     # the Schedule states (schedule.ttl above): one horizon, stated in three
-    # places, tied together by tests/velero-schedule.bats. A shorter default
+    # places, and they must agree. A shorter default
     # would have the garbage collector pruning an ad-hoc backup the bucket
     # still keeps.
     defaultBackupTTL: 4320h

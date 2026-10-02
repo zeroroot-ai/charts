@@ -2,9 +2,10 @@
 #
 # The openbao-auto-init sidecar reads this table and makes sure every key
 # exists in the kv v2 mount `secret` at `secret/data/<key>` with every
-# property listed. helm/gibson-workloads/tests/lib/check_seed_coverage.py
-# reads the same table and fails the build when a profile renders an
-# ExternalSecret that reads a key or a property this table does not seed.
+# property listed. Nothing in this repository cross-checks the table against
+# the ExternalSecrets that read it. zeroroot-ai/hosted secret-contract.yaml is
+# the cross-repo record of which key each consumer reads, and
+# zeroroot-ai/hosted scripts/check-secret-contract.py gates it.
 #
 # Format: one key per line, `<key> <property>:<kind>[:<arg>] ...`.
 # Comment lines start with `#`.

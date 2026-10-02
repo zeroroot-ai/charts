@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """velero-backup-from-schedule.py — the Backup a Schedule tick would build.
 
-Step 2 of a preserve teardown (scripts/teardown-kind.sh, deploy#1738). The
+Step 2 of a preserve teardown (zeroroot-ai/hosted scripts/teardown-kind.sh,
+deploy#1738). The
 Velero server builds a cron tick's Backup from `spec.template` of the
 Schedule, and the velero CLI's `--from-schedule` builds the same object
 client-side. Doing it here with kubectl and this file means a teardown backs
 up with the SHIPPED spec (helm/gibson-velero/templates/schedule.yaml) and
 needs no velero CLI on a workstation or a runner.
 
-This file does NOT re-check the spec it copies. The template is already
-gated where it is authored: helm/gibson-velero/tests/lib/check_velero_schedule.py
-asserts the `secrets` exclusion and the rest of the contract against the
-render, with its own failing fixture in velero-schedule.bats. And a spec
+This file does NOT re-check the spec it copies: it reads the rendered
+Schedule and trusts it. And a spec
 that did ask for Secrets comes back PartiallyFailed, which the teardown
 treats as a failure. A copy of that check here would be a third place to
 keep in step, and would fail no earlier than the two that already exist.

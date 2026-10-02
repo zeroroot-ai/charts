@@ -242,9 +242,9 @@ global:
 # kind sets `instances: 1` as a PROFILE value
 # (test/baseline/ci-2core-resources.values.yaml in CI, gitops envs/dev for the
 # dev cluster). That count is the only difference between kind and prod: no
-# flag gates any setting below. helm/gibson/tests/cnpg-posture.bats asserts
-# the staging and prod renders, and the primary-kill step of
-# .github/workflows/exit-test-backup-restore.yml proves the posture live.
+# flag gates any setting below. The primary-kill step of
+# zeroroot-ai/hosted .github/workflows/exit-test-backup-restore.yml proves the
+# posture live.
 platformPostgres:
   # 3 = one primary and two replicas. 1 = kind. The synchronous block renders
   # only above one instance, because a single instance has no standby to wait
@@ -294,7 +294,7 @@ platformPostgres:
       memory: 2Gi
 
   # postgresql.conf. archive_timeout is the recovery point objective for
-  # unplanned loss (docs/bringup.md § Cadence): a WAL segment is
+  # unplanned loss: a WAL segment is
   # shipped to the durable bucket at least every 300 s, so at most five
   # minutes of commits are lost when every instance dies at once.
   parameters:
@@ -602,8 +602,7 @@ neo4j:
   # `dbms.security.procedures.unrestricted=apoc.*` to neo4j.conf BEFORE
   # NEO4J_-prefixed settings apply, so no environment variable can undo it,
   # and Neo4j Community has no in-database RBAC — `unrestricted` would apply
-  # to every connection holding the bolt credential. says it is
-  # never set; tests/neo4j-apoc-clean-state.bats enforces both halves.
+  # to every connection holding the bolt credential, so it is never set.
   #
   # These values mirror gibson's APOC provisioning contract
   # (pkg/platform/dataplane/apoc.go: APOCCoreJarGlob, APOCInstallCommand,
@@ -1112,7 +1111,6 @@ zitadel:
     # active-session-backfill for the same reason. Those four are in
     # gibson-workloads; this Job comes from the zitadel subchart, which is
     # why it was outside that sweep.
-    # Guard: helm/gibson/tests/zitadel-setup-deadline.bats.
     activeDeadlineSeconds: 1200
     annotations:
       helm.sh/hook: post-install,post-upgrade

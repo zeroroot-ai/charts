@@ -31,7 +31,7 @@ Image policy:
 
 Override via .Values.tests.image.* in any overlay.
 
-Documentation: helm/gibson-workloads/README.md, docs/runbooks/RUNBOOK-helm-test.md.
+Documentation: helm/gibson-workloads/README.md.
 */}}
 
 {{/*

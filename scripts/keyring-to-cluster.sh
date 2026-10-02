@@ -38,7 +38,7 @@
 # value this script could not write (measured live on staging, deploy#1746:
 # the staging keyring carries an empty GHCR_PULL_TOKEN).
 # A new member added here must be quoted too, and
-# tests/harness/keyring-to-cluster.bats fails when one is not.
+# zeroroot-ai/hosted tests/harness/keyring-to-cluster.bats fails when one is not.
 #
 # Usage: keyring-to-cluster.sh <substrate.env>
 # Env:   NS            release namespace (default gibson)
@@ -70,7 +70,7 @@ BUCKET_SECRET_KEY="$(keyring_get BUCKET_SECRET_KEY)"
 # started under any other key comes up sealed and stays sealed.
 OPENBAO_SEAL_KEY="$(keyring_get OPENBAO_SEAL_KEY)"
 [ "${#OPENBAO_SEAL_KEY}" -eq 44 ] \
-  || { echo "FATAL: ${KEYRING_FILE} has no 44-character OPENBAO_SEAL_KEY member (base64 of 32 bytes); rotate the keyring (docs/runbooks/substrate-kind.md)" >&2; exit 1; }
+  || { echo "FATAL: ${KEYRING_FILE} has no 44-character OPENBAO_SEAL_KEY member (base64 of 32 bytes); generate a new keyring with scripts/keyring.sh generate" >&2; exit 1; }
 
 # The Velero repository password (deploy#1734). Velero seals its kopia
 # repository with it. Velero's Role carries no create on secrets, so a
@@ -78,7 +78,7 @@ OPENBAO_SEAL_KEY="$(keyring_get OPENBAO_SEAL_KEY)"
 # with its built-in default.
 VELERO_REPO_PASSWORD="$(keyring_get VELERO_REPO_PASSWORD)"
 [ "${#VELERO_REPO_PASSWORD}" -eq 44 ] \
-  || { echo "FATAL: ${KEYRING_FILE} has no 44-character VELERO_REPO_PASSWORD member (base64 of 32 bytes); rotate the keyring (docs/runbooks/substrate-kind.md)" >&2; exit 1; }
+  || { echo "FATAL: ${KEYRING_FILE} has no 44-character VELERO_REPO_PASSWORD member (base64 of 32 bytes); generate a new keyring with scripts/keyring.sh generate" >&2; exit 1; }
 
 log "keyring ${KEYRING_FILE} (sha256:$(sha256sum < "$KEYRING_FILE" | cut -c1-16)) -> Secret ${NS}/bringup-keyring"
 kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """wal-continuity.py — is the CNPG WAL archive continuous? (deploy#1738)
 
-Check 2 of scripts/backup-verify.sh, the gate inside a preserve teardown
+Check 2 of zeroroot-ai/hosted scripts/backup-verify.sh, the gate inside a
+preserve teardown
 (ADR-0015, CONTEXT.md § Backup-verify). A base backup with a broken WAL
 archive restores only to the instant it was taken, and it looks healthy the
 whole time: the Backup CR says `completed`, the objects are in the bucket,

@@ -3,7 +3,7 @@ ratelimit NetworkPolicy (deploy#1657).
 
 Ingress: the mTLS gRPC port from Envoy pods only, and /healthcheck from the
 scrapers. Egress: EXACTLY DNS and Redis. The quota service reaches nothing
-else, and tests/ratelimit-service.bats fails on any third egress rule.
+else: a third egress rule means the quota service grew a dependency.
 */}}
 {{- if ne (include "gibson.trueUnlessSet" (((.Values.ratelimit).networkPolicy).enabled)) "false" }}
 apiVersion: networking.k8s.io/v1

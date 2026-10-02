@@ -1,7 +1,7 @@
 {{- /*
 The scoped RBAC that replaces the upstream chart's cluster-admin binding
 (deploy#1193). Every rule below is here for a stated reason. Two
-properties hold, and tests/velero-rbac.bats fails the render on either:
+properties hold:
 
   1. No `*` in any apiGroups, resources or verbs list, and no binding to
      cluster-admin, admin or edit.
@@ -222,7 +222,8 @@ rules:
   #                              a backup of `gibson` and `tenant-*` collects
   #                              none; the list still has to be allowed.
   #   toolhive.stacklok.dev      The ToolHive operator, a cluster prerequisite
-  #                              of the connector runtime (scripts/recreate-kind.sh).
+  #                              of the connector runtime
+#                              (zeroroot-ai/hosted scripts/recreate-kind.sh).
   #                              The connector-operator renders MCPServer and
   #                              MCPRemoteProxy CRs into tenant namespaces.
   #   setec.zeroroot.ai          The sandbox runtime, an umbrella subchart

@@ -749,8 +749,7 @@ static_resources:
                         # the verifier's half of the handshake and the verifier
                         # is always in-cluster.
                         #
-                        # Guarded by tests/envoy-no-public-cg-keys.bats and by
-                        # tools/envoy-header-trust (the route is out of the
+                        # Guarded by tools/envoy-header-trust (the route is out of the
                         # reviewed ext_authz-disable allowlist).
                         # ---------------------------------------------------
                         # deploy#1205: the tenant-operator → dashboard
@@ -861,9 +860,9 @@ static_resources:
                   # local_ratelimit that looks fully configured but lacks these
                   # two fields enforces nothing while reporting as configured —
                   # the exact "renders fine when wrong" class this change exists
-                  # to close. tests/envoy-edge-rate-limiting.bats asserts
-                  # 100/HUNDRED on every local_ratelimit config in the rendered
-                  # file, so a hand-written copy that drops them fails the build.
+                  # to close. Nothing asserts 100/HUNDRED across the rendered
+                  # file, so a hand-written copy that drops them is caught by
+                  # reading, not by the build.
                   #
                   # No descriptors — see envoy.rateLimit in values.yaml for why
                   # this edge has no trustworthy client address to key on.

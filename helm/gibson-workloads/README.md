@@ -101,7 +101,7 @@ at-a-glance. The full diagnostic context follows in `[<test-name>]` lines.
    - `gibson-workloads.tests.errorPrefix` (`::error file=helm-test::`)
 3. Use `set -euo pipefail` in any embedded shell.
 4. Document the assertion in the leading `{{- /* ... */ -}}` block.
-5. Update this README + `docs/runbooks/RUNBOOK-helm-test.md`.
+5. Update this README.
 6. If extra RBAC is needed, prefer reusing
    `<release>-test-bootstrap-reader` (already grants get/list on
    secrets+configmaps); only mint a new SA if you need broader scope.

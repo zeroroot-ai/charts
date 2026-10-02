@@ -226,8 +226,7 @@ gibson:
   # on a self-hosted install; the fail-open unlimited posture is correct there.
   #
   # INVARIANT (deploy#1055 guard): if entitlementsEndpoint is set, this MUST
-  # be true. The bats guard `helm/gibson/tests/signup-seam.bats` enforces this
-  # at render time — a SaaS render that omits this knob fails CI.
+  # be true. Nothing enforces it at render time.
   #
   # Maps to GIBSON_ENTITLEMENTS_REQUIRED env on the daemon StatefulSet.
   # Leave unset (empty) for self-hosted installs (the default here).
@@ -259,7 +258,7 @@ gibson:
     # Only flip it AFTER seeding gibson-cg-signing-key-previous in the backend:
     # the daemon treats a previous.kid file that exists but is empty as a broken
     # mount and disables capability grants entirely — it does not degrade.
-    # Procedure: docs/runbooks/cg-signing-key-rotation.md
+    # The four steps are in templates/secrets/cg-signing-key.yaml.
     rotationWindow: false
 
   # Product-surface origin (gibson#1228 companion, deploy signup-email-delivery).
@@ -1983,14 +1982,14 @@ envoy:
   #   the L4 load balancer preserves it on every substrate and every HCM sets
   #   `use_remote_address: true` + `xff_num_trusted_hops: 0`, so the peer is
   #   the client and a client-supplied x-forwarded-for is never consulted.
-  #   The bats guard in tests/envoy-edge-rate-limiting.bats pins that pairing:
-  #   a descriptor may only appear under an HCM that trusts the peer.
+  #   That pairing is the rule: a descriptor may only appear under an HCM
+  #   that trusts the peer.
   #
   #   Per-client keying is a prerequisite change (client-IP preservation or
   #   PROXY protocol on the NLB, plus use_remote_address/xff_num_trusted_hops
-  #   here), tracked in deploy#1241. Until then: no descriptors. The bats suite
-  #   tests/envoy-edge-rate-limiting.bats FAILS the build on any local_ratelimit
-  #   config that grows a `descriptors` block while use_remote_address is unset.
+  #   here), tracked in deploy#1241. Until then: no descriptors. A
+  #   local_ratelimit config that grows a `descriptors` block while
+  #   use_remote_address is unset keys every client to the same bucket.
   #
   # CONTAINMENT: buckets are PER ROUTE, and a route-level bucket fully replaces
   # the chain baseline (Envoy resolves per-filter config most-specific-first),
@@ -2127,7 +2126,7 @@ envoy:
     # across Envoy replicas. Keyed on the client address (Client-IP contract:
     # the socket peer, masked /32 v4 and /64 v6). Fixed windows, no burst.
     # Sizing rule: about ten times a real client's peak, and ALWAYS below the
-    # route's fuse above — tests/ratelimit-service.bats asserts the ordering.
+    # route's fuse above, or the fuse trips first and this quota never applies.
     #
     # Fail-open by construction, not by knob: envoy.filters.http.ratelimit is
     # rendered with failure_mode_deny: false and there is no value that
@@ -2825,7 +2824,8 @@ openbao:
   # it errors out on a file backend. A logical export cannot substitute
   # either: transit keys are non-exportable by design. On a file backend a
   # filesystem archive of the data directory is the only mechanism that
-  # captures the keyring. Restore procedure: docs/runbooks/backup-restore.md.
+  # captures the keyring. A restore replaces the file tree and starts the
+  # server with the keyring the archive was sealed with.
   #
   # DEFAULT OFF, ON FOR THE AWS PROFILES. kind and a generic self-host have
   # no S3 bucket to write to, and a CronJob that fails hourly on a missing
@@ -4100,8 +4100,7 @@ setec:
       #                 4Gi). defaultResources is NOT that: setec reads it
       #                 for the warm-pool template only.
       # Two idle members cost 0.5 vCPU / 1.5Gi. The sanctioned profile
-      # (helm/gibson/values-baseline.yaml) restates the class list and is
-      # pinned by helm/gibson/tests/bank-member-sizing.bats.
+      # (helm/gibson/values-baseline.yaml) restates the class list.
       - name: agent
         spec:
           runtime:
@@ -4469,8 +4468,7 @@ bootstrap:
     # directly from the OIDCClient CRs shipped by templates/auth/. See
     # gitops#93 (no-conflicting-oidc-externalsecrets) for the precedent
     # that removed the matching conflicting ExternalSecrets from this
-    # chart, and tests/no-conflicting-oidc-externalsecrets.bats for the
-    # regression assertion. The OIDCClient flow is verified live (five
+    # chart. The OIDCClient flow is verified live (five
     # OIDCClient CRs all Ready=True on the kind dev cluster 2026-05-18).
 
     # ---- Per-role postgres passwords (deploy-simplification-bringup W3) ----

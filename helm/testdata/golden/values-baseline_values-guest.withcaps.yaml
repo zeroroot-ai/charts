@@ -3316,8 +3316,7 @@ data:
                             # the verifier's half of the handshake and the verifier
                             # is always in-cluster.
                             #
-                            # Guarded by tests/envoy-no-public-cg-keys.bats and by
-                            # tools/envoy-header-trust (the route is out of the
+                            # Guarded by tools/envoy-header-trust (the route is out of the
                             # reviewed ext_authz-disable allowlist).
                             # ---------------------------------------------------
                             # deploy#1205: the tenant-operator → dashboard
@@ -3428,9 +3427,9 @@ data:
                       # local_ratelimit that looks fully configured but lacks these
                       # two fields enforces nothing while reporting as configured —
                       # the exact "renders fine when wrong" class this change exists
-                      # to close. tests/envoy-edge-rate-limiting.bats asserts
-                      # 100/HUNDRED on every local_ratelimit config in the rendered
-                      # file, so a hand-written copy that drops them fails the build.
+                      # to close. Nothing asserts 100/HUNDRED across the rendered
+                      # file, so a hand-written copy that drops them is caught by
+                      # reading, not by the build.
                       #
                       # No descriptors — see envoy.rateLimit in values.yaml for why
                       # this edge has no trustworthy client address to key on.
@@ -4282,8 +4281,7 @@ data:
                       # filter_enabled / filter_enforced are set explicitly and
                       # MUST stay at 100%: BOTH DEFAULT TO 0% WHEN OMITTED — a
                       # limiter that omits them renders fine and enforces nothing.
-                      # tests/envoy-edge-rate-limiting.bats asserts 100/HUNDRED on
-                      # every local_ratelimit config in the rendered file.
+                      # Every local_ratelimit config in this file sets both.
                       #
                       # No descriptors — see envoy.rateLimit in values.yaml for
                       # why this edge has no trustworthy client address to key on.
@@ -11893,7 +11891,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 1bb01a8d8d8d091fcdc0f67c7c6b1f0784f61fd81d54b424f367b547a3b2ce09
+        checksum/config: 79b184e0249c72457808bac917d6c66c270f0656889d33a88d352fc1fb02b24c
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -13689,10 +13687,8 @@ spec:
         #
         # THE SEED CONTRACT is helm/gibson-workloads/files/openbao-seed-keys.txt,
         # inlined below. One kv v2 mount, `secret`, one path per key,
-        # `secret/data/<key>`, properties as the table lists them. The
-        # render guard (tests/lib/check_seed_coverage.py) fails the build when
-        # an ExternalSecret reads a key or a property the table does not
-        # seed. Idempotent by property: a present value is never overwritten,
+        # `secret/data/<key>`, properties as the table lists them.
+        # Idempotent by property: a present value is never overwritten,
         # except the two keyring inputs (they follow the keyring) and the
         # service token (it follows the Secret this sidecar writes).
         #
@@ -13752,9 +13748,10 @@ spec:
               #
               # The openbao-auto-init sidecar reads this table and makes sure every key
               # exists in the kv v2 mount `secret` at `secret/data/<key>` with every
-              # property listed. helm/gibson-workloads/tests/lib/check_seed_coverage.py
-              # reads the same table and fails the build when a profile renders an
-              # ExternalSecret that reads a key or a property this table does not seed.
+              # property listed. Nothing in this repository cross-checks the table against
+              # the ExternalSecrets that read it. zeroroot-ai/hosted secret-contract.yaml is
+              # the cross-repo record of which key each consumer reads, and
+              # zeroroot-ai/hosted scripts/check-secret-contract.py gates it.
               #
               # Format: one key per line, `<key> <property>:<kind>[:<arg>] ...`.
               # Comment lines start with `#`.
@@ -13838,8 +13835,8 @@ spec:
                 # root (/sys/generate-root) and would have to be stored
                 # somewhere to be of use; deploy#1195 removed exactly such a
                 # stored credential from this namespace. The recovery path for
-                # this store is the archive plus the bringup keyring
-                # (docs/runbooks/backup-restore.md), not a key in a Secret. So:
+                # this store is the archive plus the bringup keyring, not a
+                # key in a Secret. So:
                 #   - the response is held in one shell variable, never
                 #     written to a file (the previous code wrote it to a file);
                 #   - only root_token is parsed out of it;
@@ -13895,7 +13892,7 @@ spec:
                   -X POST -H "X-Vault-Token: ${root}" \
                   "${BAO_ADDR_LOCAL}/v1/auth/token/revoke-self")
                 if [ "$code" = "204" ] || [ "$code" = "200" ] || [ "$code" = "403" ]; then
-                  echo "[openbao-auto-init] initial root token REVOKED (HTTP $code). No recovery key exists; the archive plus the bringup keyring is the recovery path — see docs/runbooks/openbao-recovery.md"
+                  echo "[openbao-auto-init] initial root token REVOKED (HTTP $code). No recovery key exists; the archive plus the bringup keyring is the recovery path. There is nothing else to keep"
                   return 0
                 fi
                 echo "[openbao-auto-init] WARN: revoke-self returned HTTP $code: $(cat ${TMPD}/revoke.json) — initial root token is STILL LIVE (deploy#1195)" >&2
@@ -14135,7 +14132,7 @@ spec:
                 minter="$held"
                 if [ -z "$minter" ]; then
                   minter=$(bao_login_seeder) || {
-                    echo "[openbao-auto-init] FATAL: the ${secret} token is unusable and the ${SEEDER_ROLE} login failed, so nothing can mint a replacement. Procedure: docs/runbooks/openbao-recovery.md" >&2
+                    echo "[openbao-auto-init] FATAL: the ${secret} token is unusable and the ${SEEDER_ROLE} login failed, so nothing can mint a replacement. Restore the store from its archive with the keyring it was sealed with" >&2
                     return 1
                   }
                 fi
@@ -14548,7 +14545,7 @@ spec:
                 # seed it, a rotated keyring input reach the store, and a
                 # store restored into a new cluster grow a fresh service token.
                 seeder=$(bao_login_seeder) || {
-                  echo "[openbao-auto-init] WARN: cannot log in with role ${SEEDER_ROLE}; the reconcile pass is skipped. A store from before deploy#1732 has no such role: docs/runbooks/openbao-recovery.md" >&2
+                  echo "[openbao-auto-init] WARN: cannot log in with role ${SEEDER_ROLE}; the reconcile pass is skipped. A store from before deploy#1732 has no such role, and gains one on the next bootstrap" >&2
                   return 1
                 }
                 echo "[openbao-auto-init] logged in as ${OWN_SA} with role ${SEEDER_ROLE}; reconciling"
@@ -14658,7 +14655,7 @@ spec:
                   # 5 s, deploy#1731). Nothing here can open it: the static
                   # seal has no unseal key and this sidecar holds no recovery
                   # key. Say so, and never POST /v1/sys/unseal.
-                  echo "[openbao-auto-init] store is initialized but SEALED under the ${seal_type} seal: the key in Secret ${KEYRING_SECRET}/${KEYRING_KEY} does not open this store. Put the bringup keyring this store was sealed with in place and restart the pod. No unseal is attempted — see docs/runbooks/openbao-recovery.md" >&2
+                  echo "[openbao-auto-init] store is initialized but SEALED under the ${seal_type} seal: the key in Secret ${KEYRING_SECRET}/${KEYRING_KEY} does not open this store. Put the bringup keyring this store was sealed with in place and restart the pod. No unseal is attempted: this seal has no unseal key and this sidecar holds no recovery key" >&2
                   sleep 30
                   continue
                 fi
@@ -14695,7 +14692,7 @@ spec:
             # pull token and the SMTP relay credential. Projected from the same
             # bringup keyring Secret as the seal key, but as a SEPARATE volume
             # that never lists the seal key, so the sidecar cannot read it
-            # (tests/lib/check_static_seal.py asserts this). `optional: true`:
+            # by construction, not by assertion. `optional: true`:
             # a bringup that supplies no input still comes up, with the keys
             # seeded empty.
             - name: bringup-inputs
@@ -14986,7 +14983,7 @@ spec:
         # then daemon, then tenant-operator); the rotation CronJob
         # (deploy#517) enforces that order. Listing this Secret in Reloader
         # would race-restart the daemon simultaneously with redis-stack,
-        # causing WRONGPASS. See docs/runbooks/redis-password-rotation.md.
+        # causing WRONGPASS.
         secret.reloader.stakater.com/reload: "gibson-workloads-db-secrets,gibson-platform-postgres-credentials,gibson-native-login-oidc"
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
     spec:
@@ -16889,7 +16886,7 @@ metadata:
     #
     # Deliberately NOT a helm.sh/hook: this Job's only network peer is the
     # OpenFGA sibling Argo app, which carries no in-chart NetworkPolicy for a
-    # hook to be allow-listed against (scripts/lint-hook-jobs.py). Under plain
+    # hook to be allow-listed against (scripts/check-hook-jobs-sh.py). Under plain
     # Helm (kind) it is therefore a normal resource that runs once at install —
     # exactly how fga-init behaves off-Argo — and the wait-for-fga-config init
     # container below handles ordering. resource-policy:keep stops uninstall
@@ -17668,8 +17665,7 @@ metadata:
     # `bootstrap.recovery`, would re-initialize the database over the
     # recovered one. `inheritedMetadata` below puts the same label on every
     # pod and PVC the operator derives from this CR, which is what keeps
-    # those volumes out of the file-system backup. The guard is
-    # helm/gibson/tests/velero-exclude-label.bats.
+    # those volumes out of the file-system backup.
     velero.io/exclude-from-backup: "true"
   annotations:
     # Regular resource (never a hook — a hook-delete-policy would delete the
@@ -17719,7 +17715,7 @@ spec:
     topologyKey: topology.kubernetes.io/zone
   postgresql:
     # postgresql.conf. archive_timeout is the recovery point objective for
-    # unplanned loss (docs/bringup.md § Cadence): a WAL segment is shipped to
+    # unplanned loss: a WAL segment is shipped to
     # the durable bucket at least every 300 s, even when the platform writes
     # too little to fill one. Rendered on every profile, including one
     # instance on kind.
@@ -19300,8 +19296,7 @@ metadata:
     # Desired state, excluded from the Velero backup (deploy#1735, CONTEXT.md
     # § Velero backup). The chart renders this CR on every sync, so a restore
     # that carried it would fight the live copy. Velero's item collector
-    # skips any object with this label. The guard is
-    # helm/gibson/tests/velero-exclude-label.bats.
+    # skips any object with this label.
     velero.io/exclude-from-backup: "true"
 spec:
   zitadel:
@@ -19449,7 +19444,9 @@ spec:
               restart mid-saga; a sustained rate indicates an upstream
               problem (saga-path failures, or clients creating child CRs
               without owner references and deleting parents quickly).
-              Runbook: docs/runbooks/stuck-terminating-namespaces.md
+              First step: read the reaper's logs for the resource kinds it
+              stripped, then find the controller that created them without an
+              owner reference.
         - alert: TenantOperatorStuckTerminatingNamespaces
           expr: gibson_tenant_operator_stuck_terminating_namespaces > 0
           for: 15m
@@ -19464,7 +19461,10 @@ spec:
               orphan finalizers; if this alert fires, either the reaper is
               disabled or the stuck resources have unknown finalizers that
               require operator intervention.
-              Runbook: docs/runbooks/stuck-terminating-namespaces.md
+              First step: `kubectl get ns <ns> -o jsonpath='{.spec.finalizers}'`
+              and the namespace's remaining resources. A finalizer the reaper
+              does not know is removed by fixing its controller, never by
+              editing the namespace.
     - name: tenant-operator.daemon-calls
       rules:
         - alert: TenantOperatorDaemonCallsFailing
@@ -21240,8 +21240,7 @@ spec:
             local label="$1" url="$2" want="${3:-200}"
             echo "[svc-probe] $label  $url"
             # -k: dev kind uses self-signed envoy cert; this probe is a
-            #     reachability test, not a cert-chain test (cert chain is
-            #     covered by tests/envoy-edge-cert.bats).
+            #     reachability test, not a cert-chain test.
             # --max-time: bound failure latency so a hung Service doesn't
             #              swallow the rest of the run.
             code=$(curl -ksS -o /tmp/body -w '%{http_code}' --max-time 10 "$url" || echo "000")
