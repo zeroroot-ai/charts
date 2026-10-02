@@ -12107,7 +12107,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sandbox-eviction-handler
-          image: "ghcr.io/zeroroot-ai/gibson:v0.148.3@sha256:620939c325596eea10e08b4bdedf6ae57d2cab814fc47bb3873e346dfff41a75"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.149.0@sha256:303ddd771ca4fa5db56b76fba7cea98fe4cbdf3cd4c7cb2c1c872440c2feb7fd"
           imagePullPolicy: Always
           command: ["/usr/local/bin/sandbox-eviction-handler"]
           args:
@@ -13175,7 +13175,7 @@ spec:
               readOnly: true
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/connector-operator:v0.148.3@sha256:eb5aac237ddd92a612116a2b3af0d650a591d78b555d74c7960fe94b73079d4d"
+          image: "ghcr.io/zeroroot-ai/connector-operator:v0.149.0@sha256:567bd5d144482740db5b028b83c61dbaf5051114d64357424f45f5f11ece8cd6"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -13293,7 +13293,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/platform-operator:v0.148.3@sha256:16e24d1fcc0454427df8e489bbd950e5f2bea1f5060e2b65968574c6cec889c7"
+          image: "ghcr.io/zeroroot-ai/platform-operator:v0.149.0@sha256:9ec5cf6ef8bb436317375069815b3b601f0b792f8ed7eaff4459fa940e458598"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -13751,7 +13751,7 @@ spec:
               memory: 64Mi
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.148.3@sha256:2f44824fb18b4a827350c79b089b79f9407fbc96f1446226aa63115e04e62474"
+          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.149.0@sha256:76d2dda320fcc1e2b4827d226bb70ec6cdf33650a275dab7889db2c446bdfc86"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -14810,7 +14810,7 @@ spec:
               mountPath: /shared
       containers:
         - name: dashboard
-          image: "ghcr.io/zeroroot-ai/dashboard:v0.126.0@sha256:85bcb6bb2a0f667d420d7964238a37a17dab6c6d6fc01c6222e31715d4d52cb2"
+          image: "ghcr.io/zeroroot-ai/dashboard:v0.127.1@sha256:db11293cbd71f747d6457799eb9f9277dbecde5a7b429c222a3672602352b33b"
           imagePullPolicy: IfNotPresent
           # Spec: canonical-service-identity Req 5 — the resolve-sa-identity-map
           # init container writes the comma-joined numeric subs to
@@ -15830,7 +15830,7 @@ spec:
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,tmp"
         checksum/registry: 037b476875b6eab5c00cec997dc041e7760adb1c39b55ae15b5254e9df9e91b4
-        checksum/daemon-registry: 63424631fe6ed672abd022b9a2a0fbdbbc937b8baa2419b8308fc8f9652bdb22
+        checksum/daemon-registry: e4f9a629c0ad079e4031047e6ad72ef89f95e6bc78ecf5660b1297c5d2562091
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
         secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc"
     spec:
@@ -15943,7 +15943,7 @@ spec:
               memory: 64Mi
       containers:
         - name: ext-authz
-          image: "ghcr.io/zeroroot-ai/ext-authz:v0.148.3@sha256:3528582c550b671976fa9e95a311ea9f36dba6cabc13b0d574b1a18c08d99e95"
+          image: "ghcr.io/zeroroot-ai/ext-authz:v0.149.0@sha256:e9cd27a534069856a7f1c76200b0d123e032faa524985df9ff0758658440e9e0"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -18747,7 +18747,7 @@ spec:
               echo "Redis is ready!"
       containers:
         - name: gibson
-          image: "ghcr.io/zeroroot-ai/gibson:v0.148.3@sha256:620939c325596eea10e08b4bdedf6ae57d2cab814fc47bb3873e346dfff41a75"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.149.0@sha256:303ddd771ca4fa5db56b76fba7cea98fe4cbdf3cd4c7cb2c1c872440c2feb7fd"
           imagePullPolicy: Always
           ports:
             - name: callback
@@ -19969,7 +19969,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-fga-init-63424631
+  name: gibson-gibson-workloads-fga-init-e4f9a629
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -20027,7 +20027,7 @@ spec:
         # The entrypoint is the gibson binary, so command overrides it to get a
         # shell for the redirect. The runtime image is alpine-based and has one.
         - name: dump-model
-          image: "ghcr.io/zeroroot-ai/gibson:v0.148.3@sha256:620939c325596eea10e08b4bdedf6ae57d2cab814fc47bb3873e346dfff41a75"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.149.0@sha256:303ddd771ca4fa5db56b76fba7cea98fe4cbdf3cd4c7cb2c1c872440c2feb7fd"
           imagePullPolicy: Always
           command: ['/bin/sh', '-c']
           args:
@@ -20422,7 +20422,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-active-session-backfill-63424631
+  name: gibson-gibson-workloads-active-session-backfill-e4f9a629
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -20510,7 +20510,7 @@ spec:
               memory: 64Mi
       containers:
         - name: active-session-backfill
-          image: "ghcr.io/zeroroot-ai/gibson:v0.148.3@sha256:620939c325596eea10e08b4bdedf6ae57d2cab814fc47bb3873e346dfff41a75"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.149.0@sha256:303ddd771ca4fa5db56b76fba7cea98fe4cbdf3cd4c7cb2c1c872440c2feb7fd"
           imagePullPolicy: Always
           # allowlist-bringup-job-idempotency (deploy#928): the command is a
           # single Go binary, not a shell script — there is no multi-step shell
@@ -25890,7 +25890,7 @@ spec:
       # The daemon image itself — same repo@digest the StatefulSet runs — so
       # `gibson --version` reports the toolchain the DEPLOYED binary was built
       # with, not some proxy. The runtime image is alpine-based (has /bin/sh).
-      image: "ghcr.io/zeroroot-ai/gibson:v0.148.3@sha256:620939c325596eea10e08b4bdedf6ae57d2cab814fc47bb3873e346dfff41a75"
+      image: "ghcr.io/zeroroot-ai/gibson:v0.149.0@sha256:303ddd771ca4fa5db56b76fba7cea98fe4cbdf3cd4c7cb2c1c872440c2feb7fd"
       imagePullPolicy: Always
       command: ["/bin/sh", "-c"]
       args:
