@@ -145,24 +145,30 @@ spec:
             - containerPort: 8080
               name: health
               protocol: TCP
+          # All three declare timeoutSeconds, because the default is 1
+          # (charts#306). The startup probe gets 5: a cold plugin answers
+          # /healthz only after the SDK has enrolled its capability grant.
           startupProbe:
             httpGet:
               path: /healthz
               port: health
             periodSeconds: 5
             failureThreshold: 12
+            timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /healthz
               port: health
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
           livenessProbe:
             httpGet:
               path: /livez
               port: health
             initialDelaySeconds: 15
             periodSeconds: 20
+            timeoutSeconds: 3
           resources:
             requests:
               cpu: {{ (($p.resources).requests).cpu | default "25m" }}

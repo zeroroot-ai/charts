@@ -13206,18 +13206,23 @@ spec:
             - containerPort: 8081
               name: probes
               protocol: TCP
+          # Both probes declare timeoutSeconds. The default is 1, and on a
+          # loaded 2-core runner controller-runtime's own handler has missed it
+          # (charts#306, the OpenBao case in auth/openbao-deployment.yaml).
           livenessProbe:
             httpGet:
               path: /healthz
               port: probes
             initialDelaySeconds: 15
             periodSeconds: 20
+            timeoutSeconds: 3
           readinessProbe:
             httpGet:
               path: /readyz
               port: probes
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
           resources:
             requests:
               cpu: 20m
@@ -13309,18 +13314,23 @@ spec:
             - containerPort: 8081
               name: probes
               protocol: TCP
+          # Both probes declare timeoutSeconds. The default is 1, and on a
+          # loaded 2-core runner controller-runtime's own handler has missed it
+          # (charts#306, the OpenBao case in auth/openbao-deployment.yaml).
           livenessProbe:
             httpGet:
               path: /healthz
               port: probes
             initialDelaySeconds: 15
             periodSeconds: 20
+            timeoutSeconds: 3
           readinessProbe:
             httpGet:
               path: /readyz
               port: probes
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
           resources:
             requests:
               cpu: 50m
@@ -13785,18 +13795,23 @@ spec:
             - containerPort: 9443
               name: webhook
               protocol: TCP
+          # Both probes declare timeoutSeconds. The default is 1, and on a
+          # loaded 2-core runner controller-runtime's own handler has missed it
+          # (charts#306, the OpenBao case in auth/openbao-deployment.yaml).
           livenessProbe:
             httpGet:
               path: /healthz
               port: probes
             initialDelaySeconds: 15
             periodSeconds: 20
+            timeoutSeconds: 3
           readinessProbe:
             httpGet:
               path: /readyz
               port: probes
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
           resources:
             requests:
               cpu: 50m
@@ -16426,18 +16441,22 @@ spec:
             - name: metrics
               containerPort: 9090
               protocol: TCP
+          # Both declare timeoutSeconds, because the default is 1
+          # (charts#306). /healthcheck answers from process memory.
           readinessProbe:
             httpGet:
               path: /healthcheck
               port: http
             initialDelaySeconds: 2
             periodSeconds: 5
+            timeoutSeconds: 3
           livenessProbe:
             httpGet:
               path: /healthcheck
               port: http
             initialDelaySeconds: 10
             periodSeconds: 15
+            timeoutSeconds: 3
           resources:
             limits:
               cpu: 150m
@@ -16472,11 +16491,14 @@ spec:
             - name: grpc
               containerPort: 8081
               protocol: TCP
+          # A tcpSocket probe needs the kernel to accept, nothing more, so 2
+          # is generous. It is declared because the default is 1 (charts#306).
           readinessProbe:
             tcpSocket:
               port: grpc
             initialDelaySeconds: 3
             periodSeconds: 5
+            timeoutSeconds: 2
           resources:
             limits:
               cpu: 100m
@@ -19517,6 +19539,7 @@ spec:
             # Allow overriding the probe action
             tcpSocket:
               port: 7687
+            timeoutSeconds: 10
             failureThreshold: 1000
             periodSeconds: 5
       volumes:

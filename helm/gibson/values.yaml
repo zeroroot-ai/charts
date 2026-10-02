@@ -563,6 +563,13 @@ neo4j:
       limits:
         cpu: 1000m
         memory: 3Gi
+  # The upstream chart gives readinessProbe and livenessProbe timeoutSeconds: 10
+  # and leaves startupProbe on the Kubernetes default of 1 (charts#306). Neo4j
+  # is a JVM answering a TCP connect during store recovery, which is exactly
+  # when 1 second is not enough. Merge-only: the action, failureThreshold and
+  # periodSeconds stay the chart's.
+  startupProbe:
+    timeoutSeconds: 10
   volumes:
     data:
       mode: defaultStorageClass

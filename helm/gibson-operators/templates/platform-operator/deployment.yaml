@@ -82,18 +82,23 @@ spec:
             - containerPort: 8081
               name: probes
               protocol: TCP
+          # Both probes declare timeoutSeconds. The default is 1, and on a
+          # loaded 2-core runner controller-runtime's own handler has missed it
+          # (charts#306, the OpenBao case in auth/openbao-deployment.yaml).
           livenessProbe:
             httpGet:
               path: /healthz
               port: probes
             initialDelaySeconds: 15
             periodSeconds: 20
+            timeoutSeconds: 3
           readinessProbe:
             httpGet:
               path: /readyz
               port: probes
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 3
           resources:
             requests:
               cpu: {{ .Values.platformOperator.resources.requests.cpu | default "50m" }}
