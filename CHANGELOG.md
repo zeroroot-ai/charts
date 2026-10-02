@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.135.4](https://github.com/zeroroot-ai/charts/compare/v0.135.3...v0.135.4) (2026-10-02)
+
+
+### Bug Fixes
+
+* **auth:** a security bound is not an operator knob ([#323](https://github.com/zeroroot-ai/charts/issues/323)) ([d3ea4be](https://github.com/zeroroot-ai/charts/commit/d3ea4bef953d86c4d2306d918d2e1f986e255055)), closes [#317](https://github.com/zeroroot-ai/charts/issues/317)
+* **cg:** render and assert the signing-key rotation window, which no profile shows ([#321](https://github.com/zeroroot-ai/charts/issues/321)) ([7e7443d](https://github.com/zeroroot-ai/charts/commit/7e7443d23d1b9b6b27abccfeecd7c63c723b6e9e)), closes [#316](https://github.com/zeroroot-ai/charts/issues/316)
+* **docs:** no comment names a file that is not there, and 92 did ([#322](https://github.com/zeroroot-ai/charts/issues/322)) ([dcdc4e1](https://github.com/zeroroot-ai/charts/commit/dcdc4e136ae394adad2731dde48269b710b2c437))
+* **edge:** a rate limiter that renders fine and enforces nothing ([#324](https://github.com/zeroroot-ai/charts/issues/324)) ([aa6b965](https://github.com/zeroroot-ai/charts/commit/aa6b9654bfbb42ab1041badff2f9b4a4bd1f3325))
+* **helpers:** a helper's documentation lives beside its define, and 118 headers did not ([#320](https://github.com/zeroroot-ai/charts/issues/320)) ([3f6c59b](https://github.com/zeroroot-ai/charts/commit/3f6c59ba7b1c2deaedf48878479223c235c093f0)), closes [#304](https://github.com/zeroroot-ai/charts/issues/304)
+* **probes:** every probe states its timeout, and a guard keeps it that way ([#318](https://github.com/zeroroot-ai/charts/issues/318)) ([7081e86](https://github.com/zeroroot-ai/charts/commit/7081e86654b7fb6646c0cc5bc7da98f336a6fe9e)), closes [#306](https://github.com/zeroroot-ai/charts/issues/306)
+
 ## [0.135.3](https://github.com/zeroroot-ai/charts/compare/v0.135.2...v0.135.3) (2026-10-02)
 
 
