@@ -14860,11 +14860,12 @@ spec:
             # (dashboard#150). See gibson.nodeHeapMiB for the arithmetic.
             - name: NODE_OPTIONS
               value: "--max-old-space-size=768"
-            # Gibson API Configuration — both vars resolve to the same unified
-            # URL. GIBSON_API_URL is retained because next.config.ts:58 still
-            # reads it explicitly for its dev-proxy rewrite destination.
-            - name: GIBSON_API_URL
-              value: "https://gibson-gibson-workloads.gibson.svc.cluster.local:50051"
+            # NO GIBSON_API_URL. It was retained for next.config.ts's dev-proxy
+            # rewrite, and that rewrite is gone: the only occurrence of the name
+            # in the dashboard at v0.127.2 is inside the comment explaining why
+            # the `/api/grpc/:path*` rewrite was deleted, plus one test. The
+            # dashboard reaches the daemon through ADMIN_ENVOY_BASE_URL below,
+            # which is the path Envoy and ext_authz actually police.
             # Admin RPCs from the dashboard go through Envoy's api.<domain>
             # edge — same URL any external SDK caller would hit. Envoy
             # terminates TLS, validates the SPIFFE JWT-SVID the dashboard
@@ -15098,27 +15099,20 @@ spec:
             - name: DATABASE_URL
               value: postgres://gibson_platform:$(DASHBOARD_DB_PASSWORD)@platform-postgres-rw.gibson.svc.cluster.local:5432/gibson_platform?sslmode=require
 
-            # Redis (shared kv for onboarding state, rate-limiter keys,
-            # account-lockout counters, Stripe webhook idempotency table).
-            # Redis is structural infrastructure (deploy#224
-            # deleted the `redis.provider` enum); the chart fails render
-            # when `redis.addr` is empty and the dashboard pod fails boot
-            # when REDIS_URL is unreachable. Redis auth is always on; the
-            # password Secret is sourced via gibson.redisPasswordSecretName.
+            # NO REDIS_URL and NO REDIS_PASSWORD. The dashboard does not speak to
+            # Redis: at v0.127.2 it carries no redis client dependency of any
+            # kind, imports none, and the only occurrence of REDIS_URL in the
+            # whole repository is the FORBIDDEN-name list in
+            # scripts/check-no-secrets-in-client.mjs, which is a prohibition and
+            # not a reader.
             #
-            # The shared gibson.redis.url helper emits `${REDIS_PASSWORD}` so
-            # the daemon's Go config-loader can interpolate at parse time;
-            # Node's `redis` client doesn't expand env references in the URL
-            # though, so for the dashboard we rebuild the URL with kubelet's
-            # `$(REDIS_PASSWORD)` substitution form. REDIS_PASSWORD MUST be
-            # declared before REDIS_URL for kubelet to expand it.
-            - name: REDIS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: gibson-redis-stack
-                  key: redis-password
-            - name: REDIS_URL
-              value: "redis://:$(REDIS_PASSWORD)@gibson-redis-stack:6379"
+            # The comment here used to describe onboarding state, rate-limiter
+            # keys, account-lockout counters and the Stripe webhook idempotency
+            # table, and claimed the pod "fails boot when REDIS_URL is
+            # unreachable". That is the daemon's Redis, not the dashboard's.
+            # REDIS_PASSWORD existed only so kubelet could expand it inside
+            # REDIS_URL, so it goes with it — and with it goes a Secret read this
+            # pod had no use for.
 
             # Optional: Observability
             - name: LOG_LEVEL
