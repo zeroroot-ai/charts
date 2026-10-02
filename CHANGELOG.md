@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.135.3](https://github.com/zeroroot-ai/charts/compare/v0.135.2...v0.135.3) (2026-10-02)
+
+
+### Bug Fixes
+
+* **mail:** the tenant-operator's credentials are stated, never inferred ([#310](https://github.com/zeroroot-ai/charts/issues/310)) ([b316131](https://github.com/zeroroot-ai/charts/commit/b316131e6c1151aa2c94d579b3ab9e9d00773d17))
+
 ## [0.135.2](https://github.com/zeroroot-ai/charts/compare/v0.135.1...v0.135.2) (2026-10-02)
 
 
