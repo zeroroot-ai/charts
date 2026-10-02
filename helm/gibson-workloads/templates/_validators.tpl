@@ -337,14 +337,6 @@ Operators MUST install the cert-manager CRDs before installing this chart:
 {{- end -}}
 
 {{/* =========================================================================
-gibson.validateExternalSecretsCRDs — DELETED
-
-ESO is required infrastructure (one-code-path #203); the chart-wide
-ESO on/off + required toggles were removed along with this validator.
-Callers (gibson StatefulSet) no longer include this define.
-========================================================================= */}}
-
-{{/* =========================================================================
 gibson.validateTenantStoresConfigured
 
 Fails the render when the daemon is enabled but one or more of the four
