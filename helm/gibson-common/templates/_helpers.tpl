@@ -1,29 +1,50 @@
 {{/*
   gibson-common library helpers.
 
-  Two helpers today; both eliminate a cross-chart drift class observed in
-  production cluster bringup:
+  A helper lives here when more than one chart names the same thing. The
+  drift this prevents is the reason the library exists, not abstraction for
+  its own sake: "gibson:50051" against "gibson-workloads:50051" cost
+  tenant-operator#70, and clusterIP pins that disagreed across charts cost
+  deploy#169 and deploy#171.
 
-  - gibson.daemonAddress: the canonical daemon gRPC address. Every dialing
-    pod (tenant-operator, dashboard, plugins) MUST use this. Drift between
-    "gibson:50051" and "gibson-workloads:50051" caused tenant-operator#70.
-
-  - gibson.hostAliases: the canonical hostAliases block for every
-    in-cluster pod that needs to dial Envoy by its public hostnames
-    (app.<domain>, api.<domain>, www.<domain>, docs.<domain>). Drift
-    between values-kind.yaml clusterIP pins across charts caused
-    deploy#169 / #171.
-
-  Convention for adding a new helper:
+  Convention for adding a helper:
     1. Add it here as `{{- define "gibson.helperName" -}}…{{- end -}}`.
-    2. Document the values keys it reads at the top of the define block.
-    3. Document the bug class it eliminates — helpers exist to lock
-       invariants, not to add abstraction for its own sake.
-    4. Update consuming charts in the same PR (CI's cross-chart-check
-       — deploy#180 — will refuse a chart that bypasses the helper).
+    2. Put its documentation in the comment block IMMEDIATELY ABOVE the
+       define, and nowhere else. A copy in a consuming chart is how the two
+       drift apart, and a header left behind when a define moves is a table
+       of contents for a helper the reader cannot find — charts#304 deleted
+       118 of those. scripts/check-helper-docs.py fails the build on one.
+    3. Say which values keys it reads, and which bug class it locks.
+    4. Update consuming charts in the same PR. CI's cross-chart-check
+       (deploy#180) refuses a chart that bypasses the helper.
+
+  Never call `lookup`. Under Argo's repo-server render there is no cluster
+  context, so `lookup` returns nil with no error and the helper silently
+  takes its fallback branch. A `gibson.randomSecret` helper did exactly that
+  — read an existing Secret, fall back to randAlphaNum on first install — and
+  was deleted in deploy#202 with the rest of the lookup ripout. A Secret that
+  must survive a re-render is materialised once by a pre-install Job and read
+  by an init container instead.
 
   Spec: zeroroot-ai/tenant-operator#76 PRD Module 6 / deploy#179.
 */}}
+
+mailpit host — the dev-only delivering SMTP sink that satisfies the daemon's
+mailer.RequireDelivering gate on kind. Disabled outside kind
+(mailpit.enabled: false).
+
+It lives here, not in gibson-workloads, because two charts name it: the
+workloads chart renders the Service, and the operators chart's
+tenant-operator dials it as its default SMTP_HOST. The operators chart used
+to hardcode "gibson-workloads-mailpit", which is a Service no release
+renders — the name is keyed off the RELEASE name, so it is "gibson-mailpit"
+for every install (charts#114). One definition, two callers.
+
+Values read: none. Derived from .Release.Name.
+*/}}
+{{- define "gibson.mailpit.host" -}}
+{{- printf "%s-mailpit" .Release.Name }}
+{{- end }}
 
 {{/*
   gibson.daemonAddress
@@ -54,24 +75,6 @@
     - .Values.tenantOperator.daemonGrpcAddress (legacy override)
     - .Release.Name                      (used to construct the default)
 */}}
-{{/*
-mailpit host — the dev-only delivering SMTP sink that satisfies the daemon's
-mailer.RequireDelivering gate on kind. Disabled outside kind
-(mailpit.enabled: false).
-
-It lives here, not in gibson-workloads, because two charts name it: the
-workloads chart renders the Service, and the operators chart's
-tenant-operator dials it as its default SMTP_HOST. The operators chart used
-to hardcode "gibson-workloads-mailpit", which is a Service no release
-renders — the name is keyed off the RELEASE name, so it is "gibson-mailpit"
-for every install (charts#114). One definition, two callers.
-
-Values read: none. Derived from .Release.Name.
-*/}}
-{{- define "gibson.mailpit.host" -}}
-{{- printf "%s-mailpit" .Release.Name }}
-{{- end }}
-
 {{- define "gibson.daemonAddress" -}}
 {{- $override := "" -}}
 {{- if and (hasKey .Values "gibson") .Values.gibson -}}
@@ -338,6 +341,42 @@ https
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{/*
+Dashboard → Daemon URL.
+
+Scheme is tied to whether the daemon ACTUALLY serves mTLS, NOT to whether
+SPIRE is deployed (which is now always, deploy#201). The daemon's mTLS
+listener is gated on .Values.gibson.auth.spiffe being a populated map
+(trustDomain + workloadAPISocket); see templates/gibson/configmap.yaml line
+86. SPIRE is required for every consumer (tenant-operator workload
+identity, ext-authz mTLS, the SPIRE OIDC discovery provider's own TLS
+cert) and may be deployed without the daemon serving mTLS. (The historical
+spiffe-jwks-exporter consumer was removed by spec service-acting-auth
+Task 17; the dashboard spiffe-helper sidecar never existed outside a
+never-invoked template and was deleted by deploy#1456.)
+
+When the daemon DOES serve mTLS:
+  - scheme = https
+  - host  = <fullname>.<namespace>.svc.cluster.local (DNS form so the
+            daemon's serving cert SAN matches `gibson.<ns>.svc.cluster.local`)
+
+When the daemon does NOT serve mTLS:
+  - scheme = http
+  - host  = <fullname> (short Service name; saves a DNS hop in plain h2c)
+
+History: this helper was reverted in commit 9495509 because the surrounding
+state was broken (daemon SPIFFE was off, dashboard had no mTLS client). With
+spec in-cluster-mtls-restoration Phase 1 (Task 3) the daemon serves mTLS in
+every overlay including Kind, and Track A / Track B (Tasks 6-13) wire the
+dashboard's mTLS or JWT-SVID client respectively. The helper is correct in
+the new world — re-landed by Task 4.
+
+Note: callers that route through Envoy (gibson-admin-client.ts and, post
+Track B, gibson-client.ts) ignore this URL entirely — they dial Envoy at
+ADMIN_ENVOY_BASE_URL with a JWT-SVID. GIBSON_DAEMON_URL is gone (charts#294,
+the dashboard dropped the read), so this helper's one remaining consumer is
+GIBSON_API_URL, which next.config.ts reads for its dev-proxy rewrite.
+*/}}
 {{- define "gibson.dashboard.daemonURL" -}}
 {{- $spiffe := (.Values.gibson.auth).spiffe -}}
 {{- $daemonMtls := and $spiffe (kindIs "map" $spiffe) $spiffe.trustDomain $spiffe.workloadAPISocket -}}
@@ -379,6 +418,17 @@ https
 {{- end }}
 {{- end }}
 
+{{/*
+Canonical gRPC port for the Gibson daemon.
+Single source of truth consumed by:
+  - templates/gibson/configmap.yaml  (daemon.grpc_address)
+  - templates/gibson/statefulset.yaml (grpc containerPort)
+  - templates/gibson/service.yaml    (grpc port + targetPort backfill)
+  - templates/dashboard/deployment.yaml (GIBSON_API_URL)
+
+Rendered as a bare integer (no quotes, no colon prefix).
+See .spec-workflow/specs/spiffe-helm-integration/.
+*/}}
 {{- define "gibson.grpc.port" -}}
 {{- .Values.gibson.service.grpc.port | default 50051 -}}
 {{- end }}
@@ -450,6 +500,19 @@ imagePullSecrets:
 {{- end }}
 {{- end }}
 
+{{/*
+Render an annotations block from a map value. Intended for ServiceAccount
+templates that accept an optional .Values.<component>.serviceAccount.annotations
+map (primarily used for IRSA role-arn injection). Usage:
+
+  {{- with .Values.dashboard.serviceAccount.annotations }}
+  annotations:
+    {{- include "gibson.irsaAnnotations" . | nindent 4 }}
+  {{- end }}
+
+The template itself does not emit the `annotations:` key — the caller
+includes it so `{{- with }}` correctly no-ops when the map is empty.
+*/}}
 {{- define "gibson.irsaAnnotations" -}}
 {{- toYaml . -}}
 {{- end }}
@@ -477,6 +540,16 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 {{- end }}
 
+{{/*
+gibson.platformPostgres.host — hostname of the platform tier.
+
+Phase 1+2 default: forwards to the existing dashboard-postgresql alias so
+consumers can switch from `gibson.dashboard.dbHost` to
+`gibson.platformPostgres.host` byte-identically.
+
+Phase 3 changes the default to `<release>-platform-postgresql` (a new
+consolidated StatefulSet that hosts gibson_platform + per-tenant DBs).
+*/}}
 {{- define "gibson.platformPostgres.host" -}}
 {{- $cfg := .Values.platformPostgres | default dict -}}
 {{- $ext := $cfg.external | default dict -}}
@@ -552,6 +625,20 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 
 
 
+{{/*
+gibson.priorityClassName — return the priorityClassName for a component.
+Components are tiered:
+  - critical: daemon, ext-authz, envoy, openfga, spire-server  → gibson-platform-critical (900)
+  - platform: dashboard, tenant-operator                       → gibson-platform (500)
+  - tenant:   tenant-neo4j                                     → tenant-neo4j (100, existing)
+
+The chart renders the gibson-platform-critical and gibson-platform
+PriorityClass objects from templates/operations/priority-classes.yaml
+(unconditionally, like the existing tenant-neo4j PC).
+
+Usage:
+  priorityClassName: {{ include "gibson.priorityClassName" (dict "component" "gibson") }}
+*/}}
 {{- define "gibson.priorityClassName" -}}
 {{- $component := .component -}}
 {{- $critical := list "gibson" "extAuthz" "ext-authz" "envoy" "openfga" "spire-server" "spire" -}}
@@ -565,10 +652,21 @@ gibson-platform
 {{- end -}}
 {{- end }}
 
+{{/*
+gibson.redisPasswordSecretKey — Secret key for the Redis password.
+  - When .Values.redis.auth.passwordSecretKey is set, return that.
+  - Otherwise return "redis-password" (the chart-managed default).
+*/}}
 {{- define "gibson.redisPasswordSecretKey" -}}
 {{- .Values.redis.auth.passwordSecretKey | default "redis-password" -}}
 {{- end }}
 
+{{/*
+gibson.redisPasswordSecretName — name of the Secret that holds the Redis
+auth password.
+  - When .Values.redis.auth.passwordSecret is set, return that.
+  - Otherwise return the chart-managed `<release>-redis-stack` Secret name.
+*/}}
 {{- define "gibson.redisPasswordSecretName" -}}
 {{- if .Values.redis.auth.passwordSecret -}}
 {{- .Values.redis.auth.passwordSecret -}}
@@ -685,6 +783,25 @@ The daemon's own SA is `gibson.serviceAccountName` above — release-derived
 {{- printf "%s-helm-test" (include "gibson.fullname" .) -}}
 {{- end }}
 
+{{/*
+gibson.spread — emit pod topologySpreadConstraints + affinity blocks for an HA
+component. Reads per-component overrides from
+.Values.<component>.{topologySpreadConstraints, podAntiAffinity, affinity,
+nodeSelector, tolerations} and falls back to chart-wide HA defaults.
+
+Usage:
+  {{- include "gibson.spread" (dict "ctx" . "component" "gibson") | nindent 6 }}
+
+Emits these top-level pod-spec keys when set (each on its own line; the
+caller decides indentation via nindent on the include):
+  - affinity:
+  - topologySpreadConstraints:
+  - nodeSelector:
+  - tolerations:
+
+Replicas <= 1 still emit constraints with whenUnsatisfiable=ScheduleAnyway
+so a future replica bump gets the constraints automatically.
+*/}}
 {{- define "gibson.spread" -}}
 {{- $ctx := .ctx -}}
 {{- $component := .component -}}
@@ -814,6 +931,24 @@ tolerations:
 {{- if kindIs "invalid" . -}}true{{- else -}}{{ toString . }}{{- end -}}
 {{- end -}}
 
+{{/*
+gibson.validateEnvoySdsWired — fails the render when gibson.auth.spiffe is
+populated BUT the rendered Envoy daemon cluster lacks the SDS
+UpstreamTlsContext. (Envoy is unconditionally enabled — deploy#200.)
+
+Catches the inverse mistake of "I disabled SDS to debug something but forgot
+to disable daemon SPIFFE too" — exactly the failure mode that produced commit
+1d11963 ("kind overlay disables daemon SPIFFE mTLS + reverts envoy upstream
+TLS"). Without this guard, daemon SPIFFE on + Envoy SDS off renders cleanly
+but every gateway-routed RPC fails at runtime with "no certificate".
+
+Spec: in-cluster-mtls-restoration, Component 9 / Requirement 2.
+
+ACTIVE (Task 19 landed). The body calls `fail` when gibson.auth.spiffe is
+populated and the gibson_daemon_grpc cluster in files/envoy/envoy.yaml declares
+no transport_socket. The check is a render-time match with no live cluster
+dependency.
+*/}}
 {{- define "gibson.validateEnvoySdsWired" -}}
 {{- /*
   Phase 6 / Task 19: ACTIVE. When gibson.auth.spiffe is populated
@@ -853,6 +988,37 @@ tolerations:
 {{- end -}}
 {{- end }}
 
+{{/*
+gibson.waitForFgaConfig — init container that blocks pod start until the
+gibson-fga-config ConfigMap is populated with a non-empty store_id key.
+
+The gibson-fga-init Job (templates/fga-init/job.yaml) runs as a regular Job
+alongside pods — it is NOT a pre-install helm hook — so pods that read
+EXT_AUTHZ_FGA_STORE_ID / EXT_AUTHZ_FGA_MODEL_ID (or their equivalents) from
+the ConfigMap can schedule before the Job writes the ConfigMap. Without this
+init container the env vars would be empty at container-start time, causing
+the binary to exit 1 with "FGA store_id not configured".
+
+This init container replaces the previous `optional: true` pattern on those
+env refs (deploy#190 M4). Because it blocks the main container until the
+ConfigMap exists, kubelet re-evaluates the configMapKeyRef env vars at the
+moment the main container starts — by that point gibson-fga-config is
+guaranteed to contain a non-empty store_id.
+
+Requires: the pod's ServiceAccount must have `configmaps: get` in the
+release namespace. The tenant-operator SA already has this via the
+release-namespace-rbac Role; ext-authz gets it via the new
+gibson-ext-authz-fga-config-reader Role (templates/ext-authz/fga-config-rbac.yaml).
+
+Hard 300s timeout PER ATTEMPT — the kubelet restarts the init container on
+failure, so the effective wait is unbounded and survives a slow fga-init.
+(The fga-init Job's own activeDeadlineSeconds is 1200s; see
+templates/fga-init/job.yaml.)
+
+Invoke via: {{ include "gibson.waitForFgaConfig" . | nindent 8 }}
+under the pod's initContainers list. No extra volumes needed (uses in-cluster
+SA token via automountServiceAccountToken default).
+*/}}
 {{- define "gibson.waitForFgaConfig" -}}
 - name: wait-for-fga-config
   image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
@@ -891,6 +1057,26 @@ tolerations:
       memory: 64Mi
 {{- end }}
 
+{{/*
+gibson.zeroTrustHardeningVersion — render the schema version of the
+zero-trust-hardening remediation that is baked into this chart copy.
+
+Bumped by spec maintainers when a follow-up wave of the spec lands a chart
+change (rare). The current value is "1" — the initial Wave 1 cut shipped by
+spec zero-trust-hardening tasks 5.2-5.5. The label
+`zeroroot.ai/zero-trust-hardening-version` is rendered by
+templates/gibson/statefulset.yaml on the daemon workload (and ONLY the
+daemon workload — other workloads do NOT carry this label, deliberately,
+so an operator can use a label selector to confirm the daemon fleet
+specifically is on the post-fix configuration).
+
+Operator usage:
+  kubectl get sts gibson -o jsonpath='{.metadata.labels}' | grep zero-trust
+  kubectl get sts -A -l zeroroot.ai/zero-trust-hardening-version=1
+
+The value is a string ("1"), not a number — Kubernetes label values must
+be strings; the consumer template MUST quote the value.
+*/}}
 {{- define "gibson.zeroTrustHardeningVersion" -}}
 1
 {{- end }}
@@ -911,11 +1097,28 @@ tolerations:
 {{- .Values.redis.addr | default (printf "%s-redis-stack:%d" .Release.Name $port) -}}
 {{- end }}
 
+{{/*
+Redis URL — Spec 3 R11: never embeds the literal password; consumers
+inject ${REDIS_PASSWORD} at runtime via the gibson.redisPasswordSecretName
+helper. Redis auth is always on (one-code-path epic / deploy#199).
+*/}}
 {{- define "gibson.redis.url" -}}
 {{- $port := int (.Values.redis.service.port | default 6379) -}}
 {{- printf "redis://:${REDIS_PASSWORD}@%s:%d" (include "gibson.redis.host" .) $port -}}
 {{- end }}
 
+{{/*
+gibson.validateSpiffeRequired — fails the render when gibson.auth.spiffe is
+null/empty in any overlay. Memorialises the "SPIFFE stays ON" invariant from
+memory feedback_spiffe_mtls_required.md as a structural chart guard.
+
+Spec: in-cluster-mtls-restoration, Component 2 / Requirement 1.
+
+ACTIVE (Task 18 landed). The body calls `fail` when gibson.auth.spiffe is
+absent or missing workloadAPISocket/trustDomain, and the daemon statefulset
+invokes it. The `dev.disableSPIFFE` escape hatch is kind-only and is rejected in
+production overlays by CI lint.
+*/}}
 {{- define "gibson.validateSpiffeRequired" -}}
 {{- /*
   Phase 6 / Task 18: ACTIVE. Fails the render if gibson.auth.spiffe is null
@@ -934,6 +1137,32 @@ tolerations:
 {{- end -}}
 {{- end }}
 
+{{/*
+gibson.waitForSpireSocket — init container that blocks pod start until the
+SPIRE agent's Workload API socket is present on the node. Every SPIFFE-
+consuming pod (daemon, ext-authz, tenant-operator, dashboard) renders this
+ahead of its main container so a missing/restarting SPIRE agent produces a
+visible Init state instead of a generic CreateContainerConfigError or
+silent SPIFFE-Workload-API-unavailable retry loop.
+
+Spec one-code-path (deploy#201 / epic deploy#186): SPIRE is required
+infrastructure; the .Values.spire.enabled toggle is gone. This init
+container is the runtime equivalent of "fail at boot if a dependency is
+missing".
+
+Hard 60s timeout. The agent socket appears within seconds of the SPIRE
+agent DaemonSet pod becoming Ready on the node; if it isn't there after a
+minute, the SPIRE control plane is broken and we want the pod to fail-fast
+so kubelet retries (and so the operator's "pod stuck in Init" alert fires)
+instead of waiting 5+ minutes.
+
+The socket path is the chart's canonical `/run/spire/agent/spire-agent.sock`
+which is fixed by the SPIRE Helm chart's hostPath bind mount.
+
+Invoke via: {{ include "gibson.waitForSpireSocket" . | nindent 8 }}
+under a pod template's `spec.initContainers:` list. The caller MUST also
+declare the `spire-agent-socket` volume with the matching mount path.
+*/}}
 {{- define "gibson.waitForSpireSocket" -}}
 - name: wait-for-spire-socket
   image: ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
@@ -1010,29 +1239,6 @@ tolerations:
 {{- end -}}
 {{- end -}}
 
-{{/* ---------------------------------------------------------------------
-     gibson.netpolEgressDNS — the DNS egress rule every narrowed policy
-     needs (deploy#1462).
-
-     Under the namespace default-deny (deploy#1365) a pod selected by a
-     policy with policyTypes: [Egress] can reach ONLY what that policy's
-     egress rules allow. Replacing `- {}` with named rules therefore
-     severs name resolution unless DNS is restored explicitly, and a pod
-     that cannot resolve is an outage no render catches.
-
-     kube-dns rather than an ipBlock: the Service ClusterIP is not what
-     NetworkPolicy matches — it matches the BACKING POD, so the selector
-     names the CoreDNS pods. `k8s-app: kube-dns` is CoreDNS's label on
-     both EKS and kind (the Deployment is named coredns; the label is
-     retained for compatibility), and `kubernetes.io/metadata.name` is
-     applied to every namespace by the apiserver since 1.22, so no
-     cluster-specific labelling is assumed.
-
-     UDP *and* TCP :53 — a response larger than the UDP payload limit
-     sets TC and the resolver retries over TCP. Allowing only UDP works
-     until a record grows, which is the worst possible failure mode.
---------------------------------------------------------------------- */}}
-{{/*
 gibson.netpolEgressAPIServer — one egress rule per CIDR in
 global.networkPolicy.apiServerCIDRs, ports 443 and 6443, and nothing at all
 when the list is empty.
@@ -1065,6 +1271,29 @@ timed out).
       port: 6443
 {{- end }}
 {{- end -}}
+
+{{/* ---------------------------------------------------------------------
+     gibson.netpolEgressDNS — the DNS egress rule every narrowed policy
+     needs (deploy#1462).
+
+     Under the namespace default-deny (deploy#1365) a pod selected by a
+     policy with policyTypes: [Egress] can reach ONLY what that policy's
+     egress rules allow. Replacing `- {}` with named rules therefore
+     severs name resolution unless DNS is restored explicitly, and a pod
+     that cannot resolve is an outage no render catches.
+
+     kube-dns rather than an ipBlock: the Service ClusterIP is not what
+     NetworkPolicy matches — it matches the BACKING POD, so the selector
+     names the CoreDNS pods. `k8s-app: kube-dns` is CoreDNS's label on
+     both EKS and kind (the Deployment is named coredns; the label is
+     retained for compatibility), and `kubernetes.io/metadata.name` is
+     applied to every namespace by the apiserver since 1.22, so no
+     cluster-specific labelling is assumed.
+
+     UDP *and* TCP :53 — a response larger than the UDP payload limit
+     sets TC and the resolver retries over TCP. Allowing only UDP works
+     until a record grows, which is the worst possible failure mode.
+--------------------------------------------------------------------- */}}
 
 {{- define "gibson.netpolEgressDNS" -}}
 - to:
