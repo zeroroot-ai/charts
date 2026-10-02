@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.135.5](https://github.com/zeroroot-ai/charts/compare/v0.135.4...v0.135.5) (2026-10-02)
+
+
+### Bug Fixes
+
+* **contracts:** the vendored env-reader sets were stale, and nothing was running the check ([#325](https://github.com/zeroroot-ai/charts/issues/325)) ([a4e85dc](https://github.com/zeroroot-ai/charts/commit/a4e85dcf78bf1fcd54200267b94fafb6e29d19b3))
+
 ## [0.135.4](https://github.com/zeroroot-ai/charts/compare/v0.135.3...v0.135.4) (2026-10-02)
 
 
