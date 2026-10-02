@@ -89,22 +89,38 @@ spec:
               p95 sign-in latency has been above the 1.5s SLO objective
               for >10m sustained. Investigate Zitadel JWKS cache,
               membership-resolution latency, and Envoy upstream health.
-        - alert: DashboardUserTokenForwardingDisabled
+        - alert: DashboardWorkloadSvidFallback
           # Spec dashboard-fga-user-identity R8 — degraded-mode detector.
+          #
+          # RENAMED WITH THE SERIES (dashboard#165, charts#311). The old name,
+          # dashboard_user_token_forwarding_disabled_total, described a soak
+          # backout flag that no longer exists: the env var and the values key
+          # were both deleted in charts#294 and nothing read the flag. Worse, the
+          # series was DECLARED and incremented nowhere, so this alert could not
+          # fire at all — a permanently silent rule reading as coverage.
+          #
+          # The condition is real and now has a producer: spiffeNodeOptions()
+          # returns undefined when the SPIFFE Workload API socket is absent or
+          # the SVID cache is cold, and the RPC then reaches Envoy with only its
+          # Bearer token. dashboard v0.127.1 emits both names for one release, so
+          # this expr has a writer the moment the pin above lands.
           expr: |
-            increase(dashboard_user_token_forwarding_disabled_total[5m]) > 0
+            increase(dashboard_workload_svid_fallback_total[5m]) > 0
           for: 10m
           labels:
             severity: warning
             component: dashboard-auth
           annotations:
-            summary: "Dashboard running in user-token-forwarding backout mode"
+            summary: "Dashboard falling back to a workload SVID for user RPCs"
             description: |
               The dashboard is making daemon RPCs via the SPIFFE
               workload-JWT fallback. Per-user FGA is disabled and audit
-              attribution is wrong. The USE_USER_TOKEN_FORWARDING env var
-              and the dashboard.userTokenForwarding knob are both gone
-              (charts#294 — the dashboard stopped reading the flag), so a
-              non-zero rate here is a transport fault, not a soak revert.
-              Read the dashboard logs for the SPIFFE fallback reason.
+              attribution is wrong — that consequence is unchanged and is why
+              this is a warning rather than info.
+              There is no backout flag to check: USE_USER_TOKEN_FORWARDING and
+              dashboard.userTokenForwarding were both deleted in charts#294, so
+              a non-zero rate here is a transport fault. The cold-SVID-cache
+              branch increments once per pod start, which `for: 10m` absorbs;
+              a missing Workload API socket sustains it. Read the dashboard
+              logs for the fallback reason.
 {{- end }}
