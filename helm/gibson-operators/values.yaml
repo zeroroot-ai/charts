@@ -172,11 +172,10 @@ tenantOperator:
   # stripe-mock service in kind (stripeMock.enabled: true). Leave empty
   # in production.
   billing:
-    # Card-first-signup Stripe mode guard (dashboard#767). REQUIRED per
-    # env overlay — "test" (kind/staging) or "live" (prod). Empty here so
-    # overlays must declare it (one-code-path; the template
-    # `required` fails the install if an overlay leaves it empty).
-    stripeExpectedMode: ""
+    # The Stripe mode guard is the dashboard's, not the operator's: both read
+    # the same key out of the same Secret, and only the dashboard compares its
+    # prefix to a declared mode. See dashboard.billing.stripeExpectedMode in
+    # gibson-workloads.
     stripeAPIBaseURL: ""
   # devMode was deleted in deploy#205 (one-code-path epic): the operator
   # binary boots identically in every environment. Capability misses always

@@ -366,14 +366,16 @@ spec:
                   name: {{ (((.Values.tenantOperator).billing).stripeSecretKeySecretRef) | default "gibson-stripe-credentials" | quote }}
                   key: STRIPE_SECRET_KEY
             {{- /*
-              Card-first-signup Stripe mode guard (dashboard#767). REQUIRED
-              per env overlay — no silent default (one-code-path).
-              "test" on kind + staging (dummy cards only), "live" in prod
-              (real cards). main.go fails closed at boot if this disagrees
-              with the STRIPE_API_KEY prefix.
+              STRIPE_EXPECTED_MODE is NOT injected here. The operator reads
+              STRIPE_API_KEY and never compares its prefix to a declared mode:
+              operators/tenant/cmd/main.go has no such check, so the variable
+              asserted a control that did not exist. The guard that does exist
+              is the dashboard's, in src/lib/billing/stripe.ts
+              (validateBillingConfig), which reads the SAME one Stripe key out
+              of the same Secret and throws at boot when the key prefix and
+              dashboard.billing.stripeExpectedMode disagree. One key, one
+              assertion, in the process that holds the guard.
             */}}
-            - name: STRIPE_EXPECTED_MODE
-              value: {{ required "tenantOperator.billing.stripeExpectedMode is REQUIRED (epic card-first-signup / dashboard#767): set to \"test\" (kind/staging) or \"live\" (prod). The operator fails closed at boot if this disagrees with the Stripe key prefix." (((.Values.tenantOperator).billing).stripeExpectedMode) | quote }}
             {{- /*
               SMTP env block — REQUIRED at boot per one-code-path
               (tenant-operator#95). main.go exits 1 if SMTP_HOST is

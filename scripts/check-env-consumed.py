@@ -75,6 +75,20 @@ ROOT = Path(__file__).resolve().parent.parent
 CONTRACTS = ROOT / "helm" / "contracts"
 EXEMPT_FILE = ROOT / "scripts" / ".env-consumed-exemptions.txt"
 
+# Env vars the chart must NEVER inject, whatever the source says it reads.
+#
+# "Is it read?" is the wrong question for a value that bounds a security
+# decision. A reader makes it tunable, and tunable in the fail-open direction
+# is the defect: the operator who can widen the bound is exactly the operator
+# who should not be able to. These are refused on sight, so a knob cannot come
+# back by acquiring a consumer.
+NEVER_INJECTED = {
+    "GIBSON_IDENTITY_FRESHNESS_SKEW_SEC":
+        "the anti-replay bound on the Envoy->daemon hop. Widening it widens the "
+        "window in which a captured allow-decision header set replays. It is one "
+        "named constant in zeroroot-ai/sdk auth/headers.go and nothing else",
+}
+
 FIRST_PARTY = re.compile(r"^ghcr\.io/zeroroot-ai/(?!mirror/)([a-z0-9-]+)")
 
 # image name -> the service whose reader set governs it. An image with no entry
@@ -247,6 +261,13 @@ def violations(root: Path, contracts: Path) -> tuple[list[str], list[str], list[
             notes.add(f"{svc}: no vendored reader set; run `make env-contract-sync`")
             continue
         for n in names:
+            if n in NEVER_INJECTED:
+                # Not exemptible: an exemption is for a declaration waiting on
+                # its consumer, and this is a declaration that must not exist.
+                fail[f"{image}:{n}"] = (
+                    f"{n} is injected into the {cname} container of {image}, and it must "
+                    f"never be injected: {NEVER_INJECTED[n]}")
+                continue
             if n in allowed or n in expanded or n in RUNTIME_CONSUMED:
                 continue
             spec = f"{image}:{n}"
@@ -317,14 +338,33 @@ def selftest() -> int:
             print(f"SELFTEST FAIL: want gibson:GONE_AWAY stale, got {stale}")
             return 1
 
+        # A NEVER_INJECTED var fails even when the service reads it, and even
+        # with an exemption written for it. Both are the ways it would come
+        # back: acquire a consumer, or get silenced.
+        never = next(iter(NEVER_INJECTED))
+        (c / "gibson-env-readers.txt").write_text(f"# gen\nGIBSON_READS_THIS\nDSN\n{never}\n")
+        (tmp / "scripts" / ".env-consumed-exemptions.txt").write_text(
+            f"gibson:GIBSON_DEAD tracked in a follow-up\n"
+            f"gibson:GONE_AWAY target no longer fails\n"
+            f"gibson:{never} silenced, which must not work\n"
+        )
+        golden = tmp / "helm" / "testdata" / "golden" / "r.yaml"
+        golden.write_text(golden.read_text().replace(
+            "            - name: GIBSON_DEAD\n              value: d\n",
+            f"            - name: GIBSON_DEAD\n              value: d\n"
+            f"            - name: {never}\n              value: \"60\"\n"))
+        fail, _, _ = violations(tmp, c)
+        if not any(never in f and "must never be injected" in f for f in fail):
+            print(f"SELFTEST FAIL: {never} is read AND exempted and must still fail, got {fail}")
+            return 1
+
     fail, stale, notes = violations(ROOT, CONTRACTS)
     if fail or stale or notes:
         print("SELFTEST FAIL: the tree has env violations:\n  " + "\n  ".join(fail + stale + notes))
         return 1
-    print("✅ self-test: an unread var fails; a ${VAR}-expanded one, a $(VAR)-substituted one, "
-          "a third-party image, an ungoverned fork and a runtime-consumed NODE_OPTIONS do not; "
-          "an exemption silences and a "
-          "stale one fails; the tree is clean")
+    print("✅ self-test: an unread var fails, a var that must never be injected fails even when "
+          "read and exempted; a ${VAR}-expanded one, a $(VAR)-substituted one, a third-party "
+          "image and a fork are not judged; an exemption silences and a stale one fails")
     return 0
 
 
