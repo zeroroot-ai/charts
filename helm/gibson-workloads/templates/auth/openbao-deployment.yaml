@@ -540,6 +540,81 @@ spec:
                 vault_token_usable "$1"
               }
 
+              b64url_decode() {
+                # One JWT segment to JSON. base64url is base64 with two
+                # characters swapped and the padding dropped, and busybox
+                # base64 accepts neither, so both are put back.
+                s=$(printf '%s' "$1" | tr '_-' '/+')
+                case $(( ${#s} % 4 )) in 2) s="${s}==" ;; 3) s="${s}=" ;; esac
+                printf '%s' "$s" | base64 -d 2>/dev/null
+              }
+
+              bao_login_diagnose() {
+                # Runs ONLY after a kubernetes-auth login failed.
+                #
+                # OpenBao answers every login failure with the same bare 403
+                # "permission denied" — a missing token, a token the apiserver
+                # will not review, a review it refuses, and a subject the role
+                # does not bind all look identical from the outside. charts#80
+                # lost two days to that body, and gibson's exit-test-bank lost
+                # five (2026-09-28 .. 2026-10-02, 44 runs) to the same three
+                # words. Each line below separates one step. None prints a
+                # token, and the review body carries no secret.
+                echo "[openbao-auto-init] --- why the login failed ---" >&2
+
+                # STEP 1. The credential this pod presents. An absent
+                # projected token reaches OpenBao as jwt:"" and comes back as
+                # permission denied, indistinguishable from a rejected one.
+                if [ ! -s "$KUBE_TOKEN_FILE" ]; then
+                  echo "[openbao-auto-init]   token: $KUBE_TOKEN_FILE is MISSING OR EMPTY. This pod mounts no ServiceAccount token, so no login can succeed. Check automountServiceAccountToken on the StatefulSet and on ServiceAccount ${OWN_SA}." >&2
+                  return 0
+                fi
+                echo "[openbao-auto-init]   token: $(wc -c < "$KUBE_TOKEN_FILE" | tr -d ' ') bytes present" >&2
+
+                # STEP 2. What the token claims, unverified. `sub` is the
+                # identity the apiserver reports and the role's
+                # bound_service_account_names must equal it. `aud` must hold an
+                # audience the apiserver accepts, or the review fails before
+                # the subject is ever considered.
+                claims=$(b64url_decode "$(cut -d. -f2 < "$KUBE_TOKEN_FILE")")
+                got_sub=$(printf '%s' "$claims" | jq -r '.sub // "<unparsable>"' 2>/dev/null || echo "<unparsable>")
+                want_sub="system:serviceaccount:${NAMESPACE}:${OWN_SA}"
+                echo "[openbao-auto-init]   token sub=${got_sub} aud=$(printf '%s' "$claims" | jq -c '.aud // "<none>"' 2>/dev/null || echo '<unparsable>')" >&2
+                if [ "$got_sub" = "$want_sub" ]; then
+                  echo "[openbao-auto-init]   subject matches what role ${SEEDER_ROLE} binds (${want_sub}), so the role is not the fault" >&2
+                else
+                  echo "[openbao-auto-init]   SUBJECT MISMATCH: role ${SEEDER_ROLE} binds ${want_sub}. A login with any other subject is refused as permission denied." >&2
+                fi
+
+                # STEP 3. The review OpenBao makes on its own behalf, run from
+                # here with the same ServiceAccount OpenBao reviews as. This is
+                # the step the bare 403 hides, and it splits the two halves:
+                # refused or unreachable here means the fault is outside
+                # OpenBao; authenticated=true means OpenBao saw a good answer
+                # and refused anyway.
+                rv=$(kube_curl -o "${TMPD}/tr.json" -w '%{http_code}' -X POST \
+                      -H 'Content-Type: application/json' \
+                      -d "$(jq -nc --rawfile j "$KUBE_TOKEN_FILE" \
+                            '{apiVersion:"authentication.k8s.io/v1",kind:"TokenReview",spec:{token:($j|rtrimstr("\n"))}}')" \
+                      "${KUBE_API}/apis/authentication.k8s.io/v1/tokenreviews" 2>/dev/null) || rv="000"
+                case "$rv" in
+                  200|201)
+                    echo "[openbao-auto-init]   TokenReview HTTP ${rv}: authenticated=$(jq -r '.status.authenticated // false' "${TMPD}/tr.json") username=$(jq -r '.status.user.username // "<none>"' "${TMPD}/tr.json") error=$(jq -r '.status.error // ""' "${TMPD}/tr.json")" >&2
+                    echo "[openbao-auto-init]   The apiserver accepts this review, so the refusal is OpenBao's own: compare the role above against auth/${AUTH_MOUNT}/role/${SEEDER_ROLE} and check the login used that same mount." >&2
+                    ;;
+                  401|403)
+                    echo "[openbao-auto-init]   TokenReview HTTP ${rv}: the apiserver REFUSES this pod's review — $(jq -r '.message // ""' "${TMPD}/tr.json")" >&2
+                    echo "[openbao-auto-init]   OpenBao reviews as ServiceAccount ${OWN_SA} and needs system:auth-delegator for it. The ClusterRoleBinding {{ .Release.Name }}-openbao-auth-delegator is that grant." >&2
+                    ;;
+                  000)
+                    echo "[openbao-auto-init]   TokenReview did not complete: no answer from ${KUBE_API}. Egress to the kube-apiserver is the first thing to check — a narrowing NetworkPolicy must name the API CIDRs (global.networkPolicy.apiServerCIDRs), and an empty list renders no rule at all." >&2
+                    ;;
+                  *)
+                    echo "[openbao-auto-init]   TokenReview HTTP ${rv}: $(head -c 300 "${TMPD}/tr.json")" >&2
+                    ;;
+                esac
+                rm -f "${TMPD}/tr.json"
+              }
               bao_login_seeder() {
                 # Log in with THIS pod's ServiceAccount through the kubernetes
                 # auth mount, role openbao-seeder. The projected token is
@@ -559,6 +634,7 @@ spec:
                 if [ "$code" != "200" ]; then
                   echo "[openbao-auto-init] WARN: login as ${OWN_SA} with role ${SEEDER_ROLE} returned HTTP $code: $(cat ${TMPD}/login.json)" >&2
                   rm -f ${TMPD}/login.json
+                  bao_login_diagnose
                   return 1
                 fi
                 t=$(jq -r '.auth.client_token // empty' ${TMPD}/login.json)
