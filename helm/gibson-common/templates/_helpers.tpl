@@ -341,60 +341,6 @@ https
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{/*
-Dashboard → Daemon URL.
-
-Scheme is tied to whether the daemon ACTUALLY serves mTLS, NOT to whether
-SPIRE is deployed (which is now always, deploy#201). The daemon's mTLS
-listener is gated on .Values.gibson.auth.spiffe being a populated map
-(trustDomain + workloadAPISocket); see templates/gibson/configmap.yaml line
-86. SPIRE is required for every consumer (tenant-operator workload
-identity, ext-authz mTLS, the SPIRE OIDC discovery provider's own TLS
-cert) and may be deployed without the daemon serving mTLS. (The historical
-spiffe-jwks-exporter consumer was removed by spec service-acting-auth
-Task 17; the dashboard spiffe-helper sidecar never existed outside a
-never-invoked template and was deleted by deploy#1456.)
-
-When the daemon DOES serve mTLS:
-  - scheme = https
-  - host  = <fullname>.<namespace>.svc.cluster.local (DNS form so the
-            daemon's serving cert SAN matches `gibson.<ns>.svc.cluster.local`)
-
-When the daemon does NOT serve mTLS:
-  - scheme = http
-  - host  = <fullname> (short Service name; saves a DNS hop in plain h2c)
-
-History: this helper was reverted in commit 9495509 because the surrounding
-state was broken (daemon SPIFFE was off, dashboard had no mTLS client). With
-spec in-cluster-mtls-restoration Phase 1 (Task 3) the daemon serves mTLS in
-every overlay including Kind, and Track A / Track B (Tasks 6-13) wire the
-dashboard's mTLS or JWT-SVID client respectively. The helper is correct in
-the new world — re-landed by Task 4.
-
-Note: callers that route through Envoy (gibson-admin-client.ts and, post
-Track B, gibson-client.ts) ignore this URL entirely — they dial Envoy at
-ADMIN_ENVOY_BASE_URL with a JWT-SVID. GIBSON_DAEMON_URL is gone (charts#294,
-the dashboard dropped the read), so this helper's one remaining consumer is
-GIBSON_API_URL, which next.config.ts reads for its dev-proxy rewrite.
-*/}}
-{{- define "gibson.dashboard.daemonURL" -}}
-{{- $spiffe := (.Values.gibson.auth).spiffe -}}
-{{- $daemonMtls := and $spiffe (kindIs "map" $spiffe) $spiffe.trustDomain $spiffe.workloadAPISocket -}}
-{{- $scheme := "http" -}}
-{{- if $daemonMtls -}}
-{{- $scheme = "https" -}}
-{{- end -}}
-{{- $host := include "gibson.fullname" . -}}
-{{- $ns := .Release.Namespace -}}
-{{- $port := include "gibson.grpc.port" . -}}
-{{- if $daemonMtls -}}
-{{- printf "%s://%s.%s.svc.cluster.local:%s" $scheme $host $ns $port -}}
-{{- else -}}
-{{- printf "%s://%s:%s" $scheme $host $port -}}
-{{- end -}}
-{{- end }}
-
-
 
 {{- define "gibson.dashboardSecrets.name" -}}
 {{- printf "%s-dashboard-secrets" (include "gibson.fullname" .) }}
