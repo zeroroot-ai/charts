@@ -68,12 +68,27 @@ must_fail "no mail transport and offlineSetup=false" \
   "has no way to reach its owner" \
   --set global.platformOwner.offlineSetup=false
 
+# FAILING FIXTURE for the third sender (hosted#372). The daemon and Zitadel
+# configured while the tenant-operator is not is the state staging shipped in
+# for days: its welcome email defaulted to the in-cluster mailpit, which no
+# cloud install deploys, and nothing failed because an undelivered mail is a
+# Warning event and not a failed reconcile.
+must_fail "daemon smtp with no tenant-operator smtp" \
+  "tenantOperator.smtp.host is empty" \
+  --set global.platformOwner.offlineSetup=false \
+  --set gibson-workloads.gibson.email.provider=smtp \
+  --set gibson-workloads.gibson.email.smtp.host=smtp.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@localhost.zeroroot.ai \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=Gibson
+
 must_pass "smtp transport and offlineSetup=false" \
   --set global.platformOwner.offlineSetup=false \
   --set gibson-workloads.gibson.email.provider=smtp \
   --set gibson-workloads.gibson.email.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@localhost.zeroroot.ai \
+  --set gibson-operators.tenantOperator.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=Gibson
 
 # offlineSetup=true with no place to write the link must fail.
@@ -103,6 +118,7 @@ must_pass "firstTenant: smtp transport and offlineSetup=false" \
   --set gibson-workloads.gibson.email.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@localhost.zeroroot.ai \
+  --set gibson-operators.tenantOperator.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=Gibson
 
 must_fail "firstTenant: offlineSetup=true with no setupSecretRef.name" \
@@ -121,7 +137,7 @@ must_pass "firstTenant disabled: no mail transport and offlineSetup=false is fin
   --set global.firstTenant.offlineSetup=false
 
 
-# --- Zitadel's own SMTP provider (hosted#189, helm/gibson/templates/zitadel-smtp-guard.yaml) --
+# --- Zitadel's own SMTP provider (hosted#189, helm/gibson/templates/mail-transport-guard.yaml) --
 # The daemon can send mail while Zitadel cannot: two separate transports, one
 # render guard for the gap. must_pass above already proves the fixture that
 # sets BOTH sides passes; these prove a render that sets only the daemon's
@@ -134,7 +150,7 @@ must_fail "gibson-workloads smtp on, gibson-operators smtp.host empty" \
 
 # The internal completeness of the smtp block (once .host is set) is
 # platformbootstrap.yaml's own `required` calls, not this guard's job — see
-# zitadel-smtp-guard.yaml's own comment. These two prove THOSE checks fire.
+# mail-transport-guard.yaml's own comment. These two prove THOSE checks fire.
 must_fail "gibson-operators smtp.host set but .fromAddress empty" \
   "platformBootstrap.zitadel.smtp.fromAddress is required" \
   --set global.platformOwner.offlineSetup=false \
@@ -151,6 +167,7 @@ must_fail "gibson-operators smtp.host set but .fromName empty" \
   --set gibson-workloads.gibson.email.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@localhost.zeroroot.ai \
+  --set gibson-operators.tenantOperator.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=
 
 # The daemon's mail off (provider=log, the baseline) never requires Zitadel's

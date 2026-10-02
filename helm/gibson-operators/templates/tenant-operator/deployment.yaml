@@ -385,17 +385,48 @@ spec:
               ever rendered a Service by that name, so every welcome email
               failed with "server misbehaving" on a kind install.
 
-              Prod overlays must override via `tenantOperator.smtp.host`
-              (and the matching ESO Secret for credentials).
+              Every cloud overlay MUST set `tenantOperator.smtp.host`, which
+              values.yaml now declares. The umbrella's
+              mail-transport-guard.yaml fails the render when the daemon is
+              configured for smtp and this is empty, because two of three
+              senders being right is how staging sent no welcome email for
+              days (hosted#372).
             */}}
             - name: SMTP_HOST
               value: {{ ((.Values.tenantOperator).smtp).host | default (include "gibson.mailpit.host" .) | quote }}
             - name: SMTP_PORT
               value: {{ ((.Values.tenantOperator).smtp).port | default "1025" | quote }}
+            {{- /*
+              CREDENTIALS COME FROM A SECRET, and only when a relay is named.
+              These two used to be plain values whose comment said prod
+              overlays "inject a real value from ESO-backed Secret". The
+              template had no secretKeyRef, so that mechanism did not exist
+              and the only way to obey the comment was to commit an SES
+              password to a gitops values file (hosted#372).
+
+              A named host means a real relay, which means authentication.
+              No host means the in-cluster mailpit, which accepts anonymous
+              submission, and a secretKeyRef there would wedge every kind
+              install on a Secret it does not render.
+            */}}
+            {{- if ((.Values.tenantOperator).smtp).host }}
+            {{- $credSecret := ((.Values.tenantOperator).smtp).credentialsSecretName | default (printf "%s-email-smtp" .Release.Name) }}
             - name: SMTP_USERNAME
-              value: {{ ((.Values.tenantOperator).smtp).username | default "" | quote }} {{/* allowlist-silent-default: kind ships mailpit (no auth). prod overlays inject a real value from ESO-backed Secret. */}}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $credSecret | quote }}
+                  key: username
             - name: SMTP_PASSWORD
-              value: {{ ((.Values.tenantOperator).smtp).password | default "" | quote }} {{/* allowlist-silent-default: kind ships mailpit (no auth). prod overlays inject a real value from ESO-backed Secret. */}}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $credSecret | quote }}
+                  key: password
+            {{- else }}
+            - name: SMTP_USERNAME
+              value: "" {{/* allowlist-silent-default: no host means mailpit, which takes no auth. */}}
+            - name: SMTP_PASSWORD
+              value: "" {{/* allowlist-silent-default: no host means mailpit, which takes no auth. */}}
+            {{- end }}
             - name: SMTP_FROM
               value: {{ ((.Values.tenantOperator).smtp).from | default "no-reply@zeroroot.ai" | quote }}
             - name: SMTP_TLS
