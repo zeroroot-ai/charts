@@ -1,5 +1,24 @@
 {{- /*
-Zitadel SMTP provider install-value guard (hosted#189).
+Mail transport install-value guard (hosted#189, hosted#372).
+
+ONE MAIL TRANSPORT PER INSTALL, AND EVERY SENDER POINTED AT IT. Three
+first-party components send mail and each declares its own SMTP settings:
+
+  gibson-workloads.gibson.email.smtp          the daemon
+  gibson-operators.platformBootstrap.zitadel.smtp   Zitadel, via the CR
+  gibson-operators.tenantOperator.smtp        the tenant-operator's welcome mail
+
+A subchart cannot read a sibling's values, so there is no single key they can
+all default from, and the contract is enforced here instead: if the daemon is
+configured to send mail, the other two must be too.
+
+The tenant-operator arm was added after staging spent days failing every
+welcome email with `dial tcp: lookup gibson-mailpit: no such host`
+(hosted#372). Its `smtp.host` defaults to the in-cluster dev sink, the staging
+overlay set the other two and not this one, and nothing failed — the signup
+smoke stayed green because an undelivered welcome mail is a Warning event and
+not a failed reconcile. Two of three senders being right is exactly the state
+this guard exists to make impossible.
 
 Zitadel has no mail server of its own. Every Zitadel-sent email — the
 Platform owner's setup link, a tenant Owner's setup link, invitations, an
@@ -37,5 +56,9 @@ setting agree that mail should work at all.
 {{- $smtp := (($ops.platformBootstrap | default dict).zitadel | default dict).smtp | default dict -}}
 {{- if not $smtp.host -}}
 {{- fail "gibson-workloads.gibson.email.provider is \"smtp\" but gibson-operators.platformBootstrap.zitadel.smtp.host is empty: the daemon can send mail but Zitadel cannot, so every Zitadel-sent setup link and invitation is silently undeliverable (hosted#189). Point gibson-operators.platformBootstrap.zitadel.smtp at the same host/port/credentials as gibson-workloads.gibson.email.smtp." -}}
+{{- end -}}
+{{- $to := ($ops.tenantOperator | default dict).smtp | default dict -}}
+{{- if not $to.host -}}
+{{- fail "gibson-workloads.gibson.email.provider is \"smtp\" but gibson-operators.tenantOperator.smtp.host is empty: it then defaults to the in-cluster mailpit, which a cloud install does not deploy, and every tenant's welcome email fails with \"no such host\" while the signup smoke stays green (hosted#372 — staging sent none for days). Point gibson-operators.tenantOperator.smtp at the same host/port/credentials as gibson-workloads.gibson.email.smtp." -}}
 {{- end -}}
 {{- end -}}
