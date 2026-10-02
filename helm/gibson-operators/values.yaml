@@ -151,7 +151,17 @@ tenantOperator:
     # Empty means `<release>-email-smtp`, the Secret gibson-workloads'
     # ExternalSecret already materialises with `username` and `password`
     # keys for the daemon and the dashboard. One Secret, three senders.
+    #
+    # It is NOT defaulted to that name. The Secret exists only when
+    # gibson-workloads sets gibson.email.smtp.externalSecret.enabled, which
+    # staging does and kind does not, so a default would render a secretKeyRef
+    # for a Secret the kind install never creates.
     credentialsSecretName: ""
+    # anonymous — the relay above accepts any sender with no credential, which
+    # is true of the in-cluster mailpit and of nothing else here. A host with
+    # NEITHER this nor credentialsSecretName fails the render, so a real relay
+    # cannot be contacted anonymously by omission.
+    anonymous: false
   # Billing controls. devAutoConfirm was deleted in charts#294: the chart set
   # BILLING_DEV_AUTOCONFIRM from it and no code in gibson or billing ever read
   # that variable, so the bypass the comment promised did not exist. The lint

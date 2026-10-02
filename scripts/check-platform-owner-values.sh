@@ -73,6 +73,20 @@ must_fail "no mail transport and offlineSetup=false" \
 # for days: its welcome email defaulted to the in-cluster mailpit, which no
 # cloud install deploys, and nothing failed because an undelivered mail is a
 # Warning event and not a failed reconcile.
+# FAILING FIXTURE: a relay named with no credential and no anonymous opt-in.
+# Inferring "no Secret name means no auth" is how a real relay is contacted
+# anonymously and rejects the mail at send time, which is the same silent shape
+# as hosted#372 itself. It must fail the render instead.
+must_fail "tenant-operator smtp host with neither credential nor anonymous" \
+  "neither tenantOperator.smtp.credentialsSecretName nor" \
+  --set global.platformOwner.offlineSetup=false \
+  --set gibson-workloads.gibson.email.provider=smtp \
+  --set gibson-workloads.gibson.email.smtp.host=smtp.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@localhost.zeroroot.ai \
+  --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=Gibson \
+  --set gibson-operators.tenantOperator.smtp.host=smtp.example.com
+
 must_fail "daemon smtp with no tenant-operator smtp" \
   "tenantOperator.smtp.host is empty" \
   --set global.platformOwner.offlineSetup=false \
@@ -89,6 +103,7 @@ must_pass "smtp transport and offlineSetup=false" \
   --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@localhost.zeroroot.ai \
   --set gibson-operators.tenantOperator.smtp.host=smtp.example.com \
+  --set gibson-operators.tenantOperator.smtp.credentialsSecretName=gibson-email-smtp \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=Gibson
 
 # offlineSetup=true with no place to write the link must fail.
@@ -119,6 +134,7 @@ must_pass "firstTenant: smtp transport and offlineSetup=false" \
   --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@localhost.zeroroot.ai \
   --set gibson-operators.tenantOperator.smtp.host=smtp.example.com \
+  --set gibson-operators.tenantOperator.smtp.credentialsSecretName=gibson-email-smtp \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=Gibson
 
 must_fail "firstTenant: offlineSetup=true with no setupSecretRef.name" \
@@ -168,6 +184,7 @@ must_fail "gibson-operators smtp.host set but .fromName empty" \
   --set gibson-operators.platformBootstrap.zitadel.smtp.host=smtp.example.com \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@localhost.zeroroot.ai \
   --set gibson-operators.tenantOperator.smtp.host=smtp.example.com \
+  --set gibson-operators.tenantOperator.smtp.credentialsSecretName=gibson-email-smtp \
   --set gibson-operators.platformBootstrap.zitadel.smtp.fromName=
 
 # The daemon's mail off (provider=log, the baseline) never requires Zitadel's
