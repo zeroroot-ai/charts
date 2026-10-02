@@ -14557,7 +14557,7 @@ spec:
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,shared-identity"
         checksum/config: dcd6c1665f0c06b3dbd391768859adb30ff0733ac2f97e512fcac48e5d8f0b82
-        checksum/secret: 09b5102177e38585daeaaa2de03579da5f3b4608a3356d2fab1d1272c671bbe2
+        checksum/secret: 249fe85522cc62edccdc067d99132e82710d2a5f6c651d1bf310f99322d1c751
         # Pod-roll-on-Secret-change is delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). The prior pattern
         # (a checksum annotation computing sha256sum over a lookup-loaded
         # Secret) was broken under Argo's offline `helm template` render —
@@ -15163,44 +15163,6 @@ spec:
                 secretKeyRef:
                   name: gibson-gibson-workloads-dashboard-secrets
                   key: captcha-secret-key
-
-            - name: DASHBOARD_EMAIL_PROVIDER
-              value: "log"
-            - name: DASHBOARD_EMAIL_FROM
-              value: "no-reply@zeroroot.ai"
-            # Destination inbox for contact-sales form leads (deploy#854).
-            - name: CONTACT_SALES_INBOX
-              value: "sales@zeroroot.ai"
-            - name: DASHBOARD_EMAIL_RESEND_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: gibson-gibson-workloads-dashboard-secrets
-                  key: email-resend-api-key
-            # smtp.ts reads its From: header from `_SMTP_FROM`, a name the
-            # chart never shipped, and it requires the value. Same source as
-            # DASHBOARD_EMAIL_FROM above.
-            - name: DASHBOARD_EMAIL_SMTP_FROM
-              value: "no-reply@zeroroot.ai"
-            - name: DASHBOARD_EMAIL_SMTP_HOST
-              value: "" 
-            - name: DASHBOARD_EMAIL_SMTP_PORT
-              value: "587"
-            - name: DASHBOARD_EMAIL_SMTP_USER
-              valueFrom:
-                secretKeyRef:
-                  name: gibson-gibson-workloads-dashboard-secrets
-                  key: email-smtp-user
-            # The reader is `_PASS`, not `_PASSWORD`. The chart shipped
-            # `DASHBOARD_EMAIL_SMTP_PASSWORD` until charts#294, and
-            # src/lib/email/providers/smtp.ts reads
-            # `DASHBOARD_EMAIL_SMTP_PASS`, so the SMTP provider threw on a
-            # missing password wherever dashboard.email.provider was "smtp".
-            # The Secret key keeps its own name.
-            - name: DASHBOARD_EMAIL_SMTP_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: gibson-gibson-workloads-dashboard-secrets
-                  key: email-smtp-password
             - name: DASHBOARD_METRICS_ALLOWED_CIDRS
               value: "" 
 
@@ -22164,9 +22126,6 @@ spec:
         auth-secret: "{{ .auth_secret }}"
         next-server-actions-encryption-key: "{{ .server_actions_key }}"
         captcha-secret-key: "{{ .captcha_secret_key }}"
-        email-resend-api-key: "{{ .email_resend_api_key }}"
-        email-smtp-user: "{{ .email_smtp_user }}"
-        email-smtp-password: "{{ .email_smtp_password }}"
   data:
     - secretKey: auth_secret
       remoteRef: { key: gibson-dashboard-session-secrets, property: auth_secret }
@@ -22174,12 +22133,6 @@ spec:
       remoteRef: { key: gibson-dashboard-session-secrets, property: server_actions_key }
     - secretKey: captcha_secret_key
       remoteRef: { key: gibson-dashboard-auth-hardening, property: captcha_secret_key }
-    - secretKey: email_resend_api_key
-      remoteRef: { key: gibson-dashboard-auth-hardening, property: email_resend_api_key }
-    - secretKey: email_smtp_user
-      remoteRef: { key: ses-smtp-credentials, property: username }
-    - secretKey: email_smtp_password
-      remoteRef: { key: ses-smtp-credentials, property: password }
 ---
 # Source: gibson/charts/gibson-workloads/templates/ext-authz/secret.yaml
 apiVersion: external-secrets.io/v1
