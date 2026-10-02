@@ -409,18 +409,43 @@ spec:
               submission, and a secretKeyRef there would wedge every kind
               install on a Secret it does not render.
             */}}
-            {{- if ((.Values.tenantOperator).smtp).host }}
-            {{- $credSecret := ((.Values.tenantOperator).smtp).credentialsSecretName | default (printf "%s-email-smtp" .Release.Name) }}
+            {{- $toSmtp := (.Values.tenantOperator).smtp | default dict }}
+            {{- if $toSmtp.host }}
+            {{- /*
+              THREE EXPLICIT STATES. Defaulting the Secret name was wrong:
+              `<release>-email-smtp` exists only when gibson-workloads sets
+              gibson.email.smtp.externalSecret.enabled, which staging does and
+              kind does not. So the default rendered a secretKeyRef for a Secret
+              the kind install never creates, and the tenant-operator would have
+              sat in CreateContainerConfigError. check-2core-overlay caught it on
+              the signup exit test's own values, which name the in-cluster
+              mailpit explicitly.
+
+              And a relay that needs no credential must SAY so rather than be
+              inferred from the absence of a Secret name. Inferring it is how a
+              real relay gets contacted anonymously and rejects the mail at send
+              time, with nothing in the chart saying why — the same silent shape
+              as the bug this whole change exists to fix (hosted#372).
+            */}}
+            {{- if $toSmtp.credentialsSecretName }}
             - name: SMTP_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ $credSecret | quote }}
+                  name: {{ $toSmtp.credentialsSecretName | quote }}
                   key: username
             - name: SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ $credSecret | quote }}
+                  name: {{ $toSmtp.credentialsSecretName | quote }}
                   key: password
+            {{- else if $toSmtp.anonymous }}
+            - name: SMTP_USERNAME
+              value: "" {{/* allowlist-silent-default: anonymous: true — a sink that accepts any sender. */}}
+            - name: SMTP_PASSWORD
+              value: "" {{/* allowlist-silent-default: anonymous: true — a sink that accepts any sender. */}}
+            {{- else }}
+            {{- fail (printf "tenantOperator.smtp.host is %q but neither tenantOperator.smtp.credentialsSecretName nor tenantOperator.smtp.anonymous is set. The welcome email would be submitted with no credential, which a real relay rejects at send time and nothing in the chart explains. Name the Secret holding username/password, or set anonymous: true for a sink that accepts any sender (the in-cluster mailpit)." $toSmtp.host) }}
+            {{- end }}
             {{- else }}
             - name: SMTP_USERNAME
               value: "" {{/* allowlist-silent-default: no host means mailpit, which takes no auth. */}}
