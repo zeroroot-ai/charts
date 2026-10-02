@@ -1982,14 +1982,15 @@ envoy:
   #   the L4 load balancer preserves it on every substrate and every HCM sets
   #   `use_remote_address: true` + `xff_num_trusted_hops: 0`, so the peer is
   #   the client and a client-supplied x-forwarded-for is never consulted.
-  #   That pairing is the rule: a descriptor may only appear under an HCM
-  #   that trusts the peer.
+  #   That pairing is the rule, and scripts/check-edge-rate-limits.py holds
+  #   it: a descriptor may only appear under an HCM that trusts the peer.
   #
   #   Per-client keying is a prerequisite change (client-IP preservation or
   #   PROXY protocol on the NLB, plus use_remote_address/xff_num_trusted_hops
   #   here), tracked in deploy#1241. Until then: no descriptors. A
   #   local_ratelimit config that grows a `descriptors` block while
-  #   use_remote_address is unset keys every client to the same bucket.
+  #   use_remote_address is unset keys every client to the same bucket, and
+  #   scripts/check-edge-rate-limits.py fails the build on it.
   #
   # CONTAINMENT: buckets are PER ROUTE, and a route-level bucket fully replaces
   # the chain baseline (Envoy resolves per-filter config most-specific-first),
@@ -2126,7 +2127,8 @@ envoy:
     # across Envoy replicas. Keyed on the client address (Client-IP contract:
     # the socket peer, masked /32 v4 and /64 v6). Fixed windows, no burst.
     # Sizing rule: about ten times a real client's peak, and ALWAYS below the
-    # route's fuse above, or the fuse trips first and this quota never applies.
+    # route's fuse above, or the fuse trips first and this quota never
+    # applies. scripts/check-edge-rate-limits.py compares the two.
     #
     # Fail-open by construction, not by knob: envoy.filters.http.ratelimit is
     # rendered with failure_mode_deny: false and there is no value that

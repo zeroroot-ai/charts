@@ -4111,9 +4111,9 @@ data:
                       # local_ratelimit that looks fully configured but lacks these
                       # two fields enforces nothing while reporting as configured —
                       # the exact "renders fine when wrong" class this change exists
-                      # to close. Nothing asserts 100/HUNDRED across the rendered
-                      # file, so a hand-written copy that drops them is caught by
-                      # reading, not by the build.
+                      # to close. scripts/check-edge-rate-limits.py asserts
+                      # 100/HUNDRED on every HTTP local_ratelimit in the rendered
+                      # file, so a hand-written copy that drops them fails the build.
                       #
                       # No descriptors — see envoy.rateLimit in values.yaml for why
                       # this edge has no trustworthy client address to key on.
@@ -4965,7 +4965,8 @@ data:
                       # filter_enabled / filter_enforced are set explicitly and
                       # MUST stay at 100%: BOTH DEFAULT TO 0% WHEN OMITTED — a
                       # limiter that omits them renders fine and enforces nothing.
-                      # Every local_ratelimit config in this file sets both.
+                      # scripts/check-edge-rate-limits.py asserts 100/HUNDRED on
+                      # every HTTP local_ratelimit in the rendered file.
                       #
                       # No descriptors — see envoy.rateLimit in values.yaml for
                       # why this edge has no trustworthy client address to key on.
@@ -15480,7 +15481,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 79b184e0249c72457808bac917d6c66c270f0656889d33a88d352fc1fb02b24c
+        checksum/config: e1194aaaaa3dad42ad150b299b8e951b9bfff351abe72df9b181ab05aab03bcd
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #

@@ -118,7 +118,9 @@ unconditionally — there is no `envoy.enabled` opt-out.
   These buckets carry NO descriptors. Do not add any: `use_remote_address` is
   unset on this HCM, so the address Envoy would hand a `masked_remote_address`
   descriptor comes from the client-supplied x-forwarded-for (the NLB is L4 and
-  adds none).
+  adds none). scripts/check-edge-rate-limits.py fails the build on a
+  local_ratelimit that carries descriptors under an HCM that does not set
+  use_remote_address.
 */ -}}
 {{- $rl := .Values.envoy.rateLimit -}}
 {{- if not (kindIs "map" $rl) -}}
