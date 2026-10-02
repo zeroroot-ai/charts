@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.135.6](https://github.com/zeroroot-ai/charts/compare/v0.135.5...v0.135.6) (2026-10-02)
+
+
+### Bug Fixes
+
+* **dashboard:** the dashboard sends no mail, so it takes no mail configuration ([#329](https://github.com/zeroroot-ai/charts/issues/329)) ([05a4ee9](https://github.com/zeroroot-ai/charts/commit/05a4ee93e67ee79972e4f50caabcfb5089d67502))
+* **mail:** the transport is a named mode, not a boolean that reads backwards ([#327](https://github.com/zeroroot-ai/charts/issues/327)) ([f91ce0a](https://github.com/zeroroot-ai/charts/commit/f91ce0aaec0d700b6f989df4c031a4e480add316))
+* **openbao:** a failed kubernetes-auth login says which step failed ([#330](https://github.com/zeroroot-ai/charts/issues/330)) ([ec52deb](https://github.com/zeroroot-ai/charts/commit/ec52deba02bd298a93eb8e56733e0d233e3bb744))
+* **pins:** dashboard v0.127.2, the mail module and two required env names are gone ([#331](https://github.com/zeroroot-ai/charts/issues/331)) ([86fd223](https://github.com/zeroroot-ai/charts/commit/86fd223ddfbf89c1bda662ca3e0186c4791d7e4a))
+
 ## [0.135.5](https://github.com/zeroroot-ai/charts/compare/v0.135.4...v0.135.5) (2026-10-02)
 
 
