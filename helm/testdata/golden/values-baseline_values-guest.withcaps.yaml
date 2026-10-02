@@ -10354,8 +10354,6 @@ spec:
                 secretKeyRef:
                   name: "gibson-stripe-credentials"
                   key: STRIPE_SECRET_KEY
-            - name: STRIPE_EXPECTED_MODE
-              value: "test"
             - name: SMTP_HOST
               value: "gibson-mailpit"
             - name: SMTP_PORT
@@ -15455,10 +15453,6 @@ spec:
             # gRPC reflection on the daemon listeners. OFF by default;
             # set .Values.spiffe.grpcReflection to "1" in dev overlays only.
             # Spec: critical-tls-no-fallbacks Component 3 / Requirement 4.
-            # Identity-header freshness window in seconds. Headers older
-            # than this are rejected by the daemon's identity interceptor.
-            - name: GIBSON_IDENTITY_FRESHNESS_SKEW_SEC
-              value: "60"
             # SPIRE→Vault audience contract (gibson#167 / deploy#360).
             # The daemon's broker init calls SPIRE Workload API
             # source.Token(ctx, audience) for every per-tenant Vault

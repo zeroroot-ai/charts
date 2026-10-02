@@ -675,10 +675,18 @@ spec:
             - name: GIBSON_GRPC_REFLECTION
               value: {{ .Values.spiffe.grpcReflection | quote }}
             {{- end }}
-            # Identity-header freshness window in seconds. Headers older
-            # than this are rejected by the daemon's identity interceptor.
-            - name: GIBSON_IDENTITY_FRESHNESS_SKEW_SEC
-              value: {{ .Values.auth.identityFreshnessSkewSeconds | int | quote }}
+            {{- /*
+              The identity-header freshness window is NOT injected, and must
+              not become a knob again. It is the anti-replay bound on the
+              Envoy->daemon hop: ext-authz stamps x-gibson-identity-issued-at
+              when it allows a request, and the SDK's identity interceptor
+              (zeroroot-ai/sdk auth/headers.go, installed by the daemon at
+              internal/server/daemon/grpc.go) rejects a request whose stamp is
+              further from now than the bound. Widening it widens the window in
+              which a captured allow-decision header set replays, which is the
+              fail-open direction, so an overlay must not be able to do it.
+              The value lives in one place, as one named constant in the SDK.
+            */}}
             # SPIRE→Vault audience contract (gibson#167 / deploy#360).
             # The daemon's broker init calls SPIRE Workload API
             # source.Token(ctx, audience) for every per-tenant Vault

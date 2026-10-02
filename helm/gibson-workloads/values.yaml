@@ -921,17 +921,6 @@ spiffe:
   grpcReflection: ""
 
 # -----------------------------------------------------------------------------
-# Daemon-side identity / auth knobs that don't belong inside `gibson.auth`
-# (top-level so they can be referenced from multiple subcharts later)
-# -----------------------------------------------------------------------------
-auth:
-  # Maximum age (seconds) of the `x-gibson-identity-issued-at` header that
-  # ext-authz signs and the daemon validates. Headers older than this are
-  # rejected. Default 60s matches the existing in-code constant; raise
-  # only if clock skew between Envoy and the daemon exceeds 60s.
-  identityFreshnessSkewSeconds: 60
-
-# -----------------------------------------------------------------------------
 # Dashboard
 # -----------------------------------------------------------------------------
 # dashboard is structural infrastructure (one-code-path / deploy#188):
