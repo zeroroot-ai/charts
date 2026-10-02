@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.135.2](https://github.com/zeroroot-ai/charts/compare/v0.135.1...v0.135.2) (2026-10-02)
+
+
+### Bug Fixes
+
+* **mail:** the tenant-operator names the relay, and the chart declares the key ([#309](https://github.com/zeroroot-ai/charts/issues/309)) ([389924a](https://github.com/zeroroot-ai/charts/commit/389924a15c452785a2b89667d5670320ca18342f))
+* **openbao:** the health endpoint the whole bringup waits on gets a timeout it can meet ([#307](https://github.com/zeroroot-ai/charts/issues/307)) ([d7b4dcd](https://github.com/zeroroot-ai/charts/commit/d7b4dcddc1c13971109b8114dc52369f19a6d4b9))
+
 ## [0.135.1](https://github.com/zeroroot-ai/charts/compare/v0.135.0...v0.135.1) (2026-10-01)
 
 
