@@ -471,16 +471,30 @@ spec:
               does not look like a TLS handshake" against SES on 587, which is
               STARTTLS and not implicit TLS.
 
-              starttls  dial plaintext, then STARTTLS. Port 587. The default.
-              implicit  TLS from the first byte. Port 465.
+              starttls   dial plaintext, then STARTTLS. Port 587. The default.
+              implicit   TLS from the first byte. Port 465.
+              plaintext  no encryption, ever (gibson#574). For a sink that
+                         offers no STARTTLS at all — the in-cluster mailpit
+                         answers a TLS open with "500 5.5.2 Syntax error", and
+                         `starttls` against it fails by design because an
+                         upgrade that silently does not happen is the trap this
+                         whole type exists to remove.
+
+              plaintext is REFUSED when a username is set, here and again in the
+              operator's NewSMTPSender. net/smtp would refuse PlainAuth over a
+              cleartext non-localhost link anyway, so the pair can never deliver;
+              failing at render says why a deploy earlier.
 
               An unknown value fails the RENDER here, so a typo never reaches a
               pod. The operator also refuses it at startup, naming the mode, the
               host and the port.
             */}}
             {{- $mode := ((.Values.tenantOperator).smtp).tlsMode | default "starttls" }}
-            {{- if not (has $mode (list "starttls" "implicit")) }}
-            {{- fail (printf "tenantOperator.smtp.tlsMode is %q — it must be \"starttls\" (port 587, dial plaintext then upgrade) or \"implicit\" (port 465, TLS from the first byte). The old boolean tenantOperator.smtp.tls is gone: tls=false was STARTTLS, not plaintext, so set tlsMode: starttls to keep that behaviour." $mode) }}
+            {{- if not (has $mode (list "starttls" "implicit" "plaintext")) }}
+            {{- fail (printf "tenantOperator.smtp.tlsMode is %q — it must be \"starttls\" (port 587, dial plaintext then upgrade), \"implicit\" (port 465, TLS from the first byte) or \"plaintext\" (no encryption, for a sink that offers no STARTTLS). The old boolean tenantOperator.smtp.tls is gone: tls=false was STARTTLS, not plaintext, so set tlsMode: starttls to keep that behaviour." $mode) }}
+            {{- end }}
+            {{- if and (eq $mode "plaintext") ((.Values.tenantOperator).smtp).username }}
+            {{- fail (printf "tenantOperator.smtp.tlsMode is \"plaintext\" and tenantOperator.smtp.username is %q: the credential would cross the network in the clear, and net/smtp refuses PlainAuth over a cleartext link to %q, so this pair can never deliver mail. Use \"starttls\" (port 587) or \"implicit\" (port 465) with that username, or drop the username for an anonymous sink." (((.Values.tenantOperator).smtp).username) (((.Values.tenantOperator).smtp).host | default "the relay")) }}
             {{- end }}
             - name: SMTP_TLS_MODE
               value: {{ $mode | quote }}
