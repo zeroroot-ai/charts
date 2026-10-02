@@ -29,8 +29,8 @@ What that buys, measured on openbao:2.5.3 (deploy#1731):
     "cipher: message authentication failed" every 5 s and serves nothing;
   - a pod started with the key file absent or empty exits at config parse
     ("Error parsing Seal configuration") and never serves.
-So the archive (docs/runbooks/backup-restore.md) plus the keyring is the
-whole recovery path, and the archive without the keyring is ciphertext.
+So the archive plus the keyring is the whole recovery path, and the archive
+without the keyring is ciphertext.
 
 The `kubernetes` seal (a minted unseal key in `<release>-openbao-unseal-keys`)
 and the `kms` seal (awskms auto-unseal, recovery key in Secrets Manager)
@@ -361,10 +361,8 @@ spec:
         #
         # THE SEED CONTRACT is helm/gibson-workloads/files/openbao-seed-keys.txt,
         # inlined below. One kv v2 mount, `secret`, one path per key,
-        # `secret/data/<key>`, properties as the table lists them. The
-        # render guard (tests/lib/check_seed_coverage.py) fails the build when
-        # an ExternalSecret reads a key or a property the table does not
-        # seed. Idempotent by property: a present value is never overwritten,
+        # `secret/data/<key>`, properties as the table lists them.
+        # Idempotent by property: a present value is never overwritten,
         # except the two keyring inputs (they follow the keyring) and the
         # service token (it follows the Secret this sidecar writes).
         #
@@ -453,8 +451,8 @@ spec:
                 # root (/sys/generate-root) and would have to be stored
                 # somewhere to be of use; deploy#1195 removed exactly such a
                 # stored credential from this namespace. The recovery path for
-                # this store is the archive plus the bringup keyring
-                # (docs/runbooks/backup-restore.md), not a key in a Secret. So:
+                # this store is the archive plus the bringup keyring, not a
+                # key in a Secret. So:
                 #   - the response is held in one shell variable, never
                 #     written to a file (the previous code wrote it to a file);
                 #   - only root_token is parsed out of it;
@@ -510,7 +508,7 @@ spec:
                   -X POST -H "X-Vault-Token: ${root}" \
                   "${BAO_ADDR_LOCAL}/v1/auth/token/revoke-self")
                 if [ "$code" = "204" ] || [ "$code" = "200" ] || [ "$code" = "403" ]; then
-                  echo "[openbao-auto-init] initial root token REVOKED (HTTP $code). No recovery key exists; the archive plus the bringup keyring is the recovery path — see docs/runbooks/openbao-recovery.md"
+                  echo "[openbao-auto-init] initial root token REVOKED (HTTP $code). No recovery key exists; the archive plus the bringup keyring is the recovery path. There is nothing else to keep"
                   return 0
                 fi
                 echo "[openbao-auto-init] WARN: revoke-self returned HTTP $code: $(cat ${TMPD}/revoke.json) — initial root token is STILL LIVE (deploy#1195)" >&2
@@ -750,7 +748,7 @@ spec:
                 minter="$held"
                 if [ -z "$minter" ]; then
                   minter=$(bao_login_seeder) || {
-                    echo "[openbao-auto-init] FATAL: the ${secret} token is unusable and the ${SEEDER_ROLE} login failed, so nothing can mint a replacement. Procedure: docs/runbooks/openbao-recovery.md" >&2
+                    echo "[openbao-auto-init] FATAL: the ${secret} token is unusable and the ${SEEDER_ROLE} login failed, so nothing can mint a replacement. Restore the store from its archive with the keyring it was sealed with" >&2
                     return 1
                   }
                 fi
@@ -1163,7 +1161,7 @@ spec:
                 # seed it, a rotated keyring input reach the store, and a
                 # store restored into a new cluster grow a fresh service token.
                 seeder=$(bao_login_seeder) || {
-                  echo "[openbao-auto-init] WARN: cannot log in with role ${SEEDER_ROLE}; the reconcile pass is skipped. A store from before deploy#1732 has no such role: docs/runbooks/openbao-recovery.md" >&2
+                  echo "[openbao-auto-init] WARN: cannot log in with role ${SEEDER_ROLE}; the reconcile pass is skipped. A store from before deploy#1732 has no such role, and gains one on the next bootstrap" >&2
                   return 1
                 }
                 echo "[openbao-auto-init] logged in as ${OWN_SA} with role ${SEEDER_ROLE}; reconciling"
@@ -1273,7 +1271,7 @@ spec:
                   # 5 s, deploy#1731). Nothing here can open it: the static
                   # seal has no unseal key and this sidecar holds no recovery
                   # key. Say so, and never POST /v1/sys/unseal.
-                  echo "[openbao-auto-init] store is initialized but SEALED under the ${seal_type} seal: the key in Secret ${KEYRING_SECRET}/${KEYRING_KEY} does not open this store. Put the bringup keyring this store was sealed with in place and restart the pod. No unseal is attempted — see docs/runbooks/openbao-recovery.md" >&2
+                  echo "[openbao-auto-init] store is initialized but SEALED under the ${seal_type} seal: the key in Secret ${KEYRING_SECRET}/${KEYRING_KEY} does not open this store. Put the bringup keyring this store was sealed with in place and restart the pod. No unseal is attempted: this seal has no unseal key and this sidecar holds no recovery key" >&2
                   sleep 30
                   continue
                 fi
@@ -1310,7 +1308,7 @@ spec:
             # pull token and the SMTP relay credential. Projected from the same
             # bringup keyring Secret as the seal key, but as a SEPARATE volume
             # that never lists the seal key, so the sidecar cannot read it
-            # (tests/lib/check_static_seal.py asserts this). `optional: true`:
+            # by construction, not by assertion. `optional: true`:
             # a bringup that supplies no input still comes up, with the keys
             # seeded empty.
             - name: bringup-inputs

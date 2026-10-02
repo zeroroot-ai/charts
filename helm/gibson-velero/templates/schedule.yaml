@@ -1,5 +1,5 @@
 {{- /*
-The one hourly Schedule (deploy#1735, docs/bringup.md § Cadence).
+The one hourly Schedule (deploy#1735).
 
 This is the backup spec the platform pins, so it is a template here and never
 a `velero.schedules` value. The spec is the option C decision from CONTEXT.md
@@ -36,8 +36,7 @@ a `velero.schedules` value. The spec is the option C decision from CONTEXT.md
     barman archive, and a file-system copy of a CNPG volume restored over a
     `bootstrap.recovery` re-initializes the database. An object that MISSES
     the label rides in the backup and surfaces at restore as a loud conflict
-    with the chart-rendered copy, never as lost data. The render guard is
-    helm/gibson/tests/velero-exclude-label.bats.
+    with the chart-rendered copy, never as lost data.
   * `defaultVolumesToFsBackup` is set in the spec itself. The server default
     says the same thing, but a Backup built from this template must carry
     the whole contract on its own.

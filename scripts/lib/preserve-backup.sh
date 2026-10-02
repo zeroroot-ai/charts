@@ -26,7 +26,7 @@
 # destroying anything: every failure below leaves the estate standing, names
 # the step, and never falls back to a wipe (CONTEXT.md § Preserve teardown).
 #
-# The steps, in the order docs/bringup.md § A preserve teardown states:
+# The steps, in order:
 #
 #   0. backup-verify record — plant the canary that has to ride IN the backup,
 #      and record a ciphertext sealed under the LIVE store's key. It runs

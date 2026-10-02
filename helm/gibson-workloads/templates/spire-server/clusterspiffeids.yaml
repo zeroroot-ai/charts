@@ -62,8 +62,8 @@ PodSecurityPolicy was removed, so such a principal simply sets
 templates/spire-server/platform-identity-admission.yaml, which keys on
 `request.userInfo.username` — the one attribute a pod cannot self-assert.
 
-tests/clusterspiffeid-selectors.bats enforces both halves of this: no
-template syntax may survive into a rendered selector, and each `k8s:sa:`
+Both halves matter: no template syntax may survive into a rendered
+selector, and each `k8s:sa:`
 value must equal the `serviceAccountName` of the pod template carrying the
 matching component label.
 */}}

@@ -86,9 +86,8 @@ spec:
              re-derives from kubelet at attestation time, and the platform
              identity ValidatingAdmissionPolicy keys on this SA name. Before
              this line Envoy ran as the namespace `default` SA. Changing or
-             removing it silently widens who can be issued the Envoy SVID —
-             tests/clusterspiffeid-selectors.bats fails the render if this
-             name and the CSID selector ever drift apart. */}}
+             removing it silently widens who can be issued the Envoy SVID:
+             this name and the CSID selector must not drift apart. */}}
       serviceAccountName: {{ include "gibson.envoyServiceAccountName" . }}
       automountServiceAccountToken: false
       {{- /* Spec 2 R18: priorityClassName + Spec 3 §3 R8 spread. */}}

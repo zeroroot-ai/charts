@@ -30,11 +30,6 @@ uses is a local style choice, so this handles either without changing it.
 
 WHAT IT DELIBERATELY SKIPS
 
-  helm/gibson-workloads/values-kind.yaml — kind/dev tracks moving :main tags
-  on purpose and is exempt from digest-pin-check. Re-pinning it would fight
-  the dev loop. Named explicitly rather than pattern-matched so a new overlay
-  cannot become exempt by accident.
-
   ghcr.io/zeroroot-ai/mirror/* — third-party mirrors, not first-party builds.
 
 USAGE
@@ -78,9 +73,6 @@ PIN_FILES = [
     # so nothing is unpinned by their absence. If the hosted repo ever adds one,
     # it maintains its own list — an unlisted file is how a pin goes stale.
 ]
-
-# See "WHAT IT DELIBERATELY SKIPS" above.
-EXEMPT_FILES = {"helm/gibson-workloads/values-kind.yaml"}
 
 REGISTRY = "ghcr.io/zeroroot-ai"
 DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")

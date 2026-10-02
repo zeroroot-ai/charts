@@ -5,8 +5,8 @@ config.yaml — the envoyproxy/ratelimit descriptor tree. Every quota here
   mirrors a `rate_limits` action in files/envoy/public-chain.yaml (or, later,
   envoy.yaml): Envoy sends the descriptor, this file says the number. The
   numbers come from envoy.rateLimit.perClient in values.yaml, next to the
-  local_ratelimit FUSE each one sits under, and tests/ratelimit-service.bats
-  asserts every quota is below its fuse.
+  local_ratelimit FUSE each one sits under. Every quota must stay below its
+  fuse, or the fuse trips first and the quota never applies.
 
 envoy.yaml — the bootstrap for the pod's Envoy mTLS sidecar. ratelimit can
   only load static certificate files, so the sidecar terminates SPIFFE mTLS

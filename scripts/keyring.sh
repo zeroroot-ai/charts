@@ -192,7 +192,7 @@ gen_value() {
 cmd_generate() {
   local file="${1:?usage: keyring.sh generate <keyring-file> [<provided>]}"
   local provided="${2:-}"
-  [ -e "$file" ] && die "$file exists. Rotation is a new keyring and a new cluster: see docs/runbooks/substrate-kind.md"
+  [ -e "$file" ] && die "$file exists. Rotation is a new keyring and a new cluster: generate into a new path, stand up a new cluster, and restore into it"
   if [ -n "$provided" ]; then
     [ -r "$provided" ] || die "cannot read $provided"
     local key
@@ -348,7 +348,7 @@ cmd_set() {
   local name="${2:?usage: keyring.sh set <keyring-file> <MEMBER> <value>}"
   local value="${3-}"
   [ -r "$file" ] || die "cannot read $file"
-  is_input "$name" || die "$name is not an input member; only GHCR_PULL_TOKEN, DNS_ACCESS_KEY and DNS_SECRET_KEY may be set after generate. Rotation is a new keyring: see docs/runbooks/substrate-kind.md"
+  is_input "$name" || die "$name is not an input member; only GHCR_PULL_TOKEN, DNS_ACCESS_KEY and DNS_SECRET_KEY may be set after generate. Rotation is a new keyring and a new cluster, never an edit here"
   local spec err
   spec="$(member_spec "$name")"
   err="$(shape_error "$spec" "$value")"

@@ -18,10 +18,9 @@
 # NO IRSA annotation and NO cloud KMS key (deploy#1744): the 31
 # IRSA roles left with the AWS control plane — the platform's one cloud
 # credential is the durable bucket credential in the bringup keyring — and
-# the daemon key provider runs without a cloud KMS on every substrate. A
-# render guard (helm/gibson/tests/eks-overlay-no-aws-control-plane.bats)
-# fails on any eks.amazonaws.com/role-arn, Secrets Manager, ACM or WAF
-# reference in the EKS render.
+# the daemon key provider runs without a cloud KMS on every substrate. So the
+# EKS render carries no eks.amazonaws.com/role-arn, no Secrets Manager, no ACM
+# and no WAF reference.
 #
 # NOT the secret backend: OpenBao is the one External Secrets backend on every
 # substrate, so no overlay names one.

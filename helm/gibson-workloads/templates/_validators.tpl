@@ -477,9 +477,8 @@ Spec: tenant-operator-saga-capabilities Requirements 2.1 + NFR Security.
 gibson.validateNoLatestTags
 
 Spec 2 R13 — fails the render when any image string in the chart's well-known
-image-tag values resolves to :latest. The render-side guard catches misconfig
-before deploy; the CI chart-audit gate (.github/workflows/chart-audit.yaml)
-greps the rendered output for the same regression on every PR.
+image-tag values resolves to :latest. This render-side guard is the only one:
+no CI job greps the rendered output for the same regression.
 ========================================================================= */}}
 
 {{- define "gibson.validateNoLatestTags" -}}

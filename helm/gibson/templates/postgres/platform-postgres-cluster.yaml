@@ -68,8 +68,7 @@ metadata:
     # `bootstrap.recovery`, would re-initialize the database over the
     # recovered one. `inheritedMetadata` below puts the same label on every
     # pod and PVC the operator derives from this CR, which is what keeps
-    # those volumes out of the file-system backup. The guard is
-    # helm/gibson/tests/velero-exclude-label.bats.
+    # those volumes out of the file-system backup.
     velero.io/exclude-from-backup: "true"
   annotations:
     # Regular resource (never a hook — a hook-delete-policy would delete the
@@ -131,7 +130,7 @@ spec:
     topologyKey: {{ $pg.affinity.topologyKey }}
   postgresql:
     # postgresql.conf. archive_timeout is the recovery point objective for
-    # unplanned loss (docs/bringup.md § Cadence): a WAL segment is shipped to
+    # unplanned loss: a WAL segment is shipped to
     # the durable bucket at least every 300 s, even when the platform writes
     # too little to fill one. Rendered on every profile, including one
     # instance on kind.

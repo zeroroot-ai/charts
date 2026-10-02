@@ -11,7 +11,7 @@
 # not this script's job. On kind, `make recreate ENV=kind` is the bringup
 # verb that creates the cluster, runs the gVisor node prep and then installs
 # the platform (deploy#1737). An operator on another cluster brings
-# a cluster that already carries the stage 1 rows (docs/bringup.md).
+# a cluster that already carries the stage 1 rows.
 #
 # Usage:
 #   scripts/baseline-up.sh                 # use the current kube context
@@ -335,8 +335,8 @@ fi
 # BEFORE the chart, through the one producer scripts/keyring-to-cluster.sh
 # (`make recreate` runs the same script). Stage 0 is `make substrate
 # ENV=kind` on a workstation or a CI runner; an operator on-prem brings a
-# substrate.env and keyring of the same shape
-# (docs/runbooks/substrate-kind.md). There is no default bucket: a Postgres
+# substrate.env and keyring of the same shape. There is no default bucket: a
+# Postgres
 # whose archive_command points at nothing fills its WAL volume and stops
 # accepting writes.
 # ---------------------------------------------------------------------------

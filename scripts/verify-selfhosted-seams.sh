@@ -15,10 +15,8 @@
 # 2026-08-13, deploy#1039) matches the shipped default: self-serve signup is
 # ON in both profiles (signupSelfServe: true — GitLab self-managed model),
 # and closed registration is the operator override signupSelfServe: false.
-# See helm/gibson/values-baseline.yaml (+ values-eks.yaml on
-# EKS) and the assertion at
-# helm/gibson/tests/signup-seam.bats ("open card-free signup is the shipped
-# OSS default").
+# See helm/gibson/values-baseline.yaml (+ values-eks.yaml on EKS): open
+# card-free signup is the shipped OSS default.
 #
 # The suite therefore reads the deployed SIGNUP_SELF_SERVE value and asserts
 # the RPC BEHAVIOUR MATCHES IT in both directions:
@@ -320,7 +318,7 @@ if [ -z "$DOCS_IMAGE" ]; then
   fail "no docs-svc Deployment found — docs.enabled is true at the edge but no workload serves it"
 else
   pass "docs-svc runs ${DOCS_IMAGE}"
-  info "version-match caveat: helm/gibson-workloads/values.yaml pins docs.image.digest, which overrides the .Chart.AppVersion default — so the shipped image tracks a docs-site build, not the install version. The toggle-off fallback path is covered offline by helm/gibson-workloads/tests/docs-seam.bats."
+  info "version-match caveat: helm/gibson-workloads/values.yaml pins docs.image.digest, which overrides the .Chart.AppVersion default — so the shipped image tracks a docs-site build, not the install version."
 fi
 
 summary "verify-selfhosted-seams"

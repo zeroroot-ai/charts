@@ -13,7 +13,7 @@ Rebuilds three guards lost in the 2026-09-04 split (charts#17):
     a webhook the render installs.
 
   check-teardown-webhooks (deploy#1592, deploy#1594): the teardown sweep
-    (hosted: bootstrap/eks/gibson/scripts/eks-sweep-admission-webhooks.sh)
+    (zeroroot-ai/hosted bootstrap/eks/gibson/scripts/eks-sweep-admission-webhooks.sh)
     clears service-backed webhook configurations so a destroy cannot wedge
     on a dead endpoint. A url-backed webhook it leaves in place. Every
     webhook in the render must therefore be service-backed.

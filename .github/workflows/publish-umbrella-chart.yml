@@ -23,8 +23,10 @@
 # the pinning underneath buys nothing. Every publish is now cosign-signed
 # keyless (GitHub Actions OIDC identity, no key to rotate/store) against the
 # chart's content digest, and the digest is verified in-job immediately
-# after signing. See docs/security/chart-signing.md for the consumption-side
-# gap this does NOT close on its own.
+# after signing. The consumption side lives in zeroroot-ai/hosted:
+# zeroroot-ai/hosted gitops/scripts/verify-chart-signature.sh records a
+# verified digest in zeroroot-ai/hosted gitops/chart-digests.yaml. This
+# workflow does not close that gap on its own.
 name: publish-umbrella-chart
 
 on:
@@ -136,7 +138,7 @@ jobs:
         # The platform is THREE releases, not one (deploy#1777). gibson-crds is
         # a sibling release because Helm cannot install a CRD and its CR in one
         # release (CONTEXT.md § Umbrella chart); gibson-velero is a second
-        # release in its own namespace (docs/bringup.md § The stages). Neither
+        # release in its own namespace. Neither
         # is a dependency of the umbrella, so neither arrives with it — and a
         # cluster off the checkout could install none of them.
         #
@@ -170,8 +172,10 @@ jobs:
 
             # Proves the signature was written and is checkable with the
             # workflow's own OIDC identity. It does NOT prove a consumer will
-            # ever check it — see docs/security/chart-signing.md: ArgoCD has no
-            # native cosign verification for Helm OCI sources today.
+            # ever check it: ArgoCD has no native cosign verification for Helm
+            # OCI sources today, so
+            # zeroroot-ai/hosted gitops/scripts/verify-chart-signature.sh does
+            # it at promotion time.
             cosign verify \
               --certificate-identity-regexp "^https://github\.com/${{ github.repository }}/\.github/workflows/publish-umbrella-chart\.yml@" \
               --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \

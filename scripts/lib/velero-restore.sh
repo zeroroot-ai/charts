@@ -167,7 +167,8 @@ YAML
     return 0
   fi
   # Everything that makes two reports of the same fault look different goes
-  # before the grouping, the same way scripts/teardown-kind.sh does it for a
+  # before the grouping, the same way zeroroot-ai/hosted scripts/teardown-kind.sh
+# does it for a
   # backup: the timestamp, the log source, the restore name and the namespace.
   local grouped="$WORK/restore-errors.txt"
   grep -E 'level=(error|warning)' "$WORK/restore.log" \
@@ -273,8 +274,8 @@ spec:
   # a Backup only (helm/gibson-velero/charts/velero-*.tgz, crds/restores.yaml).
   # The Restore CRD prunes a field it does not declare SILENTLY, so a scoped
   # filter here would not be rejected — it would simply not filter, and this
-  # restore would bring back the whole namespace. tests/harness/restore.bats
-  # checks every field of every Restore this script builds against that CRD.
+  # restore would bring back the whole namespace.
+  # zeroroot-ai/hosted tests/harness/restore.bats checks every field of every Restore this script builds against that CRD.
   #
   # The kind persistentvolumes IS in this list, and it is what makes the restore move
   # data at all. Velero refuses to create a PodVolumeRestore when the restore's

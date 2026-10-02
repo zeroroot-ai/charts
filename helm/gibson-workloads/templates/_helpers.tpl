@@ -50,10 +50,10 @@ releases in one namespace from colliding.
 {{/*
 Stripe credentials Secret name.
 
-This name is REFERENCED by literal string `gibson-stripe-credentials` in
-helm/gibson-workloads/values-kind.yaml (dashboard.billing.stripeSecretKeySecretRef)
-and consumed by the dashboard Deployment's wait-for-stripe-secrets init
-container and STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET env entries.
+This name is the default `dashboard.billing.stripeSecretKeySecretRef` resolves
+to in templates/dashboard/deployment.yaml, and it is consumed by that
+Deployment's wait-for-stripe-secrets init container and its STRIPE_SECRET_KEY /
+STRIPE_WEBHOOK_SECRET env entries.
 
 Do NOT prefix with .Release.Name — the value in dashboard.billing.*SecretRef
 is the literal Secret name and is intentionally environment-stable.

@@ -73,8 +73,7 @@ spec:
             local label="$1" url="$2" want="${3:-200}"
             echo "[svc-probe] $label  $url"
             # -k: dev kind uses self-signed envoy cert; this probe is a
-            #     reachability test, not a cert-chain test (cert chain is
-            #     covered by tests/envoy-edge-cert.bats).
+            #     reachability test, not a cert-chain test.
             # --max-time: bound failure latency so a hung Service doesn't
             #              swallow the rest of the run.
             code=$(curl -ksS -o /tmp/body -w '%{http_code}' --max-time 10 "$url" || echo "000")

@@ -9,7 +9,8 @@
 # ---------------
 # The failure mode this library is built to prevent is a verification suite that
 # reports success when it verified nothing. The anti-pattern is already in the
-# tree — scripts/smoke-auth-chain.sh:95-99 exits 0 ("gracefully skipping") when
+# tree — zeroroot-ai/hosted scripts/smoke-auth-chain.sh exits 0 ("gracefully
+# skipping") when
 # the workload under test is absent, so a cluster missing ext-authz entirely
 # produces the same green output as a healthy one.
 #
@@ -18,7 +19,7 @@
 # code path in this file that returns success without having established the
 # thing it was asked to establish.
 #
-# Exit-code convention, matching scripts/smoke-signup.sh:
+# Exit-code convention, matching zeroroot-ai/hosted scripts/smoke-signup.sh:
 #   0 — all assertions passed
 #   1 — an assertion failed (the suite ran and found a real defect)
 #   2 — preflight failed (the suite could not run; NOT a pass)
@@ -28,7 +29,8 @@
 # as a gate.
 
 # ---------------------------------------------------------------------------
-# Output helpers — same verbs and colours as scripts/verify-profile.sh
+# Output helpers — same verbs and colours as
+# zeroroot-ai/hosted scripts/verify-profile.sh
 # ---------------------------------------------------------------------------
 GREEN=$'\033[0;32m'; RED=$'\033[0;31m'; YELLOW=$'\033[0;33m'; CYAN=$'\033[0;36m'; NC=$'\033[0m'
 
@@ -155,7 +157,8 @@ require_profile() {
 # Echoes "<ip-or-host>:<port>" for the Envoy edge, so probes can use
 # `curl --resolve` instead of depending on the operator's /etc/hosts. The
 # existing scripts assume host-side DNS for app./api./www./docs. (see the
-# /etc/hosts note at scripts/smoke-signup.sh:353); deriving the edge from the
+# /etc/hosts note in zeroroot-ai/hosted scripts/smoke-signup.sh); deriving the
+# edge from the
 # Service makes the same probe work on kind (NodePort) and EKS (LoadBalancer).
 # ---------------------------------------------------------------------------
 resolve_edge() {
