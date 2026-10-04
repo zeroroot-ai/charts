@@ -37,12 +37,29 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.toolHiveKind
+      name: ToolHive
+      priority: 1
+      type: string
+    - jsonPath: .status.toolHiveName
+      name: ToolHiveName
+      priority: 1
+      type: string
+    - jsonPath: .status.proxyURL
+      name: ProxyURL
+      priority: 1
+      type: string
+    - jsonPath: .status.observedGeneration
+      name: Observed
+      priority: 1
+      type: integer
     name: v1alpha1
     schema:
       openAPIV3Schema:
         description: |-
           ConnectorInstance is one connector enabled for one tenant. The connector-
-          operator reconciles it into ToolHive resources in the tenant namespace; the daemon writes its credential Secret.
+          operator reconciles it into ToolHive resources in the tenant namespace
+          (ADR-0014); the daemon writes its credential Secret (ADR-0015).
         properties:
           apiVersion:
             description: |-
@@ -67,7 +84,7 @@ spec:
 
               A product caller sets CatalogRef and nothing else — the catalog entry
               supplies the image or endpoint, the transport, the egress allow-list, and the
-              auth kind (: "http = catalog + button, not YAML"). The inline fields
+              auth kind (ADR-0014: "http = catalog + button, not YAML"). The inline fields
               are the advanced escape hatch for a custom connector; the catalog entry fills
               them when CatalogRef is set.
             properties:
@@ -96,15 +113,15 @@ spec:
                   connector as environment variables, each resolved from the tenant's
                   secret store. The bearer credential a connector presents (Auth "secret"
                   or "oauth") is NOT listed here: the daemon stores it under the
-                  connector's own name and writes the credential Secret.
+                  connector's own name and writes the credential Secret (ADR-0015).
                   Environment injection from this list is not wired yet.
                 items:
                   description: |-
                     CredentialRef points at ONE entry in the tenant's secret store. The store
                     is the hosted OpenBao namespace or the customer's BYO Vault, resolved from
                     the tenant's configured secret backend — the same backend the rest of the
-                    platform reads. Only the daemon reads that store; the operator
-                    has no secret-store client.
+                    platform reads (ADR-0009). Only the daemon reads that store; the operator
+                    has no secret-store client (ADR-0015).
                   properties:
                     key:
                       description: Key is the path/name of the secret in the customer's
@@ -128,7 +145,7 @@ spec:
                   EgressAllow is the list of vendor hosts the connector may reach (for
                   example "*.slack.com:443"). The operator renders it into a ToolHive
                   custom permission profile. Enforcement needs a NetworkPolicy-capable CNI
-                  (Spike 1 finding).
+                  (ADR-0014, Spike 1 finding).
                 items:
                   type: string
                 type: array
@@ -142,27 +159,6 @@ spec:
                   Image is the container image URL for a Hosted connector. A private
                   registry needs RegistryCredential.
                 type: string
-              registryCredential:
-                description: |-
-                  RegistryCredential resolves a private-registry pull secret from the
-                  customer's store, for a Hosted connector on a private image.
-                properties:
-                  key:
-                    description: Key is the path/name of the secret in the customer's
-                      store.
-                    type: string
-                  property:
-                    description: Property is the field within the secret (for a structured
-                      secret).
-                    type: string
-                  targetEnv:
-                    description: |-
-                      TargetEnv is the environment variable the connector reads. Defaults to
-                      the vendor's conventional name when unset.
-                    type: string
-                required:
-                - key
-                type: object
               runtime:
                 default: pod
                 description: |-
@@ -198,7 +194,7 @@ spec:
                 description: |-
                   Conditions carry the detailed reconcile state, one condition per concern
                   (Provisioned, Authorized, ToolsDiscovered, Healthy). Every failure mode
-                  is observable here (the error slice).
+                  is observable here (ADR-0014, the error slice).
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
