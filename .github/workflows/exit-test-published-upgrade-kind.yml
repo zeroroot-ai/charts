@@ -1,0 +1,85 @@
+# exit-test-published-upgrade-kind — the previous published chart upgrades to this one.
+#
+# WHY THIS EXISTS. charts#155: Zitadel v4.18.0's migration 76 fails against a
+# database an earlier Zitadel wrote —
+#
+#   migration failed  version=v4.18.0  name=76_users14_login_equality_indexes
+#   err.kind=AlreadyExists
+#   err.parent="ERROR: column \"owners\" of relation \"unique_constraints\"
+#              does not exist (SQLSTATE 42703)"
+#
+# A FRESH install is clean, which is why nothing caught it: every other exit
+# test installs from an empty database. The bump shipped in 0.130.0, and the
+# failure was found by a staging PROMOTION, eleven days later, with prod pinned
+# 0.128.0 and unable to move at all.
+#
+# So the gap was never a flaky test or a missing assertion. It was that no test
+# upgraded anything. This is that test.
+#
+# WHAT IT PROVES, and the order matters. It installs the PREVIOUS published
+# version, waits for Zitadel to finish its own migrations and asserts the
+# projections table is non-empty — because an upgrade from an empty database is
+# the case already covered — and only then upgrades to the version under test.
+#
+# baseline-up.sh is the same verb both times. Every release it drives is
+# `helm upgrade --install`, so a second run at a newer CHART_VERSION is the
+# upgrade a promotion performs, not a re-implementation of it.
+#
+# CADENCE. After every publish, on push to main and daily, never on a pull
+# request (ADR-0012). After every publish is the load-bearing half. A
+# release-please merge mints a version, but publish-umbrella-chart pushes the
+# artifact later, on the release event. A run on the merge commit would resolve
+# "the newest published version" one release too old. So this follows the
+# publish workflow, and a broken migration turns main red BEFORE anything is
+# promoted. Combined with ADR-0080 (prod follows a green staging), that is the
+# containment charts#155 asked for.
+#
+# ONE DISTRO, kind. published-install.yml's own header records that k3d is red
+# on an unrelated Tenant-seeding problem, and a known-red leg would mask the
+# regression this is here to find. kind also enforces no NetworkPolicy, which
+# is irrelevant to a database migration.
+#
+# COST. Two convergences on one runner, so it is the longest job in this repo.
+# That is the price of the only question it answers, and the alternative price
+# was eleven days of a prod that could not move.
+name: exit-test-published-upgrade-kind
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/baseline-up.sh'
+      - 'helm/kind-config.yaml'
+      - '.github/workflows/published-install.yml'
+      - '.github/workflows/exit-test-published-upgrade-kind.yml'
+  workflow_run:
+    workflows: [publish-umbrella-chart]
+    types: [completed]
+  schedule:
+    # Staggered away from the install legs (06:30 and 07:00) so the three do
+    # not contend for a runner.
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    inputs:
+      chart_version:
+        description: The published version to upgrade TO (default, the newest)
+        required: false
+        type: string
+
+concurrency:
+  group: exit-test-published-upgrade-kind-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade:
+    # A failed publish leaves no new version, so there is nothing new to upgrade to.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/published-install.yml
+    with:
+      distro: kind
+      chart_version: ${{ inputs.chart_version }}
+      upgrade_from_previous: true
+    secrets: inherit

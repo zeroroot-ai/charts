@@ -58,6 +58,14 @@ on:
         description: The published chart version to install (default, the newest)
         required: false
         type: string
+      upgrade_from_previous:
+        description: >-
+          Install the PREVIOUS published version first, converge it, then upgrade
+          to the version under test. Off by default, because a fresh install and
+          an upgrade are different claims and most runs want the first.
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -141,6 +149,18 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "installing published charts at $v"
 
+      # The version to upgrade FROM comes from scripts/resolve-upgrade-pair.py,
+      # not from shell here. It paginates the registry tag list and compares
+      # versions as integer tuples, both of which the first inline attempt got
+      # wrong: one page ended at 0.132.14 and a string compare orders 0.9.0
+      # after 0.10.0. It has a self-test; inline YAML cannot.
+      - name: Resolve the version to upgrade from
+        id: pair
+        if: inputs.upgrade_from_previous
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/resolve-upgrade-pair.py --to "${{ steps.version.outputs.version }}"
+
       - name: Install k3d
         if: inputs.distro == 'k3d'
         run: |
@@ -173,6 +193,47 @@ jobs:
             echo "KUBECONFIG=/tmp/k3d-gibson.kubeconfig" >> "$GITHUB_ENV"
           fi
 
+      # PHASE 1 of an upgrade run: the PREVIOUS published version, converged.
+      #
+      # This is what makes the test able to catch a migration. Every other exit
+      # test installs from an empty database, and Zitadel's setup Job only fails
+      # when it meets a schema an EARLIER Zitadel wrote — charts#155, where
+      # v4.18.0's migration 76 died on `column "owners" of relation
+      # "unique_constraints" does not exist` and a fresh install was clean.
+      #
+      # baseline-up.sh is the same verb both times: every release it drives is
+      # `helm upgrade --install`, so running it again at a newer CHART_VERSION
+      # IS the upgrade a promotion performs. No second code path to drift.
+      - name: Phase 1 — install the previous published version
+        if: inputs.upgrade_from_previous
+        env:
+          CHART_VERSION: ${{ steps.pair.outputs.from }}
+          SUBSTRATE_ENV: ${{ runner.temp }}/substrate/kind/substrate.env
+          RUNG: developer
+        run: scripts/baseline-up.sh
+
+      - name: Phase 1 — the Zitadel database is populated, not empty
+        if: inputs.upgrade_from_previous
+        run: |
+          set -euo pipefail
+          # Without a populated schema the upgrade proves nothing, so this is a
+          # precondition and not a nicety: if Zitadel never finished its own
+          # migrations at the old version, phase 2 would pass by meeting the
+          # empty database every other test already covers.
+          kubectl -n gibson wait --for=condition=complete job/gibson-zitadel-setup --timeout=900s
+          # platform-postgres is a CNPG Cluster, so the primary is found by its
+          # role label. stderr is kept: a failed exec must read as a failed exec,
+          # never as an empty table.
+          primary="$(kubectl -n gibson get pod \
+                       -l cnpg.io/cluster=platform-postgres,cnpg.io/instanceRole=primary \
+                       -o jsonpath='{.items[0].metadata.name}')"
+          [ -n "$primary" ] || { echo "::error::no primary pod for the CNPG Cluster platform-postgres"; exit 1; }
+          n="$(kubectl -n gibson exec "$primary" -c postgres -- \
+                 psql -U postgres -d zitadel -tAc \
+                 "select count(*) from projections.current_states")"
+          [ "${n:-0}" -gt 0 ] || { echo "::error::Zitadel's projections are empty after installing ${{ steps.pair.outputs.from }}, so an upgrade from here would meet an empty database and prove nothing"; exit 1; }
+          echo "Zitadel carries $n projection state row(s) at ${{ steps.pair.outputs.from }}"
+
       # THE assertion, and the one a stranger's command is measured against.
       #
       # RUNG=developer is the documented local install (ADR-0090):
@@ -191,6 +252,31 @@ jobs:
           SUBSTRATE_ENV: ${{ runner.temp }}/substrate/kind/substrate.env
           RUNG: developer
         run: scripts/baseline-up.sh
+
+      # The assertion charts#155 asked for, and it runs in BOTH modes: on a
+      # fresh install it is cheap, and on an upgrade it is the whole point.
+      # Named explicitly rather than left to "the sync went green", because the
+      # hook failing five times is what stalled the staging promotion while
+      # every pod still read Running.
+      - name: The Zitadel setup hook completed, with no migration left failing
+        run: |
+          set -euo pipefail
+          if ! kubectl -n gibson wait --for=condition=complete \
+                 job/gibson-zitadel-setup --timeout=900s; then
+            echo "::error::gibson-zitadel-setup did not complete. Its log follows; a line \
+          reading \"migration failed\" with err.kind=AlreadyExists is the charts#155 shape — \
+          a Zitadel version that cannot migrate a database an earlier version wrote."
+            kubectl -n gibson logs job/gibson-zitadel-setup --tail=200 --all-containers || true
+            exit 1
+          fi
+          log="$(kubectl -n gibson logs job/gibson-zitadel-setup --tail=400 --all-containers 2>/dev/null || true)"
+          if printf '%s' "$log" | grep -q "migration failed"; then
+            echo "::error::the setup Job completed but its log carries \"migration failed\", so a \
+          migration was skipped rather than applied:"
+            printf '%s\n' "$log" | grep -n -A3 "migration failed" | head -40
+            exit 1
+          fi
+          echo "  ✓ gibson-zitadel-setup completed with no failing migration"
 
       # The rung came from the ARTIFACT, not from anywhere on this runner.
       # Without this, a future edit that quietly passes a local file would
