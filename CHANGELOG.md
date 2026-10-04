@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.136.1](https://github.com/zeroroot-ai/charts/compare/v0.136.0...v0.136.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **config:** the ConfigMap renders only keys the daemon binds, and a guard keeps it so ([#342](https://github.com/zeroroot-ai/charts/issues/342)) ([451a1ee](https://github.com/zeroroot-ai/charts/commit/451a1eedbde9b1c6267a32468ede114f3094985b))
+* **crds:** ComponentGrant is a kind nothing defines, so the chart stops shipping it ([#340](https://github.com/zeroroot-ai/charts/issues/340)) ([65828c8](https://github.com/zeroroot-ai/charts/commit/65828c8d35901ecc08427e9de96ccea2e67de6dd))
+* **guard:** check-env-consumed joins per container, and a comment is not a consumer ([#343](https://github.com/zeroroot-ai/charts/issues/343)) ([908c748](https://github.com/zeroroot-ai/charts/commit/908c7481ea5995c5c1c7f23576478b1749602544))
+* **pins:** gibson v0.150.1, with the CRDs and the env contract regenerated at that tag ([#338](https://github.com/zeroroot-ai/charts/issues/338)) ([a408979](https://github.com/zeroroot-ai/charts/commit/a40897995f3e4b47a6710dae7eed30d151abd52f))
+* **rbac:** the dashboard consumes no Kubernetes API, so it holds no cluster grant ([#341](https://github.com/zeroroot-ai/charts/issues/341)) ([c23c220](https://github.com/zeroroot-ai/charts/commit/c23c220465e52126515d582b744ae29cf4f66e93))
+
 ## [0.136.0](https://github.com/zeroroot-ai/charts/compare/v0.135.6...v0.136.0) (2026-10-02)
 
 
