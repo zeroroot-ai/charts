@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.136.2](https://github.com/zeroroot-ai/charts/compare/v0.136.1...v0.136.2) (2026-10-04)
+
+
+### Bug Fixes
+
+* **zitadel:** bump to v4.19.4 ([#346](https://github.com/zeroroot-ai/charts/issues/346)) ([13f1443](https://github.com/zeroroot-ai/charts/commit/13f144380fa4d902e402479e552ecc28ab791ee5))
+
 ## [0.136.1](https://github.com/zeroroot-ai/charts/compare/v0.136.0...v0.136.1) (2026-10-04)
 
 
