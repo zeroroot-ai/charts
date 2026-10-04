@@ -117,6 +117,7 @@ IMAGE_SERVICE = {
 # them. zitadel-login is a fork of zitadel/zitadel and reads Zitadel's own env.
 UNGOVERNED = {"zitadel-login", "integrations", "sdk-registry"}
 
+HELM_COMMENT = re.compile(r"\{\{-?\s*/\*.*?\*/\s*-?\}\}", re.S)
 EXPANSION = re.compile(r"[\$]\{([A-Z][A-Z0-9_]*)\}|[\$]\(([A-Z][A-Z0-9_]*)\)")
 
 # Read by a language runtime or a third-party library, so they will never appear
@@ -167,12 +168,48 @@ def readers(contracts: Path) -> dict[str, set[str]]:
 
 
 def expansion_refs(root: Path, golden: Path) -> set[str]:
-    """Names consumed by ${VAR} in a chart file or $(VAR) in a rendered manifest."""
+    """Names consumed by ${VAR} interpolation in a chart FILE.
+
+    Deliberately global, and ONLY the ${VAR} form. A chart file that interpolates
+    ${NAME} — the daemon ConfigMap, a seed table — can be mounted by a pod other
+    than the one the env var is injected into, and scoping that would need mount
+    analysis. So this stays chart-wide and errs towards accepting.
+
+    The $(VAR) form is NOT collected here. kubelet substitutes it strictly within
+    one container's own env list, so a $(NAME) in the tenant-operator says nothing
+    about a NAME injected into the daemon. Collecting both chart-wide is what made
+    this gate pass a credential a pod held with no reader: the daemon's
+    StatefulSet injected TENANT_POSTGRES_ADMIN_PASSWORD, its only consumer was a
+    ConfigMap line gibson#599 had unbound, and the tenant-operator's unrelated
+    $(TENANT_POSTGRES_ADMIN_PASSWORD) kept the gate quiet. Per-pod now:
+    pod_expansions() below.
+    """
     out: set[str] = set()
 
     def scan(text: str) -> None:
-        for a, b in EXPANSION.findall(text):
-            out.add(a or b)
+        for a, _b in EXPANSION.findall(text):
+            if a:
+                out.add(a)
+
+    def decomment(text: str) -> str:
+        """Drop Helm comment blocks and whole-line YAML comments before scanning.
+
+        A reference inside a COMMENT is prose, not an expansion, and this scan
+        reads chart files as raw text. Writing "its only consumer was
+        ${NAME} in the ConfigMap, and gibson#599 unbound that key" into a
+        comment re-created the reference and kept this gate quiet about the very
+        injection the comment said was dead — measured on
+        TENANT_POSTGRES_ADMIN_PASSWORD, charts#342.
+
+        Only unambiguous comments are stripped: Helm `{{/* … */}}` blocks, and
+        lines whose first non-space character is `#`. A trailing `# …` after a
+        value is left alone, so a reference hidden there still counts. That
+        direction is the safe one: an uncounted real expansion is a LOUD false
+        failure, while an over-counted comment is the silent pass this fixes.
+        """
+        text = HELM_COMMENT.sub("", text)
+        return "\n".join("" if line.lstrip().startswith("#") else line
+                          for line in text.split("\n"))
 
     for dirpath, dirs, files in os.walk(root / "helm"):
         rel = Path(dirpath).relative_to(root / "helm")
@@ -181,15 +218,39 @@ def expansion_refs(root: Path, golden: Path) -> set[str]:
             continue
         for f in files:
             if f.endswith((".yaml", ".yml", ".tpl", ".txt", ".json")):
-                scan((Path(dirpath) / f).read_text(errors="replace"))
+                scan(decomment((Path(dirpath) / f).read_text(errors="replace")))
     if golden.is_dir():
         for f in sorted(golden.glob("*.yaml")):
-            scan(f.read_text(errors="replace"))
+            scan(decomment(f.read_text(errors="replace")))
+    return out
+
+
+def container_expansions(container) -> set[str]:
+    """Names this CONTAINER substitutes with $(VAR), from its own env list.
+
+    Per container, not per pod, because that is kubelet's actual rule: $(NAME)
+    in an env value is expanded from the SAME container's env list, and a
+    reference to a name injected only into a sibling container is not expanded
+    at all — it reaches the process as the literal string "$(NAME)".
+
+    So a cross-container reference is not a consumer, it is a bug, and this
+    scoping reports it as one. Measured before tightening: the chart has ZERO
+    cross-container references, so nothing legitimate relies on the looser read.
+
+    Chart-wide was the original defect: a $(TENANT_POSTGRES_ADMIN_PASSWORD) in
+    the tenant-operator kept this gate quiet about the same name injected into
+    the daemon, which held it with no reader (charts#342).
+    """
+    out: set[str] = set()
+    for _a, b in EXPANSION.findall(yaml.safe_dump(container.get("env") or [],
+                                                  sort_keys=True)):
+        if b:
+            out.add(b)
     return out
 
 
 def containers(golden: Path):
-    """(image, container-name, [env names]) for every container in every render."""
+    """(image, container-name, [env names], pod $(VAR) refs) for every container."""
     out = []
     if not golden.is_dir():
         return out
@@ -211,7 +272,8 @@ def containers(golden: Path):
                             continue
                         names = [e.get("name") for e in (c.get("env") or [])
                                  if isinstance(e, dict) and isinstance(e.get("name"), str)]
-                        out.append((img, c.get("name") or "<unnamed>", names))
+                        out.append((img, c.get("name") or "<unnamed>", names,
+                                    container_expansions(c)))
     return out
 
 
@@ -245,7 +307,7 @@ def violations(root: Path, contracts: Path) -> tuple[list[str], list[str], list[
     fail: dict[str, str] = {}
     notes: set[str] = set()
 
-    for img, cname, names in containers(golden):
+    for img, cname, names, subs in containers(golden):
         m = FIRST_PARTY.match(img)
         if not m:
             continue
@@ -268,7 +330,7 @@ def violations(root: Path, contracts: Path) -> tuple[list[str], list[str], list[
                     f"{n} is injected into the {cname} container of {image}, and it must "
                     f"never be injected: {NEVER_INJECTED[n]}")
                 continue
-            if n in allowed or n in expanded or n in RUNTIME_CONSUMED:
+            if n in allowed or n in expanded or n in subs or n in RUNTIME_CONSUMED:
                 continue
             spec = f"{image}:{n}"
             if spec in exempt:
@@ -307,8 +369,9 @@ def selftest() -> int:
             "            - name: GIBSON_SUBSTITUTED\n              value: c\n"
             "            - name: GIBSON_DEAD\n              value: d\n"
             "            - name: NODE_OPTIONS\n              value: --max-old-space-size=1\n"
-            "        - name: dsn\n          image: ghcr.io/zeroroot-ai/gibson:v1\n"
-            "          env:\n"
+            # $(VAR) is expanded from the SAME container's env, so the reference
+            # lives beside the injection. A sibling-container reference would
+            # reach the process as the literal "$(GIBSON_SUBSTITUTED)".
             "            - name: DSN\n"
             "              value: postgres://u:$(GIBSON_SUBSTITUTED)@h/db\n"
             "        - name: upstream\n          image: docker.io/library/redis:7\n"
@@ -358,13 +421,65 @@ def selftest() -> int:
             print(f"SELFTEST FAIL: {never} is read AND exempted and must still fail, got {fail}")
             return 1
 
+    # The two ways this gate used to pass a credential a pod held with no reader
+    # (charts#342). Both are planted here, not in the tree, so the fixture cannot
+    # be satisfied by the thing under test.
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        (tmp / "helm" / "testdata" / "golden").mkdir(parents=True)
+        (tmp / "helm" / "x" / "templates").mkdir(parents=True)
+        (tmp / "scripts").mkdir()
+        c = tmp / "contracts"
+        c.mkdir()
+        (c / "gibson-env-readers.txt").write_text("# gen\nGIBSON_READS_THIS\n")
+
+        # 1. A reference in a COMMENT is prose, not an expansion. Writing "its
+        #    only consumer was ${SECRET} in the ConfigMap" into a comment used to
+        #    re-create the reference and silence the gate about that very var.
+        (tmp / "helm" / "x" / "templates" / "cm.yaml").write_text(
+            "# NO SECRET here: its only consumer was ${GIBSON_COMMENT_ONLY} and it is gone.\n"
+            "{{- /* and ${GIBSON_HELM_COMMENT} in a Helm comment block */ -}}\n"
+            "data:\n  conf: |\n    real: ${GIBSON_REALLY_EXPANDED}\n"
+        )
+        # 2. $(VAR) is per CONTAINER. A reference in a sibling container is not an
+        #    expansion — the process receives the literal "$(NAME)".
+        (tmp / "helm" / "testdata" / "golden" / "r.yaml").write_text(
+            "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n"
+            "      containers:\n"
+            "        - name: holder\n          image: ghcr.io/zeroroot-ai/gibson:v1\n"
+            "          env:\n"
+            "            - name: GIBSON_READS_THIS\n              value: a\n"
+            "            - name: GIBSON_COMMENT_ONLY\n              value: b\n"
+            "            - name: GIBSON_HELM_COMMENT\n              value: c\n"
+            "            - name: GIBSON_REALLY_EXPANDED\n              value: d\n"
+            "            - name: GIBSON_CROSS_CONTAINER\n              value: e\n"
+            "        - name: referencer\n          image: ghcr.io/zeroroot-ai/gibson:v1\n"
+            "          env:\n"
+            "            - name: DSN\n"
+            "              value: postgres://u:$(GIBSON_CROSS_CONTAINER)@h/db\n"
+        )
+        fail, _, _ = violations(tmp, c)
+        for name, why in (
+            ("GIBSON_COMMENT_ONLY", "a ${VAR} inside a whole-line # comment"),
+            ("GIBSON_HELM_COMMENT", "a ${VAR} inside a Helm {{/* */}} comment"),
+            ("GIBSON_CROSS_CONTAINER", "a $(VAR) referenced only by a SIBLING container"),
+        ):
+            if not any(name in f for f in fail):
+                print(f"SELFTEST FAIL: {why} was accepted as a consumer, got {fail}")
+                return 1
+        if any("GIBSON_REALLY_EXPANDED" in f for f in fail):
+            print(f"SELFTEST FAIL: a real ${{VAR}} expansion outside a comment was flagged: {fail}")
+            return 1
+
     fail, stale, notes = violations(ROOT, CONTRACTS)
     if fail or stale or notes:
         print("SELFTEST FAIL: the tree has env violations:\n  " + "\n  ".join(fail + stale + notes))
         return 1
     print("✅ self-test: an unread var fails, a var that must never be injected fails even when "
           "read and exempted; a ${VAR}-expanded one, a $(VAR)-substituted one, a third-party "
-          "image and a fork are not judged; an exemption silences and a stale one fails")
+          "image and a fork are not judged; an exemption silences and a stale one fails; and a "
+          "${VAR} in a comment, a ${VAR} in a Helm comment and a $(VAR) from a sibling container "
+          "are each rejected as consumers")
     return 0
 
 
