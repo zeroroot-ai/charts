@@ -6445,13 +6445,13 @@ rules:
   # #801–805). The operator owns their full lifecycle plus status +
   # finalizers, exactly as for the top-level Tenant CRDs.
   - apiGroups: ["gibson.zeroroot.ai"]
-    resources: ["tenants", "tenantmembers", "agentenrollments", "componentgrants", "tenantdataplanes", "tenantsecretsbackends", "tenantidentities", "tenantgrants"]
+    resources: ["tenants", "tenantmembers", "agentenrollments", "tenantdataplanes", "tenantsecretsbackends", "tenantidentities", "tenantgrants"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["gibson.zeroroot.ai"]
-    resources: ["tenants/status", "tenantmembers/status", "agentenrollments/status", "componentgrants/status", "tenantdataplanes/status", "tenantsecretsbackends/status", "tenantidentities/status", "tenantgrants/status"]
+    resources: ["tenants/status", "tenantmembers/status", "agentenrollments/status", "tenantdataplanes/status", "tenantsecretsbackends/status", "tenantidentities/status", "tenantgrants/status"]
     verbs: ["get", "update", "patch"]
   - apiGroups: ["gibson.zeroroot.ai"]
-    resources: ["tenants/finalizers", "tenantmembers/finalizers", "agentenrollments/finalizers", "componentgrants/finalizers", "tenantdataplanes/finalizers", "tenantsecretsbackends/finalizers", "tenantidentities/finalizers", "tenantgrants/finalizers"]
+    resources: ["tenants/finalizers", "tenantmembers/finalizers", "agentenrollments/finalizers", "tenantdataplanes/finalizers", "tenantsecretsbackends/finalizers", "tenantidentities/finalizers", "tenantgrants/finalizers"]
     verbs: ["update"]
 
   # ConnectorInstance is the connector-operator's CRD. The tenant-operator
@@ -6922,7 +6922,7 @@ rules:
     verbs: ["get"]
   # Namespaced CRDs (across all tenant-* namespaces).
   - apiGroups: ["gibson.zeroroot.ai"]
-    resources: ["tenantmembers", "agentenrollments", "componentgrants"]
+    resources: ["tenantmembers", "agentenrollments"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # No Secret access. The rule that stood here granted `get` on every
   # Secret in the cluster "for reading agent-enrollment bootstrap-token
@@ -19245,7 +19245,7 @@ webhooks:
       - apiGroups: ["gibson.zeroroot.ai"]
         apiVersions: ["v1alpha1"]
         operations: ["CREATE"]
-        resources: ["agentenrollments", "componentgrants", "tenantmembers"]
+        resources: ["agentenrollments", "tenantmembers"]
         scope: Namespaced
     # Fail-closed (one-code-path / deploy#204): webhook outage rejects
     # writes rather than silently admitting malformed CRDs. Availability

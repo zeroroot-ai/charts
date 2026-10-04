@@ -3212,7 +3212,7 @@ spire:
 
 # Tenant Operator (spec: tenant-control-plane-foundation)
 # Standalone kubebuilder operator that reconciles Gibson Tenant CRDs and
-# child CRDs (TenantMember, AgentEnrollment, ComponentGrant) across all
+# child CRDs (TenantMember, AgentEnrollment) across all
 # identity and data subsystems.
 #
 # tenant-operator is structural infrastructure (one-code-path / deploy#188 —
@@ -3322,7 +3322,7 @@ tenantOperator:
     enabled: true
     gracePeriodSeconds: 300
   # Mutating admission webhook that stamps ownerReferences on CREATE for
-  # AgentEnrollment/ComponentGrant/TenantMember so Kubernetes GC cascades
+  # AgentEnrollment/TenantMember so Kubernetes GC cascades
   # cleanup when a parent Tenant is deleted (even if the saga is bypassed).
   # failurePolicy is Ignore — the reconciler-side backfill remains the
   # durable convergence path, so a webhook outage cannot wedge tenant
