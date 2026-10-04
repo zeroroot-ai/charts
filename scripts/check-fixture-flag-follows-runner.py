@@ -11,11 +11,21 @@ stopped at the dispatch gate (gibson#14).
 This guard renders the umbrella with the toggle off and on and fails when the
 flag is present while the runner is off, or absent while the runner is on.
 
+It also renders every values file the umbrella ships and fails when any of them
+puts the flag on any container (charts#332). A shipped profile is one a real
+installer applies, and the flag admits test fixtures into a tenant. An exit
+test turns the runner on at dispatch, with --set or a file outside helm/gibson,
+never in a shipped file. gibson held this check as cmd/fixtures-lint, where no
+lane ran it and no workflow could read this repo, so gibson#507 deleted it.
+
   check-fixture-flag-follows-runner.py             exit 1 on a mismatch
-  check-fixture-flag-follows-runner.py --selftest  prove a stray flag and a missing flag fail
+  check-fixture-flag-follows-runner.py --selftest  prove a stray flag, a missing flag
+                                                   and a shipped file that sets it fail
 """
 import copy
+import glob
 import os
+import tempfile
 import subprocess
 import sys
 
@@ -25,16 +35,56 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FLAG = "GIBSON_TEST_FIXTURES_ENABLED"
 
 
-def render(runner_on: bool) -> list[dict]:
+BASELINE = "helm/gibson/values-baseline.yaml"
+
+
+def helm_template(extra: list[str]) -> list[dict]:
     args = [
         "helm", "template", "gibson", "helm/gibson",
-        "-f", "helm/gibson/values-baseline.yaml",
+        "-f", BASELINE,
         "-f", "helm/testdata/render-inputs/gibson.yaml",
         "--namespace", "gibson",
-        "--set", f"gibson-workloads.gibson.e2eRunner.enabled={'true' if runner_on else 'false'}",
-    ]
+    ] + extra
     out = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, check=True).stdout
     return [d for d in yaml.safe_load_all(out) if d]
+
+
+def render(runner_on: bool) -> list[dict]:
+    return helm_template(["--set", f"gibson-workloads.gibson.e2eRunner.enabled={'true' if runner_on else 'false'}"])
+
+
+def shipped_profiles() -> list[str]:
+    """Every values file the umbrella ships on top of the baseline."""
+    found = sorted(glob.glob(os.path.join(ROOT, "helm/gibson/values-*.yaml")))
+    return [os.path.relpath(f, ROOT) for f in found if os.path.relpath(f, ROOT) != BASELINE]
+
+
+def flag_carriers(docs: list[dict]) -> list[str]:
+    """Each workload container whose env names the flag, whatever its value."""
+    out = []
+    for d in docs:
+        pod = (((d.get("spec") or {}).get("template") or {}).get("spec") or {})
+        if d.get("kind") == "CronJob":
+            pod = ((((d.get("spec") or {}).get("jobTemplate") or {}).get("spec") or {}).get("template") or {}).get("spec") or {}
+        for c in (pod.get("containers") or []) + (pod.get("initContainers") or []):
+            if any(e.get("name") == FLAG for e in c.get("env") or []):
+                out.append(f"{d.get('kind')}/{d['metadata']['name']} container {c.get('name')}")
+    return out
+
+
+def judge_profile(profile: str, docs: list[dict]) -> list[str]:
+    return [f"{profile} puts {FLAG} on {w}: a shipped profile would admit test fixtures into a tenant"
+            for w in flag_carriers(docs)]
+
+
+def judge_shipped() -> list[str]:
+    profiles = shipped_profiles()
+    if not profiles:
+        return ["no helm/gibson/values-*.yaml beside the baseline: the check found nothing to read"]
+    out = judge_profile(BASELINE, helm_template([]))
+    for prof in profiles:
+        out += judge_profile(prof, helm_template(["-f", prof]))
+    return out
 
 
 def daemon_env(docs: list[dict]) -> dict | None:
@@ -76,6 +126,14 @@ def selftest() -> int:
     if not judge(env_off, missing):
         print("selftest: a missing flag while the runner is on must fail", file=sys.stderr)
         return 1
+    # A shipped file that turns the runner on is the charts#332 shape. The
+    # fixture goes through the same render a real profile does.
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml") as fx:
+        fx.write("gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n")
+        fx.flush()
+        if not judge_profile("fixture", helm_template(["-f", fx.name])):
+            print("selftest: a values file that turns the runner on must fail", file=sys.stderr)
+            return 1
     print("check-fixture-flag-follows-runner selftest PASSED")
     return 0
 
@@ -84,11 +142,12 @@ def main() -> int:
     if "--selftest" in sys.argv[1:]:
         return selftest()
     problems = judge(daemon_env(render(False)), daemon_env(render(True)))
+    problems += judge_shipped()
     for p in problems:
         print(f"FAIL: {p}", file=sys.stderr)
     if problems:
         return 1
-    print("check-fixture-flag-follows-runner PASSED")
+    print(f"check-fixture-flag-follows-runner PASSED ({len(shipped_profiles())} shipped profiles carry no {FLAG})")
     return 0
 
 

@@ -300,7 +300,7 @@ daemon-sa-binding: ## The tenant-operator binds the daemon's real ServiceAccount
 	@python3 scripts/check-daemon-sa-binding.py --selftest
 	@python3 scripts/check-daemon-sa-binding.py
 
-fixture-flag-follows-runner: ## The daemon's GIBSON_TEST_FIXTURES_ENABLED follows gibson.e2eRunner.enabled, on and off (gibson#14)
+fixture-flag-follows-runner: ## GIBSON_TEST_FIXTURES_ENABLED follows gibson.e2eRunner.enabled, and no shipped values file sets it (gibson#14, charts#332)
 	@python3 scripts/check-fixture-flag-follows-runner.py --selftest
 	@python3 scripts/check-fixture-flag-follows-runner.py
 
