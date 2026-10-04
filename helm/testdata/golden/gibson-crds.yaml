@@ -2177,6 +2177,10 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.grantsAppliedCount
+      name: Grants
+      priority: 1
+      type: integer
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -2255,8 +2259,6 @@ spec:
                 enum:
                 - autonomous
                 - supervised
-                type: string
-              notes:
                 type: string
               principalKind:
                 description: |-
@@ -2577,12 +2579,29 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.toolHiveKind
+      name: ToolHive
+      priority: 1
+      type: string
+    - jsonPath: .status.toolHiveName
+      name: ToolHiveName
+      priority: 1
+      type: string
+    - jsonPath: .status.proxyURL
+      name: ProxyURL
+      priority: 1
+      type: string
+    - jsonPath: .status.observedGeneration
+      name: Observed
+      priority: 1
+      type: integer
     name: v1alpha1
     schema:
       openAPIV3Schema:
         description: |-
           ConnectorInstance is one connector enabled for one tenant. The connector-
-          operator reconciles it into ToolHive resources in the tenant namespace; the daemon writes its credential Secret.
+          operator reconciles it into ToolHive resources in the tenant namespace
+          (ADR-0014); the daemon writes its credential Secret (ADR-0015).
         properties:
           apiVersion:
             description: |-
@@ -2607,7 +2626,7 @@ spec:
 
               A product caller sets CatalogRef and nothing else — the catalog entry
               supplies the image or endpoint, the transport, the egress allow-list, and the
-              auth kind (: "http = catalog + button, not YAML"). The inline fields
+              auth kind (ADR-0014: "http = catalog + button, not YAML"). The inline fields
               are the advanced escape hatch for a custom connector; the catalog entry fills
               them when CatalogRef is set.
             properties:
@@ -2636,15 +2655,15 @@ spec:
                   connector as environment variables, each resolved from the tenant's
                   secret store. The bearer credential a connector presents (Auth "secret"
                   or "oauth") is NOT listed here: the daemon stores it under the
-                  connector's own name and writes the credential Secret.
+                  connector's own name and writes the credential Secret (ADR-0015).
                   Environment injection from this list is not wired yet.
                 items:
                   description: |-
                     CredentialRef points at ONE entry in the tenant's secret store. The store
                     is the hosted OpenBao namespace or the customer's BYO Vault, resolved from
                     the tenant's configured secret backend — the same backend the rest of the
-                    platform reads. Only the daemon reads that store; the operator
-                    has no secret-store client.
+                    platform reads (ADR-0009). Only the daemon reads that store; the operator
+                    has no secret-store client (ADR-0015).
                   properties:
                     key:
                       description: Key is the path/name of the secret in the customer's
@@ -2668,7 +2687,7 @@ spec:
                   EgressAllow is the list of vendor hosts the connector may reach (for
                   example "*.slack.com:443"). The operator renders it into a ToolHive
                   custom permission profile. Enforcement needs a NetworkPolicy-capable CNI
-                  (Spike 1 finding).
+                  (ADR-0014, Spike 1 finding).
                 items:
                   type: string
                 type: array
@@ -2682,27 +2701,6 @@ spec:
                   Image is the container image URL for a Hosted connector. A private
                   registry needs RegistryCredential.
                 type: string
-              registryCredential:
-                description: |-
-                  RegistryCredential resolves a private-registry pull secret from the
-                  customer's store, for a Hosted connector on a private image.
-                properties:
-                  key:
-                    description: Key is the path/name of the secret in the customer's
-                      store.
-                    type: string
-                  property:
-                    description: Property is the field within the secret (for a structured
-                      secret).
-                    type: string
-                  targetEnv:
-                    description: |-
-                      TargetEnv is the environment variable the connector reads. Defaults to
-                      the vendor's conventional name when unset.
-                    type: string
-                required:
-                - key
-                type: object
               runtime:
                 default: pod
                 description: |-
@@ -2738,7 +2736,7 @@ spec:
                 description: |-
                   Conditions carry the detailed reconcile state, one condition per concern
                   (Provisioned, Authorized, ToolsDiscovered, Healthy). Every failure mode
-                  is observable here (the error slice).
+                  is observable here (ADR-0014, the error slice).
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -2860,6 +2858,10 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.observedGeneration
+      name: Observed
+      priority: 1
+      type: integer
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -3150,6 +3152,18 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.observedGeneration
+      name: Observed
+      priority: 1
+      type: integer
+    - jsonPath: .status.oidcClients[*].name
+      name: OIDCClients
+      priority: 1
+      type: string
+    - jsonPath: .status.oidcClients[*].clientID
+      name: ClientIDs
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -4033,6 +4047,18 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.lastError
+      name: LastError
+      priority: 1
+      type: string
+    - jsonPath: .status.stores[*].name
+      name: Stores
+      priority: 1
+      type: string
+    - jsonPath: .status.stores[*].state
+      name: StoreStates
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -4232,11 +4258,6 @@ spec:
                     store. The aggregate Ready condition (and the scalar Ready field) is True
                     only when every requested store has reached state=ready.
                   properties:
-                    lastUpdated:
-                      description: LastUpdated is the time this store's state was
-                        last written.
-                      format: date-time
-                      type: string
                     name:
                       description: 'Name identifies the store: postgres, neo4j, redis,
                         vector, or kek.'
@@ -4246,11 +4267,6 @@ spec:
                       - redis
                       - vector
                       - kek
-                      type: string
-                    reason:
-                      description: |-
-                        Reason carries a human-readable description, especially when
-                        state=failed.
                       type: string
                     state:
                       description: State is the current provisioning state of the
@@ -4312,6 +4328,18 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.lastError
+      name: LastError
+      priority: 1
+      type: string
+    - jsonPath: .status.components[*].name
+      name: Components
+      priority: 1
+      type: string
+    - jsonPath: .status.components[*].state
+      name: ComponentStates
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -4436,11 +4464,6 @@ spec:
                     grant component. The aggregate Ready condition (and the scalar Ready field) is
                     True only when every participating component has reached state=ready.
                   properties:
-                    lastUpdated:
-                      description: LastUpdated is the time this component's state
-                        was last written.
-                      format: date-time
-                      type: string
                     name:
                       description: |-
                         Name identifies the component: platform-registration (the canonical
@@ -4448,10 +4471,6 @@ spec:
                       enum:
                       - platform-registration
                       - extra-tuples
-                      type: string
-                    reason:
-                      description: Reason carries a human-readable description, especially
-                        when state=failed.
                       type: string
                     state:
                       description: State is the current reconciliation state of the
@@ -4597,6 +4616,22 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.lastError
+      name: LastError
+      priority: 1
+      type: string
+    - jsonPath: .status.components[*].name
+      name: Components
+      priority: 1
+      type: string
+    - jsonPath: .status.components[*].state
+      name: ComponentStates
+      priority: 1
+      type: string
+    - jsonPath: .status.zitadelOrgSlug
+      name: OrgSlug
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -4709,11 +4744,6 @@ spec:
                     identity component. The aggregate Ready condition (and the scalar Ready field)
                     is True only when every participating component has reached state=ready.
                   properties:
-                    lastUpdated:
-                      description: LastUpdated is the time this component's state
-                        was last written.
-                      format: date-time
-                      type: string
                     name:
                       description: |-
                         Name identifies the component: zitadel-org (the per-tenant Zitadel
@@ -4721,10 +4751,6 @@ spec:
                       enum:
                       - zitadel-org
                       - oidc-client
-                      type: string
-                    reason:
-                      description: Reason carries a human-readable description, especially
-                        when state=failed.
                       type: string
                     state:
                       description: State is the current provisioning state of the
@@ -5026,11 +5052,6 @@ spec:
                   InvitationSecretRef is the name of the Secret holding the plaintext
                   invitation token. Deleted when accepted or expired.
                 type: string
-              invitationTokenHash:
-                description: |-
-                  InvitationTokenHash is the SHA-256 hash of the invitation token.
-                  The plaintext token lives only in the Secret referenced below.
-                type: string
               lastResendAt:
                 description: |-
                   LastResendAt tracks the most recent invitation email sent for
@@ -5108,6 +5129,14 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.dataPlane.phase
+      name: DataPlane
+      priority: 1
+      type: string
+    - jsonPath: .status.dataPlane.lastError
+      name: DataPlaneError
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -5263,12 +5292,6 @@ spec:
                       Neo4jProvisioned is true after the per-tenant Neo4j database and schema
                       migrations have been applied.
                     type: boolean
-                  observedGeneration:
-                    description: |-
-                      ObservedGeneration is the Tenant.metadata.generation that was current
-                      when the dataPlane status was last updated.
-                    format: int64
-                    type: integer
                   phase:
                     description: Phase describes the current provisioning phase.
                     enum:
@@ -5305,16 +5328,6 @@ spec:
                           Neo4j reports the provisioning state of the per-tenant Neo4j
                           StatefulSet instance.
                         properties:
-                          lastUpdated:
-                            description: LastUpdated is the time this store's status
-                              was last written.
-                            format: date-time
-                            type: string
-                          reason:
-                            description: |-
-                              Reason contains a human-readable description of the current state,
-                              especially useful when State is "failed".
-                            type: string
                           state:
                             description: State is the current provisioning state.
                             enum:
@@ -5328,16 +5341,6 @@ spec:
                           Postgres reports the provisioning state of the per-tenant Postgres
                           database and role.
                         properties:
-                          lastUpdated:
-                            description: LastUpdated is the time this store's status
-                              was last written.
-                            format: date-time
-                            type: string
-                          reason:
-                            description: |-
-                              Reason contains a human-readable description of the current state,
-                              especially useful when State is "failed".
-                            type: string
                           state:
                             description: State is the current provisioning state.
                             enum:
@@ -5351,16 +5354,6 @@ spec:
                           Redis reports the provisioning state of the per-tenant Redis logical
                           database index.
                         properties:
-                          lastUpdated:
-                            description: LastUpdated is the time this store's status
-                              was last written.
-                            format: date-time
-                            type: string
-                          reason:
-                            description: |-
-                              Reason contains a human-readable description of the current state,
-                              especially useful when State is "failed".
-                            type: string
                           state:
                             description: State is the current provisioning state.
                             enum:
@@ -5402,10 +5395,6 @@ spec:
                   persisted by the reconciler's Status().Patch) — it was previously a
                   spec field whose mid-saga write was silently discarded, so every
                   reconcile created a fresh Stripe customer (tenant-operator#354).
-                type: string
-              tierObserved:
-                description: TierObserved is the tier last reconciled. Used to detect
-                  tier changes.
                 type: string
               zitadelOrgID:
                 description: |-
@@ -5458,6 +5447,18 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
+    - jsonPath: .status.lastError
+      name: LastError
+      priority: 1
+      type: string
+    - jsonPath: .status.components[*].name
+      name: Components
+      priority: 1
+      type: string
+    - jsonPath: .status.components[*].state
+      name: ComponentStates
+      priority: 1
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -5503,22 +5504,6 @@ spec:
               overrides for the two values that vary per deployment shape: the KV mount
               path and the JWT-auth role name.
             properties:
-              authRole:
-                description: |-
-                  AuthRole optionally overrides the per-tenant JWT-auth role name. When
-                  empty the operator derives the conventional "gibson-plugin-<tenantID>"
-                  role (ADR-0009), matching the saga. Informational today; recorded on the
-                  CR for observability.
-                type: string
-              mountPath:
-                description: |-
-                  MountPath optionally overrides the Vault KV v2 mount that holds the
-                  tenant's secrets. When empty the operator's Helm-chart default applies
-                  (GIBSON_VAULT_MOUNT_PATH, conventionally "secret"). Informational: the
-                  underlying vault.AdminClient mounts KV at the operator-configured path;
-                  this records the intended value on the CR for observability and a future
-                  per-tenant override.
-                type: string
               tenantID:
                 description: |-
                   TenantID is the canonical tenant identifier (the Tenant CR name). The
@@ -5548,11 +5533,6 @@ spec:
                     single backend component. The aggregate Ready condition (and the scalar Ready
                     field) is True only when every component has reached state=ready.
                   properties:
-                    lastUpdated:
-                      description: LastUpdated is the time this component's state
-                        was last written.
-                      format: date-time
-                      type: string
                     name:
                       description: |-
                         Name identifies the component: vault-namespace (the per-tenant Vault
@@ -5562,11 +5542,6 @@ spec:
                       - vault-namespace
                       - jwt-auth
                       - broker-config
-                      type: string
-                    reason:
-                      description: |-
-                        Reason carries a human-readable description, especially when
-                        state=failed.
                       type: string
                     state:
                       description: State is the current provisioning state of the
