@@ -5793,21 +5793,13 @@ data:
     core:
       # Spec 3 R3 — daemon runs as nonroot uid 65532; HOME is /var/lib/gibson.
       home_dir: /var/lib/gibson/.gibson
-      data_dir: /var/lib/gibson/.gibson/data
-      cache_dir: /var/lib/gibson/.gibson/cache
       # Nil-safe access: .Values.gibson.config.core may be unset when an
       # overlay only contributes other gibson.config.* subkeys (e.g.,
       # values-kind.yaml only sets gibson.config.identity). Parenthesized
       # paths return nil instead of erroring on missing intermediates.
-      parallel_limit: 10
       timeout: 5m
-      debug: false
 
     security:
-      encryption_algorithm: "aes-256-gcm"
-      key_derivation: "scrypt"
-      ssl_validation: true
-      audit_logging: true
       key_provider:
         type: "file"
         file:
@@ -5822,20 +5814,15 @@ data:
       # Tenant claim extraction for multi-tenant deployments
       tenant_claim: "tenant_id"
       # Default tenant for single-tenant or dev deployments
-      default_tenant: "_system"
 
       # Clock skew tolerance for token expiry validation
       clock_skew: "30s"
 
       # Trust localhost connections without authentication (dev only)
-      trust_localhost: false
       # SPIFFE/SPIRE workload identity configuration
       spiffe:
         trust_domain: "zeroroot.ai"
         workload_api_socket: "/run/spire/sockets/api.sock"
-        infrastructure_ids:
-          - "spiffe://zeroroot.ai/platform/dashboard"
-          - "spiffe://zeroroot.ai/platform/daemon"
       # Local tokens are for dev mode only (no K8s, no SSO).
       local:
         users:
@@ -5847,7 +5834,6 @@ data:
     registry:
       type: platform
       namespace: gibson
-      ttl: 30s
 
     daemon:
       grpc_address: 0.0.0.0:50051
@@ -5875,7 +5861,6 @@ data:
     registration:
       enabled: true
       port: 50100
-      heartbeat_timeout: 30s
 
     redis:
       url: redis://:${REDIS_PASSWORD}@gibson-redis-stack:6379
@@ -5897,11 +5882,10 @@ data:
       password: ${DASHBOARD_DB_PASSWORD}
       ssl_mode: "require"
       max_conns: 10
-    # Per-tenant admin Postgres — used by the daemon to bootstrap tenant databases
-    # and roles. Requires a role with CREATEDB privilege. The admin_password field
-    # is NOT rendered here; it is injected at runtime via the
-    # TENANT_POSTGRES_ADMIN_PASSWORD env var (set via secretKeyRef on the
-    # StatefulSet), which the daemon's loader env-interpolation block expands.
+    # Per-tenant admin Postgres — host, port, admin_username and ssl_mode, which
+    # are the keys the daemon still binds. admin_password and admin_database are
+    # NOT rendered: gibson#599 unbound both, so viper dropped them in silence, and
+    # the bootstrap credential reaches the tenant-operator instead.
     # Spec: per-tenant-data-plane-completion Req 1, D1, D5; Tasks 6, 25.
     #
     # Host resolution order (gibson.tenant.dbHost):
@@ -5910,10 +5894,7 @@ data:
     tenant_postgres:
       host: "platform-postgres-rw.gibson.svc.cluster.local"
       port: 5432
-      admin_database: "postgres"
       admin_username: "gibson_admin"
-      # admin_password injected from TENANT_POSTGRES_ADMIN_PASSWORD env var at runtime
-      admin_password: ${TENANT_POSTGRES_ADMIN_PASSWORD}
       ssl_mode: "require"
 
     graphrag:
@@ -5958,7 +5939,6 @@ data:
       # for backwards compatibility with older daemon images.
       enabled: true
       provider: openfga
-      enforcement_source: "fga"
       fga:
         endpoint: https://gibson-openfga:8080
         store_id: ""
@@ -18513,7 +18493,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "tmp,spire-agent-socket"
-        checksum/config: db81165cfad2b49563f10b75e2c309441293be50675ed46f103a02b77559faab
+        checksum/config: 388f29ebfe62f9ca80a044fbdc8abcb28c11f784bd34ac06afd6fc4047ec087d
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). Consumer envFrom
         # resolution is frozen for the pod's lifetime; Reloader watches the
         # named Secrets and triggers a rolling restart when any changes.
@@ -18891,22 +18871,15 @@ spec:
                 secretKeyRef:
                   name: gibson-platform-postgres-credentials
                   key: password
-            # Per-tenant admin PostgreSQL password — for tenant data-plane bootstrap.
-            # Populated when either an external dataPlane.postgres.host is set OR
-            # the in-chart tenant-postgresql subchart is enabled (Task 25).
-            # Sourced from dataPlane.postgres.admin_password_secret_ref (name +
-            # key pair) so the plaintext password never appears in the ConfigMap.
-            # The default secret is the chart-managed one gibson.dbSecrets.name
-            # names, "<fullname>-db-secrets", key TENANT_POSTGRES_ADMIN_PASSWORD,
-            # populated by templates/external-secrets/missing-secrets.yaml.
-            # The tenant-postgresql Bitnami alias that shared the key is not a
-            # Chart.yaml dependency, so its values are discarded (charts#292).
-            # Spec: per-tenant-data-plane-completion Req 6.3, D1; Tasks 24, 25.
-            - name: TENANT_POSTGRES_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: gibson-gibson-workloads-db-secrets
-                  key: TENANT_POSTGRES_ADMIN_PASSWORD
+            # NO TENANT_POSTGRES_ADMIN_PASSWORD. The daemon does not read it: its
+            # only consumer was `tenant_postgres.admin_password:
+            # ${TENANT_POSTGRES_ADMIN_PASSWORD}` in the ConfigMap, and gibson#599
+            # unbound that key, so viper dropped the line. The name is absent from
+            # helm/contracts/gibson-env-readers.txt, which is the proof there is no
+            # Go reader either. The TENANT POSTGRES bootstrap credential now reaches
+            # only the tenant-operator, which really does use it, through
+            # $(TENANT_POSTGRES_ADMIN_PASSWORD) inside DATAPLANE_PG_ADMIN_DSN.
+            # Delivering it here was a credential handed to a pod with no caller.
             # ---------------------------------------------------------------
             # IdP admin credentials (spec: agent-service-credentials task 13).
             # The daemon's TenantAdminService uses these to call the IdP's
