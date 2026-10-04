@@ -19,15 +19,11 @@ data:
     core:
       # Spec 3 R3 — daemon runs as nonroot uid 65532; HOME is /var/lib/gibson.
       home_dir: /var/lib/gibson/.gibson
-      data_dir: /var/lib/gibson/.gibson/data
-      cache_dir: /var/lib/gibson/.gibson/cache
       # Nil-safe access: .Values.gibson.config.core may be unset when an
       # overlay only contributes other gibson.config.* subkeys (e.g.,
       # values-kind.yaml only sets gibson.config.identity). Parenthesized
       # paths return nil instead of erroring on missing intermediates.
-      parallel_limit: {{ ((.Values.gibson.config).core).parallelLimit | default 10 }}
       timeout: {{ ((.Values.gibson.config).core).timeout | default "5m" }}
-      debug: {{ ((.Values.gibson.config).core).debug | default false }}
 
     security:
       {{- /* Spec first-deploy-unblock-and-ha R6.2: render the security block
@@ -39,14 +35,6 @@ data:
              { kubernetes, vault, aws_kms, azure, gcp } — `aws_kms` is the
              canonical underscore form (NOT `aws`). */ -}}
       {{- $sec := ((.Values.gibson).config).security | default dict }}
-      encryption_algorithm: {{ $sec.encryption_algo | default $sec.encryption_algorithm | default "aes-256-gcm" | quote }}
-      key_derivation: {{ $sec.key_derivation | default "scrypt" | quote }}
-      {{- /* deploy#1220: `| default true` swallowed an explicit `false`
-             on both of these — TLS verification and audit logging were
-             knobs that could not be turned off, which also means they
-             were knobs nobody could trust. */}}
-      ssl_validation: {{ include "gibson.trueUnlessSet" $sec.ssl_validation }}
-      audit_logging: {{ include "gibson.trueUnlessSet" $sec.audit_logging }}
       {{- $kp := $sec.key_provider | default dict }}
       {{- $kpType := "" }}
       {{- if kindIs "map" $kp }}{{- $kpType = required "gibson.config.security.key_provider.type is required (one of: file, vault, aws_kms, azure, gcp). See +." $kp.type }}
@@ -98,14 +86,12 @@ data:
 
       {{- if .Values.gibson.auth.defaultTenant }}
       # Default tenant for single-tenant or dev deployments
-      default_tenant: {{ .Values.gibson.auth.defaultTenant | quote }}
       {{- end }}
 
       # Clock skew tolerance for token expiry validation
       clock_skew: {{ .Values.gibson.auth.clockSkew | default "30s" | quote }}
 
       # Trust localhost connections without authentication (dev only)
-      trust_localhost: {{ .Values.gibson.auth.trustLocalhost | default false }}
 
       {{- if .Values.gibson.auth.oidc }}
       # OIDC providers configuration
@@ -142,12 +128,6 @@ data:
       spiffe:
         trust_domain: {{ .Values.gibson.auth.spiffe.trustDomain | default "zeroroot.ai" | quote }}
         workload_api_socket: {{ .Values.gibson.auth.spiffe.workloadAPISocket | default "/run/spire/sockets/api.sock" | quote }}
-        {{- if .Values.gibson.auth.spiffe.infrastructureIDs }}
-        infrastructure_ids:
-          {{- range .Values.gibson.auth.spiffe.infrastructureIDs }}
-          - {{ . | quote }}
-          {{- end }}
-        {{- end }}
       {{- end }}
 
       {{- if .Values.gibson.auth.roleBindings }}
@@ -185,7 +165,6 @@ data:
     registry:
       type: platform
       namespace: gibson
-      ttl: 30s
 
     daemon:
       grpc_address: 0.0.0.0:{{ include "gibson.grpc.port" . }}
@@ -213,7 +192,6 @@ data:
     registration:
       enabled: true
       port: 50100
-      heartbeat_timeout: 30s
 
     redis:
       url: {{ include "gibson.redis.url" . }}
@@ -246,11 +224,10 @@ data:
 
     {{- $tenantPgHost := include "gibson.tenant.dbHost" . }}
     {{- if $tenantPgHost }}
-    # Per-tenant admin Postgres — used by the daemon to bootstrap tenant databases
-    # and roles. Requires a role with CREATEDB privilege. The admin_password field
-    # is NOT rendered here; it is injected at runtime via the
-    # TENANT_POSTGRES_ADMIN_PASSWORD env var (set via secretKeyRef on the
-    # StatefulSet), which the daemon's loader env-interpolation block expands.
+    # Per-tenant admin Postgres — host, port, admin_username and ssl_mode, which
+    # are the keys the daemon still binds. admin_password and admin_database are
+    # NOT rendered: gibson#599 unbound both, so viper dropped them in silence, and
+    # the bootstrap credential reaches the tenant-operator instead.
     # Spec: per-tenant-data-plane-completion Req 1, D1, D5; Tasks 6, 25.
     #
     # Host resolution order (gibson.tenant.dbHost):
@@ -259,10 +236,7 @@ data:
     tenant_postgres:
       host: {{ $tenantPgHost | quote }}
       port: {{ .Values.dataPlane.postgres.port | default 5432 }}
-      admin_database: {{ .Values.dataPlane.postgres.admin_database | default "postgres" | quote }}
       admin_username: {{ .Values.dataPlane.postgres.admin_username | default "gibson_admin" | quote }}
-      # admin_password injected from TENANT_POSTGRES_ADMIN_PASSWORD env var at runtime
-      admin_password: ${TENANT_POSTGRES_ADMIN_PASSWORD}
       {{- /* sslmode=require is hardcoded — Spec first-deploy-unblock-and-ha R7. */}}
       ssl_mode: "require"
     {{- end }}
@@ -314,7 +288,6 @@ data:
       # for backwards compatibility with older daemon images.
       enabled: true
       provider: openfga
-      enforcement_source: "fga"
       fga:
 {{- /* deploy#1382: explicit https:// — the OpenFGA HTTP listener serves
             TLS; the daemon's FGA client honours the scheme and the pod

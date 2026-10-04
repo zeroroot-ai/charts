@@ -557,24 +557,15 @@ spec:
                   name: {{ include "gibson.platformPostgres.passwordSecretName" . }}
                   key: {{ include "gibson.platformPostgres.passwordSecretKey" . }}
             {{- end }}
-            # Per-tenant admin PostgreSQL password — for tenant data-plane bootstrap.
-            # Populated when either an external dataPlane.postgres.host is set OR
-            # the in-chart tenant-postgresql subchart is enabled (Task 25).
-            # Sourced from dataPlane.postgres.admin_password_secret_ref (name +
-            # key pair) so the plaintext password never appears in the ConfigMap.
-            # The default secret is the chart-managed one gibson.dbSecrets.name
-            # names, "<fullname>-db-secrets", key TENANT_POSTGRES_ADMIN_PASSWORD,
-            # populated by templates/external-secrets/missing-secrets.yaml.
-            # The tenant-postgresql Bitnami alias that shared the key is not a
-            # Chart.yaml dependency, so its values are discarded (charts#292).
-            # Spec: per-tenant-data-plane-completion Req 6.3, D1; Tasks 24, 25.
-            {{- if include "gibson.tenant.dbHost" . }}
-            - name: TENANT_POSTGRES_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.dataPlane.postgres.admin_password_secret_ref.name | default (include "gibson.dbSecrets.name" .) }}
-                  key: {{ .Values.dataPlane.postgres.admin_password_secret_ref.key | default "TENANT_POSTGRES_ADMIN_PASSWORD" }}
-            {{- end }}
+            # NO TENANT_POSTGRES_ADMIN_PASSWORD. The daemon does not read it: its
+            # only consumer was `tenant_postgres.admin_password:
+            # ${TENANT_POSTGRES_ADMIN_PASSWORD}` in the ConfigMap, and gibson#599
+            # unbound that key, so viper dropped the line. The name is absent from
+            # helm/contracts/gibson-env-readers.txt, which is the proof there is no
+            # Go reader either. The TENANT POSTGRES bootstrap credential now reaches
+            # only the tenant-operator, which really does use it, through
+            # $(TENANT_POSTGRES_ADMIN_PASSWORD) inside DATAPLANE_PG_ADMIN_DSN.
+            # Delivering it here was a credential handed to a pod with no caller.
             # ---------------------------------------------------------------
             # IdP admin credentials (spec: agent-service-credentials task 13).
             # The daemon's TenantAdminService uses these to call the IdP's
