@@ -1251,11 +1251,11 @@ static_resources:
         # ExternalDomain in the Host header, so we rewrite Host to the public
         # app.<domain> name before proxying upstream.
         #
-        # Pre-auth surface only — /.well-known/openid-configuration and
-        # /oauth/v2/* + /management/v1/* (machine-user OAuth client_credentials
-        # + Zitadel admin API for the daemon's IdP admin client). No
-        # ext_authz / no jwt_authn on this chain — these endpoints exist to
-        # bootstrap auth, they can't depend on it.
+        # Pre-auth surface only: /.well-known/openid-configuration and
+        # /oauth/v2/* (machine-user OAuth client_credentials). The Zitadel
+        # management API has no route here (ADR-0093). No ext_authz and no
+        # jwt_authn on this chain: these endpoints exist to bootstrap auth,
+        # so they cannot depend on it.
         #
         # deploy#1204 — this chain shares the public :10000 listener, and
         # filter-chain selection keys on the connection's SNI. Nothing stopped
@@ -1345,11 +1345,6 @@ static_resources:
                             host_rewrite_literal: "{{ .domains.app }}{{ if and (eq .envoyServiceType "NodePort") .envoyServiceNodePort }}:{{ .envoyServiceNodePort }}{{ end }}"
                             timeout: 30s
                         - match: { prefix: "/oauth/v2/" }
-                          route:
-                            cluster: zitadel_upstream
-                            host_rewrite_literal: "{{ .domains.app }}{{ if and (eq .envoyServiceType "NodePort") .envoyServiceNodePort }}:{{ .envoyServiceNodePort }}{{ end }}"
-                            timeout: 30s
-                        - match: { prefix: "/management/v1/" }
                           route:
                             cluster: zitadel_upstream
                             host_rewrite_literal: "{{ .domains.app }}{{ if and (eq .envoyServiceType "NodePort") .envoyServiceNodePort }}:{{ .envoyServiceNodePort }}{{ end }}"

@@ -11,11 +11,13 @@
 #
 # Adding a line here publishes more of Zitadel on the edge. Say why the route
 # must be public, and who calls it.
+#
+# The admin surface of Zitadel has no public route (ADR-0093): /ui/console,
+# /admin/v1/, /management/v1/ and /zitadel. The guard fails on a route for one
+# of them, listed here or not.
 routes:
   "public_routes/app prefix:/ui/login/":
     why: Zitadel's embedded v1 login.
-  "public_routes/app prefix:/ui/console":
-    why: The Zitadel console. Only the Platform owner has a Zitadel administrator role.
   "public_routes/app prefix:/ui/":
     why: The hosted login (Login V2). The authorize endpoint sends the browser here.
   "public_routes/app prefix:/.well-known/openid-configuration":
@@ -33,21 +35,12 @@ routes:
       The auth API for the signed-in user (password policy, own user). The
       edge answers 403 for the own-username and own-email changes before
       this route.
-  "public_routes/app prefix:/management/v1/":
-    why: The management API. The console and the platform call it. It needs org permissions.
-  "public_routes/app prefix:/admin/v1/":
-    why: The instance admin API. The console calls it. It needs instance permissions.
   "public_routes/app prefix:/v2/":
     why: >-
       The v2 REST APIs. Signup creates users here. The edge answers 403 for
       the email and username changes before this route.
   "public_routes/app prefix:/v2beta/":
     why: The v2beta REST APIs. Same 403 routes as /v2/.
-  "public_routes/app prefix:/zitadel.":
-    why: >-
-      gRPC, gRPC-web and Connect for every Zitadel service. The console and
-      the hosted login call these. The edge answers 403 for the email and
-      username changes before this route.
   "public_routes/app prefix:/assets/":
     why: Label policy assets (logo, icon, font) that the hosted login shows.
   "api_routes/api prefix:/.well-known/openid-configuration":
@@ -56,5 +49,3 @@ routes:
     why: In-cluster OIDC discovery. The virtual host accepts only the in-cluster Service names.
   "cluster_oidc_routes/cluster_oidc prefix:/oauth/v2/":
     why: In-cluster token and keys endpoints. Same Service-name virtual host.
-  "cluster_oidc_routes/cluster_oidc prefix:/management/v1/":
-    why: In-cluster management API calls. Same Service-name virtual host.
