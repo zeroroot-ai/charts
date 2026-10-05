@@ -1245,6 +1245,21 @@ spire:
           key: password
     controllerManager:
       enabled: true
+      # The spire chart registers four identities for SPIKE by default. This
+      # chart deploys no SPIKE workload, and a registration with no workload
+      # is an identity that waits for any pod with the right label
+      # (clusterspiffeids.yaml states the rule). All four are off.
+      # scripts/check-identity-admission-covers.py fails if one returns.
+      identities:
+        clusterSPIFFEIDs:
+          spike-keeper:
+            enabled: false
+          spike-nexus:
+            enabled: false
+          spike-bootstrap:
+            enabled: false
+          spike-pilot:
+            enabled: false
     telemetry:
       prometheus:
         enabled: false
