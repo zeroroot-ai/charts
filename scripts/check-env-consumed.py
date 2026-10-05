@@ -46,8 +46,8 @@ var behind a values flag no profile sets is invisible to it. Two of the three
 credential-shaped findings this slice fixed were in exactly that position and had
 to be found by hand:
 
-  * `BILLING_DEV_AUTOCONFIRM` renders only under
-    `tenantOperator.billing.devAutoConfirm`, which no profile sets.
+  * a billing bypass variable rendered only under a `tenantOperator.billing`
+    flag that no profile set. Both are deleted.
   * `GIBSON_AUTHZ_RPC_REGISTRY_PATH` renders only under
     `gibson.authz.rpcRegistry.override`, which no profile sets.
 
