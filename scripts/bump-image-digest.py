@@ -6,8 +6,8 @@ WHY THIS EXISTS
 ADR-0072, in its first form, asserted "the umbrella chart re-versions on
 every first-party service bump — handled by an automated fan-out (existing
 pattern), not by hand." No fan-out existed: the criterion was tracked as
-deploy#806, closed without being built, and re-filed with evidence as deploy#1391. Until now a
-first-party image bump meant hand-editing a digest in a values file, and on
+deploy#806, closed without being built, and re-filed with evidence as
+deploy#1391. Until now a first-party image bump meant hand-editing a digest in a values file, and on
 2026-08-12 alone that was done six times by hand (www, docs-site twice,
 gibson + ext-authz together, and five setec images at once).
 
