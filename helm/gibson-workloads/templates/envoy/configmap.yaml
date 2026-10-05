@@ -72,15 +72,15 @@ unconditionally — there is no `envoy.enabled` opt-out.
 {{- $jwksPort := default 8080 ((.Values.envoy.zitadel).jwks).port -}}
 {{- $jwksScheme := default "http" ((.Values.envoy.zitadel).jwks).scheme -}}
 {{- /*
-  The JWKS URI's authority (host:port) becomes the Host header Envoy sends
-  on the JWKS fetch. Zitadel routes by Host — a request without the public
-  hostname (app.<domain>) gets matched to its default vhost and 404s.
-  Construct the URI with the public authority so Zitadel's vhost match
-  succeeds, while the actual TCP connect still goes to the in-cluster
-  Service via the zitadel_jwks cluster's socket_address (set from
-  zitadelJwksHost:zitadelJwksPort below). Standard Envoy pattern.
+  The JWKS URI's authority becomes the Host header Envoy sends on the JWKS
+  fetch, and Zitadel selects its instance from that host. So the authority is
+  the CLAIMED host, gibson.zitadel.externalDomain, the one name for that fact
+  (ADR-0092). It never carries a port: the TCP connect goes to the in-cluster
+  Service through the zitadel_jwks cluster's socket_address, so a port here
+  addresses nothing. A port in a claimed host is the class of defect that put
+  ":443" into the issuer on staging (charts#162).
 */ -}}
-{{- $jwksUriAuthority := printf "%s:%v" (include "gibson.appHost" .) (.Values.envoy.service.httpsPort | default 443) -}}
+{{- $jwksUriAuthority := include "gibson.zitadel.externalDomain" . -}}
 {{- $jwksUri := default (printf "%s://%s/oauth/v2/keys" $jwksScheme $jwksUriAuthority) ((.Values.envoy.zitadel).jwks).uri -}}
 {{- /*
   deploy#1204 — source CIDRs allowed to select the pre-auth in-cluster OIDC
