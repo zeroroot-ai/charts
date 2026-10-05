@@ -314,6 +314,91 @@ jobs:
       # pods and ExternalSecrets and nothing else, so when the k3d leg died at
       # `first-admin failed: DeadlineExceeded` the ONE thing that failed was
       # the one thing with no log, and the cause took a second run to find.
+      # ADR-0092: an identity client CONNECTS to the Zitadel Service and CLAIMS
+      # the public host in a header. So no operator call to Zitadel passes
+      # through the edge. This step proves it the only way that cannot be
+      # faked by an old condition: it removes the edge, makes each operator
+      # start again and call Zitadel again, and gives the tenant-operator a
+      # new tenant to provision.
+      #
+      # A Ready condition alone proves nothing here, because it can be older
+      # than the scale-down. The restart is what makes the proof current: the
+      # platform-operator's readiness probe dials ZITADEL_URL, and on start it
+      # reconciles the PlatformBootstrap and every OIDCClient again.
+      #
+      # It runs on the test's own throwaway cluster, after every other
+      # assertion, and puts the edge back.
+      - name: Both operators reach Zitadel with the edge at zero replicas
+        run: |
+          set -euo pipefail
+          NS=gibson
+          since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          echo "▶ scale the edge to zero"
+          edge_replicas="$(kubectl -n "$NS" get deploy/gibson-envoy -o jsonpath='{.spec.replicas}')"
+          kubectl -n "$NS" scale deploy/gibson-envoy --replicas=0
+          kubectl -n "$NS" wait --for=delete pod -l app.kubernetes.io/component=envoy --timeout=180s
+          left="$(kubectl -n "$NS" get pod -l app.kubernetes.io/component=envoy --no-headers 2>/dev/null | wc -l)"
+          [ "$left" -eq 0 ] || { echo "::error::$left edge pod(s) still exist, so the step would prove nothing"; exit 1; }
+
+          echo "▶ restart both operators, so each one calls Zitadel again"
+          kubectl -n "$NS" rollout restart deploy/gibson-platform-operator deploy/gibson-tenant-operator
+          kubectl -n "$NS" rollout status deploy/gibson-platform-operator --timeout=300s
+          kubectl -n "$NS" rollout status deploy/gibson-tenant-operator --timeout=300s
+
+          echo "▶ a second tenant, provisioned with no edge"
+          tier="$(kubectl get tenant primary -o jsonpath='{.spec.tier}')"
+          [ -n "$tier" ] || { echo "::error::the tenant primary has no spec.tier to copy"; exit 1; }
+          kubectl apply -f - <<YAML
+          apiVersion: gibson.zeroroot.ai/v1alpha1
+          kind: Tenant
+          metadata:
+            name: edgeless
+          spec:
+            displayName: Edgeless exit test
+            owner: edgeless@localhost.zeroroot.ai
+            tier: ${tier}
+          YAML
+          org=""
+          for _ in $(seq 1 120); do
+            org="$(kubectl get tenant edgeless -o jsonpath='{.status.zitadelOrgID}' 2>/dev/null || true)"
+            [ -n "$org" ] && break
+            sleep 5
+          done
+          if [ -z "$org" ]; then
+            echo "::error::the tenant edgeless got no Zitadel org in 600s with the edge at zero. The tenant-operator did not reach Zitadel by the Service."
+            kubectl get tenant edgeless -o yaml | tail -40
+            kubectl -n "$NS" logs deploy/gibson-tenant-operator --since-time="$since" --tail=80 || true
+            exit 1
+          fi
+          echo "  ✓ tenant edgeless has Zitadel org $org (phase $(kubectl get tenant edgeless -o jsonpath='{.status.phase}'))"
+
+          echo "▶ the bootstrap and every OIDCClient are Ready after the restart"
+          kubectl wait platformbootstrap --all --for=condition=Ready --timeout=300s
+          kubectl -n "$NS" wait oidcclient --all --for=condition=Ready --timeout=300s
+          n="$(kubectl -n "$NS" get oidcclient --no-headers | wc -l)"
+          [ "$n" -gt 0 ] || { echo "::error::no OIDCClient exists in $NS, so the wait above matched nothing"; exit 1; }
+          echo "  ✓ PlatformBootstrap and $n OIDCClient(s) are Ready"
+
+          echo "▶ no operator logged a failed Zitadel call since the edge went away"
+          bad=0
+          for d in gibson-platform-operator gibson-tenant-operator; do
+            hits="$(kubectl -n "$NS" logs "deploy/$d" --since-time="$since" --all-containers 2>/dev/null \
+                    | grep -ciE 'transient zitadel error|zitadel.*(connection refused|no such host)' || true)"
+            if [ "${hits:-0}" -ne 0 ]; then
+              echo "::error::$d logged $hits failed Zitadel call(s) with the edge at zero:"
+              kubectl -n "$NS" logs "deploy/$d" --since-time="$since" --all-containers \
+                | grep -iE 'transient zitadel error|zitadel.*(connection refused|no such host)' | head -10
+              bad=1
+            fi
+          done
+          [ "$bad" -eq 0 ] || exit 1
+          echo "  ✓ both operator logs are clean"
+
+          echo "▶ put the edge back"
+          kubectl -n "$NS" scale deploy/gibson-envoy --replicas="${edge_replicas:-1}"
+          kubectl -n "$NS" rollout status deploy/gibson-envoy --timeout=300s
+
       - name: Diagnose a failure
         if: failure()
         run: |
