@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.136.4](https://github.com/zeroroot-ai/charts/compare/v0.136.3...v0.136.4) (2026-10-05)
+
+
+### Bug Fixes
+
+* **openbao:** the render fails above one replica, because the chart stores on a file ([#354](https://github.com/zeroroot-ai/charts/issues/354)) ([f6efc2a](https://github.com/zeroroot-ai/charts/commit/f6efc2a45d4a40b970bc938ad62eb81477da819c))
+* **pins:** dashboard v0.128.0 reaches Zitadel by Service name, and its reader set comes from its own file ([#387](https://github.com/zeroroot-ai/charts/issues/387)) ([89b37cc](https://github.com/zeroroot-ai/charts/commit/89b37cc5d98d858479d5c3fdf60cba1abe61aa10)), closes [#303](https://github.com/zeroroot-ai/charts/issues/303) [#163](https://github.com/zeroroot-ai/charts/issues/163)
+* **zitadel:** bump to v4.19.4 ([#353](https://github.com/zeroroot-ai/charts/issues/353)) ([84bbe6f](https://github.com/zeroroot-ai/charts/commit/84bbe6fa9e98486c042900026f289bcbf3641480))
+
 ## [0.136.3](https://github.com/zeroroot-ai/charts/compare/v0.136.2...v0.136.3) (2026-10-05)
 
 
