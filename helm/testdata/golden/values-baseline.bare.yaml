@@ -18236,6 +18236,9 @@ spec:
         secret.reloader.stakater.com/reload: "gibson-redis-stack"
     spec:
       priorityClassName: gibson-platform-critical
+      # Redis does not call the Kubernetes API, so the pod mounts no
+      # ServiceAccount token.
+      automountServiceAccountToken: false
       # Redis runs as a non-root user (ADR-0165, charts#401). The image has no
       # user of its own, so the pod names the numeric user and group 999.
       # fsGroup makes the data volume writable for that group on each volume
