@@ -1,10 +1,12 @@
-# Caller workflow for the two org tree guards. Copy to
-# .github/workflows/tree-guards.yml in any repository.
+# Caller workflow for the org tree guards.
 #
-#   brand-guard  fails on a retired brand string anywhere in the tracked tree
-#   link-check   fails on a broken link in any Markdown file
+#   brand-guard                  fails on a retired brand string anywhere in the tracked tree
+#   link-check                   fails on a broken link in any Markdown file
+#   vault-auth-method-deny-list  fails on a token of a retired OpenBao login method (ADR-0009).
+#                                The exceptions are in .github/.vault-auth-deny-list-allowlist.json,
+#                                each keyed by the content of its line.
 #
-# Both reusables live in zeroroot-ai/.github. Neither needs a secret: the
+# The reusables live in zeroroot-ai/.github. None needs a secret: the
 # checkout uses the calling repository's own GITHUB_TOKEN, and the scanners
 # travel with the composite actions.
 #
@@ -38,3 +40,6 @@ jobs:
 
   link-check:
     uses: zeroroot-ai/.github/.github/workflows/link-check.yml@f2ca779edd5461be94bdd0a0762657f85317983e # v0.7.2
+
+  vault-auth-method-deny-list:
+    uses: zeroroot-ai/.github/.github/workflows/vault-auth-method-deny-list.yml@105df5cab9e7bee2b55197d1e307050c1a365abc # v0.14.2
