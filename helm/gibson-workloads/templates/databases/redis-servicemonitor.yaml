@@ -1,10 +1,10 @@
 {{/* Redis-Stack ServiceMonitor (Week 2 §3 R21). Requires a redis-exporter sidecar
      when scraping; for the default Redis-Stack image with no exporter we expose
      the placeholder ServiceMonitor with the metrics endpoint disabled by default.
-     Outer gate (deploy#313): both observability provider shapes consume
-     ServiceMonitors; the OR-gate collapsed into the enum. Inner gate is
-     the redis.metrics.enabled sub-feature toggle which stays. */}}
-{{- if default false ((.Values.redis).metrics).enabled }}
+     It renders only where the cluster serves monitoring.coreos.com/v1
+     (ADR-0087), and only when the redis.metrics.enabled sub-feature toggle
+     is on. */}}
+{{- if and (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") (default false ((.Values.redis).metrics).enabled) }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:

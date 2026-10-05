@@ -1,0 +1,12 @@
+{{- /*
+The plugin rotation-propagation SLO rule (spec plugin-runtime Requirement
+10.6). The rule is files/alerts/rotation-propagation.yaml. The plugin SDK emits
+gibson_plugin_rotation_propagation_seconds (sdk plugin/metrics), and
+tests/plugin/rotation-monitor.sh in zeroroot-ai/hosted drives it.
+
+Renders only where the cluster serves monitoring.coreos.com/v1 (ADR-0087),
+like every other rule and monitor of this chart.
+*/ -}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+{{ .Files.Get "files/alerts/rotation-propagation.yaml" }}
+{{- end }}

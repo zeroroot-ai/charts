@@ -1,6 +1,5 @@
 {{/* Envoy ServiceMonitor (Week 2 §3 R21). Scrapes /stats/prometheus on :9901, the admin_probe listener that fronts the loopback admin.
-     Renders unconditionally: both observability provider shapes (in-chart Prometheus
-     and external grafana-agent → Grafana Cloud) consume ServiceMonitors. deploy#313. */}}
+     It renders only where the cluster serves monitoring.coreos.com/v1 (ADR-0087). */}}
 {{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor

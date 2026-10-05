@@ -14,8 +14,8 @@ added to the template in Task 31). The `gibson.zeroroot.ai/tenant-id` label is
 relabeled into a `tenant_id` time-series label so dashboards can filter
 per-tenant.
 */}}
-{{- /* Both observability provider shapes consume ServiceMonitors; gated only
-       on the CRD presence at this point (deploy#313). */ -}}
+{{- /* Renders only where the cluster serves monitoring.coreos.com/v1
+       (ADR-0087). */ -}}
 {{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
