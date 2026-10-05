@@ -18236,23 +18236,49 @@ spec:
         secret.reloader.stakater.com/reload: "gibson-redis-stack"
     spec:
       priorityClassName: gibson-platform-critical
+      # Redis runs as a non-root user (ADR-0165, charts#401). The image has no
+      # user of its own, so the pod names the numeric user and group 999.
+      # fsGroup makes the data volume writable for that group on each volume
+      # type that supports it.
       securityContext:
-        fsGroup: 0
-        runAsUser: 0
-        runAsGroup: 0
-        runAsNonRoot: false
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
-        - name: init-permissions
+        # A volume that the earlier root pod wrote holds files that only root
+        # can write. A hostPath-backed volume (local-path on k3s and kind)
+        # does not get fsGroup, so Redis could not open its append-only file
+        # there. The earlier pod left the directories world-writable, so this
+        # container can replace each such file with a copy that the Redis
+        # user owns. It needs no root for that. On a volume with fsGroup, and
+        # on a new volume, it finds no such file and does nothing.
+        - name: own-data
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           command: ['sh', '-c']
           args:
             - |
-              mkdir -p /data/appendonlydir
-              chmod -R 777 /data
-              echo "Permissions set for Redis data directory"
+              set -eu
+              umask 077
+              for f in /data/appendonlydir/* /data/*.rdb; do
+                [ -f "$f" ] || continue
+                [ -w "$f" ] && continue
+                cp "$f" "$f.own"
+                mv -f "$f.own" "$f"
+                echo "[own-data] took over $f"
+              done
+              echo "[own-data] done"
           volumeMounts:
             - name: data
               mountPath: /data
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
         # Writes /etc/redis-acl/users.acl from the current password Secret.
         # Redis starts with this file; the rotation CronJob (deploy#517) adds
         # the previous password in-memory during the rolling-restart window
@@ -18262,6 +18288,7 @@ spec:
           command: ['sh', '-c']
           args:
             - |
+              umask 077
               printf 'user default on >%s ~* &* +@all\n' "$REDIS_PASSWORD" \
                 > /etc/redis-acl/users.acl
               echo "[init-acl] ACL file written"
@@ -18276,6 +18303,9 @@ spec:
               mountPath: /etc/redis-acl
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
       containers:
         - name: redis-stack
           image: "ghcr.io/zeroroot-ai/mirror/redis-stack-server:7.4.0-v1@sha256:72035434f455ecd897090d3dd83ec357d34857287f159378b965a7006312a797"
@@ -18292,10 +18322,18 @@ spec:
           # AOF log would land on the ephemeral overlay, not the PVC. Passing
           # --dir /data as a trailing arg ($* in the script) wins because Redis
           # applies CLI flags left-to-right and last-one-wins for duplicates.
+          #
+          # umask 077: only the Redis user can read the files that Redis
+          # writes to the data volume.
           command:
             - sh
             - -c
-            - 'exec redis-stack-server /etc/redis-stack/redis-stack.conf --dir /data'
+            - 'umask 077; exec redis-stack-server /etc/redis-stack/redis-stack.conf --dir /data'
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: redis
               containerPort: 6379
