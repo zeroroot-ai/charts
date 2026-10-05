@@ -58,6 +58,14 @@ on:
         description: The published chart version to install (default, the newest)
         required: false
         type: string
+      upgrade_from_version:
+        description: >-
+          With upgrade_from_previous, the published version to upgrade FROM in
+          place of the one before the version under test. Use it for the version
+          an environment pins, or to pass over a release that cannot install.
+        required: false
+        type: string
+        default: ""
       upgrade_from_previous:
         description: >-
           Install the PREVIOUS published version first, converge it, then upgrade
@@ -159,7 +167,14 @@ jobs:
         if: inputs.upgrade_from_previous
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 scripts/resolve-upgrade-pair.py --to "${{ steps.version.outputs.version }}"
+        run: |
+          set -euo pipefail
+          from="${{ inputs.upgrade_from_version }}"
+          if [ -n "$from" ]; then
+            python3 scripts/resolve-upgrade-pair.py --to "${{ steps.version.outputs.version }}" --from "$from"
+          else
+            python3 scripts/resolve-upgrade-pair.py --to "${{ steps.version.outputs.version }}"
+          fi
 
       - name: Install k3d
         if: inputs.distro == 'k3d'
