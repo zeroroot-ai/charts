@@ -231,7 +231,10 @@ def chart_version() -> str:
 
 def build_dependencies() -> None:
     for chart in DEP_CHARTS:
-        run(["helm", "dependency", "update", chart], cwd=ROOT)
+        # Through the one retrying path. A direct `helm dependency update`
+        # failed the airgap-image-list check on a single 500 from a GitHub
+        # release asset (charts#349).
+        run(["scripts/helm-dep-update.sh", chart], cwd=ROOT)
 
 
 def render_images() -> dict[str, set[str]]:
