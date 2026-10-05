@@ -2679,18 +2679,11 @@ certManager:
 # have been DELETED. Customers running on EKS who prefer managed-OpenBao
 # become a separate product question, not a chart toggle.
 #
-#   mode: dev   — single-pod OpenBao in dev mode, auto-unsealed. Transit
-#                 engine is enabled by an init Job; key
-#                 `gibson-cg-jwt-signing` is created with type=ed25519.
-#                 NOT FOR PRODUCTION.
-#   mode: ha    — production HA OpenBao deployment (Raft storage, manually
-#                 unsealed via shamir or auto-unseal-by-cloud-KMS). The
-#                 chart still renders the Transit init Job which is
-#                 idempotent against an already-initialized OpenBao.
+# ONE REPLICA. The chart writes `storage "file"`, so each pod holds its own
+# data directory. A second replica is a second, separate secret store behind
+# the same Service. The template fails the render above one replica. More
+# replicas need Raft storage in this chart first.
 openbao:
-  # Deployment mode for the in-chart OpenBao. Allowed: dev | ha.
-  mode: dev
-
   image:
     repository: ghcr.io/zeroroot-ai/mirror/openbao
     tag: "2.5.3@sha256:fdc6da21ca6963560c32336fd7feb9cf2d5e52668f1a1647205a4b41171f0806"
