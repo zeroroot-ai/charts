@@ -140,7 +140,7 @@ POLICY_FIXTURE = {
 def csid(path: str, comp: str, sa: str | None) -> dict:
     sel = [f"k8s:ns:gibson"] + ([f"k8s:sa:{sa}"] if sa else [])
     return {"kind": "ClusterSPIFFEID", "metadata": {"name": path.replace("/", "-")},
-            "spec": {"spiffeIDTemplate": f"spiffe://zeroroot.ai/{path}",
+            "spec": {"spiffeIDTemplate": f"spiffe://example.test/{path}",
                      "podSelector": {"matchLabels": {"app.kubernetes.io/component": comp}},
                      "workloadSelectorTemplates": sel}}
 
@@ -164,9 +164,9 @@ def selftest() -> int:
             print(f"selftest: {what} must give one finding, gave {found}", file=sys.stderr)
             return 1
     spike = {"kind": "ClusterSPIFFEID", "metadata": {"name": "gibson-gibson-spike-pilot"},
-             "spec": {"spiffeIDTemplate": "spiffe://zeroroot.ai/spike/pilot/role/superuser"}}
+             "spec": {"spiffeIDTemplate": "spiffe://example.test/spike/pilot/role/superuser"}}
     kept = {"kind": "ClusterSPIFFEID", "metadata": {"name": "gibson-gibson-default"},
-            "spec": {"spiffeIDTemplate": "spiffe://zeroroot.ai/ns/x/sa/y"}}
+            "spec": {"spiffeIDTemplate": "spiffe://example.test/ns/x/sa/y"}}
     if len(judge(good + [spike])[0]) != 1 or judge(good + [kept])[0]:
         print("selftest: a subchart identity with no workload must fail, and the fallback must pass", file=sys.stderr)
         return 1

@@ -18,7 +18,7 @@ envoy.yaml — the bootstrap for the pod's Envoy mTLS sidecar. ratelimit can
 */}}
 {{- $rl := .Values.envoy.rateLimit -}}
 {{- $pc := $rl.perClient -}}
-{{- $td := .Values.spire.server.trustDomain | default "zeroroot.ai" -}}
+{{- $td := include "gibson.trustDomain" . -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:

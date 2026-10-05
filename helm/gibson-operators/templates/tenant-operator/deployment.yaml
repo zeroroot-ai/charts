@@ -1,3 +1,4 @@
+{{- include "gibson.assertTrustDomainKnobsDeleted" (dict "ctx" . "keys" (list "tenantOperator.daemonSpiffeID" "connectorOperator.daemonSpiffeID")) }}
 {{- /*
   tenant-operator is structural infrastructure (one-code-path /
   deploy#188). The previous outer `.Values.tenantOperator.enabled`
@@ -247,11 +248,11 @@ spec:
               # (gibson-workloads:50051) was fixed in tenant-operator#70.
               value: {{ include "gibson.daemonAddress" . | quote }}
             # the operator dials the daemon over SPIFFE mTLS and
-            # authorises the daemon's SVID at the TLS handshake. Defaults to
-            # the platform daemon SVID; override per-environment if the
-            # trust domain differs.
+            # authorises the daemon's SVID at the TLS handshake. The ID is the
+            # trust domain of the install (global.spire.trustDomain) and the
+            # fixed path platform/daemon.
             - name: GIBSON_DAEMON_SPIFFE_ID
-              value: {{ .Values.tenantOperator.daemonSpiffeID | default "spiffe://zeroroot.ai/platform/daemon" | quote }}
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/daemon") | quote }}
             # First-tenant seed (gibson#1496): on a self-hosted install with no
             # signup, the operator enqueues the first tenant over its SPIFFE
             # identity via EnqueueTenantProvisioning — the session-less path,

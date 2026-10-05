@@ -36,6 +36,8 @@
 #                  (default: ${XDG_STATE_HOME:-$HOME/.local/state}/zeroroot/substrate)
 #   SUBSTRATE_ENV  stage 0 output, read for the bucket  (default: $SUBSTRATE_DIR/kind/substrate.env)
 #   TIMEOUT        per-step helm timeout                (default: 10m)
+#   TRUST_DOMAIN   the SPIFFE trust domain              (default: the profile's
+#                  global.spire.trustDomain). A running install keeps its own.
 set -euo pipefail
 
 NS="${NS:-gibson}"
@@ -172,6 +174,24 @@ case "$K8S_SVC_IP" in
 esac
 ENVOY_CLUSTER_IP="${ENVOY_CLUSTER_IP:-${K8S_SVC_IP%.*.*}.0.250}"
 echo "service CIDR anchor: ${K8S_SVC_IP} -> pinning envoy at ${ENVOY_CLUSTER_IP}"
+# The SPIFFE trust domain (ADR-0164). It comes from the profile, or from
+# TRUST_DOMAIN. A trust domain cannot change on a running install: every SVID,
+# every agent and the SPIRE CA belong to it. So when the platform already
+# runs here, the install keeps the domain of its daemon identity, and a
+# TRUST_DOMAIN that names a different one is an error.
+TRUST_DOMAIN="${TRUST_DOMAIN:-}"
+RUNNING_TD="$(kubectl get clusterspiffeid gibson-platform-daemon -o jsonpath='{.spec.spiffeIDTemplate}' 2>/dev/null \
+  | sed -n 's#^spiffe://\([^/]*\)/.*#\1#p' || true)"
+if [ -n "$RUNNING_TD" ]; then
+  if [ -n "$TRUST_DOMAIN" ] && [ "$TRUST_DOMAIN" != "$RUNNING_TD" ]; then
+    echo "FATAL: TRUST_DOMAIN=$TRUST_DOMAIN, and the running install uses $RUNNING_TD. A trust domain cannot change in place." >&2
+    exit 2
+  fi
+  TRUST_DOMAIN="$RUNNING_TD"
+  echo "trust domain: ${TRUST_DOMAIN} (kept from the running install)"
+fi
+TRUST_DOMAIN_ARGS=()
+[ -n "$TRUST_DOMAIN" ] && TRUST_DOMAIN_ARGS=(--set "global.spire.trustDomain=${TRUST_DOMAIN}")
 # The apiserver egress the OpenBao policy must allow. Its Kubernetes auth
 # method calls TokenReview against the apiserver on every login, and without
 # this rule the login fails, the secret store never validates, every
@@ -383,6 +403,7 @@ helm upgrade --install "$RELEASE" "${GIBSON_CHART[@]}" \
   ${RUNG_FILE:+-f "$RUNG_FILE"} \
   "${EXTRA_VALUES_ARGS[@]}" \
   "${BUCKET_ARGS[@]}" \
+  "${TRUST_DOMAIN_ARGS[@]}" \
   --set-json "gibson-workloads.spire.identityAdmission.workloadCreators=[\"${PRINCIPAL}\"]" \
   --set "global.networkPolicy.apiServerCIDRs={${API_CIDRS}}" \
   --set "gibson-workloads.envoy.service.clusterIP=${ENVOY_CLUSTER_IP}" \

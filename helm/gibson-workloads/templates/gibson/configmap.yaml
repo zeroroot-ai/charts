@@ -126,7 +126,7 @@ data:
       {{- if and .Values.gibson.auth.spiffe (not (.Values.dev).disableSPIFFE) }}
       # SPIFFE/SPIRE workload identity configuration
       spiffe:
-        trust_domain: {{ .Values.gibson.auth.spiffe.trustDomain | default "zeroroot.ai" | quote }}
+        trust_domain: {{ include "gibson.trustDomain" . | quote }}
         workload_api_socket: {{ .Values.gibson.auth.spiffe.workloadAPISocket | default "/run/spire/sockets/api.sock" | quote }}
       {{- end }}
 

@@ -8,8 +8,8 @@ app., api., auth., www. and docs. from it. A literal `<label>.zeroroot.ai`
 in a template is a hostname that does not move with the domain: it points a
 customer install at the vendor's estate. The rule is keyed by content: any
 literal host under zeroroot.ai in a template fails, except the two things
-that are names and not hosts, the `gibson.zeroroot.ai` API group and the
-`spiffe://zeroroot.ai` trust domain. Comment lines are skipped.
+that are names and not hosts: the `gibson.zeroroot.ai` API group, and a
+SPIFFE trust domain in a `spiffe://` ID. Comment lines are skipped.
 
   check-hostnames.py             exit 1 on a literal hostname, 0 when clean
   check-hostnames.py --selftest  prove a literal app host fails and the API group passes
@@ -52,8 +52,6 @@ def scan(root: str) -> list[str]:
                     host = m.group(1)
                     if host in ALLOWED or host.endswith(".gibson.zeroroot.ai") or "spiffe://" + host in line:
                         continue
-                    if "spiffe://zeroroot.ai" in line and host == "zeroroot.ai":
-                        continue
                     hits.append(f"{os.path.relpath(p, root)}:{n}: {host}")
     return hits
 
@@ -67,7 +65,7 @@ def selftest() -> int:
             "# so is a shell comment: api.zeroroot.ai\n"
             "group: gibson.zeroroot.ai\n"
             "kind: tenants.gibson.zeroroot.ai\n"
-            "id: spiffe://zeroroot.ai/platform/daemon\n"
+            "id: spiffe://localhost.zeroroot.ai/platform/daemon\n"
             "labels: {setec.zeroroot.ai/sandbox-namespace: \"true\"}\n"
             "url: https://app.zeroroot.ai/login\n"
             "issuer: {{ include \"gibson.oidcIssuer\" . }}\n"

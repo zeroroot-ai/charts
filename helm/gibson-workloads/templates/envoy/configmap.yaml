@@ -182,7 +182,7 @@ unconditionally — there is no `envoy.enabled` opt-out.
         "zitadelJwksUri"  $jwksUri
         "zitadelJwksHost" $jwksHost
         "zitadelJwksPort" $jwksPort
-        "spiffeTrustDomain" (.Values.spire.server.trustDomain | default "zeroroot.ai"))
+        "spiffeTrustDomain" (include "gibson.trustDomain" .))
     "envoyHttpsPort"   (.Values.envoy.service.httpsPort | default 443)
     "ratelimitPort"    (((.Values.ratelimit).ports).grpc | default 8081)
     "waf"              (dict

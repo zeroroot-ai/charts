@@ -307,7 +307,7 @@ spec:
             - name: EXT_AUTHZ_REGISTRY_URL
               value: "https://{{ include "gibson.fullname" . }}:{{ .Values.gibson.service.authzRegistry.port | default 8086 }}/authz/registry.yaml"
             - name: EXT_AUTHZ_DAEMON_SVID
-              value: {{ .Values.spiffe.daemonID | default "spiffe://zeroroot.ai/platform/daemon" | quote }}
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/daemon") | quote }}
             - name: EXT_AUTHZ_REGISTRY_FETCH_TIMEOUT
               value: {{ .Values.extAuthz.registryFetchTimeout | default "600s" | quote }}
             {{- end }}
@@ -425,12 +425,12 @@ spec:
             # agent DaemonSet writes to. Required by main.go.
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"
-            # Envoy peer SPIFFE ID — pin the gRPC peer (Envoy) to this SVID.
-            # Must match the ClusterSPIFFEID registered for the Envoy
-            # ServiceAccount (templates/spiffe/envoy-spiffeid.yaml). Comma-
-            # separated list also accepted.
+            # Envoy peer SPIFFE ID: pin the gRPC peer (Envoy) to this SVID. It
+            # is the ID of the Envoy ClusterSPIFFEID
+            # (templates/spire-server/clusterspiffeids.yaml): the trust domain
+            # of the install and the fixed path platform/envoy.
             - name: EXT_AUTHZ_ENVOY_SVID
-              value: {{ required "spiffe.envoyID is required (e.g. \"spiffe://zeroroot.ai/platform/envoy\") — SPIRE is REQUIRED infrastructure (deploy#201)" .Values.spiffe.envoyID | quote }}
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/envoy") | quote }}
             {{- /* EXT_AUTHZ_HMAC_SECRET — symmetric-key identity-header signing
                    path removed by Spec 3 R14 (SPIFFE-mTLS roots trust now). The
                    legacyHmacEnabled toggle was a transitional shim and is
