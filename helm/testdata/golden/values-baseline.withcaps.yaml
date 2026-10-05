@@ -15969,7 +15969,7 @@ spec:
               # constructs iss from {ExternalScheme}://{ExternalDomain}[:{ExternalPort}],
               # so this default mirrors Zitadel's own ExternalDomain — NOT
               # the daemon's api.<domain> host (which is the bug this default
-              # had until edge-case zitadel-iss-port-vs-discovery was logged).
+              # once had).
               # Misalignment surfaces as `extauthz.issuer_mismatch` warnings
               # and HTTP 403 "permission denied" on every authenticated
               # daemon RPC. Environment overlays SHOULD override
@@ -25353,7 +25353,7 @@ spec:
           esac
 
           # Sibling-application services: OpenFGA, Zitadel, Neo4j. They are
-          # structural on every profile (ADR-0015), so an unreachable one is a
+          # structural on every profile (ADR-0083), so an unreachable one is a
           # failed install, not a soft warning. These three used to end in
           # `|| true`, which made this test unable to fail on them. Deep
           # contract checks live in their dedicated test pods.

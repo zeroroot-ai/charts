@@ -319,7 +319,7 @@ webhooks: ## Every Fail webhook is probed before activation, every webhook is se
 	@python3 scripts/check-webhooks.py --selftest
 	@python3 scripts/check-webhooks.py
 
-edge-config-identical: ## The Envoy edge renders identically on every substrate, one edge (ADR-0011, charts#17)
+edge-config-identical: ## The Envoy edge renders identically on every substrate, one edge (ADR-0079, charts#17)
 	@python3 scripts/check-edge-config-identical.py --selftest
 	@python3 scripts/check-edge-config-identical.py
 

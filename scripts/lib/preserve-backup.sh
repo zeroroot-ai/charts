@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # preserve-backup.sh — the preserve half of a teardown, for EVERY substrate
-# (ADR-0015, ADR-0014, deploy#1738, deploy#1746).
+# (ADR-0083, deploy#1738, deploy#1746).
 #
 # A preserve teardown is four steps before the destroy, and not one of them
 # knows what the cluster runs on. They speak kubectl, the durable bucket and
@@ -46,7 +46,7 @@
 #   3. backup-verify verify — the canary decrypt gate.
 #
 # One name covers all three artifacts, so a later recreate finds every piece
-# of a restore from the single string the teardown prints (ADR-0014).
+# of a restore from the single string the teardown prints (ADR-0083).
 
 # explain_bad_backup <name> — WHY a backup is not Completed, in the words
 # Velero itself recorded.

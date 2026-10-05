@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# keyring-to-cluster.sh — write the bringup keyring into the cluster (ADR-0015).
+# keyring-to-cluster.sh — write the bringup keyring into the cluster (ADR-0083).
 #
 # The ONE producer of the in-cluster keyring Secrets. `make recreate` owns
 # this step (deploy#1737); scripts/baseline-up.sh calls the same script for an
@@ -47,7 +47,7 @@ set -euo pipefail
 
 SUBSTRATE_ENV="${1:-}"
 [ -n "$SUBSTRATE_ENV" ] || { echo "usage: keyring-to-cluster.sh <substrate.env>" >&2; exit 2; }
-[ -s "$SUBSTRATE_ENV" ] || { echo "FATAL: no substrate.env at ${SUBSTRATE_ENV}. Run make substrate ENV=<env> first (ADR-0015)." >&2; exit 2; }
+[ -s "$SUBSTRATE_ENV" ] || { echo "FATAL: no substrate.env at ${SUBSTRATE_ENV}. Run make substrate ENV=<env> first (ADR-0083)." >&2; exit 2; }
 NS="${NS:-gibson}"
 
 log() { printf '\033[1;32m▶\033[0m %s\n' "$*"; }

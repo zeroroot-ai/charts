@@ -3,10 +3,10 @@
 
 WHY THIS EXISTS
 
-ADR-0004:30 asserts "the umbrella chart re-versions on every first-party
-service bump — handled by an automated fan-out (existing pattern), not by
-hand." No fan-out existed: the criterion was tracked as deploy#806, closed
-without being built, and re-filed with evidence as deploy#1391. Until now a
+ADR-0072, in its first form, asserted "the umbrella chart re-versions on
+every first-party service bump — handled by an automated fan-out (existing
+pattern), not by hand." No fan-out existed: the criterion was tracked as
+deploy#806, closed without being built, and re-filed with evidence as deploy#1391. Until now a
 first-party image bump meant hand-editing a digest in a values file, and on
 2026-08-12 alone that was done six times by hand (www, docs-site twice,
 gibson + ext-authz together, and five setec images at once).
@@ -264,7 +264,7 @@ def resolve_digest(image: str, ref: str) -> str:
 def cmd_resolve_all(require: bool) -> int:
     """Re-resolve every first-party pin against the registry (package time).
 
-    ADR-0004 wants a chart version to be an exact deployable. The pins are
+    ADR-0072 wants a chart version to be an exact deployable. The pins are
     committed by hand (now also by the fan-out, deploy#1391), and several name
     a MUTABLE ref — `main@sha256:…`, `latest@sha256:…`. Committed digest and
     registry truth can therefore diverge between the last bump and the
@@ -304,7 +304,7 @@ def cmd_resolve_all(require: bool) -> int:
     if failed and require:
         print("[resolve-all] refusing to package: a first-party image could not be "
               "resolved to a digest, so the chart would not be an exact deployable "
-              "(ADR-0004).", file=sys.stderr)
+              "(ADR-0072).", file=sys.stderr)
         return 1
     if not drift and not failed:
         print("[resolve-all] every first-party pin already matches the registry")
@@ -453,7 +453,7 @@ def selftest() -> int:
         got = load(path)
         if got:
             seen.update(p.image for p in find_pins(got, path))
-    # www is NOT here: it is an off-cluster surface since ADR-0009 (deploy#1622
+    # www is NOT here: it is an off-cluster surface since ADR-0077 (deploy#1622
     # removed its chart and its pin), so no fan-out event exists for it. It sat
     # in this list for a week and failed the 0.118.0 chart publish.
     for required in ("gibson", "ext-authz", "dashboard", "docs-site", "setec"):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""smtp-auth-probe.py — one SMTP session: connect, EHLO, AUTH, QUIT (ADR-0015).
+"""smtp-auth-probe.py — one SMTP session: connect, EHLO, AUTH, QUIT (ADR-0083).
 
 preflight calls this to prove the SMTP relay of an environment is live and
 accepts the keyring credential. Standard library only, so it runs on any

@@ -5,7 +5,7 @@
 # CNPG archives WAL to <destinationPath>/<serverName>/ and refuses, on the
 # first segment, a directory that already holds WAL from another cluster
 # (barman-cloud-check-wal-archive). The durable bucket outlives the cluster
-# by design (ADR-0015), so every bringup after the first must archive under
+# by design (ADR-0083), so every bringup after the first must archive under
 # a new name, and a recovery must read the OLD name and write a NEW one.
 # Measured 2026-09-07: a fresh cluster into a used archive went
 # ContinuousArchiving=False and every base backup sat in walArchivingFailing.

@@ -11,7 +11,7 @@
 # A NOTE ON THE SIGNUP CRITERION, because it is not as written
 # ------------------------------------------------------------
 # deploy#1039 says the self-serve path must return admin-only PermissionDenied.
-# That is true only when the front door is closed. ADR-0006 §4 (as amended
+# That is true only when the front door is closed. ADR-0074 (as amended
 # 2026-08-13, deploy#1039) matches the shipped default: self-serve signup is
 # ON in both profiles (signupSelfServe: true — GitLab self-managed model),
 # and closed registration is the operator override signupSelfServe: false.
@@ -93,7 +93,7 @@ pass "edge resolved to ${EDGE}"
 # ---------------------------------------------------------------------------
 step "Front door — GET / is login, not marketing"
 # ---------------------------------------------------------------------------
-# ADR-0006 §4: "Self-hosted GET / is the login page (no marketing)."
+# ADR-0074: "Self-hosted GET / is the login page (no marketing)."
 # dashboard/src/lib/host-routing.ts:19-20: with WWW_URL unset there is no host
 # split, so GET / renders the root page, which redirects to /login.
 ROOT_CODE="$(edge_status "$EDGE" "$APP_HOST" "/")"
@@ -115,14 +115,14 @@ else
   fail "GET / body carries no login affordance — self-hosted must not serve marketing here"
 fi
 
-# The marketing pages the dashboard shed (dashboard#911 / ADR-0006) must not be
+# The marketing pages the dashboard shed (dashboard#911 / ADR-0074) must not be
 # reachable on the self-hosted app host.
 for path in /pricing /contact-sales /features; do
   code="$(edge_status "$EDGE" "$APP_HOST" "$path")"
   if [ "$code" = "404" ] || [ "$code" = "302" ] || [ "$code" = "307" ]; then
     pass "GET ${path} -> ${code} (marketing page not served on self-hosted)"
   elif [ "$code" = "200" ]; then
-    fail "GET https://${APP_HOST}${path} -> 200 — a marketing page is being served on a self-hosted install (ADR-0006: marketing is SaaS-only)"
+    fail "GET https://${APP_HOST}${path} -> 200 — a marketing page is being served on a self-hosted install (ADR-0074: marketing is SaaS-only)"
   else
     fail "GET https://${APP_HOST}${path} -> ${code} (unexpected; expected 404 or a redirect)"
   fi
@@ -131,7 +131,7 @@ done
 # ---------------------------------------------------------------------------
 step "www is not served by this cluster"
 # ---------------------------------------------------------------------------
-# The marketing site is an off-cluster surface (deploy ADR-0009): no chart
+# The marketing site is an off-cluster surface (ADR-0077): no chart
 # deploys it in either audience, and the edge has no filter chain for the www
 # host at all. The listener matches by SNI (files/envoy/envoy.yaml: api., then
 # app./apex/docs. as one public chain) and there is no default chain, so a
@@ -157,10 +157,10 @@ case "$ROOT_CODE:$WWW_CODE" in
     fail "GET https://${WWW_HOST}/ -> 200 — this cluster is serving a marketing surface it must not own"
     ;;
   *:503)
-    fail "GET https://${WWW_HOST}/ -> 503 — a www vhost has returned to the edge. Remove it: this cluster must not claim www.<domain> (ADR-0009)."
+    fail "GET https://${WWW_HOST}/ -> 503 — a www vhost has returned to the edge. Remove it: this cluster must not claim www.<domain> (ADR-0077)."
     ;;
   *)
-    fail "GET https://${WWW_HOST}/ -> ${WWW_CODE} — the edge terminates TLS for www.<domain>; it must have no chain for that host (ADR-0009)"
+    fail "GET https://${WWW_HOST}/ -> ${WWW_CODE} — the edge terminates TLS for www.<domain>; it must have no chain for that host (ADR-0077)"
     ;;
 esac
 
@@ -189,14 +189,14 @@ fi
 # seam failing (owner call 2026-09-07). What a person sees is the contract:
 # with self-serve on, GET /signup renders the signup page; with it off, the
 # dashboard redirects /signup to /login (app/(public)/signup/page.tsx, deploy
-# ADR-0006 §4 as amended). The redirect target is part of the assertion: a
+# ADR-0074 as amended). The redirect target is part of the assertion: a
 # redirect elsewhere is a different surface, not the front door.
 SIGNUP_CODE="$(edge_status "$EDGE" "$APP_HOST" "/signup")"
 SIGNUP_REDIRECT="$(edge_redirect "$EDGE" "$APP_HOST" "/signup")"
 if [ "$SELF_SERVE" = "true" ]; then
   case "$SIGNUP_CODE" in
     200)
-      pass "GET https://${APP_HOST}/signup -> 200 with SIGNUP_SELF_SERVE=true (seam coherent; the shipped open default per ADR-0006 §4 as amended)"
+      pass "GET https://${APP_HOST}/signup -> 200 with SIGNUP_SELF_SERVE=true (seam coherent; the shipped open default per ADR-0074 as amended)"
       ;;
     30[1278])
       fail "GET https://${APP_HOST}/signup -> ${SIGNUP_CODE} to ${SIGNUP_REDIRECT:-?} while SIGNUP_SELF_SERVE=true — the seam and the deployed config disagree"

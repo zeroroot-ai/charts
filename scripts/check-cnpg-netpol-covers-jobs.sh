@@ -78,7 +78,7 @@ if bad:
 # the CNPG operator on :8000 — the instance-status probe. Without it the
 # operator reports "Cannot extract Pod status", the Cluster never reports a
 # system ID, and the umbrella sync deadlocks on the wave that waits for the
-# Cluster to be healthy. That is not hypothetical: a SaaS overlay (ADR-0006)
+# Cluster to be healthy. That is not hypothetical: a SaaS overlay (ADR-0074)
 # shipped a NetworkPolicy of its own against these pods, allowing :5432 from
 # its pods and nothing else. On a warm cluster the umbrella policy was
 # already there and the union was fine; on the from-zero bringup of

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # velero-restore.sh — the restore half of a recreate, for EVERY substrate
-# (ADR-0014, ADR-0015, deploy#1739, deploy#1746).
+# (ADR-0083, deploy#1739, deploy#1746).
 #
 # A recreate restores ONLY the backup named on the command line. There is no
 # `latest`, no auto-detect and no default that turns the restore on. Every
@@ -47,7 +47,7 @@
 # CNPG base backup id. The preserve teardown gives its CNPG `Backup` CR the
 # same name as the Velero backup and takes it BEFORE the Velero backup, so
 # the completed record with its `status.backupId` rides inside the archive.
-# Reading it here is what keeps ADR-0014 true for Postgres too: the recovery
+# Reading it here is what keeps ADR-0083 true for Postgres too: the recovery
 # target is the backup that was named, never the newest one in the catalog.
 # ---------------------------------------------------------------------------
 RECOVERY_BACKUP_ID=""
@@ -65,7 +65,7 @@ resolve_named_backup() {
   s3 s3 ls "s3://${BUCKET_NAME}/${BACKUP_KEY}" >/dev/null 2>&1 \
     || die "there is no backup named '${RESTORE_FROM}' in the durable bucket.
     looked for  s3://${BUCKET_NAME}/${BACKUP_KEY}
-    A recreate restores ONLY a backup named on the command line (ADR-0014): there is no
+    A recreate restores ONLY a backup named on the command line (ADR-0083): there is no
     latest, no auto-detect and no fallback to an empty bringup. A preserve teardown
     prints the name it verified as its last line. Run without RESTORE_FROM to bootstrap
     every store empty."
@@ -253,7 +253,7 @@ wait_backup_synced() {
 #
 # The seal is already in place: stage 1 wrote the bringup keyring into this
 # namespace, so the restored store unseals from the keyring with no human
-# step (ADR-0015). Without the keyring the archive is ciphertext, which is
+# step (ADR-0083). Without the keyring the archive is ciphertext, which is
 # what the exit test's failing fixture measures.
 # ---------------------------------------------------------------------------
 restore_secret_store() {

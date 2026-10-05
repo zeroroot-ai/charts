@@ -1,4 +1,4 @@
-# Publish the Gibson umbrella chart as a versioned OCI Helm artifact (ADR-0004,
+# Publish the Gibson umbrella chart as a versioned OCI Helm artifact (ADR-0072,
 # deploy#804). A chart version IS the deployable: gitops envs/<env> overlays pin
 # a chartVersion and promote by bumping it.
 #
@@ -6,7 +6,7 @@
 # version tracks the repo release version.
 #
 # Digest-pinning of first-party images happens AT PACKAGE TIME (deploy#1402,
-# the second half of ADR-0004). The "resolve first-party image digests" step
+# the second half of ADR-0072). The "resolve first-party image digests" step
 # below re-resolves every first-party pin against GHCR immediately before
 # `helm package`, and fails the publish if any of them cannot be resolved, so
 # a chart version is an exact deployable rather than one that was exact
@@ -99,7 +99,7 @@ jobs:
           ./scripts/helm-dep-update.sh helm/gibson
           ./scripts/helm-dep-update.sh helm/gibson-velero
 
-      - name: Resolve first-party image digests (ADR-0004, deploy#1402)
+      - name: Resolve first-party image digests (ADR-0072, deploy#1402)
         # Runs AFTER dependency build (so the subchart values that ship are the
         # ones rewritten) and BEFORE package. Writes into the checkout only —
         # nothing is pushed back to main, so this cannot smuggle an unreviewed
