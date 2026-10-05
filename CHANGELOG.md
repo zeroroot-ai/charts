@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.136.6](https://github.com/zeroroot-ai/charts/compare/v0.136.5...v0.136.6) (2026-10-05)
+
+
+### Bug Fixes
+
+* **rbac:** the tenant-operator may read and write what its controllers watch ([#404](https://github.com/zeroroot-ai/charts/issues/404)) ([cb80d59](https://github.com/zeroroot-ai/charts/commit/cb80d59da3bb586184d7f60ba08aa69ab9ad99c6))
+* **spire:** the identity admission lists hold every first-party identity, and a check keeps them so ([#402](https://github.com/zeroroot-ai/charts/issues/402)) ([899c679](https://github.com/zeroroot-ai/charts/commit/899c679dabde248e04fcd6aa480b8ca7182b4d45))
+
 ## [0.136.5](https://github.com/zeroroot-ai/charts/compare/v0.136.4...v0.136.5) (2026-10-05)
 
 
