@@ -7,7 +7,7 @@ stamps it into the issuer, so a port in a claimed host becomes a port in the
 issuer. That put ":443" into the issuer on staging (charts#162).
 
 This guard renders the baseline and every shipped values file, and reads the
-four places a rendered manifest can claim a host:
+five places a rendered manifest can claim a host:
 
   1. an env var named ZITADEL_EXTERNAL_DOMAIN
   2. the login app's CUSTOM_REQUEST_HEADERS (Host and X-Zitadel-*-Host)
@@ -16,9 +16,8 @@ four places a rendered manifest can claim a host:
   4. a curl call that forges `-H "Host: ..."`. No caller may do this at all:
      the claimed host goes in the instance header, from the chart helper.
 
-PlatformBootstrap.spec.zitadel.externalDomain is not read here. The
-platform-operator still forges it as a Host header with a port, and that
-field moves with the operator change in gibson#223.
+  5. PlatformBootstrap.spec.zitadel.externalDomain. The platform-operator
+     claims it in the instance header and refuses a port since gibson#223.
 
   check-zitadel-claimed-host.py             exit 1 on a finding
   check-zitadel-claimed-host.py --selftest  prove each of the four shapes fails
@@ -76,11 +75,16 @@ def envs(node):
 def judge(rendered: str) -> tuple[list[str], dict[str, int]]:
     """Findings, and how many of each surface the render held."""
     out: list[str] = []
-    seen = {"env": 0, "headers": 0, "jwks": 0}
+    seen = {"env": 0, "headers": 0, "jwks": 0, "bootstrap": 0}
     for doc in yaml.safe_load_all(rendered):
         if not doc:
             continue
         where = f"{doc.get('kind')}/{(doc.get('metadata') or {}).get('name')}"
+        if doc.get("kind") == "PlatformBootstrap":
+            seen["bootstrap"] += 1
+            claimed = str((((doc.get("spec") or {}).get("zitadel") or {}).get("externalDomain")) or "")
+            if not claimed or HAS_PORT.search(claimed) or "://" in claimed:
+                out.append(f"{where}: spec.zitadel.externalDomain is {claimed!r}; it must be a bare host with no scheme and no port")
         for name, value in envs(doc):
             if name == "ZITADEL_EXTERNAL_DOMAIN":
                 seen["env"] += 1
@@ -119,6 +123,12 @@ spec:
           env:
             - {name: ZITADEL_EXTERNAL_DOMAIN, value: "%(env)s"}
 ---
+kind: PlatformBootstrap
+metadata: {name: fixture-pb}
+spec:
+  zitadel:
+    externalDomain: "%(pb)s"
+---
 kind: ConfigMap
 metadata: {name: fixture-cm}
 data:
@@ -130,6 +140,7 @@ data:
     curl -sS %(curl)s http://gibson-zitadel:8080/management/v1/users
 """
 CLEAN = {"env": "app.example.com", "hdr": "app.example.com", "jwks": "app.example.com",
+         "pb": "app.example.com",
          "curl": '-H "x-zitadel-instance-host: app.example.com"'}
 
 
@@ -143,6 +154,7 @@ def selftest() -> int:
         "hdr": "app.example.com:30443",
         "jwks": "app.example.com:443",
         "curl": '-H "Host: app.example.com"',
+        "pb": "app.example.com:30443",
     }
     for key, value in bad.items():
         found, _ = judge(FIXTURE % {**CLEAN, key: value})
@@ -150,7 +162,8 @@ def selftest() -> int:
             print(f"selftest: a bad {key} ({value}) must give one finding, gave {found}", file=sys.stderr)
             return 1
     print("check-zitadel-claimed-host selftest PASSED (a port in the env var, the login "
-          "header and the JWKS authority each fail, and so does a forged curl Host)")
+          "header, the JWKS authority and the PlatformBootstrap field each fail, and "
+          "so does a forged curl Host)")
     return 0
 
 
