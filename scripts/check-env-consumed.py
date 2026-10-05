@@ -110,7 +110,6 @@ IMAGE_SERVICE = {
     "setec-runtime-agent": "setec",
     "setec-installer": "setec",
     "setec-keepalive": "setec",
-    "billing": "billing",
     "docs-site": "docs-site",
 }
 # First-party images whose source is not ours to read, so no reader set governs
