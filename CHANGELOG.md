@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.136.8](https://github.com/zeroroot-ai/charts/compare/v0.136.7...v0.136.8) (2026-10-05)
+
+
+### Bug Fixes
+
+* **pins:** gibson v0.153.2, and the edge-at-zero test waits for the tenant webhook ([#417](https://github.com/zeroroot-ai/charts/issues/417)) ([99ca88d](https://github.com/zeroroot-ai/charts/commit/99ca88d938e6a342b310207e2d0d7a2ccf454de7))
+
 ## [0.136.7](https://github.com/zeroroot-ai/charts/compare/v0.136.6...v0.136.7) (2026-10-05)
 
 
