@@ -27,9 +27,10 @@ from pinned_source import pinned_tag, tree_at
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "helm" / "contracts"
-# The operators that publish a generated role. The platform-operator has no
-# config/rbac/role.yaml in the gibson repo, so nothing is vendored for it.
-OPERATORS = ("tenant", "connector")
+# The operators that publish a generated role. The platform-operator publishes
+# one since gibson v0.153.1 (gibson#768): its markers stood in a type doc
+# comment before, where controller-gen ignores them.
+OPERATORS = ("tenant", "connector", "platform")
 
 
 def render(op: str, tag: str, body: str) -> str:

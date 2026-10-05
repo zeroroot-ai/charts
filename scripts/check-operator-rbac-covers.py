@@ -31,7 +31,8 @@ import sys
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OPERATORS = {"tenant": "gibson-tenant-operator", "connector": "gibson-connector-operator"}
+OPERATORS = {"tenant": "gibson-tenant-operator", "connector": "gibson-connector-operator",
+             "platform": "gibson-platform-operator"}
 
 
 def helm_template() -> list[dict]:
