@@ -54,7 +54,7 @@ spec:
           declarative here rather than a kubectl restart at rotation time
           (deploy#1144).
         */}}
-        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-workloads-dashboard-secrets,gibson-workloads-redis-stack,{{ (((.Values.dashboard.billing).stripeSecretKeySecretRef)) | default "gibson-stripe-credentials" }}"
+        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,{{ include "gibson.dashboardSecrets.name" . }},{{ (((.Values.dashboard.billing).stripeSecretKeySecretRef)) | default "gibson-stripe-credentials" }}"
     spec:
       {{- include "gibson.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ .Values.dashboard.serviceAccount.name | default "gibson-dashboard" }}

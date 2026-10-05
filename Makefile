@@ -9,7 +9,7 @@
 GREEN := \033[0;32m
 NC    := \033[0m
 
-.PHONY: upgrade-pair operator-rbac-sync operator-rbac-covers identity-admission-covers openbao-one-replica zitadel-claimed-host contract-pins config-contract-sync config-consumed smtp-tls-mode email-smtp-external-secret openbao-login-diagnosis help values-consumed env-consumed env-contract-sync env-contract-fresh chart-deps chart-deps-retry golden golden-update render-diff baseline-up baseline-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords login-brand \
+.PHONY: upgrade-pair reloader-names operator-rbac-sync operator-rbac-covers identity-admission-covers openbao-one-replica zitadel-claimed-host contract-pins config-contract-sync config-consumed smtp-tls-mode email-smtp-external-secret openbao-login-diagnosis help values-consumed env-consumed env-contract-sync env-contract-fresh chart-deps chart-deps-retry golden golden-update render-diff baseline-up baseline-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords login-brand \
         check attribution vendor-operators cloud-free
 
 help: ## Show available targets
@@ -323,6 +323,10 @@ identity-admission-covers: ## Every identity the chart registers is one the admi
 	@python3 scripts/check-identity-admission-covers.py --selftest
 	@python3 scripts/check-identity-admission-covers.py
 
+reloader-names: ## Every Reloader annotation names a Secret or a ConfigMap that exists (charts#411)
+	@python3 scripts/check-reloader-names.py --selftest
+	@python3 scripts/check-reloader-names.py
+
 fixture-flag-follows-runner: ## GIBSON_TEST_FIXTURES_ENABLED follows gibson.e2eRunner.enabled, and no shipped values file sets it (gibson#14, charts#332)
 	@python3 scripts/check-fixture-flag-follows-runner.py --selftest
 	@python3 scripts/check-fixture-flag-follows-runner.py
@@ -358,7 +362,7 @@ operator-rbac-fresh: ## The vendored cert-manager and External Secrets RBAC matc
 	@python3 scripts/vendor-operator-rbac.py --selftest
 	@python3 scripts/vendor-operator-rbac.py --check
 
-check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed env-consumed config-consumed contract-pins probes probe-timeouts helper-docs referenced-paths-exist cg-rotation-window email-smtp-external-secret smtp-tls-mode edge-rate-limits netpol-coverage daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows upgrade-pair envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes edge-jwt-payload-unforgeable netpol-before-hooks openbao-login-diagnosis zitadel-claimed-host openbao-one-replica identity-admission-covers operator-rbac-covers ## Everything that runs without a cluster
+check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed env-consumed config-consumed contract-pins probes probe-timeouts helper-docs referenced-paths-exist cg-rotation-window email-smtp-external-secret smtp-tls-mode edge-rate-limits netpol-coverage daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows upgrade-pair envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes edge-jwt-payload-unforgeable netpol-before-hooks openbao-login-diagnosis zitadel-claimed-host openbao-one-replica identity-admission-covers operator-rbac-covers reloader-names ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context
