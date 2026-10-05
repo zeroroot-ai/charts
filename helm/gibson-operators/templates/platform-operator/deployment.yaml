@@ -42,21 +42,6 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ .Values.platformOperator.serviceAccount.name | default "gibson-platform-operator" }}
-      {{- /*
-        hostAliases makes app.<domain> + api.<domain> resolve to Envoy's
-        ClusterIP from inside the platform-operator pod (the auth.<domain>
-        host is retired — Zitadel is served under app.<domain>). The
-        PlatformBootstrap CR's spec.zitadel.issuer URL
-        (e.g. https://app.zeroroot.ai) is the public URL; the
-        reconciler dials it directly. Without this alias the operator
-        can't reach Zitadel — DNS for *.zeroroot.ai doesn't resolve
-        inside the cluster.
-
-        gibson-common library helper (deploy#179) replaces the
-        previously-inline block; single source of truth shared with
-        tenant-operator + dashboard + daemon templates.
-      */}}
-      {{- include "gibson.hostAliases" . | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -131,35 +116,15 @@ spec:
               value: "/etc/ssl/certs:/etc/ssl/fga-ca"
             {{- end }}
             {{- /*
-              ZITADEL_EXTERNAL_DOMAIN is the Host header forged onto every
-              Zitadel API request. Required because the platform-operator
-              dials Zitadel via in-cluster Service-name DNS (resolved via
-              hostAlias) — Zitadel's instance router matches by Host, not
-              SNI, so the Host has to be the registered ExternalDomain.
-              Same env var pattern as tenant-operator.
+              Zitadel addressing (ADR-0092, gibson#223). The operator connects
+              to the Zitadel Service (ZITADEL_URL) and claims the public host
+              in the x-zitadel-instance-host header (ZITADEL_EXTERNAL_DOMAIN, a
+              bare host with no port). It exits at startup without both. Both
+              come from the one helper. ZITADEL_ISSUER and
+              ZITADEL_INTERNAL_ADDRESS are gone: no operator code dials the
+              public issuer, so the pod needs no hostAliases either.
             */}}
-            - name: ZITADEL_EXTERNAL_DOMAIN
-              value: {{ (((.Values.zitadel).zitadel).configmapConfig).ExternalDomain | default (include "gibson.zitadelExternalDomain" .) | quote }}
-            # ZITADEL_ISSUER: public OIDC issuer URL used by the ZitadelProbe
-            # readiness check (hits <issuer>/debug/ready). Must match the URL
-            # Zitadel emits in the `iss` claim. Uses dashboard.zitadel.issuer
-            # (the same value tenant-operator uses) — hostAliases above make
-            # app.<domain> resolve to Envoy's ClusterIP inside the pod.
-            - name: ZITADEL_ISSUER
-              value: {{ ((.Values.dashboard.zitadel).issuer) | default (include "gibson.oidcIssuer" .) | quote }}
-            # ZITADEL_INTERNAL_ADDRESS: in-cluster Zitadel Service URL used by
-            # the readiness ZitadelProbe (GET <addr>/debug/ready). MUST be the
-            # cluster service, not ZITADEL_ISSUER (app.<domain>): the external
-            # origin routes through Envoy, which does not proxy /debug/ to
-            # Zitadel, so probing the issuer pins the pod at 0/1
-            # (platform-operator#76, deploy#630). Same convention the
-            # tenant-operator uses for its in-cluster Zitadel URL.
-            # Reuse tenantOperator.zitadelURL — both operators dial the SAME
-            # in-cluster Zitadel Service (gibson-zitadel:8080). Do NOT derive
-            # from .Release.Name: this chart's release is "gibson-operators",
-            # which would yield the non-existent "gibson-operators-zitadel".
-            - name: ZITADEL_INTERNAL_ADDRESS
-              value: {{ ((.Values.platformOperator).zitadelInternalURL) | default ((.Values.tenantOperator).zitadelURL) | default "http://gibson-zitadel:8080" | quote }}
+            {{- include "gibson.zitadel.env" . | nindent 12 }}
             {{- /* deploy#201: SPIRE is REQUIRED — env + mount unconditional. */}}
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"

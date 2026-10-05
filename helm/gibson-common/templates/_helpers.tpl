@@ -296,12 +296,6 @@ https
      ExternalPort/ExternalSecure are configured separately). */}}
 {{- define "gibson.zitadelExternalDomain" -}}{{ include "gibson.appHost" . }}{{- end -}}
 
-{{/* gibson.zitadelHostPort — app host WITH the external port suffix
-     ("app.<domain>[:port]"). This is the Host header the operators forge onto
-     in-cluster Zitadel requests (they dial Service DNS but Zitadel routes by
-     Host), and must match Zitadel's registered ExternalDomain+ExternalPort. */}}
-{{- define "gibson.zitadelHostPort" -}}{{ printf "%s%s" (include "gibson.appHost" .) (include "gibson.externalPortSuffix" .) }}{{- end -}}
-
 {{/* gibson.dashboardCallbackURI — the dashboard's OIDC redirect_uri,
      derived from the external origin. Registered on the gibson-dashboard
      OIDCClient and sent verbatim by Auth.js; the two MUST match. */}}

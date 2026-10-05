@@ -55,7 +55,7 @@ tenantOperator:
     # Tenant CR never reached Ready (deploy#1766, run 33600876035). The
     # package publishes main/latest/sha-* only, so the commit sha tag is the
     # honest provenance.
-    tag: "v0.150.1@sha256:7ae801bb1454ecdfdaab56fcee41dff73779239bf042d1bad1af000ec302c1be"
+    tag: "v0.153.0@sha256:2fd3276ca1cecd220a0ced64dfa788d8f75d7b4fcc413b01609dd8431d1cc27b"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     digest: ""
@@ -116,8 +116,6 @@ tenantOperator:
   # tenant-operator#70 documented the older legacy-release default
   # ("gibson:50051").
   daemonGrpcAddress: "gibson-workloads:50051"
-  # Zitadel in-cluster Service URL. Overlays set per-environment.
-  zitadelURL: ""
 
   # smtp — the tenant-operator's own mail transport, for the welcome email a
   # new tenant receives. UNDECLARED UNTIL charts#308: the template read
@@ -251,7 +249,7 @@ platformOperator:
     # deploy#789: digest-pinned for staging/prod immutability.
     # The digest below is the current `latest`. kind keeps :main, exempt.
     # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/platform-operator/versions
-    tag: "v0.150.1@sha256:1835e9afe96589bc0ec3f3340a76fdefaa50f3f148dbd143323fe3ea1a368a75"
+    tag: "v0.153.0@sha256:9594e48bc60603301c8730ac9a392eb70bb16f69a8d7e6806ff13d25ef59b0f6"
     # digest (deploy#1066) — see tenantOperator.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -305,7 +303,7 @@ connectorOperator:
     # name:tag@digest reference kubelet pulls by digest; the `main` tag is
     # cosmetic). kind keeps the floating :main tag (values-kind.yaml), exempt.
     # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/connector-operator/versions
-    tag: "v0.150.1@sha256:cd36dbe22a2c859f7649e3089092a1781399f1df8f984e41d25fbfa587fce58e"
+    tag: "v0.153.0@sha256:477a13e9f85bf9020d85c0867a323fb303e605c417b5b55d258bcff933246043"
     # digest (deploy#1066) — see tenantOperator.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -341,7 +339,7 @@ global:
   domain: zeroroot.ai
   # externalPort: the external NodePort the platform is served on. Empty in
   # base (standard 443 via the LB); the kind overlay sets "30443" and the
-  # gibson-common helpers fold it into gibson.oidcIssuer / gibson.zitadelHostPort.
+  # gibson-common helpers fold it into gibson.oidcIssuer.
   # Declared here so the kind overlay's key has a base default (deploy#576 parity).
   externalPort: ""
   imagePullSecrets:
@@ -390,7 +388,8 @@ envoy:
 # pod that silently no-ops the entire IAM provisioning saga (NoopClient
 # injection at the operator end). Whether Zitadel runs as an in-cluster
 # subchart (kind/dev) or as an external instance (prod) is now expressed
-# only by `tenantOperator.zitadelURL` and the chart-level `dashboard.zitadel.issuer`. There is no "Zitadel off" state.
+# only by the chart-level `dashboard.zitadel.issuer`. The connect address is the
+# gibson.zitadel.url helper for every client (ADR-0092). There is no "Zitadel off" state.
 zitadel:
   zitadel:
     configmapConfig:

@@ -42,7 +42,10 @@ OUT = ROOT / "helm" / "contracts"
 # with no rendered image, so its contract governed no container and its
 # checkout was the one reason the nightly held a long-lived personal token.
 SERVICES: dict[str, dict] = {
-    "gibson": {"repo": "gibson", "lang": "go",
+    # gibson publishes its own reader set since v0.152.0 (gibson#650,
+    # charts#303): configs/env-readers.txt, with a drift gate in gibson's merge
+    # gate. This repo reads that file at the pinned tag and extracts nothing.
+    "gibson": {"repo": "gibson", "lang": "artifact", "artifact": "configs/env-readers.txt",
                "images": ["gibson", "ext-authz", "tenant-operator", "platform-operator",
                           "connector-operator", "gibson-bootstrap-runner",
                           "internal-authz-registry", "spiffe-jwks-exporter"]},
@@ -117,8 +120,13 @@ def readers(service: str, repo_root: Path) -> set[str]:
         if not f.is_file():
             raise SystemExit(f"::error::{service}: the pinned tag holds no {spec['artifact']}. "
                              f"The service publishes its reader set from the release that added the file.")
-        names = json.loads(f.read_text()).get("names")
-        if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        if f.suffix == ".json":
+            names = json.loads(f.read_text()).get("names")
+        else:
+            # one name per line; a line that starts with # is the header
+            names = [ln.strip() for ln in f.read_text().splitlines()
+                     if ln.strip() and not ln.startswith("#")]
+        if not isinstance(names, list) or not names or not all(isinstance(n, str) for n in names):
             raise SystemExit(f"::error::{service}: {spec['artifact']} has no list of names")
         found |= set(names)
     elif spec["lang"] == "sh":

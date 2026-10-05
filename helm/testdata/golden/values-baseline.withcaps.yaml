@@ -11994,7 +11994,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sandbox-eviction-handler
-          image: "ghcr.io/zeroroot-ai/gibson:v0.150.1@sha256:8e2f12cb0e6e52d978b79b41c576fa086d9dcd1d88d0342aa7272fb2476efb38"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.153.0@sha256:4ae92ac7a6fb7364b8d86300c26e2d97a02ddad6979b6a039f62c1630983afa2"
           imagePullPolicy: Always
           command: ["/usr/local/bin/sandbox-eviction-handler"]
           args:
@@ -13049,7 +13049,7 @@ spec:
               readOnly: true
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/connector-operator:v0.150.1@sha256:cd36dbe22a2c859f7649e3089092a1781399f1df8f984e41d25fbfa587fce58e"
+          image: "ghcr.io/zeroroot-ai/connector-operator:v0.153.0@sha256:477a13e9f85bf9020d85c0867a323fb303e605c417b5b55d258bcff933246043"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -13156,13 +13156,6 @@ spec:
       imagePullSecrets:
         - name: ghcr-credentials
       serviceAccountName: gibson-platform-operator
-      hostAliases:
-        - ip: "10.96.0.250"
-          hostnames:
-            - "app.localhost.zeroroot.ai"
-            - "api.localhost.zeroroot.ai"
-            - "www.localhost.zeroroot.ai"
-            - "docs.localhost.zeroroot.ai"
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -13172,7 +13165,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/platform-operator:v0.150.1@sha256:1835e9afe96589bc0ec3f3340a76fdefaa50f3f148dbd143323fe3ea1a368a75"
+          image: "ghcr.io/zeroroot-ai/platform-operator:v0.153.0@sha256:9594e48bc60603301c8730ac9a392eb70bb16f69a8d7e6806ff13d25ef59b0f6"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -13232,28 +13225,10 @@ spec:
             # the env is unconditional.
             - name: SSL_CERT_DIR
               value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
+            - name: ZITADEL_URL
+              value: "http://gibson-zitadel.gibson.svc.cluster.local:8080"
             - name: ZITADEL_EXTERNAL_DOMAIN
               value: "app.localhost.zeroroot.ai"
-            # ZITADEL_ISSUER: public OIDC issuer URL used by the ZitadelProbe
-            # readiness check (hits <issuer>/debug/ready). Must match the URL
-            # Zitadel emits in the `iss` claim. Uses dashboard.zitadel.issuer
-            # (the same value tenant-operator uses) — hostAliases above make
-            # app.<domain> resolve to Envoy's ClusterIP inside the pod.
-            - name: ZITADEL_ISSUER
-              value: "https://app.localhost.zeroroot.ai"
-            # ZITADEL_INTERNAL_ADDRESS: in-cluster Zitadel Service URL used by
-            # the readiness ZitadelProbe (GET <addr>/debug/ready). MUST be the
-            # cluster service, not ZITADEL_ISSUER (app.<domain>): the external
-            # origin routes through Envoy, which does not proxy /debug/ to
-            # Zitadel, so probing the issuer pins the pod at 0/1
-            # (platform-operator#76, deploy#630). Same convention the
-            # tenant-operator uses for its in-cluster Zitadel URL.
-            # Reuse tenantOperator.zitadelURL — both operators dial the SAME
-            # in-cluster Zitadel Service (gibson-zitadel:8080). Do NOT derive
-            # from .Release.Name: this chart's release is "gibson-operators",
-            # which would yield the non-existent "gibson-operators-zitadel".
-            - name: ZITADEL_INTERNAL_ADDRESS
-              value: "http://gibson-zitadel:8080"
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"
             # Zitadel System API user private key path (platform-operator#28,
@@ -13498,13 +13473,6 @@ spec:
                     app.kubernetes.io/instance: gibson
                     app.kubernetes.io/component: tenantOperator
                 topologyKey: kubernetes.io/hostname
-      hostAliases:
-        - ip: "10.96.0.250"
-          hostnames:
-            - "app.localhost.zeroroot.ai"
-            - "api.localhost.zeroroot.ai"
-            - "www.localhost.zeroroot.ai"
-            - "docs.localhost.zeroroot.ai"
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -13635,7 +13603,7 @@ spec:
               memory: 64Mi
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.150.1@sha256:7ae801bb1454ecdfdaab56fcee41dff73779239bf042d1bad1af000ec302c1be"
+          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.153.0@sha256:2fd3276ca1cecd220a0ced64dfa788d8f75d7b4fcc413b01609dd8431d1cc27b"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -13856,18 +13824,16 @@ spec:
             # (gibson-tenant-operator, client credentials). It holds only
             # the Zitadel roles its OIDCClient declares; it never reads the
             # owner credentials (hosted#192).
-            # In-cluster HTTP to gibson-zitadel:8080 is fine here — Zitadel
-            # accepts the forged Host header the operator client already
-            # sends, and TLS is terminated further up (Envoy) for
-            # browser-facing traffic only.
-            # ZITADEL_URL — in-cluster Service URL for the operator's
-            # Zitadel admin client. Default constructs <Release.Name>-zitadel
-            # which only works when Zitadel is a subchart of this release.
-            # Under the gitops branch-per-env model Zitadel is a sibling
-            # Application with its own Service name; override via
-            # .Values.tenantOperator.zitadelURL.
+            # Zitadel addressing (ADR-0092, gibson#222): the operator connects
+            # to the Zitadel Service (ZITADEL_URL) and claims the public host
+            # in the x-zitadel-instance-host header (ZITADEL_EXTERNAL_DOMAIN,
+            # a bare host with no port). Both come from the one helper. The
+            # operator no longer reads ZITADEL_ISSUER, so the pod needs no
+            # hostAliases.
             - name: ZITADEL_URL
-              value: "http://gibson-zitadel:8080"
+              value: "http://gibson-zitadel.gibson.svc.cluster.local:8080"
+            - name: ZITADEL_EXTERNAL_DOMAIN
+              value: "app.localhost.zeroroot.ai"
             # OAuth2 client_credentials of the operator's own machine user
             # (the gibson-tenant-operator OIDCClient). The operator uses them
             # for the daemon's admin endpoints and for the Zitadel API. It
@@ -13885,22 +13851,6 @@ spec:
                 secretKeyRef:
                   name: gibson-zitadel-tenant-operator
                   key: ZITADEL_CLIENT_SECRET
-            # Operator reads ZITADEL_ISSUER (not ZITADEL_TENANT_OPERATOR_ISSUER)
-            # — see cmd/main.go:236. Must use the public issuer URL (matches
-            # Zitadel's ExternalDomain) — Zitadel rejects token requests
-            # whose Host header doesn't match a registered instance.
-            # hostAliases below makes app.<domain> resolve to Envoy's
-            # ClusterIP from inside the pod; SSL_CERT_DIR trusts the
-            # Envoy self-signed cert.
-            # Per epic one-code-path (deploy#186), slice deploy#196:
-            # dashboard.zitadel.issuer is required. The previous
-            # `| default (printf "https://auth.%s:30443" .Values.global.domain)`
-            # silently picked a Kind-shaped URL when the value was unset, so
-            # production overlays that forgot to set it booted against the
-            # wrong issuer hostname. Chart render now fails with an
-            # actionable message naming the value.
-            - name: ZITADEL_ISSUER
-              value: "https://app.localhost.zeroroot.ai"
             # SSL_CERT_DIR is colon-separated; Go skips missing dirs and
             # /etc/ssl/certs keeps the system bundle. envoy-ca trusts the
             # Envoy edge cert (deploy#200); fga-ca trusts the OpenFGA
@@ -13909,13 +13859,6 @@ spec:
             # so the env is unconditional.
             - name: SSL_CERT_DIR
               value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
-            # Forge Host header so Zitadel's instance router accepts the
-            # request. The operator reaches Zitadel via its in-cluster
-            # Service name, whose hostname ("gibson-zitadel:8080") is not a
-            # registered instance — without this forge Zitadel returns 404
-            # for every endpoint.
-            - name: ZITADEL_EXTERNAL_DOMAIN
-              value: "app.localhost.zeroroot.ai"
             # ADR-0093 decision 2: the gibson project each tenant org is
             # granted and whose four tenant roles the role sync reads. The
             # operator refuses to start without it. The platform-operator
@@ -15696,7 +15639,7 @@ spec:
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,tmp"
         checksum/registry: 037b476875b6eab5c00cec997dc041e7760adb1c39b55ae15b5254e9df9e91b4
-        checksum/daemon-registry: 10f1437fcc41295cfd5e693de52e3cc8401b190f10d08e5004eb7b61562d8a18
+        checksum/daemon-registry: 753a769ef0ea4e59863fc442534123a07ac29617cbbce2513d64ff06e6a42042
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
         secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc"
     spec:
@@ -15809,7 +15752,7 @@ spec:
               memory: 64Mi
       containers:
         - name: ext-authz
-          image: "ghcr.io/zeroroot-ai/ext-authz:v0.150.1@sha256:63fc4bf021dd8d5bb4a080631718cf484eb23abaf05436a51d09fd83303b8826"
+          image: "ghcr.io/zeroroot-ai/ext-authz:v0.153.0@sha256:a58f4b81959b4c741ae6908e3d862055c36826ce7e1f8a598593de76734410d7"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -18694,7 +18637,7 @@ spec:
               echo "Redis is ready!"
       containers:
         - name: gibson
-          image: "ghcr.io/zeroroot-ai/gibson:v0.150.1@sha256:8e2f12cb0e6e52d978b79b41c576fa086d9dcd1d88d0342aa7272fb2476efb38"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.153.0@sha256:4ae92ac7a6fb7364b8d86300c26e2d97a02ddad6979b6a039f62c1630983afa2"
           imagePullPolicy: Always
           ports:
             - name: callback
@@ -19913,7 +19856,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-fga-init-10f1437f
+  name: gibson-gibson-workloads-fga-init-753a769e
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -19971,7 +19914,7 @@ spec:
         # The entrypoint is the gibson binary, so command overrides it to get a
         # shell for the redirect. The runtime image is alpine-based and has one.
         - name: dump-model
-          image: "ghcr.io/zeroroot-ai/gibson:v0.150.1@sha256:8e2f12cb0e6e52d978b79b41c576fa086d9dcd1d88d0342aa7272fb2476efb38"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.153.0@sha256:4ae92ac7a6fb7364b8d86300c26e2d97a02ddad6979b6a039f62c1630983afa2"
           imagePullPolicy: Always
           command: ['/bin/sh', '-c']
           args:
@@ -20366,7 +20309,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-active-session-backfill-10f1437f
+  name: gibson-gibson-workloads-active-session-backfill-753a769e
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -20454,7 +20397,7 @@ spec:
               memory: 64Mi
       containers:
         - name: active-session-backfill
-          image: "ghcr.io/zeroroot-ai/gibson:v0.150.1@sha256:8e2f12cb0e6e52d978b79b41c576fa086d9dcd1d88d0342aa7272fb2476efb38"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.153.0@sha256:4ae92ac7a6fb7364b8d86300c26e2d97a02ddad6979b6a039f62c1630983afa2"
           imagePullPolicy: Always
           # allowlist-bringup-job-idempotency (deploy#928): the command is a
           # single Go binary, not a shell script — there is no multi-step shell
@@ -23073,10 +23016,9 @@ metadata:
 spec:
   zitadel:
     issuer: "http://gibson-zitadel:8080"
-    # Host header the operator forges onto in-cluster Zitadel requests
-    # (it dials Service DNS via platformBootstrap.zitadel.issuer but Zitadel
-    # routes by Host). Derives from global.domain (app host + external port);
-    # override only for an off-domain Zitadel edge.
+    # The public host the operator claims in the x-zitadel-instance-host
+    # header (ADR-0092). A bare host: the operator refuses a scheme or a port.
+    # It is the same value every other Zitadel client claims.
     externalDomain: "app.localhost.zeroroot.ai"
     adminTokenRef:
       name: "iam-admin-pat"
@@ -26328,7 +26270,7 @@ spec:
       # The daemon image itself — same repo@digest the StatefulSet runs — so
       # `gibson --version` reports the toolchain the DEPLOYED binary was built
       # with, not some proxy. The runtime image is alpine-based (has /bin/sh).
-      image: "ghcr.io/zeroroot-ai/gibson:v0.150.1@sha256:8e2f12cb0e6e52d978b79b41c576fa086d9dcd1d88d0342aa7272fb2476efb38"
+      image: "ghcr.io/zeroroot-ai/gibson:v0.153.0@sha256:4ae92ac7a6fb7364b8d86300c26e2d97a02ddad6979b6a039f62c1630983afa2"
       imagePullPolicy: Always
       command: ["/bin/sh", "-c"]
       args:

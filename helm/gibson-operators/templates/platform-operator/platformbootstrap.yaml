@@ -35,11 +35,10 @@ metadata:
 spec:
   zitadel:
     issuer: {{ required "platformBootstrap.zitadel.issuer is required (one-code-path/187): set to the OIDC issuer URL the platform-operator should reconcile against (e.g. http://gibson-zitadel:8080 in kind, https://app.<domain> in EKS — the auth.<domain> host is retired)." .Values.platformBootstrap.zitadel.issuer | quote }}
-    # Host header the operator forges onto in-cluster Zitadel requests
-    # (it dials Service DNS via platformBootstrap.zitadel.issuer but Zitadel
-    # routes by Host). Derives from global.domain (app host + external port);
-    # override only for an off-domain Zitadel edge.
-    externalDomain: {{ .Values.platformBootstrap.zitadel.externalDomain | default (include "gibson.zitadelHostPort" .) | quote }}
+    # The public host the operator claims in the x-zitadel-instance-host
+    # header (ADR-0092). A bare host: the operator refuses a scheme or a port.
+    # It is the same value every other Zitadel client claims.
+    externalDomain: {{ include "gibson.zitadel.externalDomain" . | quote }}
     adminTokenRef:
       name: {{ .Values.platformBootstrap.zitadel.adminTokenRef.name | default "iam-admin-pat" | quote }}
       {{- if .Values.platformBootstrap.zitadel.adminTokenRef.namespace }}
@@ -97,9 +96,9 @@ spec:
         `gibson-zitadel`. Relying on that derivation yields
         platform-zitadel.<ns>, which resolves to nothing.
 
-        Zitadel routes by Host, so the client still forges Host to
-        spec.zitadel.externalDomain (system_client.go) — the dial address
-        and the routed vhost are independent, which is what makes the
+        The client claims spec.zitadel.externalDomain in the
+        x-zitadel-instance-host header (ADR-0092), so the dial address and
+        the selected instance are independent. That is what makes the
         in-cluster dial work at all. Do not remove externalDomain.
       */}}
       {{- $apiURL := .apiURL }}

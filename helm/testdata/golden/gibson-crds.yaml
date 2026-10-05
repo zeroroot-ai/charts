@@ -2254,12 +2254,6 @@ spec:
               maxRuntime:
                 default: 24h
                 type: string
-              mode:
-                description: AgentMode is the autonomy mode of an enrolled agent.
-                enum:
-                - autonomous
-                - supervised
-                type: string
               principalKind:
                 description: |-
                   PrincipalKind identifies the FGA principal type for this enrollment.
@@ -2273,7 +2267,6 @@ spec:
                 type: string
             required:
             - agentName
-            - mode
             type: object
           status:
             description: AgentEnrollmentStatus defines the observed state.
@@ -2444,11 +2437,10 @@ spec:
             description: |-
               ConnectorInstanceSpec is the desired state of one connector for one tenant.
 
-              A product caller sets CatalogRef and nothing else — the catalog entry
-              supplies the image or endpoint, the transport, the egress allow-list, and the
-              auth kind (ADR-0014: "http = catalog + button, not YAML"). The inline fields
-              are the advanced escape hatch for a custom connector; the catalog entry fills
-              them when CatalogRef is set.
+              The daemon writes the instance from the catalog entry on enable (ADR-0014:
+              "http = catalog + button, not YAML"): the image or endpoint, the transport,
+              the egress allow-list and the auth kind come from the entry. The inline
+              fields are also the escape hatch for a custom connector authored by hand.
             properties:
               auth:
                 default: none
@@ -2457,11 +2449,6 @@ spec:
                 - none
                 - secret
                 - oauth
-                type: string
-              catalogRef:
-                description: |-
-                  CatalogRef selects a curated catalog entry. When set, the operator fills
-                  the inline fields from the entry; the caller does not author them.
                 type: string
               connector:
                 description: |-
@@ -2842,10 +2829,13 @@ spec:
                 - key
                 - name
                 type: object
-              zitadelIssuer:
+              zitadelURL:
                 description: |-
-                  ZitadelIssuer is the OIDC issuer URL. Identical to the parent
-                  PlatformBootstrap's spec.zitadel.issuer.
+                  ZitadelURL is the in-cluster Zitadel Service base URL the reconciler
+                  connects to, for example "http://gibson-zitadel:8080". It is a connect
+                  address and never an issuer: the public host is claimed with the
+                  x-zitadel-instance-host header (ADR-0092). The field was named
+                  zitadelIssuer while it held this same connect address.
                 pattern: ^https?://
                 type: string
             required:
@@ -2854,7 +2844,7 @@ spec:
             - clientName
             - projectRef
             - secretRef
-            - zitadelIssuer
+            - zitadelURL
             type: object
           status:
             description: OIDCClientStatus is the observed state.
@@ -3487,11 +3477,11 @@ spec:
                     type: object
                   externalDomain:
                     description: |-
-                      ExternalDomain is the public hostname (e.g. "app.example.com:30443")
-                      forged onto the Host header on every Zitadel API request. Allows the
-                      operator to dial Zitadel's in-cluster Service name while satisfying
-                      Zitadel's instance router until all consumers are migrated. Equivalent
-                      to the ZITADEL_EXTERNAL_DOMAIN env used by the OIDCClient reconciler.
+                      ExternalDomain is the public hostname (e.g. "app.example.com") the
+                      operator claims on every Zitadel System API request with the
+                      x-zitadel-instance-host header (ADR-0092). It is a bare host: a value
+                      with a scheme or a port is refused. Equivalent to the
+                      ZITADEL_EXTERNAL_DOMAIN env used by the OIDCClient reconciler.
                     type: string
                   issuer:
                     description: |-
@@ -3651,12 +3641,12 @@ spec:
                           internet-facing edge and back.
 
                           Resolution order when empty:
-                           1. the ZITADEL_INTERNAL_ADDRESS env var on the operator Pod, then
+                           1. the ZITADEL_URL env var on the operator Pod, then
                            2. "http://<trustedClusterDomain>:8080".
 
-                          Zitadel routes by Host header, so whichever address is dialled the
-                          client still forges Host to the public domain
-                          (spec.zitadel.externalDomain, falling back to the issuer host).
+                          Whichever address is dialled, the client claims the public domain
+                          (spec.zitadel.externalDomain) with the x-zitadel-instance-host header
+                          (ADR-0092).
                         pattern: ^https?://
                         type: string
                       keyPath:

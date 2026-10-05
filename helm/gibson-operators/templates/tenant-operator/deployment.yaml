@@ -62,12 +62,6 @@ spec:
       priorityClassName: {{ $pcn }}
       {{- end }}
       {{- include "gibson.spread" (dict "ctx" . "component" "tenantOperator") | nindent 6 }}
-      {{- /* hostAliases for envoy dialing — gibson-common library
-         helper (deploy#179) replaces the duplicated block that used
-         to live inline here AND in dashboard / daemon / platform-
-         operator templates. Single source of truth keyed on
-         .Values.envoy.service.clusterIP. */}}
-      {{- include "gibson.hostAliases" . | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -524,18 +518,13 @@ spec:
             # (gibson-tenant-operator, client credentials). It holds only
             # the Zitadel roles its OIDCClient declares; it never reads the
             # owner credentials (hosted#192).
-            # In-cluster HTTP to gibson-zitadel:8080 is fine here — Zitadel
-            # accepts the forged Host header the operator client already
-            # sends, and TLS is terminated further up (Envoy) for
-            # browser-facing traffic only.
-            # ZITADEL_URL — in-cluster Service URL for the operator's
-            # Zitadel admin client. Default constructs <Release.Name>-zitadel
-            # which only works when Zitadel is a subchart of this release.
-            # Under the gitops branch-per-env model Zitadel is a sibling
-            # Application with its own Service name; override via
-            # .Values.tenantOperator.zitadelURL.
-            - name: ZITADEL_URL
-              value: {{ ((.Values.tenantOperator).zitadelURL) | default (printf "http://%s-zitadel:8080" .Release.Name) | quote }}
+            # Zitadel addressing (ADR-0092, gibson#222): the operator connects
+            # to the Zitadel Service (ZITADEL_URL) and claims the public host
+            # in the x-zitadel-instance-host header (ZITADEL_EXTERNAL_DOMAIN,
+            # a bare host with no port). Both come from the one helper. The
+            # operator no longer reads ZITADEL_ISSUER, so the pod needs no
+            # hostAliases.
+            {{- include "gibson.zitadel.env" . | nindent 12 }}
             # OAuth2 client_credentials of the operator's own machine user
             # (the gibson-tenant-operator OIDCClient). The operator uses them
             # for the daemon's admin endpoints and for the Zitadel API. It
@@ -553,22 +542,6 @@ spec:
                 secretKeyRef:
                   name: gibson-zitadel-tenant-operator
                   key: ZITADEL_CLIENT_SECRET
-            # Operator reads ZITADEL_ISSUER (not ZITADEL_TENANT_OPERATOR_ISSUER)
-            # — see cmd/main.go:236. Must use the public issuer URL (matches
-            # Zitadel's ExternalDomain) — Zitadel rejects token requests
-            # whose Host header doesn't match a registered instance.
-            # hostAliases below makes app.<domain> resolve to Envoy's
-            # ClusterIP from inside the pod; SSL_CERT_DIR trusts the
-            # Envoy self-signed cert.
-            # Per epic one-code-path (deploy#186), slice deploy#196:
-            # dashboard.zitadel.issuer is required. The previous
-            # `| default (printf "https://auth.%s:30443" .Values.global.domain)`
-            # silently picked a Kind-shaped URL when the value was unset, so
-            # production overlays that forgot to set it booted against the
-            # wrong issuer hostname. Chart render now fails with an
-            # actionable message naming the value.
-            - name: ZITADEL_ISSUER
-              value: {{ ((.Values.dashboard.zitadel).issuer) | default (include "gibson.oidcIssuer" .) | quote }}
             # SSL_CERT_DIR is colon-separated; Go skips missing dirs and
             # /etc/ssl/certs keeps the system bundle. envoy-ca trusts the
             # Envoy edge cert (deploy#200); fga-ca trusts the OpenFGA
@@ -581,13 +554,6 @@ spec:
             {{- else }}
               value: "/etc/ssl/certs:/etc/ssl/fga-ca"
             {{- end }}
-            # Forge Host header so Zitadel's instance router accepts the
-            # request. The operator reaches Zitadel via its in-cluster
-            # Service name, whose hostname ("gibson-zitadel:8080") is not a
-            # registered instance — without this forge Zitadel returns 404
-            # for every endpoint.
-            - name: ZITADEL_EXTERNAL_DOMAIN
-              value: {{ (((.Values.zitadel).zitadel).configmapConfig).ExternalDomain | default (include "gibson.zitadelExternalDomain" .) | quote }}
             # ADR-0093 decision 2: the gibson project each tenant org is
             # granted and whose four tenant roles the role sync reads. The
             # operator refuses to start without it. The platform-operator
