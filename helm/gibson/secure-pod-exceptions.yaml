@@ -272,7 +272,7 @@ pods:
     reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
   'CronJob/gibson/gibson-redis-rotation read-only':
     digest: f31a0c09fafb9aac
-    reason: "charts#401 runs Redis as a non-root user."
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'DaemonSet/gibson/gibson-agent read-only':
     digest: eb9676462f099991
     reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths."
@@ -351,15 +351,12 @@ pods:
   'StatefulSet/gibson/gibson-openbao read-only':
     digest: d360d26718273c02
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'StatefulSet/gibson/gibson-redis-stack read-only':
-    digest: b625956a26bab767
-    reason: "charts#401 runs Redis as a non-root user."
   'StatefulSet/gibson/gibson-server read-only':
     digest: e813048e93772592
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'CronJob/gibson/gibson-redis-rotation restricted':
     digest: f80e1dfdb4e28e7f
-    reason: "charts#401 runs Redis as a non-root user."
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'DaemonSet/gibson/gibson-agent restricted':
     digest: 58a63912eaf1ea86
     reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths."
@@ -456,9 +453,6 @@ pods:
   'StatefulSet/gibson/gibson-openbao restricted':
     digest: aaf4c1a6d2511ae3
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'StatefulSet/gibson/gibson-redis-stack restricted':
-    digest: a3e4d25168b2855c
-    reason: "charts#401 runs Redis as a non-root user."
   'StatefulSet/gibson/gibson-server restricted':
     digest: 073efe33dfe31053
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
@@ -507,6 +501,3 @@ pods:
   'StatefulSet/gibson/gibson token':
     digest: f905b201ea835d99
     reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'StatefulSet/gibson/gibson-redis-stack token':
-    digest: f905b201ea835d99
-    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
