@@ -1306,13 +1306,35 @@ gibson.spiffeIDs: the SPIFFE IDs of a list of paths, joined with commas.
 {{- end -}}
 
 {{/*
-gibson.assertTrustDomainKnobsDeleted: the render fails when a values key that
-held the trust domain or a full SPIFFE ID is set (ADR-0164, charts#392). Each
-one is now `global.spire.trustDomain` plus a path. A silent ignore would keep
-the old domain in an overlay that nobody reads.
-  {{ include "gibson.assertTrustDomainKnobsDeleted" (dict "ctx" $ "keys" (list "spiffe.envoyID")) }}
+gibson.registrationKnob: the SIGNUP_SELF_SERVE value of the registration rung
+(ADR-0074, charts#374). `registration` names the rung:
+
+  closed    no value: the daemon refuses every signup, and the dashboard
+            redirects /signup to /login. A platform admin provisions tenants.
+  approval  "approval": anyone may register, and an administrator approves
+            each account. No mail transport is needed.
+  open      "true": self-serve signup.
+
+The daemon and the dashboard read the same variable, so both take it from
+here. The render fails on any other name.
 */}}
-{{- define "gibson.assertTrustDomainKnobsDeleted" -}}
+{{- define "gibson.registrationKnob" -}}
+{{- $rung := .Values.registration | default "" | toString -}}
+{{- if eq $rung "open" -}}true
+{{- else if eq $rung "approval" -}}approval
+{{- else if ne $rung "closed" -}}
+{{- fail (printf "registration is %q: use closed, approval or open (ADR-0074)" $rung) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+gibson.assertKeysDeleted: the render fails when a deleted values key is set to
+a value. A silent ignore would keep an old setting in an overlay that nobody
+reads. `use` names what replaces the keys. charts#392 (the trust domain keys)
+and charts#374 (the signup keys) both call it.
+  {{ include "gibson.assertKeysDeleted" (dict "ctx" $ "keys" (list "a.b") "use" "registration") }}
+*/}}
+{{- define "gibson.assertKeysDeleted" -}}
 {{- range $k := .keys -}}
 {{- $node := $.ctx.Values -}}
 {{- $found := true -}}
@@ -1324,7 +1346,7 @@ the old domain in an overlay that nobody reads.
 {{- end -}}
 {{- end -}}
 {{- if and $found (not (empty $node)) -}}
-{{- fail (printf "%s was deleted (ADR-0164, charts#392). Set the one value global.spire.trustDomain; each SPIFFE ID is built from it and a path." $k) -}}
+{{- fail (printf "%s was deleted. Use %s." $k $.use) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
