@@ -598,9 +598,41 @@ neo4j:
           - "bash"
           - "-c"
           - "cp /var/lib/neo4j/labs/apoc-*-core.jar /plugins/apoc.jar"
+        # The restricted Pod Security Standard (ADR-0165, charts#394). The
+        # copy runs as the neo4j user into the emptyDir, which fsGroup makes
+        # writable. Proved with docker: the pinned image, UID 7474, no
+        # capabilities, no-new-privileges, a read-only root.
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 7474
+          runAsGroup: 7474
+          capabilities:
+            drop: ["ALL"]
         volumeMounts:
           - name: neo4j-plugins
             mountPath: /plugins
+  # The restricted Pod Security Standard (ADR-0165, charts#394): the subchart
+  # defaults plus a RuntimeDefault seccomp profile and no privilege
+  # escalation. The server starts with these settings (docker, the pinned
+  # image). The root filesystem stays writable: the image entrypoint writes
+  # neo4j.conf under /var/lib/neo4j at start.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 7474
+    runAsGroup: 7474
+    fsGroup: 7474
+    fsGroupChangePolicy: "Always"
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 7474
+    runAsGroup: 7474
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
   additionalVolumes:
     - name: neo4j-plugins
       emptyDir: {}

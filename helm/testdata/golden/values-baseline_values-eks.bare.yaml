@@ -19198,7 +19198,9 @@ spec:
         fsGroupChangePolicy: Always
         runAsGroup: 7474
         runAsNonRoot: true
-        runAsUser: 7474            
+        runAsUser: 7474
+        seccompProfile:
+          type: RuntimeDefault            
       
       terminationGracePeriodSeconds: 3600
       initContainers:
@@ -19207,6 +19209,15 @@ spec:
           - -c
           - cp /var/lib/neo4j/labs/apoc-*-core.jar /plugins/apoc.jar
           name: install-apoc-core
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsGroup: 7474
+            runAsNonRoot: true
+            runAsUser: 7474
           volumeMounts:
           - mountPath: /plugins
             name: neo4j-plugins
@@ -19246,6 +19257,7 @@ spec:
               cpu: 500m
               memory: 2Gi
           securityContext: 
+              allowPrivilegeEscalation: false
               capabilities:
                 drop:
                 - ALL
