@@ -22933,6 +22933,7 @@ spec:
             severity: warning
             component: tenant-operator
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/tenant-operator.md#tenantoperatororphansaccumulating"
             summary: "Orphan CR finalizer-strip rate elevated on tenant-operator"
             description: |
               The orphan-reaper is stripping more than 5 finalizers/hour. A
@@ -22950,6 +22951,7 @@ spec:
             severity: warning
             component: tenant-operator
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/tenant-operator.md#tenantoperatorstuckterminatingnamespaces"
             summary: "Tenant namespace(s) stuck in Terminating past reaper grace period"
             description: |
               At least one tenant-* namespace has been Terminating longer
@@ -22970,6 +22972,7 @@ spec:
             severity: critical
             component: tenant-operator
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/tenant-operator.md#tenantoperatordaemoncallsfailing"
             summary: "tenant-operator -> daemon gRPC calls failing repeatedly"
             description: |
               The tenant-operator's daemon client (SPIFFE-mTLS gRPC,
@@ -22989,6 +22992,7 @@ spec:
             severity: critical
             component: tenant-operator
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/tenant-operator.md#tenantoperatordaemoncallsdenied"
             summary: "daemon is DENYING tenant-operator calls (authz/SPIFFE regression)"
             description: |
               The daemon returned permission_denied/unauthenticated to the
@@ -23046,12 +23050,13 @@ spec:
             severity: page
             component: dashboard-auth
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/dashboard-auth.md#dashboardsigninerrorratehigh"
             summary: "Dashboard sign-in error rate >1% over 5m"
             description: |
               More than 1% of dashboard sign-in attempts have failed over
               the last 5 minutes. Check
-              dashboard_login_error_total{reason} and the auth Grafana
-              dashboard for the dominant reason.
+              dashboard_login_error_total{reason} for the dominant
+              reason.
         - alert: DashboardFGAUnreachable
           expr: |
             increase(dashboard_membership_resolution_total{outcome="fga_error"}[1m]) > 0
@@ -23060,6 +23065,7 @@ spec:
             severity: page
             component: dashboard-auth
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/dashboard-auth.md#dashboardfgaunreachable"
             summary: "Dashboard cannot reach FGA — membership resolution failing"
             description: |
               The dashboard's getMyMemberships() RPC is failing with FGA
@@ -23078,6 +23084,7 @@ spec:
             severity: page
             component: dashboard-auth
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/dashboard-auth.md#dashboardsigninlatencybudgetburn"
             summary: "Dashboard sign-in p95 latency budget burning at >2x"
             description: |
               p95 sign-in latency has been above the 1.5s SLO objective
@@ -23108,6 +23115,7 @@ spec:
             severity: warning
             component: dashboard-auth
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/dashboard-auth.md#dashboardworkloadsvidfallback"
             summary: "Dashboard falling back to a workload SVID for user RPCs"
             description: |
               The dashboard is making daemon RPCs via the SPIFFE
@@ -23154,6 +23162,7 @@ spec:
             severity: page
             component: redis
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/redis.md#redisstackunhealthy"
             summary: "redis-stack StatefulSet has 0 ready replicas"
             description: |
               redis-stack in gibson has had 0 ready replicas for
@@ -23322,6 +23331,7 @@ spec:
             slo: cold_start_p95_500ms
             component: setec-sandbox
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxcoldstartlatencyhigh"
             summary: "Setec cold-start p95 above 500ms (SLI breach)"
             description: |
               The 5-minute p95 latency of cold-start SANDBOXED dispatches
@@ -23340,6 +23350,7 @@ spec:
             slo: warm_start_p95_100ms
             component: setec-sandbox
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxwarmstartlatencyhigh"
             summary: "Setec warm-start p95 above 100ms (SLI breach)"
             description: |
               The 5-minute p95 latency of warm-start SANDBOXED
@@ -23358,6 +23369,7 @@ spec:
             slo: dispatch_p99_10s
             component: setec-sandbox
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxdispatchslobreach"
             summary: "99th-percentile SANDBOXED dispatch above 10s SLO"
             description: |
               At least 1% of SANDBOXED dispatches are taking longer than
@@ -23374,14 +23386,13 @@ spec:
             severity: critical
             component: setec-sandbox
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxunavailable"
             summary: "Setec sandbox unavailable for >5m — SANDBOXED dispatch failing closed"
             description: |
               The daemon's 30s health probe has reported the Setec
               frontend unreachable for the majority of the last 5
               minutes. UNTRUSTED-content missions are failing closed with
               `sandbox_unavailable`; trusted-content missions continue.
-              The R3.4 OverrideDispatchPolicy RPC is the documented
-              escape hatch (1-hour TTL, audit-logged).
 
         # NFR-R1 + Scenario 4: spot-eviction storm signal.
         # health=degraded for >5m means the eviction handler in
@@ -23397,6 +23408,7 @@ spec:
             severity: warning
             component: setec-sandbox
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxspotevictionstorm"
             summary: "Sustained spot-eviction churn — consider raising on-demand fallback cap"
             description: |
               The sandbox health gauge has been in `degraded` state for
@@ -23423,13 +23435,13 @@ spec:
             severity: warning
             component: setec-sandbox
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxquotaexceededrate"
             summary: "Setec quota_exceeded rejections elevated across tenants"
             description: |
               SANDBOXED dispatches are being rejected with
               `quota_exceeded` at a sustained rate above 0.1/sec for 15m.
               Likely a single tenant driving traffic past the per-tenant
-              cap; check the Sandbox Health dashboard's "quota-exceeded
-              by tenant" panel and follow setec-cost-spike.md.
+              cap. The runbook shows the query by tenant.
 ---
 # Source: gibson/charts/gibson-workloads/templates/ratelimit/alertrule.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -23456,6 +23468,7 @@ spec:
             severity: page
             component: ratelimit
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/ratelimit.md#edgeperclientquotafailingopen"
             summary: "Edge per-client quota is failing open — requests pass unchecked"
             description: |
               The edge Envoy could not reach the ratelimit service for at least
