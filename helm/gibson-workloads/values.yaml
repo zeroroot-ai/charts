@@ -2772,67 +2772,9 @@ openbao:
   serviceAccount:
     annotations: {}
 
-  # Scheduled storage snapshot -> S3 (deploy#1496 ask 1, deploy#1535).
-  #
-  # THE RISK THIS CLOSES. The bringup keyring protects the SEAL KEY, not the
-  # data. The transit engine, the CG-JWT signing key and every per-tenant
-  # KEK live on the OpenBao StatefulSet PVC. Lose that PVC and the keyring
-  # still exists, still able to unwrap a root key that does not: every
-  # tenant's encrypted data is unrecoverable even from a perfect Postgres
-  # backup. Until this landed, nothing in the platform copied that PVC.
-  #
-  # NOT A RAFT SNAPSHOT. This chart runs `storage "file"` (deploy#365), and
-  # `bao operator raft snapshot save` requires the integrated raft backend —
-  # it errors out on a file backend. A logical export cannot substitute
-  # either: transit keys are non-exportable by design. On a file backend a
-  # filesystem archive of the data directory is the only mechanism that
-  # captures the keyring. A restore replaces the file tree and starts the
-  # server with the keyring the archive was sealed with.
-  #
-  # DEFAULT OFF, ON FOR THE AWS PROFILES. kind and a generic self-host have
-  # no S3 bucket to write to, and a CronJob that fails hourly on a missing
-  # bucket is worse than none. values-aws-prod.yaml and the staging/saas ci
-  # profiles enable it; a self-hosted install enables it with its own bucket.
-  backup:
-    enabled: false
-    # Daily, off the hour so it does not collide with the CNPG ScheduledBackup
-    # or the hourly redis RDB job.
-    schedule: "17 3 * * *"
-    # The platform backups bucket: <workspace_name>-backups-<account_id>
-    # (eks/gibson/modules/s3). REQUIRED when enabled.
-    s3Bucket: ""
-    # Object prefix. `longterm/` is the ONLY prefix the bucket's lifecycle
-    # rule covers (GLACIER@30d, expire@6y) — objects written outside it are
-    # kept forever at STANDARD price. Keep the longterm/ leader.
-    s3Prefix: "longterm/openbao"
-    awsRegion: ""
-    # Non-AWS S3 endpoint, for a self-hosted install backing up to MinIO, Ceph
-    # or any other S3-compatible store. Empty means real AWS S3, which is what
-    # every AWS profile wants. When set, the upload container also switches to
-    # path-style addressing — virtual-host style resolves
-    # <bucket>.<service>.<ns>.svc, which no cluster DNS serves.
-    s3EndpointUrl: ""
-    # Secret supplying AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY to the upload
-    # stage, for a store with no IRSA. Empty on every AWS profile, which
-    # authenticate through the ServiceAccount role annotation above.
-    credentialsSecretName: ""
-    # IRSA. The role (eks/gibson/modules/iam-irsa key `openbao_backup`) grants
-    # s3:PutObject + s3:GetObject on this prefix and NOTHING else — no
-    # s3:DeleteObject, so retention stays the bucket lifecycle's job and a
-    # compromised job cannot destroy the copies it made.
-    serviceAccount:
-      annotations: {}
-    # Stage 1 (init container) — MUST ship `tar`. The mirrored OpenBao image
-    # is Alpine/BusyBox and does.
-    snapshotImage:
-      repository: ghcr.io/zeroroot-ai/mirror/openbao
-      tag: "2.5.3@sha256:fdc6da21ca6963560c32336fd7feb9cf2d5e52668f1a1647205a4b41171f0806"
-      pullPolicy: IfNotPresent
-    # Stage 2 (main container) — MUST ship the aws CLI.
-    awsCliImage: "ghcr.io/zeroroot-ai/mirror/aws-cli:2.17.50@sha256:ac68e76ae4bbb804b0c36d56c6fdc8e6800adb46d29867ac2b73280225a7b719"
-    # Override only if the StatefulSet claim is not the ordinal-0 default
-    # (data-<release>-openbao-0).
-    pvcName: ""
+  # Backup. Velero is the one backup producer for this volume: the hourly
+  # Schedule in the gibson-velero chart copies the data directory as files to
+  # the durable bucket. A Raft snapshot is not possible on `storage "file"`.
 
   # Transit secrets engine for capability-grant JWT signing.
   # The init Job enables the engine and creates the EdDSA key on first install.
