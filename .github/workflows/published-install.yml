@@ -349,7 +349,7 @@ jobs:
           echo "▶ a second tenant, provisioned with no edge"
           tier="$(kubectl get tenant primary -o jsonpath='{.spec.tier}')"
           [ -n "$tier" ] || { echo "::error::the tenant primary has no spec.tier to copy"; exit 1; }
-          kubectl apply -f - <<YAML
+          cat > "$RUNNER_TEMP/edgeless-tenant.yaml" <<YAML
           apiVersion: gibson.zeroroot.ai/v1alpha1
           kind: Tenant
           metadata:
@@ -359,6 +359,23 @@ jobs:
             owner: edgeless@localhost.zeroroot.ai
             tier: ${tier}
           YAML
+          # The Tenant webhook is served by the tenant-operator, which this step
+          # restarted a moment ago. A finished rollout says that the pods are
+          # Ready. It does not say that the apiserver already reaches the
+          # webhook on them: run 37348444179 failed here with "failed calling
+          # webhook ... context deadline exceeded" two seconds after the
+          # rollout. That delay is not the claim under test, so the create
+          # waits for the webhook, for a bounded time, and says how long.
+          created=0
+          for attempt in $(seq 1 24); do
+            if kubectl apply -f "$RUNNER_TEMP/edgeless-tenant.yaml" 2>"$RUNNER_TEMP/edgeless.err"; then
+              created=1; echo "  the Tenant webhook answered on attempt ${attempt}"; break
+            fi
+            grep -q "failed calling webhook" "$RUNNER_TEMP/edgeless.err" \
+              || { echo "::error::the Tenant was refused for a reason that is not the webhook's readiness:"; cat "$RUNNER_TEMP/edgeless.err"; exit 1; }
+            sleep 5
+          done
+          [ "$created" -eq 1 ] || { echo "::error::the Tenant webhook did not answer in 120s after the tenant-operator restart:"; cat "$RUNNER_TEMP/edgeless.err"; exit 1; }
           org=""
           for _ in $(seq 1 120); do
             org="$(kubectl get tenant edgeless -o jsonpath='{.status.zitadelOrgID}' 2>/dev/null || true)"
@@ -379,6 +396,11 @@ jobs:
           n="$(kubectl -n "$NS" get oidcclient --no-headers | wc -l)"
           [ "$n" -gt 0 ] || { echo "::error::no OIDCClient exists in $NS, so the wait above matched nothing"; exit 1; }
           echo "  ✓ PlatformBootstrap and $n OIDCClient(s) are Ready"
+          # Since gibson v0.153.2 a reconcile that succeeds sets ClientExists
+          # again (gibson#801). Before that release the condition stayed
+          # Unknown after any transient error, beside Ready=True.
+          kubectl -n "$NS" wait oidcclient --all --for=condition=ClientExists --timeout=300s
+          echo "  ✓ every OIDCClient reports ClientExists=True"
 
           echo "▶ no operator logged a failed Zitadel call since the edge went away"
           bad=0
