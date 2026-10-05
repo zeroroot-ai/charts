@@ -20357,9 +20357,32 @@ spec:
           
           imagePullSecrets:
             - name: ghcr-credentials
+          # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+          # profile, a read-only root filesystem and no capabilities. kubectl
+          # writes its cache under HOME=/tmp, an emptyDir.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: tmp
+              emptyDir: {}
           containers:
             - name: rotation-controller
               image: "ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              env:
+                - name: HOME
+                  value: /tmp
               imagePullPolicy: IfNotPresent
               command:
                 - /bin/bash
@@ -25084,6 +25107,9 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
+  # The probe does not call the Kubernetes API, so the pod mounts no
+  # ServiceAccount token (ADR-0165, charts#394).
+  automountServiceAccountToken: false
   containers:
     - name: probe
       image: "ghcr.io/zeroroot-ai/mirror/curl:8.10.1@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b"
@@ -26174,6 +26200,9 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
+  # The probe does not call the Kubernetes API, so the pod mounts no
+  # ServiceAccount token (ADR-0165, charts#394).
+  automountServiceAccountToken: false
   containers:
     - name: assert-toolchain
       # The daemon image itself — same repo@digest the StatefulSet runs — so
@@ -26251,9 +26280,32 @@ metadata:
 spec:
   restartPolicy: Never
   serviceAccountName: "gibson-gibson-workloads-test-sandbox-admission"
+  # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+  # profile, a read-only root filesystem and no capabilities. kubectl
+  # writes its cache under HOME=/tmp, an emptyDir.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  volumes:
+    - name: tmp
+      emptyDir: {}
   containers:
     - name: probe
       image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      env:
+        - name: HOME
+          value: /tmp
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:

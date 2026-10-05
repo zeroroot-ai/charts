@@ -175,9 +175,32 @@ spec:
           restartPolicy: Never
           serviceAccountName: {{ $saName }}
           {{- include "gibson.imagePullSecrets" . | nindent 10 }}
+          # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+          # profile, a read-only root filesystem and no capabilities. kubectl
+          # writes its cache under HOME=/tmp, an emptyDir.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: tmp
+              emptyDir: {}
           containers:
             - name: rotation-controller
               image: "ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              env:
+                - name: HOME
+                  value: /tmp
               imagePullPolicy: IfNotPresent
               command:
                 - /bin/bash
