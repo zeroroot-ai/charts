@@ -14272,6 +14272,13 @@ spec:
       imagePullSecrets:
         - name: ghcr-credentials
       serviceAccountName: gibson-dashboard
+      # Secure pod (ADR-0165, charts#394): every container runs non-root with
+      # the RuntimeDefault seccomp profile, a read-only root filesystem and no
+      # capabilities.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       priorityClassName: gibson-platform
       topologySpreadConstraints:
         - maxSkew: 1
@@ -14342,6 +14349,13 @@ spec:
               readOnly: true
         - name: wait-for-gibson
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
           command:
             - sh
             - -c
@@ -14381,6 +14395,13 @@ spec:
         # required.
         - name: wait-for-zitadel-client
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
           command:
             - sh
             - -c
@@ -14459,6 +14480,13 @@ spec:
         # post-install Job has populated the map.
         - name: resolve-sa-identity-map
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
           command:
             - sh
             - -c
@@ -14898,7 +14926,10 @@ spec:
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false  # Next.js needs write access for cache
+            # Next.js writes only its image cache (/app/.next/cache) and /tmp,
+            # both emptyDir volumes. Measured with docker on the image: no
+            # write to the root at start or on a request.
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1001  # nextjs user from Dockerfile
             capabilities:
@@ -14924,7 +14955,15 @@ spec:
             - name: shared-identity
               mountPath: /shared
               readOnly: true
+            - name: next-cache
+              mountPath: /app/.next/cache
+            - name: tmp
+              mountPath: /tmp
       volumes:
+        - name: next-cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
         - name: spire-agent-socket
           csi:
             driver: csi.spiffe.io
@@ -15007,6 +15046,9 @@ spec:
       
       imagePullSecrets:
         - name: ghcr-credentials
+      # nginx serves static files and never calls the Kubernetes API, so the
+      # pod mounts no ServiceAccount token (ADR-0165, charts#394).
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 101
@@ -15020,6 +15062,8 @@ spec:
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
+            # Not read-only yet: the image rewrites its own index.html at
+            # start. docs-site#79 changes the image (ADR-0165, charts#394).
             readOnlyRootFilesystem: false
             runAsNonRoot: true
             runAsUser: 101

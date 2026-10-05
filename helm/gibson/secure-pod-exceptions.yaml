@@ -279,12 +279,9 @@ pods:
   'DaemonSet/gibson/node-agent read-only':
     digest: 3b74e134c6bcaaad
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
-  'Deployment/gibson/gibson-dashboard read-only':
-    digest: 879cbd080764eb88
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'Deployment/gibson/gibson-docs-svc read-only':
     digest: f645e1e6ef183e3d
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+    reason: "The image rewrites its own index.html at start, so its root cannot be read-only. docs-site#79 changes the image."
   'Deployment/gibson/gibson-openfga read-only':
     digest: 12dbb1ad617f88db
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
@@ -336,9 +333,6 @@ pods:
   'DaemonSet/setec-system/setec-runtime-agent restricted':
     digest: a09dad21976b3d3f
     reason: "Expected exception of ADR-0165: the setec node agent installs the runtime on the node and mounts host paths."
-  'Deployment/gibson/gibson-dashboard restricted':
-    digest: 089082bedf97f615
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'Deployment/gibson/gibson-openfga restricted':
     digest: baddd7356598e5f1
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
@@ -402,9 +396,6 @@ pods:
   'Deployment/gibson/external-secrets-webhook token':
     digest: 5401b028ab76cfef
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
-  'Deployment/gibson/gibson-docs-svc token':
-    digest: f905b201ea835d99
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'Deployment/gibson/gibson-spiffe-oidc-discovery-provider token':
     digest: e89690d6cef81447
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."

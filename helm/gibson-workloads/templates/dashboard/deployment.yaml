@@ -58,6 +58,13 @@ spec:
     spec:
       {{- include "gibson.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ .Values.dashboard.serviceAccount.name | default "gibson-dashboard" }}
+      # Secure pod (ADR-0165, charts#394): every container runs non-root with
+      # the RuntimeDefault seccomp profile, a read-only root filesystem and no
+      # capabilities.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       {{- /* Spec 2 R18: priorityClassName via shared helper. */}}
       {{- $pcn := include "gibson.priorityClassName" (dict "component" "dashboard") }}
       {{- if $pcn }}
@@ -99,6 +106,13 @@ spec:
         {{- if .Values.dashboard.initContainers.waitForGibson }}
         - name: wait-for-gibson
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
           command:
             - sh
             - -c
@@ -139,6 +153,13 @@ spec:
         # required.
         - name: wait-for-zitadel-client
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
           command:
             - sh
             - -c
@@ -291,6 +312,13 @@ spec:
         # post-install Job has populated the map.
         - name: resolve-sa-identity-map
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
           command:
             - sh
             - -c
@@ -852,7 +880,10 @@ spec:
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false  # Next.js needs write access for cache
+            # Next.js writes only its image cache (/app/.next/cache) and /tmp,
+            # both emptyDir volumes. Measured with docker on the image: no
+            # write to the root at start or on a request.
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1001  # nextjs user from Dockerfile
             capabilities:
@@ -883,7 +914,15 @@ spec:
             - name: shared-identity
               mountPath: /shared
               readOnly: true
+            - name: next-cache
+              mountPath: /app/.next/cache
+            - name: tmp
+              mountPath: /tmp
       volumes:
+        - name: next-cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
         {{- /* deploy#201: SPIRE is REQUIRED — the wait-for-spire-socket init
                container above is this volume's ONLY mounter. The `dashboard`
                container does not mount it, and the spiffe-helper sidecar that
