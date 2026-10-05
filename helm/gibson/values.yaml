@@ -1466,16 +1466,20 @@ cnpg:
 # is deferred.
 #
 # `probes` is the list the gate walks. It is not decoration:
-# `scripts/check-webhooks.py` renders the umbrella per profile and
+# `scripts/check-webhooks.py` renders each published profile, reads the probe
+# list from the rendered gate Job, and
 # fails the build when a `failurePolicy: Fail` webhook exists in the render
 # with no probe here, when a probe names a webhook the render does not
 # install, or when a probe's service, port or path disagrees with the
 # `clientConfig` the API server will actually dial. Add a webhook and the
 # guard tells you to add its probe.
 #
-# `component` marks a probe that only exists on profiles where that component
-# is enabled. Today the one such component is setec, which ci/values-saas.yaml
-# turns off. A probe with no `component` is unconditional.
+# `component` marks a probe of a webhook that the chart installs only when
+# that component is on: `setec`, or one of the operator seams `certManager`,
+# `externalSecrets` and `cnpg` (the `<name>.enabled` value). With a seam off,
+# the cluster owns that operator and its webhooks, in a namespace that this
+# chart does not know, so the gate does not probe them. A probe with no
+# `component` is unconditional.
 #
 # `namespace` defaults to the release namespace.
 # =============================================================================  # The operator's scratch volume. Velero fs-backup skips it.
@@ -1492,71 +1496,85 @@ webhookGate:
   probes:
     - config: cert-manager-webhook
       webhook: webhook.cert-manager.io
+      component: certManager
       service: cert-manager-webhook
       port: 443
       path: /mutate
     - config: cert-manager-webhook
       webhook: webhook.cert-manager.io
+      component: certManager
       service: cert-manager-webhook
       port: 443
       path: /validate
     - config: cnpg-mutating-webhook-configuration
       webhook: mbackup.cnpg.io
+      component: cnpg
       service: cnpg-webhook-service
       port: 443
       path: /mutate-postgresql-cnpg-io-v1-backup
     - config: cnpg-mutating-webhook-configuration
       webhook: mcluster.cnpg.io
+      component: cnpg
       service: cnpg-webhook-service
       port: 443
       path: /mutate-postgresql-cnpg-io-v1-cluster
     - config: cnpg-mutating-webhook-configuration
       webhook: mdatabase.cnpg.io
+      component: cnpg
       service: cnpg-webhook-service
       port: 443
       path: /mutate-postgresql-cnpg-io-v1-database
     - config: cnpg-mutating-webhook-configuration
       webhook: mscheduledbackup.cnpg.io
+      component: cnpg
       service: cnpg-webhook-service
       port: 443
       path: /mutate-postgresql-cnpg-io-v1-scheduledbackup
     - config: cnpg-validating-webhook-configuration
       webhook: vbackup.cnpg.io
+      component: cnpg
       service: cnpg-webhook-service
       port: 443
       path: /validate-postgresql-cnpg-io-v1-backup
     - config: cnpg-validating-webhook-configuration
       webhook: vcluster.cnpg.io
+      component: cnpg
       service: cnpg-webhook-service
       port: 443
       path: /validate-postgresql-cnpg-io-v1-cluster
     - config: cnpg-validating-webhook-configuration
       webhook: vdatabase.cnpg.io
+      component: cnpg
       service: cnpg-webhook-service
       port: 443
       path: /validate-postgresql-cnpg-io-v1-database
     - config: cnpg-validating-webhook-configuration
       webhook: vpooler.cnpg.io
+      component: cnpg
       service: cnpg-webhook-service
       port: 443
       path: /validate-postgresql-cnpg-io-v1-pooler
     - config: cnpg-validating-webhook-configuration
       webhook: vscheduledbackup.cnpg.io
+      component: cnpg
       service: cnpg-webhook-service
       port: 443
       path: /validate-postgresql-cnpg-io-v1-scheduledbackup
     - config: externalsecret-validate
       webhook: validate.externalsecret.external-secrets.io
+      component: externalSecrets
       service: external-secrets-webhook
       port: 443
       path: /validate-external-secrets-io-v1-externalsecret
     - config: secretstore-validate
       webhook: validate.clustersecretstore.external-secrets.io
+      component: externalSecrets
       service: external-secrets-webhook
       port: 443
       path: /validate-external-secrets-io-v1-clustersecretstore
     - config: secretstore-validate
       webhook: validate.secretstore.external-secrets.io
+      component: externalSecrets
       service: external-secrets-webhook
       port: 443
       path: /validate-external-secrets-io-v1-secretstore
