@@ -3,11 +3,15 @@
 # schedule, or on a release — so until this file existed, nothing at all ran on
 # a pull request and any change could merge.
 #
-# That was not a deliberate choice. The baseline-install exit test said in its
-# own header "The merge gate is the ten-minute set in ci.yml", written when this
-# repo was still `deploy`. The chart source moved here in the 2026-09-04 split
-# (ADR-0086) and ci.yml did not come with it. That exit test now lives in
-# zeroroot-ai/hosted with the verbs it runs; it checks this repo out itself.
+# That was not a deliberate choice: the chart source moved here in the
+# 2026-09-04 split (ADR-0086) and ci.yml did not come with it.
+#
+# THE INSTALL PROOF RUNS AFTER THE MERGE (owner decision 2026-10-05, ADR-0080).
+# No workflow of this repo installs the chart on a cluster on a pull request.
+# The exit tests install the PUBLISHED chart on main, daily and on dispatch:
+# exit-test-published-install-kind, exit-test-published-install-k3d,
+# exit-test-published-upgrade-kind. A chart that renders and does not install
+# is found there, after the merge, and fixed forward.
 #
 # What it runs is `make check`, the offline gate set, unchanged: the golden
 # snapshots for every profile, the vendored-attribution guard, and the
