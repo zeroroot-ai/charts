@@ -46,6 +46,10 @@ jobs:
         with:
           version: v3.18.4
 
+      # bats, for `make check`'s purge-tenant-backup gate (tests/*.bats).
+      - name: Install bats
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+
       # actionlint, for `make check`'s workflows gate. A workflow with a bad
       # expression is rejected by GitHub at dispatch and reports failure with
       # no jobs and no log, so the merge gate is the only place to catch it.

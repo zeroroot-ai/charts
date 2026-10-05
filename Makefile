@@ -246,6 +246,13 @@ edge-grpc-routes: ## Each gRPC route of the edge names a service of the gibson a
 	@python3 scripts/check-edge-grpc-routes.py --selftest
 	@python3 scripts/check-edge-grpc-routes.py
 
+.PHONY: purge-tenant-backup-test purge-tenant-backup
+purge-tenant-backup-test: ## The purge script deletes one last backup of a deleted tenant and refuses each other case (charts#419)
+	@bats tests/purge-tenant-backup.bats
+
+purge-tenant-backup: ## Delete the last backup of a deleted tenant: make purge-tenant-backup TENANT=<name> [TENANT_UID=<uid>]
+	@scripts/purge-tenant-backup.sh "$(TENANT)"
+
 .PHONY: edge-zitadel-routes edge-zitadel-routes-live
 edge-zitadel-routes: ## The edge sends only listed routes to Zitadel, and refuses a user's own email or username change (ADR-0093)
 	@python3 scripts/check-edge-zitadel-routes.py --selftest
@@ -369,7 +376,7 @@ operator-rbac-fresh: ## The vendored cert-manager and External Secrets RBAC matc
 	@python3 scripts/vendor-operator-rbac.py --selftest
 	@python3 scripts/vendor-operator-rbac.py --check
 
-check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed env-consumed config-consumed contract-pins probes probe-timeouts helper-docs referenced-paths-exist cg-rotation-window email-smtp-external-secret smtp-tls-mode edge-rate-limits secure-pod daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows upgrade-pair envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes edge-grpc-routes edge-jwt-payload-unforgeable netpol-before-hooks openbao-login-diagnosis zitadel-claimed-host openbao-one-replica identity-admission-covers operator-rbac-covers reloader-names ## Everything that runs without a cluster
+check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed env-consumed config-consumed contract-pins probes probe-timeouts helper-docs referenced-paths-exist cg-rotation-window email-smtp-external-secret smtp-tls-mode edge-rate-limits secure-pod daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows upgrade-pair envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes edge-grpc-routes edge-jwt-payload-unforgeable netpol-before-hooks openbao-login-diagnosis zitadel-claimed-host openbao-one-replica identity-admission-covers operator-rbac-covers reloader-names purge-tenant-backup-test ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context
