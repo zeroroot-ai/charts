@@ -112,9 +112,12 @@ IMAGE_SERVICE = {
     "setec-keepalive": "setec",
     "docs-site": "docs-site",
 }
-# First-party images whose source is not ours to read, so no reader set governs
-# them. zitadel-login is a fork of zitadel/zitadel and reads Zitadel's own env.
-UNGOVERNED = {"zitadel-login", "integrations", "sdk-registry"}
+# First-party images built from a fork, so no reader set of ours governs them.
+# Each entry states its reason. Any other first-party image needs a reader set,
+# or the gate fails: a plugin image of `integrations` has none today, so a
+# render that holds one fails until its reader set is vendored (charts#386).
+#   zitadel-login  a fork of zitadel/zitadel; it reads Zitadel's own env.
+UNGOVERNED = {"zitadel-login"}
 
 HELM_COMMENT = re.compile(r"\{\{-?\s*/\*.*?\*/\s*-?\}\}", re.S)
 EXPANSION = re.compile(r"[\$]\{([A-Z][A-Z0-9_]*)\}|[\$]\(([A-Z][A-Z0-9_]*)\)")
@@ -380,6 +383,21 @@ def selftest() -> int:
             "          env:\n"
             "            - name: ZITADEL_WHATEVER\n              value: f\n"
         )
+        # A plugin image with no reader set fails the gate: it is first-party
+        # source, so an env var that no plugin reads must not ship silently.
+        plugin = tmp / "helm" / "testdata" / "golden" / "p.yaml"
+        plugin.write_text(
+            "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n"
+            "      containers:\n"
+            "        - name: plugin\n          image: ghcr.io/zeroroot-ai/integrations/acme:v1\n"
+            "          env:\n"
+            "            - name: PLUGIN_UNREAD\n              value: x\n"
+        )
+        _, _, pnotes = violations(tmp, c)
+        if not any(n.startswith("integrations:") for n in pnotes):
+            print(f"SELFTEST FAIL: a plugin image with no reader set must fail, got notes={pnotes}")
+            return 1
+        plugin.unlink()
         fail, stale, notes = violations(tmp, c)
         if len(fail) != 1 or "GIBSON_DEAD" not in fail[0]:
             print(f"SELFTEST FAIL: want only GIBSON_DEAD flagged, got {fail}")
