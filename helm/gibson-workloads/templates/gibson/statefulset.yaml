@@ -456,8 +456,8 @@ spec:
             # Credentials path B: BOTH username and password come from the
             # ExternalSecret-synced Secret (templates/secrets/email-smtp-secret.yaml),
             # which reads gibson.email.smtp.externalSecret.remoteKey (default
-            # "ses-smtp-credentials" — the AWS Secrets Manager secret module.ses
-            # populates post-apply; see secret-contract.yaml). Not SES-specific —
+            # "ses-smtp-credentials", a key in the secret store, OpenBao on
+            # every profile, ADR-0014; see secret-contract.yaml). Not SES-specific —
             # any delivering provider whose credentials are seeded as one backend
             # secret with a username + password property fits this path.
             - name: GIBSON_SMTP_USERNAME

@@ -97,8 +97,8 @@ secrets:
   #
   # Default path: ExternalSecret pulling both keys from
   # `gibson-secrets-backend` properties `dashboard_stripe_secret_key` and
-  # `dashboard_stripe_webhook_secret` in the configured ClusterSecretStore
-  # (in kind: kind-bootstrap dev fixture; in EKS: AWS Secrets Manager).
+  # `dashboard_stripe_webhook_secret` in the configured ClusterSecretStore.
+  # The store is OpenBao on every profile (ADR-0014).
   #
   # Set `stripe.existingSecret` to skip the template entirely when an
   # operator-owned `gibson-stripe-credentials` Secret already exists
@@ -430,10 +430,9 @@ gibson:
       #     (any provider, no ExternalSecret machinery required). Ignored
       #     when smtp.externalSecret.enabled is true (path B, below).
       #     THE CHART RENDERS NO SECRET FOR PATH A — deliberately. The
-      #     operator MUST create the Secret named here, in the release
-      #     namespace, before install (deploy#1355):
-      #       kubectl create secret generic <passwordSecretName> \
-      #         -n gibson --from-literal=<passwordSecretKey>=<smtp-password>
+      #     operator's own secret tooling provides the Secret named here, in
+      #     the release namespace, before install (deploy#1355). Path B,
+      #     the ExternalSecret from OpenBao, needs no such step.
       #     A dangling name here is the operator's to resolve, not a chart
       #     bug — the secret-plumbing guard allowlists the CI fixture's
       #     example name for exactly this reason.
@@ -1078,9 +1077,8 @@ dashboard:
   # ---------------------------------------------------------------------------
   # Stripe billing configuration (spec: stripe-billing-integration)
   # ---------------------------------------------------------------------------
-  # All Stripe secrets must be mounted from AWS Secrets Manager via ESO.
-  # AWS SM key paths: gibson/{env}/dashboard/stripe-secret-key
-  #                   gibson/{env}/dashboard/stripe-webhook-secret
+  # The Stripe secrets come from OpenBao through an ExternalSecret
+  # (ADR-0014): the gibson-stripe-credentials Secret above.
   #
   # To enable paid-tier checkout flows, set paidTiersEnabled: true AND
   # configure all STRIPE_PRICE_* env vars via the price ID fields below.
@@ -1254,7 +1252,7 @@ ingress:
   tls:
     enabled: false
     # Secret containing the TLS cert/key pair for the host.
-    # Create via cert-manager ClusterIssuer or kubectl create secret tls.
+    # A cert-manager Certificate writes it.
     secretName: "gibson-tls"
   grpc:
     # Enable gRPC routing alongside HTTP on the same host.
@@ -2611,10 +2609,9 @@ openbao:
     # stage 0 wrote (`make substrate ENV=kind`, scripts/keyring.sh): through
     # scripts/keyring-to-cluster.sh, run by `make recreate ENV=kind` and by
     # scripts/baseline-up.sh (deploy#1737), and in the backup exit test by the
-    # workflow itself. An operator installing by hand creates it once:
-    #   kubectl -n gibson create secret generic bringup-keyring \
-    #     --from-literal=openbao-seal-key="$(head -c 32 /dev/urandom | base64 -w0)"
-    # and keeps the value OUTSIDE the cluster. It is the only thing that
+    # workflow itself. An operator installing without the bringup runs
+    # scripts/keyring.sh and scripts/keyring-to-cluster.sh the same way, and
+    # keeps the keyring file OUTSIDE the cluster. It is the only thing that
     # opens the archive; without it a restore is ciphertext.
     #
     # Both names are `required` in the template: an empty value fails the
@@ -3627,9 +3624,9 @@ setec:
   # SandboxClass naming it. So a disabled backend is not a slow path — it
   # is a launch that never happens.
   #
-  # Only the two microVM backends are enabled. gvisor (userspace kernel)
-  # and runc (namespaces only) stay off: both are weaker than a microVM
-  # and nothing here needs them.
+  # Three backends are enabled: the two microVM backends, and gvisor
+  # (userspace kernel) for the `agent` SandboxClass below. runc (namespaces
+  # only) stays off: it is weaker than each of them, and nothing here needs it.
   #
   # WHY kata-qemu IS ON
   #
@@ -4048,22 +4045,6 @@ setec:
     tlsClientCASecretName: "setec-frontend-tls"
 
 # =============================================================================
-# bootstrap-secrets Job + ESO stores
-# =============================================================================
-# Spec: .spec-workflow/specs/deploy-simplification (Phase 2 / R3).
-#
-# Single secret-generation mechanism. The chart never inlines randAlphaNum,
-# never uses lookup-or-keep, never lets a post-install Hook patch a Secret.
-# Instead, a pre-install,pre-upgrade Job mints every required secret into
-# the configured backend (kubernetes Secret in Kind, AWS Secrets Manager
-# in EKS). Workloads consume via ExternalSecret CRs ESO materialises.
-#
-# bootstrap-secrets is structural infrastructure (one-code-path / deploy#187):
-# legacy Secret templates have been deleted, and bootstrap-secrets is the
-# only mechanism that populates the daemon / dashboard / tenant-operator /
-# tool-runner Zitadel OIDC client credentials. The previous
-# `enabled: true|false` substitution toggle has been deleted.
-# =============================================================================
 # First admin (deploy#1631). A self-hosted install has no self-serve signup, so
 # nothing creates the initial principal — without this the platform comes up
 # and nobody can log in.
@@ -4106,14 +4087,11 @@ firstAdmin:
   activeDeadlineSeconds: 1500
   backoffLimit: 10
 
+# bootstrap: the image of the first-admin Job (helm/gibson templates
+# jobs/gibson-workloads-first-admin.yaml reads bootstrap.image). The secret
+# store is OpenBao on every profile (ADR-0014); no Job of this chart mints
+# secrets into a second backend.
 bootstrap:
-  # Backend: where minted secret values live.
-  #   kubernetes  in-cluster Secret in bootstrap.kubernetes.backendNamespace
-  #   aws         AWS Secrets Manager under bootstrap.aws.backendPrefix
-  # Default `kubernetes` works for Kind dev with zero AWS dependencies.
-  # EKS overlays MUST set `backend: aws` + `bootstrap.aws.region` +
-  # `bootstrap.aws.backendPrefix` + `bootstrap.aws.irsaRoleArn`.
-  backend: "kubernetes"
 
   image:
     # The bootstrap-secrets Job runs bash + jq + kubectl + aws-cli to
@@ -4169,15 +4147,7 @@ bootstrap:
   #       name: gibson-zitadel-admin-pat
   #       key: pat
 
-  kubernetes:
-    backendNamespace: external-secrets-backend
 
-  aws:
-    region: ""           # required when backend=aws (e.g. us-east-1)
-    backendPrefix: ""    # required when backend=aws (e.g. gibson/dev)
-    # IRSA role with secretsmanager:GetSecretValue, PutSecretValue, and
-    # CreateSecret on arn:aws:secretsmanager:<region>:<acct>:secret:<prefix>/*
-    irsaRoleArn: ""
 
   # The canonical secret list. Each entry: { key, generator }.
   #

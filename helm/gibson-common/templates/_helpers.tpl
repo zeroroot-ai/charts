@@ -528,9 +528,9 @@ consolidated StatefulSet that hosts gibson_platform + per-tenant DBs).
        structurally required. No silent fallback to a synthetic
        <release>-platform-postgresql Secret name — that Secret is not
        reconciled by this chart. Every overlay MUST name a real Secret
-       (kind: gibson-platform-postgres-credentials reconciled by
-       kind-bootstrap CNPG; eks: ESO-projected Secret pointing at the
-       RDS credential Secret in AWS Secrets Manager). */ -}}
+       (gibson-platform-postgres-credentials that CNPG reconciles, or a
+       Secret that an ExternalSecret writes from OpenBao, the store on every
+       profile, ADR-0014). */ -}}
 {{- required "platformPostgres.passwordSecretName is required — set it to the Secret name that holds the platform Postgres password (kind: gibson-platform-postgres-credentials; eks: an ESO-projected Secret). See one-code-path epic deploy#186." $cfg.passwordSecretName -}}
 {{- end -}}
 {{- end }}
