@@ -3,9 +3,11 @@
 #
 #   helm install gibson . -f values-baseline.yaml -f values-eks.yaml
 #
-# Proof: installed on zeroroot-ai staging/prod EKS before the 2026-08-16
-#        teardown; the client-IP annotations below are rendered in CI, not yet
-#        installed on a cluster (exit-test-substrate.yml, deploy#1661).
+# Proof level: render only (make substrate-overlays, make golden). An
+#        earlier form of this file ran on the zeroroot-ai EKS clusters before
+#        the 2026-08-16 teardown. No cluster has run the client-IP
+#        annotations below. An EKS exit test that asserts the real client
+#        address waits for an EKS environment (charts#377).
 #
 # a plain Kubernetes cluster is the supported self-hosted target and a
 # substrate is one specialisation of it. This file therefore contains ONLY
@@ -92,10 +94,10 @@ gibson-workloads:
         service.beta.kubernetes.io/aws-load-balancer-attributes: "deletion_protection.enabled=true"
         # Client-IP contract. NLB IP targets default to
         # preserve_client_ip.enabled=false, which hands Envoy the NLB ENI as
-        # the peer. On, the peer is the client. The controller (>= v2.6) gives
-        # the NLB its own security group and writes the backend rule as a
-        # reference to it, so the target SG never opens to 0.0.0.0/0 and the
-        # public rule lives on the NLB alone.
+        # the peer. On, the peer is the client. With the backend rule
+        # managed, the AWS Load Balancer Controller (>= v2.6) is documented
+        # to give the NLB its own security group and to write the backend
+        # rule as a reference to it. No test of this repository proves it.
         service.beta.kubernetes.io/aws-load-balancer-target-group-attributes: "preserve_client_ip.enabled=true"
         service.beta.kubernetes.io/aws-load-balancer-manage-backend-security-group-rules: "true"
 

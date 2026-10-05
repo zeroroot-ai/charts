@@ -45,6 +45,8 @@ _Avoid_: vanilla, the self-hosted profile, the small profile, tier
 **Substrate overlay**:
 A values file carrying only one provider's deltas, layered on top of a rung of
 the **profile ladder**. `values-eks.yaml` is the one cloud overlay (ADR-0083).
+The supported substrates are EKS, k3s, and the CI clusters kind and k3d. A
+cloud returns with its own build and its own proof.
 
 The substrate is a separate axis from the ladder, not a rung on it (ADR-0090).
 A cluster is both `production` and `eks`.
