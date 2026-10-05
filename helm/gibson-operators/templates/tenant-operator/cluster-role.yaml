@@ -54,6 +54,23 @@ rules:
     resources: ["tenants/finalizers", "tenantmembers/finalizers", "agentenrollments/finalizers", "tenantdataplanes/finalizers", "tenantsecretsbackends/finalizers", "tenantidentities/finalizers", "tenantgrants/finalizers"]
     verbs: ["update"]
 
+  # OIDCClient and PlatformBootstrap belong to the platform-operator. Since
+  # gibson v0.153.0 the TenantIdentity controller owns the OIDCClients of a
+  # tenant: it creates one for each client the TenantIdentity declares, and
+  # it reads the PlatformBootstrap for the Zitadel connect address. Both
+  # kinds are watched at cluster scope. Without these two rules the informer
+  # never syncs, the controller never starts, and a new tenant never gets
+  # its Zitadel org: the first-admin hook then fails on its deadline
+  # (charts 0.136.5, exit-test-published-install on kind and k3d).
+  # scripts/check-operator-rbac-covers.py holds this role to the operator's
+  # own role at the pinned tag.
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["oidcclients"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["platformbootstraps"]
+    verbs: ["get", "list", "watch"]
+
   # ConnectorInstance is the connector-operator's CRD. The tenant-operator
   # watches it to converge the connector's FGA component tuples and holds its
   # own finalizer for tuple removal (gibson#1548). Read + update

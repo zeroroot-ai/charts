@@ -105,7 +105,7 @@ def header_problems(contract_text: str, name: str, pinned: dict[str, str]) -> li
 
 def check_headers() -> int:
     pinned = pins()
-    files = sorted(CONTRACTS.glob("*.txt"))
+    files = sorted(f for f in CONTRACTS.iterdir() if f.is_file())
     if not files:
         print("::error::helm/contracts holds no contract: the check found nothing to read")
         return 1
