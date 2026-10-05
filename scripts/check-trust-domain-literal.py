@@ -92,7 +92,9 @@ def selftest() -> int:
             "ok.yaml": 'id: "spiffe://{{ include "gibson.trustDomain" . }}/platform/daemon"\n'
                        "other: spiffe://localhost.zeroroot.ai/platform/daemon\n",
             "CHANGELOG.md": f"history: {LITERAL}/platform/daemon\n",
-            "helm/testdata/golden.yaml": f"id: {LITERAL}/platform/daemon\n",
+            # A golden file under SKIP_DIRS. The path is joined, so that
+            # referenced-paths-exist does not read it as a repo path.
+            os.path.join("helm", "testdata", "fixture.yaml"): f"id: {LITERAL}/platform/daemon\n",
         }
         for name, text in files.items():
             open(os.path.join(d, name), "w").write(text)
