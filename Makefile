@@ -165,6 +165,7 @@ env-consumed: ## No env var injected into a first-party container that the servi
 
 env-contract-sync: ## Refresh helm/contracts/ from each service's sibling clone, at the tag the chart pins
 	@python3 scripts/gen-env-readers.py --write
+	@python3 scripts/gen-grpc-methods.py --write
 
 config-contract-sync: ## Regenerate helm/contracts/gibson-config-keys.txt from the sibling gibson clone, at the pinned tag
 	@python3 scripts/gen-config-keys.py --write
@@ -187,6 +188,7 @@ env-contract-fresh: ## The vendored contracts match their source repos at the pi
 	@python3 scripts/gen-env-readers.py --check
 	@python3 scripts/gen-config-keys.py --check
 	@python3 scripts/gen-operator-rbac.py --check
+	@python3 scripts/gen-grpc-methods.py --check
 
 probes: ## No smoke or verify probe whose failure is swallowed by || true (charts#17)
 	@python3 scripts/check-probes.py --selftest
@@ -238,6 +240,11 @@ edge-strips-instance-headers: ## The Envoy edge never forwards a client's Zitade
 edge-jwt-payload-unforgeable: ## A client can never supply x-jwt-payload: jwt_authn strips it on every route before ext_authz reads it
 	@python3 scripts/check-edge-jwt-payload-unforgeable.py --selftest
 	@python3 scripts/check-edge-jwt-payload-unforgeable.py
+
+.PHONY: edge-grpc-routes
+edge-grpc-routes: ## Each gRPC route of the edge names a service of the gibson authz registry (charts#356)
+	@python3 scripts/check-edge-grpc-routes.py --selftest
+	@python3 scripts/check-edge-grpc-routes.py
 
 .PHONY: edge-zitadel-routes edge-zitadel-routes-live
 edge-zitadel-routes: ## The edge sends only listed routes to Zitadel, and refuses a user's own email or username change (ADR-0093)
@@ -362,7 +369,7 @@ operator-rbac-fresh: ## The vendored cert-manager and External Secrets RBAC matc
 	@python3 scripts/vendor-operator-rbac.py --selftest
 	@python3 scripts/vendor-operator-rbac.py --check
 
-check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed env-consumed config-consumed contract-pins probes probe-timeouts helper-docs referenced-paths-exist cg-rotation-window email-smtp-external-secret smtp-tls-mode edge-rate-limits secure-pod daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows upgrade-pair envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes edge-jwt-payload-unforgeable netpol-before-hooks openbao-login-diagnosis zitadel-claimed-host openbao-one-replica identity-admission-covers operator-rbac-covers reloader-names ## Everything that runs without a cluster
+check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed env-consumed config-consumed contract-pins probes probe-timeouts helper-docs referenced-paths-exist cg-rotation-window email-smtp-external-secret smtp-tls-mode edge-rate-limits secure-pod daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows upgrade-pair envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes edge-grpc-routes edge-jwt-payload-unforgeable netpol-before-hooks openbao-login-diagnosis zitadel-claimed-host openbao-one-replica identity-admission-covers operator-rbac-covers reloader-names ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context
