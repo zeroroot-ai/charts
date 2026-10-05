@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.136.5](https://github.com/zeroroot-ai/charts/compare/v0.136.4...v0.136.5) (2026-10-05)
+
+
+### Bug Fixes
+
+* **openbao:** the backup CronJob that no profile enables is deleted ([#388](https://github.com/zeroroot-ai/charts/issues/388)) ([bb9c122](https://github.com/zeroroot-ai/charts/commit/bb9c122e48492719c9fd030452747b2f12591fcf)), closes [#362](https://github.com/zeroroot-ai/charts/issues/362)
+* **pins:** gibson v0.153.0, where both operators reach Zitadel by Service name ([#390](https://github.com/zeroroot-ai/charts/issues/390)) ([b5a8e1e](https://github.com/zeroroot-ai/charts/commit/b5a8e1e89ff09e083ffd7c10524d8d8f9ed835c3)), closes [#303](https://github.com/zeroroot-ai/charts/issues/303) [#163](https://github.com/zeroroot-ai/charts/issues/163)
+
 ## [0.136.4](https://github.com/zeroroot-ai/charts/compare/v0.136.3...v0.136.4) (2026-10-05)
 
 
