@@ -2627,14 +2627,13 @@ data:
             # api.<domain> — single multiplexed surface for ALL services:
             #   - gibson.daemon.v1.DaemonService          (user/member RPCs)
             #   - gibson.daemon.operator.v1.DaemonOperatorService (ZD-internal operator RPCs)
-            #   - gibson.tenant.v1.TenantAdminService     (tenant admin RPCs)
-            #   - gibson.user.v1.UserService              (user profile RPCs)
-            #   - gibson.budget.v1.BudgetService          (budget RPCs)
             #   - gibson.component.v1.ComponentService    (component reg / tool runner)
             #   - gibson.harness.v1.HarnessCallbackService (agent + off-cluster
             #       component callbacks — the ONE service here whose upstream is
             #       NOT the daemon's main gRPC port; see gibson_daemon_callback)
-            #   - gibson.intelligence.v1.IntelligenceService (mission orchestrator)
+            #   - each other gibson.* service, through the /gibson. catch-all
+            #       (scripts/check-edge-grpc-routes.py fails on a route for a
+            #       service that the daemon does not serve)
             #   - /api/admin/provisioning/*               (tenant-operator → dashboard)
             # All h2/h2c (gRPC + HTTP/2 multiplex). HTTP/1.1 fallback for
             # browser clients hitting /.well-known/.
@@ -2845,84 +2844,6 @@ data:
                                           header_name: x-gibson-identity-subject
                                           descriptor_key: subject
                                           skip_if_absent: false
-                            # ---------------------------------------------------
-                            # Admin/identity surfaces
-                            # (spec: agent-service-credentials task 13,
-                            # admin-services-completion). Each gets the same
-                            # jwt_authn + ext_authz filter chain as the daemon
-                            # user-RPC route above — only the route prefix
-                            # differs. Per-RPC FGA rules live in the SDK
-                            # registry; ext-authz looks them up by method FQN.
-                            # ---------------------------------------------------
-                            - match: { prefix: "/gibson.tenant.v1.TenantAdminService/" }
-                              route:
-                                cluster: gibson_daemon_grpc
-                                timeout: 0s
-                                idle_timeout: 0s
-                                # Per-client quota (deploy#1659):
-                                # envoy.rateLimit.perClient.apiAuthenticated, by the
-                                # identity ext-authz asserted. skip_if_absent so a
-                                # route ext-authz did not label (none today) is not
-                                # silently unlimited under a half-descriptor.
-                                rate_limits:
-                                  - actions:
-                                      - generic_key:
-                                          descriptor_key: route
-                                          descriptor_value: api_authenticated
-                                      - request_headers:
-                                          header_name: x-gibson-identity-tenant
-                                          descriptor_key: tenant
-                                          skip_if_absent: false
-                                      - request_headers:
-                                          header_name: x-gibson-identity-subject
-                                          descriptor_key: subject
-                                          skip_if_absent: false
-                            - match: { prefix: "/gibson.user.v1.UserService/" }
-                              route:
-                                cluster: gibson_daemon_grpc
-                                timeout: 0s
-                                idle_timeout: 0s
-                                # Per-client quota (deploy#1659):
-                                # envoy.rateLimit.perClient.apiAuthenticated, by the
-                                # identity ext-authz asserted. skip_if_absent so a
-                                # route ext-authz did not label (none today) is not
-                                # silently unlimited under a half-descriptor.
-                                rate_limits:
-                                  - actions:
-                                      - generic_key:
-                                          descriptor_key: route
-                                          descriptor_value: api_authenticated
-                                      - request_headers:
-                                          header_name: x-gibson-identity-tenant
-                                          descriptor_key: tenant
-                                          skip_if_absent: false
-                                      - request_headers:
-                                          header_name: x-gibson-identity-subject
-                                          descriptor_key: subject
-                                          skip_if_absent: false
-                            - match: { prefix: "/gibson.budget.v1.BudgetService/" }
-                              route:
-                                cluster: gibson_daemon_grpc
-                                timeout: 0s
-                                idle_timeout: 0s
-                                # Per-client quota (deploy#1659):
-                                # envoy.rateLimit.perClient.apiAuthenticated, by the
-                                # identity ext-authz asserted. skip_if_absent so a
-                                # route ext-authz did not label (none today) is not
-                                # silently unlimited under a half-descriptor.
-                                rate_limits:
-                                  - actions:
-                                      - generic_key:
-                                          descriptor_key: route
-                                          descriptor_value: api_authenticated
-                                      - request_headers:
-                                          header_name: x-gibson-identity-tenant
-                                          descriptor_key: tenant
-                                          skip_if_absent: false
-                                      - request_headers:
-                                          header_name: x-gibson-identity-subject
-                                          descriptor_key: subject
-                                          skip_if_absent: false
                             - match: { prefix: "/gibson.component.v1.ComponentService/" }
                               route:
                                 cluster: gibson_daemon_grpc
@@ -2989,31 +2910,9 @@ data:
                                           header_name: x-gibson-identity-subject
                                           descriptor_key: subject
                                           skip_if_absent: false
-                            - match: { prefix: "/gibson.intelligence.v1.IntelligenceService/" }
-                              route:
-                                cluster: gibson_daemon_grpc
-                                timeout: 0s
-                                idle_timeout: 0s
-                                # Per-client quota (deploy#1659):
-                                # envoy.rateLimit.perClient.apiAuthenticated, by the
-                                # identity ext-authz asserted. skip_if_absent so a
-                                # route ext-authz did not label (none today) is not
-                                # silently unlimited under a half-descriptor.
-                                rate_limits:
-                                  - actions:
-                                      - generic_key:
-                                          descriptor_key: route
-                                          descriptor_value: api_authenticated
-                                      - request_headers:
-                                          header_name: x-gibson-identity-tenant
-                                          descriptor_key: tenant
-                                          skip_if_absent: false
-                                      - request_headers:
-                                          header_name: x-gibson-identity-subject
-                                          descriptor_key: subject
-                                          skip_if_absent: false
-                            # Catch-all for additional gibson.* services added by
-                            # the SDK without a chart bump. The daemon's startup
+                            # Catch-all for each other gibson.* service (the tenant,
+                            # user, budget and secrets services among them), and for
+                            # a service that a release adds. The daemon's startup
                             # self-check (Req 4.8) panics if a method without an
                             # ext-authz registry entry is registered, so this
                             # remains safe — there's no ext-authz bypass.
@@ -11650,7 +11549,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 0be4602290ffdd6088411c94664cf1ca0b694fcea3f777be821d229cb2e883ae
+        checksum/config: 3c8c32891cbbdf21a6771debb9012d5d85166e58de967dcab30c77365a9c0d21
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
