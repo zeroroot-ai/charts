@@ -54,7 +54,7 @@ environment variable.
 | Profile | For |
 |---|---|
 | `values-baseline.yaml` | a Kubernetes cluster with a default StorageClass and nothing else assumed. **This is the supported self-hosted target.** kind is one. |
-| `values-eks.yaml`, `values-gke.yaml`, `values-aks.yaml` | layered on baseline, carrying only that provider's deltas |
+| `values-eks.yaml` | layered on baseline, carrying only the EKS deltas. EKS is the one cloud overlay; k3s, kind and k3d run the baseline (ADR-0083). |
 | `values-guest.yaml` | layered on baseline, for a cluster that already owns cert-manager, External Secrets, ExternalDNS and CloudNativePG |
 | `values-developer.yaml` | layered on baseline, sized to fit ONE local node (kind or k3d). The rung a developer installs. |
 | `values-ci.yaml` | layered on baseline, the same content as `developer` under its own name so either may change later |

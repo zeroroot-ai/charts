@@ -4,7 +4,7 @@
 Rebuilds a guard lost in the 2026-09-04 split (charts#17, ADR-0079: one
 edge, one substrate-independent configuration). The Envoy ConfigMaps the
 umbrella renders must be byte-identical across the baseline profile and
-every substrate overlay (eks, gke, aks, guest). A substrate that needs a
+every substrate overlay (eks, guest). A substrate that needs a
 different edge is a second edge, and ADR-0079 forbids that.
 
   check-edge-config-identical.py             exit 1 on a divergence, 0 when identical
@@ -19,7 +19,7 @@ import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = ["helm/gibson/values-baseline.yaml", "helm/testdata/render-inputs/gibson.yaml"]
-OVERLAYS = ["values-eks.yaml", "values-gke.yaml", "values-aks.yaml", "values-guest.yaml"]
+OVERLAYS = ["values-eks.yaml", "values-guest.yaml"]
 
 
 def edge_digests(extra: list[str]) -> dict[str, str]:
@@ -81,7 +81,7 @@ def main() -> int:
     if got:
         print("❌ the Envoy edge is not one configuration:\n  " + "\n  ".join(got))
         return 1
-    print("✓ edge-config-identical: the Envoy ConfigMaps are identical on baseline, eks, gke, aks and guest")
+    print("✓ edge-config-identical: the Envoy ConfigMaps are identical on baseline, eks and guest")
     return 0
 
 
