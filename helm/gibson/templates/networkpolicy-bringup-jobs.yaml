@@ -11,7 +11,7 @@ there are no ingress rules — selecting them with policyTypes Ingress and an
 empty rule list IS the per-pod ingress deny.
 
 Every Job pod template (templates/jobs/ AND templates/operations/) MUST carry
-one of the component labels below; scripts/check-netpol-coverage.py fails the
+one of the component labels below; scripts/check-secure-pod.py fails the
 render when a workload in the namespace is selected by no policy.
 
 The Jobs hard-code `namespace: gibson`, so this policy does the same.
@@ -42,7 +42,7 @@ spec:
           # reach CoreDNS — seed-first-admin then fails with an i/o timeout to
           # :53 that reads like a DNS bug, not a policy one. The Job lives in
           # templates/operations/ rather than templates/jobs/, which is why
-          # check-netpol-coverage.py did not force it into this list.
+          # check-secure-pod.py did not force it into this list.
           - first-admin
           # deploy#1761: the admission-webhook readiness gate. It posts an
           # AdmissionReview to every webhook endpoint the umbrella installs,
