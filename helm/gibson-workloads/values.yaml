@@ -139,12 +139,12 @@ secrets:
     externalSecret:
       enabled: true
 
-  # Database passwords (auto-generated if empty)
-  databases:
-    neo4jPassword: ""
-    postgresPassword: ""
-    redisPassword: ""
 
+
+  # The Secret that holds the database credentials that the dashboard reads.
+  # Empty: the chart's own name (gibson.dbSecrets.name).
+  databases:
+    existingSecret: ""
 
 # -----------------------------------------------------------------------------
 # Gibson Core Daemon
@@ -800,9 +800,8 @@ gibson:
 #
 # The K8s Secret named by `idp.adminCredentialsSecret` carries the admin
 # OAuth2 client_id / client_secret used to call the IdP's management API.
-# In overlays where external-secrets-operator (ESO) is in use, set
-# `idp.createSecret: false` so the chart leaves Secret materialization to
-# ESO; the daemon Deployment still references the Secret by name.
+# The platform-operator's OIDCClient reconciler writes it. The daemon
+# Deployment references the Secret by name.
 # -----------------------------------------------------------------------------
 idp:
   # Provider selector. Only "zitadel" is accepted by the daemon's
@@ -816,32 +815,7 @@ idp:
   # `org_id`, `project_id` from this Secret via env-var refs.
   adminCredentialsSecret: "idp-admin-credentials"
 
-  # Kept at false: the legacy chart-rendered Secret at
-  # templates/secrets/idp-admin-credentials.yaml was deleted in
-  # deploy-simplification Phase 3.5.
-  #
-  # deploy#1348 — this comment used to claim "the chart's
-  # gibson-idp-admin-credentials ExternalSecret owns the Secret". No such
-  # template exists, and no ExternalSecret by that name is rendered in any
-  # profile. The real producer is the platform-operator's OIDCClient
-  # reconciler, which writes client_id/client_secret into
-  # `idp-admin-credentials` after registering the daemon's IdP-admin client
-  # in Zitadel (gibson operators/platform/internal/controller/
-  # oidcclient_controller.go). The daemon's wait-for-idp-admin-secret init
-  # container is what blocks until it lands.
-  #
-  # Corrected rather than left alone because a comment asserting a producer
-  # that does not exist is exactly what hid the Zitadel masterkey defect.
-  createSecret: false
 
-  # OAuth2 client credentials for the daemon's IdP-admin client. These
-  # land in the K8s Secret when `createSecret: true`. Production overlays
-  # SHOULD leave these empty and provision the Secret out-of-band (ESO,
-  # sealed-secrets, manual `kubectl create secret`); the chart will
-  # render an empty Secret in that case which the daemon will fail-closed
-  # against at startup with a clear error.
-  adminClientId: ""
-  adminClientSecret: ""
 
   # Provider-specific settings. The Zitadel block is the only one
   # consumed today.
@@ -850,11 +824,6 @@ idp:
     # Zitadel service (sibling ArgoCD Application installs Zitadel before
     # gibson). EKS overlays override with the public hostname.
     issuer: "http://gibson-zitadel.gibson.svc.cluster.local:8080"
-    # Numeric Zitadel organization ID owning the project. Empty until
-    # the bootstrap-secrets Job's `zitadel-ensure-org` step lands; the
-    # daemon fails closed at startup with a clear error message until
-    # the overlay sets it.
-    orgId: ""
     # Numeric Zitadel project ID inside which agent service accounts are
     # created. REQUIRED.
     projectId: ""
@@ -1604,8 +1573,6 @@ openfga:
     httpPort: 8080
     # gRPC API
     grpcPort: 8081
-    # Prometheus metrics
-    metricsPort: 2112
 
   resources:
     requests:
@@ -1625,50 +1592,6 @@ openfga:
   datastore:
     engine: postgres  # postgres | memory
 
-# -----------------------------------------------------------------------------
-# Zitadel — sole identity provider (spec: zitadel-envoy-gateway-migration)
-#
-# Sole IdP after the Better-Auth removal. Owns user records, login UI, MFA,
-# organizations, invitations, and federation to upstream IdPs (Google,
-# GitHub, generic OIDC, SAML). The dashboard becomes a standard OIDC RP
-# (Auth.js v5).
-#
-# Per epic one-code-path (deploy#186), slice deploy#196: the previous
-# `zitadel.enabled` master switch has been DELETED. Zitadel is the identity
-# provider for every signed-in user — rendering the chart with Zitadel
-# "off" produced a dashboard pod whose Auth.js silently boots against an
-# empty client_id and an operator pod whose entire IAM provisioning saga
-# silently no-ops. The deletion deliberately makes those failure modes
-# unreachable.
-#
-# Zitadel is NOT a Helm dependency of this chart (no entry in Chart.yaml); it
-# is a dependency of the UMBRELLA chart (helm/gibson/Chart.yaml). This is NOT
-# a subchart values pass-through block — nothing in this repo forwards it to
-# the zitadel subchart, and the `enabled` toggle no longer gates anything in
-# this chart's own templates (deploy#1353; the "passed through to the
-# sibling ArgoCD Application" claim this comment used to make was false —
-# `helm/gibson/values.yaml`'s own top-level `zitadel:` alias is the umbrella
-# key the subchart actually reads).
-#
-# The single key kept below is read directly by THIS chart's own
-# templates/dashboard/deployment.yaml, to resolve the Zitadel host for the
-# dashboard's Auth.js callback env var (falls back to the global.domain-
-# derived `gibson.zitadelExternalDomain` helper when unset). Every other key
-# this block used to carry (tls, the rest of zitadel.zitadel.configmapConfig,
-# postgresql, env, replicaCount, ingress, gibsonIngress, bootstrap, service,
-# resources) was read by no template in this chart — gibsonIngress and
-# bootstrap even named a templates/zitadel/ directory that does not exist
-# here. If a value is genuinely meant to reach the zitadel subchart itself,
-# it belongs in helm/gibson/values.yaml under the umbrella's own `zitadel:`
-# alias, which is where the subchart reads from.
-# -----------------------------------------------------------------------------
-zitadel:
-  zitadel:
-    configmapConfig:
-      # Public domain for Zitadel — the single consolidated host app.<domain>
-      # (deploy#630). Read directly by templates/dashboard/deployment.yaml;
-      # empty falls back to gibson.zitadelExternalDomain (global.domain-derived).
-      ExternalDomain: ""
 
 # -----------------------------------------------------------------------------
 # ext_authz — sole authorization-decision service (spec: zitadel-envoy-gateway-migration)
@@ -2180,27 +2103,6 @@ envoy:
   # Spec unified-identity-and-authorization Phase H/8.8 (Req 1.6).
   zitadel:
     issuer: ""
-    # DEPRECATED — resolved at pod startup from Secret `gibson-dashboard-oidc`.
-    # ------------------------------------------------------------------
-    # The Envoy pod's `render-envoy-config` initContainer reads the live
-    # OAuth client_id of the gibson-dashboard OIDC app from the Secret
-    # `gibson-dashboard-oidc` (key `client_id`) — which platform-operator
-    # rewrites on every Zitadel reset / OIDC re-mint — and substitutes
-    # it into envoy.yaml before the main container starts. Stakater
-    # Reloader rolls the Envoy Deployment when the Secret changes so the
-    # live config tracks the live Zitadel state.
-    #
-    # The chart-time history: Argo's repo-server cannot
-    # `lookup` cluster Secrets at render time, so the
-    # value had to be hardcoded in env overlays and refreshed by hand
-    # after every Zitadel reset. The runtime-resolution follow-up moved
-    # that resolution to the pod, eliminating the staleness class
-    # entirely — env overlays no longer carry this value.
-    #
-    # The field is kept here as the empty default for backward
-    # compatibility while gitops env overlays drop it. Setting it has
-    # no effect — the chart no longer reads this value.
-    dashboardClientId: ""
   spiffe:
     # When true, mounts the SPIRE Workload API socket so SDS can later wire
     # SPIFFE mTLS validation. Trust-domain SAN matching is enforced by the
@@ -2990,7 +2892,6 @@ spire:
     # DaemonSet — used in kind dev where the gibson-spire sibling release
     # owns the agent. Sub-feature toggle, not a service disable.
     enabled: true
-    skipKubeletVerification: false
     logLevel: "INFO"
     # Workload API socket path (the SPIFFE_ENDPOINT_SOCKET env var the SDK +
     # dashboard expect). Spec unified-identity-and-authorization Phase H/8.1
@@ -3165,7 +3066,6 @@ tenantOperator:
   # secrets-blast-radius-reduction Phase 1.3.
   rbacBackfill:
     enabled: true
-    workers: 8
     timeout: "5m"
 
   image:

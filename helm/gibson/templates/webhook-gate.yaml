@@ -87,10 +87,9 @@ the render, not to a name.
 */ -}}
 {{- $gate := .Values.webhookGate | default dict -}}
 {{- $setecOn := true -}}
-{{- with (index .Values "gibson-workloads") -}}
-{{- with .setec -}}
+{{- $wlSetec := (index .Values "gibson-workloads").setec -}}
+{{- with $wlSetec -}}
 {{- $setecOn = .enabled -}}
-{{- end -}}
 {{- end -}}
 {{- $probes := list -}}
 {{- range $p := ($gate.probes | default list) -}}

@@ -445,10 +445,7 @@ includes the daemon hits the check.
        the `redis.provider` enum and `redis.external` substitution). The
        chart always renders the in-cluster redis-stack StatefulSet; the
        gibson.redis.host helper hard-fails render via `| required` on an
-       empty redis.addr, which covers the only remaining knob. Per-tenant
-       Redis ACL user provisioning runs through `dataPlane.redis.adminURL`,
-       independently required by the data-plane saga (no validator gate
-       here — its absence is surfaced loudly at the operator-side step). */ -}}
+       empty redis.addr, which covers the only remaining knob. */ -}}
 
 {{- end -}}{{/* end else (not devDisabled) */}}
 {{- end -}}{{/* end if gibson.enabled */}}
