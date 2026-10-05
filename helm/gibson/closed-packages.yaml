@@ -1,0 +1,11 @@
+# closed-packages.yaml: the container packages of the org that are not public.
+#
+# A self-hosted install must not need a closed image (ADR-0074). The guard
+# scripts/check-no-closed-images.py renders each published profile and fails
+# when an image reference names a package in this list.
+#
+# Keyed by the package name under ghcr.io/zeroroot-ai/. The list matches the
+# private container packages of the org on 2026-10-05:
+#   gh api "/orgs/zeroroot-ai/packages?package_type=container&visibility=private" --jq '.[].name'
+packages:
+  billing: the billing component of the hosted product (D41). It is never part of this chart.
