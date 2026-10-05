@@ -3,7 +3,7 @@
 
 Rebuilds the shell half of lint-hook-jobs, lost in the 2026-09-04 split
 (charts#17, origin deploy#608); the NetworkPolicy half is
-check-netpol-coverage.py. A hook Job whose command is `sh -c` (or `sh -ec`,
+check-secure-pod.py. A hook Job whose command is `sh -c` (or `sh -ec`,
 `/bin/sh`) runs under busybox or dash, where a bashism is a syntax error
 at the worst moment: a pre-install hook that dies on `[[` or `${x//}`
 wedges the install. A parse alone does not catch a bashism (`[[` is a

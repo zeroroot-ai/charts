@@ -1,0 +1,512 @@
+# secure-pod-exceptions.yaml: each pod that does not meet the secure pod rule
+# (ADR-0165), with the reason. scripts/check-secure-pod.py reads this file.
+#
+# pods: one entry for each workload and rule.
+#   Key:    '<Kind>/<namespace>/<name> <rule>'
+#   digest: a digest of the findings of that workload for that rule, over each
+#           rendered profile. A new finding moves the digest and fails the
+#           guard. The guard prints the new digest.
+#   reason: why the pod has the exception.
+# An entry with no finding in any render fails the guard, so this file cannot
+# go stale. To see the findings behind a digest, run:
+#   python3 scripts/check-secure-pod.py --print
+#
+# Rules: restricted (Pod Security Standard "restricted"), read-only (root
+# filesystem), token (ServiceAccount token mount), network (default deny and
+# egress by host), image (install registry and digest), namespace-label.
+#
+# runtime: one entry for each pod that an operator creates at run time. The
+# chart renders no such pod. `created_by` names the rendered workload that
+# creates it. The guard fails when no render has that workload.
+runtime:
+  catalog-connector-image:
+    rule: image
+    created_by: Deployment/gibson/gibson-connector-operator
+    reason: >-
+      The image of a catalog connector is a vendor image in the vendor
+      registry, with a digest (ADR-0114). The platform owner approves the
+      image when the catalog entry merges. The entry covers rule 5 only.
+pods:
+  'DaemonSet/gibson/gibson-agent image':
+    digest: d0f03621592ec8ed
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'DaemonSet/gibson/gibson-spiffe-csi-driver image':
+    digest: 59de57c1ae840052
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Deployment/gibson/cert-manager image':
+    digest: cc52bce083ea642c
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Deployment/gibson/cert-manager-cainjector image':
+    digest: 4315cdd604be985d
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Deployment/gibson/cert-manager-webhook image':
+    digest: 5be6c936cd8a794a
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Deployment/gibson/external-dns image':
+    digest: 708af4a8a4de803e
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Deployment/gibson/external-secrets image':
+    digest: 501724818f973954
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Deployment/gibson/external-secrets-cert-controller image':
+    digest: fcba0b24d0d28a5c
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Deployment/gibson/external-secrets-webhook image':
+    digest: 1f247e5e4e29a585
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Deployment/gibson/gibson-cloudnative-pg image':
+    digest: 390f4d3a1ed785a1
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Deployment/gibson/gibson-spiffe-oidc-discovery-provider image':
+    digest: eb1c26766b44bdb5
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Deployment/gibson/gibson-zitadel image':
+    digest: a4f8367a7a4577f9
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Deployment/gibson/reloader image':
+    digest: 2c161f19e9640261
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Job/gibson/gibson-zitadel-init image':
+    digest: f3f53635e56d3317
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Job/gibson/gibson-zitadel-setup image':
+    digest: a4a22f95ade558ad
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Pod/gibson/gibson-gibson-workloads-test-spire-attestation image':
+    digest: ecf0421aa1528143
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Pod/gibson/gibson-server-test-connection image':
+    digest: 2ff42ea0e86a2ca4
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Pod/gibson/gibson-spiffe-oidc-discovery-provider-test-connection image':
+    digest: 35fb5215e60aace6
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Pod/gibson/gibson-spiffe-oidc-discovery-provider-test-keys image':
+    digest: 10f9c08c62b371fe
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'StatefulSet/gibson/gibson-server image':
+    digest: dc18340191f4b4ca
+    reason: "charts#400 moves each image to the install registry with a digest."
+  'Namespace/gibson namespace-label':
+    digest: c00f8736a37861fe
+    reason: "The SPIRE agent and the SPIFFE CSI driver run in the release namespace and mount host paths (expected exception of ADR-0165). The namespace cannot enforce the restricted level while they run there."
+  'Namespace/setec-system namespace-label':
+    digest: c00f8736a37861fe
+    reason: "Expected exception of ADR-0165: the setec node agent mounts host paths, so its namespace cannot enforce the restricted level."
+  'CronJob/gibson/gibson-redis-rotation network':
+    digest: f8dc0db1daea060e
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'DaemonSet/gibson/gibson-gibson-workloads-sandbox-eviction-handler network':
+    digest: f8dc0db1daea060e
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'DaemonSet/gibson/gibson-spiffe-csi-driver network':
+    digest: 0699be7caf69d4d3
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'DaemonSet/gibson/node-agent network':
+    digest: 4631826349a789ed
+    reason: "gibson-velero is a separate release. The umbrella chart has no policy for its pods."
+  'DaemonSet/setec-system/setec-runtime-agent network':
+    digest: f0783ba6e4b6914c
+    reason: "The setec chart renders this pod and owns the policies of its namespace. The fix belongs to the setec chart."
+  'Deployment/gibson/cert-manager network':
+    digest: 858cf31cf95a1c0c
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/cert-manager-cainjector network':
+    digest: bd591e86d9961832
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/cert-manager-webhook network':
+    digest: e229cb5e7e16afe2
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/external-dns network':
+    digest: 05d495a5c2d81ec3
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/external-secrets network':
+    digest: aaeff4bea7ab3cf9
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/external-secrets-cert-controller network':
+    digest: 7c2c6788cbab715b
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/external-secrets-webhook network':
+    digest: 87acf2e689abb5a4
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/gibson-cloudnative-pg network':
+    digest: a191cf43ab8f894f
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/gibson-connector-operator network':
+    digest: 630cb1ede135fff6
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/gibson-dashboard network':
+    digest: ba1f2a8b8e955ddf
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/gibson-envoy network':
+    digest: 6ad0379fe29340a4
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/gibson-ext-authz network':
+    digest: 1c4b22868204ffb3
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/gibson-openfga network':
+    digest: 41f60b1521428d34
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/gibson-platform-operator network':
+    digest: a72939617b76a5c2
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/gibson-spiffe-oidc-discovery-provider network':
+    digest: a99c7c56e4a3f196
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/gibson-tenant-operator network':
+    digest: 873563ef72b524b6
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/gibson-zitadel network':
+    digest: 61e6c7c3cf2fbf5d
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/gibson-zitadel-login network':
+    digest: 0f32658a9ca17f8c
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/reloader network':
+    digest: bdae058aedf2916b
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Deployment/gibson/velero network':
+    digest: 4631826349a789ed
+    reason: "gibson-velero is a separate release. The umbrella chart has no policy for its pods."
+  'Deployment/setec-system/setec network':
+    digest: f0783ba6e4b6914c
+    reason: "The setec chart renders this pod and owns the policies of its namespace. The fix belongs to the setec chart."
+  'Deployment/setec-system/setec-frontend network':
+    digest: f0783ba6e4b6914c
+    reason: "The setec chart renders this pod and owns the policies of its namespace. The fix belongs to the setec chart."
+  'Job/gibson/gibson-gibson-workloads-active-session-backfill-28a471c8 network':
+    digest: f8dc0db1daea060e
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Job/gibson/gibson-gibson-workloads-fga-init-28a471c8 network':
+    digest: f8dc0db1daea060e
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Job/gibson/gibson-gibson-workloads-first-admin network':
+    digest: e76b7a776221c44c
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Job/gibson/gibson-gibson-workloads-openbao-jwt-auth-init network':
+    digest: f8dc0db1daea060e
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Job/gibson/gibson-openfga-migrate network':
+    digest: 41f60b1521428d34
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Job/gibson/gibson-webhook-gate network':
+    digest: e76b7a776221c44c
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Job/gibson/gibson-workloads-postgres-setup network':
+    digest: e76b7a776221c44c
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Job/gibson/gibson-zitadel-cleanup network':
+    digest: 61e6c7c3cf2fbf5d
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Job/gibson/gibson-zitadel-init network':
+    digest: 61e6c7c3cf2fbf5d
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Job/gibson/gibson-zitadel-setup network':
+    digest: 61e6c7c3cf2fbf5d
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Job/gibson/iam-admin-pat-escrow network':
+    digest: e76b7a776221c44c
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Job/gibson/openfga-postgres-setup network':
+    digest: e76b7a776221c44c
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Job/gibson/spire-postgres-setup network':
+    digest: e76b7a776221c44c
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Job/gibson/zitadel-postgres-setup network':
+    digest: e76b7a776221c44c
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Job/setec-system/setec-preupgrade-runtime-check network':
+    digest: f0783ba6e4b6914c
+    reason: "The setec chart renders this pod and owns the policies of its namespace. The fix belongs to the setec chart."
+  'Pod/gibson/gibson-gibson-workloads-test-bootstrap-configmaps network':
+    digest: 4631826349a789ed
+    reason: "A helm test pod. No policy selects it, so the default-deny policy isolates it."
+  'Pod/gibson/gibson-gibson-workloads-test-bootstrap-secrets network':
+    digest: 4631826349a789ed
+    reason: "A helm test pod. No policy selects it, so the default-deny policy isolates it."
+  'Pod/gibson/gibson-gibson-workloads-test-data-plane network':
+    digest: 4631826349a789ed
+    reason: "A helm test pod. No policy selects it, so the default-deny policy isolates it."
+  'Pod/gibson/gibson-gibson-workloads-test-envoy-admin network':
+    digest: 4631826349a789ed
+    reason: "A helm test pod. No policy selects it, so the default-deny policy isolates it."
+  'Pod/gibson/gibson-gibson-workloads-test-fga-tuple-seed network':
+    digest: 4631826349a789ed
+    reason: "A helm test pod. No policy selects it, so the default-deny policy isolates it."
+  'Pod/gibson/gibson-gibson-workloads-test-go-toolchain network':
+    digest: 4631826349a789ed
+    reason: "A helm test pod. No policy selects it, so the default-deny policy isolates it."
+  'Pod/gibson/gibson-gibson-workloads-test-sandbox-host-denied network':
+    digest: 4631826349a789ed
+    reason: "A helm test pod. No policy selects it, so the default-deny policy isolates it."
+  'Pod/gibson/gibson-gibson-workloads-test-service-reachability network':
+    digest: 4631826349a789ed
+    reason: "A helm test pod. No policy selects it, so the default-deny policy isolates it."
+  'Pod/gibson/gibson-gibson-workloads-test-spire-attestation network':
+    digest: 4631826349a789ed
+    reason: "A helm test pod. No policy selects it, so the default-deny policy isolates it."
+  'Pod/gibson/gibson-gibson-workloads-test-zitadel-auth-probe network':
+    digest: 4631826349a789ed
+    reason: "A helm test pod. No policy selects it, so the default-deny policy isolates it."
+  'Pod/gibson/gibson-openfga-test-connection network':
+    digest: 41f60b1521428d34
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Pod/gibson/gibson-server-test-connection network':
+    digest: 8eccc0baa7624553
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Pod/gibson/gibson-spiffe-oidc-discovery-provider-test-connection network':
+    digest: a99c7c56e4a3f196
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'Pod/gibson/gibson-spiffe-oidc-discovery-provider-test-keys network':
+    digest: a99c7c56e4a3f196
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'StatefulSet/gibson/gibson network':
+    digest: 6928ed34e8b9cd85
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'StatefulSet/gibson/gibson-gibson-workloads network':
+    digest: 557e10c126a45b31
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'StatefulSet/gibson/gibson-server network':
+    digest: 8eccc0baa7624553
+    reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
+  'CronJob/gibson/gibson-redis-rotation read-only':
+    digest: f31a0c09fafb9aac
+    reason: "charts#401 runs Redis as a non-root user."
+  'DaemonSet/gibson/gibson-agent read-only':
+    digest: eb9676462f099991
+    reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths."
+  'DaemonSet/gibson/gibson-spiffe-csi-driver read-only':
+    digest: 11ea229adb46b8e3
+    reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths."
+  'DaemonSet/gibson/node-agent read-only':
+    digest: 3b74e134c6bcaaad
+    reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
+  'Deployment/gibson/gibson-dashboard read-only':
+    digest: 879cbd080764eb88
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Deployment/gibson/gibson-docs-svc read-only':
+    digest: f645e1e6ef183e3d
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Deployment/gibson/gibson-openfga read-only':
+    digest: 12dbb1ad617f88db
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Deployment/gibson/gibson-spiffe-oidc-discovery-provider read-only':
+    digest: 422299a150ab3ff4
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Deployment/gibson/velero read-only':
+    digest: 9f876c717f8d9fa0
+    reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
+  'Job/gibson/gibson-gibson-workloads-fga-init-28a471c8 read-only':
+    digest: 2ba37613d18eaf60
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/gibson-gibson-workloads-first-admin read-only':
+    digest: 59f5eb82522ae549
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/gibson-gibson-workloads-openbao-jwt-auth-init read-only':
+    digest: e2850a4d493053a2
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/gibson-openfga-migrate read-only':
+    digest: ee07f483d0b185d6
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/gibson-webhook-gate read-only':
+    digest: f633b36603a61693
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/gibson-workloads-postgres-setup read-only':
+    digest: f7dddb8c2cbbddf4
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/iam-admin-pat-escrow read-only':
+    digest: 1cf3b2c0791f4404
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/openfga-postgres-setup read-only':
+    digest: f7dddb8c2cbbddf4
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/spire-postgres-setup read-only':
+    digest: f7dddb8c2cbbddf4
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/zitadel-postgres-setup read-only':
+    digest: f7dddb8c2cbbddf4
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-gibson-workloads-test-sandbox-host-denied read-only':
+    digest: 1c7ce6f6c7b4dc72
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-openfga-test-connection read-only':
+    digest: 1eb6b295da1171fb
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-server-test-connection read-only':
+    digest: 49d41fecf6eab9af
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-spiffe-oidc-discovery-provider-test-connection read-only':
+    digest: 858497f4bac03605
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-spiffe-oidc-discovery-provider-test-keys read-only':
+    digest: aa36cea0c9261338
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'StatefulSet/gibson/gibson read-only':
+    digest: e2fb85cf2c0e4305
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'StatefulSet/gibson/gibson-gibson-workloads read-only':
+    digest: e455ca3daf933147
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'StatefulSet/gibson/gibson-openbao read-only':
+    digest: d360d26718273c02
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'StatefulSet/gibson/gibson-redis-stack read-only':
+    digest: b625956a26bab767
+    reason: "charts#401 runs Redis as a non-root user."
+  'StatefulSet/gibson/gibson-server read-only':
+    digest: e813048e93772592
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'CronJob/gibson/gibson-redis-rotation restricted':
+    digest: f80e1dfdb4e28e7f
+    reason: "charts#401 runs Redis as a non-root user."
+  'DaemonSet/gibson/gibson-agent restricted':
+    digest: 58a63912eaf1ea86
+    reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths."
+  'DaemonSet/gibson/gibson-gibson-workloads-sandbox-eviction-handler restricted':
+    digest: 849f349acc86b143
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'DaemonSet/gibson/gibson-spiffe-csi-driver restricted':
+    digest: b925d3d195bb22d0
+    reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths."
+  'DaemonSet/gibson/node-agent restricted':
+    digest: d6fc811bbe059e20
+    reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
+  'DaemonSet/setec-system/setec-runtime-agent restricted':
+    digest: a09dad21976b3d3f
+    reason: "Expected exception of ADR-0165: the setec node agent installs the runtime on the node and mounts host paths."
+  'Deployment/gibson/gibson-dashboard restricted':
+    digest: 089082bedf97f615
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Deployment/gibson/gibson-openfga restricted':
+    digest: baddd7356598e5f1
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Deployment/gibson/gibson-spiffe-oidc-discovery-provider restricted':
+    digest: 2e5264df5ec2e7c3
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Deployment/gibson/gibson-zitadel restricted':
+    digest: 6853ca3c1a3fd4de
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Deployment/gibson/gibson-zitadel-login restricted':
+    digest: ce64aa19236d3683
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Deployment/gibson/velero restricted':
+    digest: 0ab124b456a0d1db
+    reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
+  'Job/gibson/gibson-gibson-workloads-fga-init-28a471c8 restricted':
+    digest: ad190cf01bfe8072
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/gibson-gibson-workloads-first-admin restricted':
+    digest: 8adefa8424bb5924
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/gibson-openfga-migrate restricted':
+    digest: 24d76f10e9a9b3f7
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/gibson-webhook-gate restricted':
+    digest: f602697e681058ad
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/gibson-workloads-postgres-setup restricted':
+    digest: d381f6d3d0be9775
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/gibson-zitadel-cleanup restricted':
+    digest: 84b1488c63896262
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/gibson-zitadel-init restricted':
+    digest: 26e4a71bcc0d6088
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/gibson-zitadel-setup restricted':
+    digest: 6baffe3b90e49860
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/iam-admin-pat-escrow restricted':
+    digest: 2b568598e73d6e07
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/openfga-postgres-setup restricted':
+    digest: d381f6d3d0be9775
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/spire-postgres-setup restricted':
+    digest: d381f6d3d0be9775
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Job/gibson/zitadel-postgres-setup restricted':
+    digest: d381f6d3d0be9775
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-gibson-workloads-test-sandbox-host-denied restricted':
+    digest: 6bf3072573486236
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-gibson-workloads-test-spire-attestation restricted':
+    digest: 4cf7a827e00d2c33
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-openfga-test-connection restricted':
+    digest: 964949eb904251bb
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-server-test-connection restricted':
+    digest: 3c0a88fb13c3abe6
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-spiffe-oidc-discovery-provider-test-connection restricted':
+    digest: 8b4ac99993653a4b
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-spiffe-oidc-discovery-provider-test-keys restricted':
+    digest: 99cb1b43b62a999e
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'StatefulSet/gibson/gibson restricted':
+    digest: 61dc4408c3598f35
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'StatefulSet/gibson/gibson-gibson-workloads restricted':
+    digest: edfcb85284b2ed30
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'StatefulSet/gibson/gibson-openbao restricted':
+    digest: aaf4c1a6d2511ae3
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'StatefulSet/gibson/gibson-redis-stack restricted':
+    digest: a3e4d25168b2855c
+    reason: "charts#401 runs Redis as a non-root user."
+  'StatefulSet/gibson/gibson-server restricted':
+    digest: 073efe33dfe31053
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'DaemonSet/gibson/gibson-spiffe-csi-driver token':
+    digest: 24ae7871ca615480
+    reason: "The SPIFFE CSI driver chart gives the pod a ServiceAccount with no grant. The chart has no value that turns the token mount off."
+  'DaemonSet/gibson/node-agent token':
+    digest: b91d468512d5e74a
+    reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
+  'Deployment/gibson/external-secrets-webhook token':
+    digest: 5401b028ab76cfef
+    reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
+  'Deployment/gibson/gibson-docs-svc token':
+    digest: f905b201ea835d99
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Deployment/gibson/gibson-spiffe-oidc-discovery-provider token':
+    digest: e89690d6cef81447
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Deployment/gibson/gibson-zitadel-login token':
+    digest: 4bf5b735032c4641
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Deployment/gibson/velero token':
+    digest: b91d468512d5e74a
+    reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
+  'Job/gibson/gibson-gibson-workloads-openbao-jwt-auth-init token':
+    digest: 161141aedc79491b
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-gibson-workloads-test-go-toolchain token':
+    digest: f905b201ea835d99
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-gibson-workloads-test-service-reachability token':
+    digest: f905b201ea835d99
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-openfga-test-connection token':
+    digest: f905b201ea835d99
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-server-test-connection token':
+    digest: f905b201ea835d99
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-spiffe-oidc-discovery-provider-test-connection token':
+    digest: f905b201ea835d99
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'Pod/gibson/gibson-spiffe-oidc-discovery-provider-test-keys token':
+    digest: e89690d6cef81447
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'StatefulSet/gibson/gibson token':
+    digest: f905b201ea835d99
+    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+  'StatefulSet/gibson/gibson-redis-stack token':
+    digest: f905b201ea835d99
+    reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
