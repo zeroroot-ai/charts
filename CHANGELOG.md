@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.137.0](https://github.com/zeroroot-ai/charts/compare/v0.136.9...v0.137.0) (2026-10-05)
+
+
+### Features
+
+* **backup:** one script purges the last backup of a deleted tenant ([#436](https://github.com/zeroroot-ai/charts/issues/436)) ([381b0f6](https://github.com/zeroroot-ai/charts/commit/381b0f61899f9398fc5ca67a3c516c4fed1deb88)), closes [#419](https://github.com/zeroroot-ai/charts/issues/419)
+* **guards:** one render guard checks the secure pod rule on each rendered pod ([#426](https://github.com/zeroroot-ai/charts/issues/426)) ([2a2bf61](https://github.com/zeroroot-ai/charts/commit/2a2bf6155cb6a7c20db46e815589a8a5bd997bb0))
+
+
+### Bug Fixes
+
+* **edge:** each gRPC route of the edge names a service that the daemon serves ([#427](https://github.com/zeroroot-ai/charts/issues/427)) ([ec431c8](https://github.com/zeroroot-ai/charts/commit/ec431c80ad0c84cd82d899a2c98f9fb10ebd9f90)), closes [#356](https://github.com/zeroroot-ai/charts/issues/356)
+* **edge:** the public edge routes only the sign-in paths to the identity provider ([#423](https://github.com/zeroroot-ai/charts/issues/423)) ([d243b21](https://github.com/zeroroot-ai/charts/commit/d243b21cc929950e4a6e06c0ba5e753b5e2bc0b4)), closes [#398](https://github.com/zeroroot-ai/charts/issues/398)
+* **redis:** Redis runs as a non-root user ([#431](https://github.com/zeroroot-ai/charts/issues/431)) ([c2f4df8](https://github.com/zeroroot-ai/charts/commit/c2f4df8ca0ce63057a9e00ff746f3880846b5fa8))
+
 ## [0.136.9](https://github.com/zeroroot-ai/charts/compare/v0.136.8...v0.136.9) (2026-10-05)
 
 
