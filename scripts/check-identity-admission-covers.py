@@ -12,8 +12,11 @@ could be registered with no admission rule in front of it.
 This check renders both and fails when a first-party ClusterSPIFFEID (a
 `platform/...` or `plugin/...` SPIFFE ID) has a podSelector component, or a
 `k8s:sa:` selector, that the policy's lists do not hold. The vendored spire
-chart renders identities of its own under other paths. They are not
-first-party registrations and this check does not read them. It renders the baseline twice: as shipped, and with
+chart renders identities of its own under other paths. This check holds those
+to a closed list: the two that have a workload in this chart. Any other
+identity from the subchart is a registration with no workload, and it fails.
+The spire chart turns on four SPIKE identities by default, and this chart
+deploys no SPIKE. It renders the baseline twice: as shipped, and with
 one plugin enabled, because the per-plugin identities exist only then.
 
 Two identities are outside the lists on purpose. Each is named here with its
@@ -43,6 +46,10 @@ import yaml
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UNPROTECTED_ON_PURPOSE = {"platform/helm-test", "platform/e2e-runner"}
 FIRST_PARTY = ("platform/", "plugin/")
+# The subchart identities that have a workload here, by ClusterSPIFFEID name
+# suffix: the generic per-ServiceAccount fallback for other namespaces, and the
+# OIDC discovery provider. test-keys belongs to the spire chart's own helm test.
+SUBCHART_WITH_WORKLOAD = ("-default", "-oidc-discovery-provider", "-test-keys")
 POLICY_NAME_PART = "platform-identity"
 LISTS = re.compile(r"variables\.component in (\[[^\]]*\])\s*\|\|\s*variables\.sa in (\[[^\]]*\])")
 
@@ -65,6 +72,21 @@ def policy_lists(docs: list[dict]) -> list[tuple[str, set[str], set[str]]]:
             m = LISTS.search(str(var.get("expression", "")))
             if m:
                 out.append((d["metadata"]["name"], set(json.loads(m.group(1))), set(json.loads(m.group(2)))))
+    return out
+
+
+def unowned(docs: list[dict]) -> list[str]:
+    """Each ClusterSPIFFEID that is neither first-party nor a subchart identity
+    with a workload in this chart."""
+    out = []
+    for d in docs:
+        if d.get("kind") != "ClusterSPIFFEID":
+            continue
+        path = str((d.get("spec") or {}).get("spiffeIDTemplate", "")).split("/", 3)[-1]
+        name = d["metadata"]["name"]
+        if path.startswith(FIRST_PARTY) or name.endswith(SUBCHART_WITH_WORKLOAD):
+            continue
+        out.append(f"{name} registers {path}, and this chart deploys no workload for it")
     return out
 
 
@@ -91,6 +113,7 @@ def judge(docs: list[dict]) -> tuple[list[str], int]:
         return ["the render holds no admission policy with the two protected lists: this check read nothing"], 0
     if not any(p.startswith(FIRST_PARTY) for p, _, _ in ids):
         return ["the render holds no first-party ClusterSPIFFEID: this check read nothing"], 0
+    out += unowned(docs)
     checked = 0
     for path, comp, sas in ids:
         if not path.startswith(FIRST_PARTY) or path in UNPROTECTED_ON_PURPOSE:
@@ -140,11 +163,19 @@ def selftest() -> int:
         if len(found) != 1:
             print(f"selftest: {what} must give one finding, gave {found}", file=sys.stderr)
             return 1
+    spike = {"kind": "ClusterSPIFFEID", "metadata": {"name": "gibson-gibson-spike-pilot"},
+             "spec": {"spiffeIDTemplate": "spiffe://zeroroot.ai/spike/pilot/role/superuser"}}
+    kept = {"kind": "ClusterSPIFFEID", "metadata": {"name": "gibson-gibson-default"},
+            "spec": {"spiffeIDTemplate": "spiffe://zeroroot.ai/ns/x/sa/y"}}
+    if len(judge(good + [spike])[0]) != 1 or judge(good + [kept])[0]:
+        print("selftest: a subchart identity with no workload must fail, and the fallback must pass", file=sys.stderr)
+        return 1
     if not judge([csid("platform/daemon", "daemon", "gibson")])[0]:
         print("selftest: a render with no policy must fail", file=sys.stderr)
         return 1
     print("check-identity-admission-covers selftest PASSED (an uncovered component, an uncovered "
-          "ServiceAccount, an identity with no ServiceAccount and a missing policy each fail)")
+          "ServiceAccount, an identity with no ServiceAccount, a registration with no workload "
+          "and a missing policy each fail)")
     return 0
 
 
