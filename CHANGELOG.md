@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.136.9](https://github.com/zeroroot-ai/charts/compare/v0.136.8...v0.136.9) (2026-10-05)
+
+
+### Bug Fixes
+
+* **reloader:** each Reloader annotation names an object the chart renders ([#420](https://github.com/zeroroot-ai/charts/issues/420)) ([2a8e6e8](https://github.com/zeroroot-ai/charts/commit/2a8e6e8105b603d35dfc5817f7085f22c8f5ba66)), closes [#411](https://github.com/zeroroot-ai/charts/issues/411)
+
 ## [0.136.8](https://github.com/zeroroot-ai/charts/compare/v0.136.7...v0.136.8) (2026-10-05)
 
 
