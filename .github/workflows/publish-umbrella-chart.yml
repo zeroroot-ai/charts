@@ -135,17 +135,18 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Package, push, sign and verify every published chart
-        # The platform is THREE releases, not one (deploy#1777). gibson-crds is
-        # a sibling release because Helm cannot install a CRD and its CR in one
-        # release (CONTEXT.md § Umbrella chart); gibson-velero is a second
-        # release in its own namespace. Neither
-        # is a dependency of the umbrella, so neither arrives with it — and a
-        # cluster off the checkout could install none of them.
+        # This step publishes FOUR charts: gibson, gibson-crds,
+        # gibson-operator-crds and gibson-velero (the CHARTS list below).
+        # gibson-crds and gibson-operator-crds are releases of their own
+        # because Helm cannot install a CRD and its CR in one release, and one
+        # release record holds 1 MiB at most (CONTEXT.md § Umbrella chart).
+        # gibson-velero is a release in its own namespace. None of the three
+        # is a dependency of the umbrella, so none arrives with it.
         #
-        # One loop, not three copies of the same block (ADR-0027). Every chart
+        # One loop, not four copies of the same block (ADR-0027). Every chart
         # is packaged at the same version, pushed, signed by the digest that
         # push reported, signature-verified in-job, then pulled back and
-        # rendered. Any failure fails the publish for all three: a partial
+        # rendered. Any failure fails the publish for all four: a partial
         # publish is what left two charts missing in the first place.
         run: |
           set -euo pipefail
