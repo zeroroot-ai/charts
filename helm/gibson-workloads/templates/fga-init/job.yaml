@@ -87,6 +87,15 @@ spec:
     spec:
       restartPolicy: OnFailure
       serviceAccountName: {{ .Release.Name }}-fga-init
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The scripts
+      # write only to /tmp and /model, both emptyDir volumes.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       {{- /* The dump-model init container pulls the PRIVATE daemon image.
              Without the pull secret the kubelet falls back to an anonymous
              pull, GHCR answers 401, the pod never starts, and the Job dies at
@@ -112,6 +121,11 @@ spec:
         # shell for the redirect. The runtime image is alpine-based and has one.
         - name: dump-model
           image: {{ $daemonImage | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           imagePullPolicy: {{ .Values.gibson.image.pullPolicy }}
           command: ['/bin/sh', '-c']
           args:
@@ -127,6 +141,11 @@ spec:
               mountPath: /model
         - name: wait-for-fga
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           command: ['sh', '-c']
           args:
             - |
@@ -161,6 +180,11 @@ spec:
         # finding 4 (previous mirror image 404ed on first install).
         - name: fga-init
           image: {{ ((((.Values.gibson).config).security).fgaInit).image | default (include "gibson.toolImage" .) | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           imagePullPolicy: IfNotPresent
           command: ['sh', '-c']
           args:
@@ -483,6 +507,8 @@ spec:
             - name: CURL_CA_BUNDLE
               value: /etc/gibson/tls/fga-ca/ca.crt
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
             - name: model
               mountPath: /model
               readOnly: true
@@ -490,6 +516,8 @@ spec:
               mountPath: /etc/gibson/tls/fga-ca
               readOnly: true
       volumes:
+        - name: tmp
+          emptyDir: {}
         # Written by the dump-model init container, read by fga-init. Not a
         # ConfigMap any more: nothing vendored to mount.
         - name: model

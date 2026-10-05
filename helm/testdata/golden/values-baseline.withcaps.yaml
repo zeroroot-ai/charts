@@ -19769,6 +19769,15 @@ spec:
     spec:
       restartPolicy: OnFailure
       serviceAccountName: gibson-fga-init
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The scripts
+      # write only to /tmp and /model, both emptyDir volumes.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       
       imagePullSecrets:
         - name: ghcr-credentials
@@ -19788,6 +19797,11 @@ spec:
         # shell for the redirect. The runtime image is alpine-based and has one.
         - name: dump-model
           image: "ghcr.io/zeroroot-ai/gibson:v0.153.2@sha256:b57acca62d5acf01aea285cb1933310febfb29a32e4bf07f7ccc1bfa662edd5c"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           imagePullPolicy: Always
           command: ['/bin/sh', '-c']
           args:
@@ -19803,6 +19817,11 @@ spec:
               mountPath: /model
         - name: wait-for-fga
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           command: ['sh', '-c']
           args:
             - |
@@ -19837,6 +19856,11 @@ spec:
         # finding 4 (previous mirror image 404ed on first install).
         - name: fga-init
           image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           imagePullPolicy: IfNotPresent
           command: ['sh', '-c']
           args:
@@ -20159,6 +20183,8 @@ spec:
             - name: CURL_CA_BUNDLE
               value: /etc/gibson/tls/fga-ca/ca.crt
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
             - name: model
               mountPath: /model
               readOnly: true
@@ -20166,6 +20192,8 @@ spec:
               mountPath: /etc/gibson/tls/fga-ca
               readOnly: true
       volumes:
+        - name: tmp
+          emptyDir: {}
         # Written by the dump-model init container, read by fga-init. Not a
         # ConfigMap any more: nothing vendored to mount.
         - name: model
@@ -27082,15 +27110,28 @@ spec:
       
       imagePullSecrets:
         - name: ghcr-credentials
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault
+      # seccomp profile, a read-only root filesystem and no capabilities.
+      # kubectl writes its cache under HOME=/tmp, an emptyDir.
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
+        runAsGroup: 65532
         fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: first-admin
           image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-2f91a7b@sha256:90405ce6d9a3eb79dc3f46605d075f986079850cd1e9d5549055ac07ee3301f2"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           env:
+            - name: HOME
+              value: /tmp
             - name: BOOTSTRAP_ADMIN_EMAIL
               value: "admin@localhost.zeroroot.ai"
             - name: BOOTSTRAP_TENANT_ID
@@ -27177,6 +27218,8 @@ spec:
                 -setup-secret "gibson-first-tenant-owner-setup" \
                 -setup-secret-key "setup-link"
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
             - name: fga-ca
               mountPath: /etc/ssl/fga-ca
               readOnly: true
@@ -27188,6 +27231,8 @@ spec:
               cpu: 500m
               memory: 256Mi
       volumes:
+        - name: tmp
+          emptyDir: {}
         # OpenFGA's HTTP API serves TLS; bootstrap's FGA client must trust its CA.
         - name: fga-ca
           secret:
