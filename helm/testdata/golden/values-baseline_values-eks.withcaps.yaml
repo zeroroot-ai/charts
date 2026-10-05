@@ -14722,7 +14722,7 @@ spec:
               mountPath: /shared
       containers:
         - name: dashboard
-          image: "ghcr.io/zeroroot-ai/dashboard:v0.127.2@sha256:b3eb592cf477461d8ce57db7f4a9e5af0a7aa5865dc0bc9c96e7d7277634f059"
+          image: "ghcr.io/zeroroot-ai/dashboard:v0.128.0@sha256:41ce2921bd056f01938bb1188644ba16baac7503c43971293c1cad880ffa3588"
           imagePullPolicy: IfNotPresent
           # Spec: canonical-service-identity Req 5 — the resolve-sa-identity-map
           # init container writes the comma-joined numeric subs to
@@ -14864,17 +14864,18 @@ spec:
             # URL that production overlays could inherit by accident.
             - name: ZITADEL_ISSUER
               value: "https://app.localhost.zeroroot.ai"
-            # Same URL the browser uses — hostAliases (above) makes
-            # app.<domain> resolve to Envoy's pinned ClusterIP from inside
-            # the pod, so server-side OIDC discovery + token exchange hit
-            # the same authority the browser does. No issuer mismatch.
-            #
-            # ZITADEL_INTERNAL_ISSUER stays as a deliberate divergence hatch
-            # for environments where pod-side and browser-side authorities
-            # MUST differ. When unset it inherits the (required) ZITADEL_ISSUER;
-            # there is no `http://localhost:30080` silent fallback.
-            - name: ZITADEL_INTERNAL_ISSUER
-              value: "https://app.localhost.zeroroot.ai"
+            # ZITADEL_ISSUER above is a STRING: the dashboard compares it with
+            # the `iss` claim, and the browser follows it. No server code dials
+            # it. Since dashboard v0.128.0 the server side reaches Zitadel the
+            # one way ADR-0092 names: it connects to the Zitadel Service
+            # (ZITADEL_URL) and claims the public host in the instance header
+            # (ZITADEL_EXTERNAL_DOMAIN, never with a port). The dashboard
+            # refuses to boot without both. ZITADEL_INTERNAL_ISSUER is gone
+            # with the second authority it stood for (dashboard#88).
+            - name: ZITADEL_URL
+              value: "http://gibson-zitadel.gibson.svc.cluster.local:8080"
+            - name: ZITADEL_EXTERNAL_DOMAIN
+              value: "app.localhost.zeroroot.ai"
             # The Zitadel-generated OIDC clientId is written by the
             # zitadel-bootstrap Job into this Secret after Zitadel creates
             # the app. If the Job re-runs (e.g. after a DB wipe), it
@@ -14914,11 +14915,6 @@ spec:
                 secretKeyRef:
                   name: gibson-zitadel-dashboard
                   key: ZITADEL_CLIENT_SECRET
-            # The signupAction also needs the external domain to forge
-            # Host headers when the admin-client's apiUrl points at the
-            # in-cluster Zitadel Service (same trick as Envoy routing).
-            - name: ZITADEL_EXTERNAL_DOMAIN
-              value: "app.localhost.zeroroot.ai"
             # OIDC client secret for the dashboard's browser-side
             # authorization_code flow against Zitadel. Paired with
             # ZITADEL_CLIENT_ID above; both MUST point at the same

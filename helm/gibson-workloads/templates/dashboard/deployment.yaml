@@ -66,17 +66,13 @@ spec:
       {{- /* Spec 3 §3 R8 — HA topology spread + anti-affinity. */}}
       {{- include "gibson.spread" (dict "ctx" . "component" "dashboard") | nindent 6 }}
       {{- /*
-        hostAliases — make the dashboard pod resolve the same hostnames the
-        browser uses (auth/app/api .<global.domain>) to Envoy's pinned
-        ClusterIP. This lets Auth.js's server-side OIDC discovery + token
-        exchange call exactly the URL the browser sees, so Zitadel's issuer
-        claim and discovery-doc URLs match what Auth.js validates against.
-        Without this, a separate "internal" issuer URL is needed and breaks
-        OIDC `iss` validation.
-
-        gibson-common library helper (deploy#179) emits the block — single
-        source of truth shared with daemon statefulset, tenant-operator
-        deployment, platform-operator deployment.
+        hostAliases — the dashboard's server side dials ADMIN_ENVOY_BASE_URL,
+        which is the public api.<global.domain> host, and on a local cluster
+        the pod resolves that name only through this alias to Envoy's pinned
+        ClusterIP. Identity calls no longer need it: since v0.128.0 they go
+        to the Zitadel Service by name (ADR-0092). The alias leaves when each
+        bringup writes the CoreDNS record for api.<domain> (hosted#397), and
+        charts#163 deletes the helper.
       */}}
       {{- include "gibson.hostAliases" . | nindent 6 }}
       {{- /*
@@ -516,17 +512,15 @@ spec:
             # URL that production overlays could inherit by accident.
             - name: ZITADEL_ISSUER
               value: {{ ((.Values.dashboard.zitadel).issuer) | default (include "gibson.oidcIssuer" .) | quote }}
-            # Same URL the browser uses — hostAliases (above) makes
-            # app.<domain> resolve to Envoy's pinned ClusterIP from inside
-            # the pod, so server-side OIDC discovery + token exchange hit
-            # the same authority the browser does. No issuer mismatch.
-            #
-            # ZITADEL_INTERNAL_ISSUER stays as a deliberate divergence hatch
-            # for environments where pod-side and browser-side authorities
-            # MUST differ. When unset it inherits the (required) ZITADEL_ISSUER;
-            # there is no `http://localhost:30080` silent fallback.
-            - name: ZITADEL_INTERNAL_ISSUER
-              value: {{ ((.Values.dashboard.zitadel).internalIssuer) | default ((.Values.dashboard.zitadel).issuer) | default (include "gibson.oidcIssuer" .) | quote }}
+            # ZITADEL_ISSUER above is a STRING: the dashboard compares it with
+            # the `iss` claim, and the browser follows it. No server code dials
+            # it. Since dashboard v0.128.0 the server side reaches Zitadel the
+            # one way ADR-0092 names: it connects to the Zitadel Service
+            # (ZITADEL_URL) and claims the public host in the instance header
+            # (ZITADEL_EXTERNAL_DOMAIN, never with a port). The dashboard
+            # refuses to boot without both. ZITADEL_INTERNAL_ISSUER is gone
+            # with the second authority it stood for (dashboard#88).
+            {{- include "gibson.zitadel.env" . | nindent 12 }}
             # The Zitadel-generated OIDC clientId is written by the
             # zitadel-bootstrap Job into this Secret after Zitadel creates
             # the app. If the Job re-runs (e.g. after a DB wipe), it
@@ -566,11 +560,6 @@ spec:
                 secretKeyRef:
                   name: gibson-zitadel-dashboard
                   key: ZITADEL_CLIENT_SECRET
-            # The signupAction also needs the external domain to forge
-            # Host headers when the admin-client's apiUrl points at the
-            # in-cluster Zitadel Service (same trick as Envoy routing).
-            - name: ZITADEL_EXTERNAL_DOMAIN
-              value: {{ (.Values.zitadel.zitadel.configmapConfig.ExternalDomain | default (include "gibson.zitadelExternalDomain" .)) | quote }}
             # OIDC client secret for the dashboard's browser-side
             # authorization_code flow against Zitadel. Paired with
             # ZITADEL_CLIENT_ID above; both MUST point at the same
