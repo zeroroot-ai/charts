@@ -512,13 +512,6 @@ spec:
                    headers without re-keying.
                    Coordinated with daemon Go agent's removal of the HMAC
                    verifier in core/gibson/internal/identity/. */}}
-            # Impersonation token signing key (gibson#103). Daemon refuses
-            # to start without it; there is no in-process random fallback.
-            # Delivered via the `impersonation-key` volume mount below at
-            # /etc/gibson/impersonation/GIBSON_IMPERSONATION_KEY[_PREVIOUS]
-            # (kubelet Secret projection — NUL-byte-safe). The daemon reads
-            # the files directly (gibson#162); the previous env-var bindings
-            # were removed in deploy#315.
             {{- /*
               Capability-Grant JWT signing key directory (GHSA-3957,
               gibson#1288). Points at the cg-signing-key volume mount below.
@@ -901,18 +894,9 @@ spec:
             - name: sa-identity-map
               mountPath: /etc/gibson/sa-identity-map
               readOnly: true
-            # Impersonation signing keys — volume-mounted so the daemon
-            # can read NUL-byte-safe (file: length-based; env var:
-            # C-string truncated at first NUL). The daemon reads each
-            # file directly (gibson#162). Cross-chart-check class 16
-            # (deploy#182 / PR #316) blocks regressions to env-var
-            # delivery.
-            - name: impersonation-key
-              mountPath: /etc/gibson/impersonation
-              readOnly: true
             {{- /* Capability-Grant JWT signing key (GHSA-3957, gibson#1288).
-                   Same projection idiom as impersonation-key: kubelet writes
-                   one file per Secret key, the daemon reads them directly.
+                   A Secret volume, not an env var: kubelet writes one file
+                   per Secret key, and the daemon reads them directly.
                    Unconditional mount, optional volume — see the volume below
                    and templates/secrets/cg-signing-key.yaml. */}}
             - name: cg-signing-key
@@ -998,15 +982,6 @@ spec:
         # ConfigMap key as a file under the mount path. The Go resolver
         # at internal/auth/identityresolver reads the directory and treats
         # filenames as readable SA names, contents as the numeric sub.
-        # Impersonation signing keys — Secret mounted at
-        # /etc/gibson/impersonation/. Kubelet projects each key in the
-        # Secret as a file named after the key. The daemon reads from
-        # this mount (file path NUL-transparent, env var truncates).
-        # Spec: deploy#315 / cross-chart-check class 16 (deploy#182).
-        - name: impersonation-key
-          secret:
-            secretName: {{ include "gibson.impersonationSecret.name" . }}
-            defaultMode: 0o400
         {{- /*
           Capability-Grant JWT signing key (GHSA-3957, gibson#1288).
 

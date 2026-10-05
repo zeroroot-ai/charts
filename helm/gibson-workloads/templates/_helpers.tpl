@@ -26,19 +26,9 @@ credentials ExternalSecret materialises (gibson.email.smtp.externalSecret).
 {{- end }}
 
 {{/*
-Impersonation signing key Secret name. The daemon mounts the
-GIBSON_IMPERSONATION_KEY env var from this Secret; key persistence is
-required (gibson#103) so tokens issued before a restart remain valid and
-HA replicas agree on signatures.
-*/}}
-{{- define "gibson.impersonationSecret.name" -}}
-{{- printf "%s-impersonation-key" (include "gibson.fullname" .) }}
-{{- end }}
-
-{{/*
 Capability-Grant JWT signing key Secret name (GHSA-3957, gibson#1288).
 
-Release-prefixed like the impersonation key: nothing outside this chart
+Release-prefixed: nothing outside this chart
 references it by literal string — the daemon reaches it through a volume
 mount, not a values-supplied *SecretRef — so the prefix is safe and keeps two
 releases in one namespace from colliding.

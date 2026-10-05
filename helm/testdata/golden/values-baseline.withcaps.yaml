@@ -17039,8 +17039,6 @@ spec:
               gibson-spire-postgres-password password:pw
               gibson-neo4j-password password:pw
               gibson-redis-password password:pw
-              gibson-impersonation-key value:rand
-              gibson-impersonation-key-previous value:rand
               zitadel-masterkey value:rand
               gibson-billing-webhook-secret secret:rand
               gibson-dashboard-session-secrets auth_secret:rand server_actions_key:randb64
@@ -18687,13 +18685,6 @@ spec:
             # the embedded copy and hot-reloads it every 5 minutes.
             - name: GIBSON_PROVIDERS_CATALOGUE_PATH
               value: "/etc/gibson-providers/provider-catalogue.yaml"
-            # Impersonation token signing key (gibson#103). Daemon refuses
-            # to start without it; there is no in-process random fallback.
-            # Delivered via the `impersonation-key` volume mount below at
-            # /etc/gibson/impersonation/GIBSON_IMPERSONATION_KEY[_PREVIOUS]
-            # (kubelet Secret projection — NUL-byte-safe). The daemon reads
-            # the files directly (gibson#162); the previous env-var bindings
-            # were removed in deploy#315.
             - name: GIBSON_CGJWT_SIGNING_KEY_DIR
               value: "/etc/gibson/cg-signing-key"
             # Spec 3 R11 — Redis password sourced from chart-managed Secret
@@ -18964,15 +18955,6 @@ spec:
             - name: sa-identity-map
               mountPath: /etc/gibson/sa-identity-map
               readOnly: true
-            # Impersonation signing keys — volume-mounted so the daemon
-            # can read NUL-byte-safe (file: length-based; env var:
-            # C-string truncated at first NUL). The daemon reads each
-            # file directly (gibson#162). Cross-chart-check class 16
-            # (deploy#182 / PR #316) blocks regressions to env-var
-            # delivery.
-            - name: impersonation-key
-              mountPath: /etc/gibson/impersonation
-              readOnly: true
             - name: cg-signing-key
               mountPath: "/etc/gibson/cg-signing-key"
               readOnly: true
@@ -19061,15 +19043,6 @@ spec:
         # ConfigMap key as a file under the mount path. The Go resolver
         # at internal/auth/identityresolver reads the directory and treats
         # filenames as readable SA names, contents as the numeric sub.
-        # Impersonation signing keys — Secret mounted at
-        # /etc/gibson/impersonation/. Kubelet projects each key in the
-        # Secret as a file named after the key. The daemon reads from
-        # this mount (file path NUL-transparent, env var truncates).
-        # Spec: deploy#315 / cross-chart-check class 16 (deploy#182).
-        - name: impersonation-key
-          secret:
-            secretName: gibson-gibson-workloads-impersonation-key
-            defaultMode: 0o400
         - name: cg-signing-key
           secret:
             secretName: gibson-gibson-workloads-cg-signing-key
@@ -22128,42 +22101,6 @@ spec:
       remoteRef: { key: gibson-cg-signing-key, property: kid }
     - secretKey: current_key
       remoteRef: { key: gibson-cg-signing-key, property: key }
----
-# Source: gibson/charts/gibson-workloads/templates/secrets/impersonation-key.yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: gibson-gibson-workloads-impersonation-key
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: secrets
-spec:
-  refreshInterval: 60s
-  secretStoreRef:
-    name: "gibson-secrets"
-    kind: ClusterSecretStore
-  target:
-    name: gibson-gibson-workloads-impersonation-key
-    creationPolicy: Owner
-    template:
-      type: Opaque
-      data:
-        GIBSON_IMPERSONATION_KEY: "{{ .impersonation_key }}"
-        # Previous-key slot for zero-downtime rotation. Empty in steady
-        # state; populated during rotation so Verify accepts tokens signed
-        # under the prior current key until they expire naturally (≤ 1h).
-        # Operators clear this slot once maxTTL has elapsed.
-        GIBSON_IMPERSONATION_KEY_PREVIOUS: "{{ .impersonation_key_previous }}"
-  data:
-    - secretKey: impersonation_key
-      remoteRef: { key: gibson-impersonation-key, property: value }
-    - secretKey: impersonation_key_previous
-      remoteRef: { key: gibson-impersonation-key-previous, property: value }
 ---
 # Source: gibson/charts/gibson-workloads/templates/secrets/openbao-keys.yaml
 apiVersion: external-secrets.io/v1
