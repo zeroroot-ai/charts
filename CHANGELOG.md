@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.136.3](https://github.com/zeroroot-ai/charts/compare/v0.136.2...v0.136.3) (2026-10-05)
+
+
+### Bug Fixes
+
+* **billing:** the deleted billing bypass leaves no comment behind ([#351](https://github.com/zeroroot-ai/charts/issues/351)) ([717b24d](https://github.com/zeroroot-ai/charts/commit/717b24d3d549d297606fba87e0777914191d493c)), closes [#314](https://github.com/zeroroot-ai/charts/issues/314)
+* **ci:** every chart dependency fetch goes through the retry script ([#352](https://github.com/zeroroot-ai/charts/issues/352)) ([540733b](https://github.com/zeroroot-ai/charts/commit/540733b6559889d2b778a1ef668352eed07dc977))
+* **edge:** the Envoy JWKS fetch claims a portless host, and a guard keeps every claimed host portless ([#350](https://github.com/zeroroot-ai/charts/issues/350)) ([887ee4d](https://github.com/zeroroot-ai/charts/commit/887ee4dca2e5368bf5e21f654c69e2a992fa3817)), closes [#162](https://github.com/zeroroot-ai/charts/issues/162)
+* **guard:** a vendored contract is compared at the tag the chart pins ([#348](https://github.com/zeroroot-ai/charts/issues/348)) ([34dc0b5](https://github.com/zeroroot-ai/charts/commit/34dc0b5044b4d423e701da721223833d7958c97f)), closes [#303](https://github.com/zeroroot-ai/charts/issues/303)
+
 ## [0.136.2](https://github.com/zeroroot-ai/charts/compare/v0.136.1...v0.136.2) (2026-10-04)
 
 
