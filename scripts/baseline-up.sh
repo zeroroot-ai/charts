@@ -239,11 +239,11 @@ log "building chart dependencies (bottom-up)"
 # installed below, so it is built here too. The list is written out by hand,
 # which is exactly how the chart was missed when it was added: the render
 # then fails with "missing in charts/ directory: gibson-operator-crd-files".
-helm dependency update "${CHART_DIR}/gibson-operator-crds" >/dev/null
-helm dependency update "${CHART_DIR}/gibson-crds" >/dev/null
-helm dependency update "${CHART_DIR}/gibson-operators" >/dev/null
-helm dependency update "${CHART_DIR}/gibson-workloads" >/dev/null
-helm dependency update "${CHART_DIR}/gibson" >/dev/null
+"$(dirname "$0")/helm-dep-update.sh" "${CHART_DIR}/gibson-operator-crds"
+"$(dirname "$0")/helm-dep-update.sh" "${CHART_DIR}/gibson-crds"
+"$(dirname "$0")/helm-dep-update.sh" "${CHART_DIR}/gibson-operators"
+"$(dirname "$0")/helm-dep-update.sh" "${CHART_DIR}/gibson-workloads"
+"$(dirname "$0")/helm-dep-update.sh" "${CHART_DIR}/gibson"
 # gibson-velero is its own release (deploy#1762) with a remote `velero`
 # dependency, so it needs the same build the four charts above get. Without
 # this line `helm upgrade --install velero` fails in seconds with "found in
@@ -251,7 +251,7 @@ helm dependency update "${CHART_DIR}/gibson" >/dev/null
 # 33572682175, the first run after deploy#1762 merged. The Makefile targets
 # carry the stamp (CHART_DEPS_VELERO); this script is the one other place
 # that builds dependencies, and it must stay complete.
-helm dependency update "${CHART_DIR}/gibson-velero" >/dev/null
+"$(dirname "$0")/helm-dep-update.sh" "${CHART_DIR}/gibson-velero"
 fi
 
 # ---------------------------------------------------------------------------

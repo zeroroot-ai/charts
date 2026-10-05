@@ -63,4 +63,30 @@ else
   echo "  ✓ a download that never succeeds fails chart-deps after 5 attempts and names the reason"
 fi
 
+# 3. nothing fetches dependencies around the retry. scripts/helm-dep-update.sh
+# is the one caller of `helm dependency update`. Three callers used to run it
+# directly, and one 500 from a GitHub release asset failed the release PR's
+# airgap-image-list check (charts#349). Comment lines are not callers.
+direct_callers() {  # direct_callers <tree>
+  ( cd "$1" && grep -rnE 'helm dependency update|"dependency", *"update"' \
+      --include='*.sh' --include='*.py' --include='*.yml' --include='*.yaml' --include='Makefile' \
+      --exclude-dir=.git --exclude-dir=testdata --exclude-dir=charts . 2>/dev/null \
+    | grep -vE '^\./scripts/(helm-dep-update|check-chart-deps-retry)\.sh:' \
+    | grep -vE '^[^:]+:[0-9]+:\s*(#|//|\{\{-?\s*/\*)' \
+    | grep -vE '^[^:]+:[0-9]+:.*(help=|echo |`helm dependency update`)' || true )
+}
+mkdir -p "$tmp/fx/scripts"
+printf '#!/bin/sh\n# helm dependency update in a comment is not a caller\nhelm dependency update helm/gibson\n' > "$tmp/fx/scripts/direct.sh"
+printf 'run(["helm", "dependency", "update", chart])\n' > "$tmp/fx/scripts/direct.py"
+if [ "$(direct_callers "$tmp/fx" | wc -l)" -ne 2 ]; then
+  echo "FAIL: the fixture holds two direct callers (one shell, one python) and one comment; the scan saw:"; direct_callers "$tmp/fx"; fail=1
+else
+  found="$(direct_callers "$root")"
+  if [ -n "$found" ]; then
+    echo "FAIL: these call helm dependency update with no retry. Call scripts/helm-dep-update.sh:"; echo "$found"; fail=1
+  else
+    echo "  ✓ every dependency fetch goes through scripts/helm-dep-update.sh"
+  fi
+fi
+
 exit $fail

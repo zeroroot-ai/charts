@@ -92,12 +92,12 @@ jobs:
         # stale subchart code if a committed/cached .tgz matches the version
         # constraint (deploy#1001). update guarantees freshness.
         run: |
-          helm dependency update helm/gibson-crds
-          helm dependency update helm/gibson-operator-crds
-          helm dependency update helm/gibson-operators
-          helm dependency update helm/gibson-workloads
-          helm dependency update helm/gibson
-          helm dependency update helm/gibson-velero
+          ./scripts/helm-dep-update.sh helm/gibson-crds
+          ./scripts/helm-dep-update.sh helm/gibson-operator-crds
+          ./scripts/helm-dep-update.sh helm/gibson-operators
+          ./scripts/helm-dep-update.sh helm/gibson-workloads
+          ./scripts/helm-dep-update.sh helm/gibson
+          ./scripts/helm-dep-update.sh helm/gibson-velero
 
       - name: Resolve first-party image digests (ADR-0004, deploy#1402)
         # Runs AFTER dependency build (so the subchart values that ship are the
