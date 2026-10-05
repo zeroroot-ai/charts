@@ -94,7 +94,19 @@ the render, not to a name.
 {{- end -}}
 {{- $probes := list -}}
 {{- range $p := ($gate.probes | default list) -}}
-{{- if or (not $p.component) (and (eq $p.component "setec") $setecOn) -}}
+{{- $on := true -}}
+{{- if eq ($p.component | default "") "setec" -}}
+{{- $on = $setecOn -}}
+{{- else if $p.component -}}
+{{- /* An operator seam: certManager, externalSecrets or cnpg. With the seam
+       off, the cluster owns the operator and its webhooks. */ -}}
+{{- $seam := index $.Values $p.component -}}
+{{- if not (kindIs "map" $seam) -}}
+{{- fail (printf "webhookGate.probes: component %q is not setec and is not a values key with an `enabled` field" $p.component) -}}
+{{- end -}}
+{{- $on = $seam.enabled -}}
+{{- end -}}
+{{- if $on -}}
 {{- $probes = append $probes $p -}}
 {{- end -}}
 {{- end -}}

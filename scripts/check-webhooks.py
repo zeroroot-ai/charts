@@ -19,11 +19,15 @@ Rebuilds three guards lost in the 2026-09-04 split (charts#17):
     webhook in the render must therefore be service-backed.
 
   fail-closed: no webhook in the render carries `failurePolicy: Ignore`,
-    except one the vendored chart itself flips to Fail with a post-install
-    hook; those are named here with that reason.
+    except the two webhooks of the SPIRE controller manager that ADR-0076
+    accepts. ACCEPTED_IGNORE names them. An entry that names a webhook that
+    no render installs at Ignore fails, so the list cannot go stale.
+
+The guard reads each published profile, the same list that scripts/golden.sh
+renders.
 
   check-webhooks.py             exit 1 on a violation, 0 when clean
-  check-webhooks.py --selftest  prove an unprobed Fail webhook, a url-backed one and an Ignore one fail
+  check-webhooks.py --selftest  prove an unprobed Fail webhook, a url-backed one, an Ignore one and a stale exception fail
 """
 import os
 import subprocess
@@ -33,28 +37,69 @@ import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Webhooks the vendored chart renders at Ignore and flips to Fail in its own
-# post-install/upgrade hook (spire-controller-manager: "Actual value to be
-# set by post install/upgrade hooks"). Keyed by webhook name.
-FLIPPED_BY_HOOK = {
-    "vclusterfederatedtrustdomain.kb.io": "spire-controller-manager sets Fail in its post-install hook",
-    "vclusterspiffeid.kb.io": "spire-controller-manager sets Fail in its post-install hook",
+# The webhooks that can render `failurePolicy: Ignore` (ADR-0076). Keyed by
+# webhook name. The chart turns the install and upgrade hooks of the SPIRE
+# chart off, so nothing sets these two to Fail: they stay at Ignore.
+ACCEPTED_IGNORE = {
+    "vclusterfederatedtrustdomain.kb.io": "ADR-0076 accepts Ignore for this webhook of the SPIRE controller manager",
+    "vclusterspiffeid.kb.io": "ADR-0076 accepts Ignore for this webhook of the SPIRE controller manager",
 }
+# The same profiles that scripts/golden.sh renders.
+PROFILES = (
+    ("values-baseline.yaml",),
+    ("values-baseline.yaml", "values-eks.yaml"),
+    ("values-baseline.yaml", "values-guest.yaml"),
+)
 
 
-def render() -> tuple[list[dict], list[dict]]:
-    out = subprocess.run(
-        ["helm", "template", "gibson", "helm/gibson",
-         "-f", "helm/gibson/values-baseline.yaml", "-f", "helm/testdata/render-inputs/gibson.yaml",
-         "--namespace", "gibson"],
-        cwd=ROOT, capture_output=True, text=True, check=True,
-    ).stdout
+def render(profile: tuple[str, ...] = PROFILES[0]) -> tuple[list[dict], list[dict]]:
+    args = ["helm", "template", "gibson", "helm/gibson", "-f", "helm/testdata/render-inputs/gibson.yaml",
+            "--namespace", "gibson"]
+    for f in profile:
+        args += ["-f", f"helm/gibson/{f}"]
+    out = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, check=True).stdout
     docs = [d for d in yaml.safe_load_all(out) if d]
-    probes = ((yaml.safe_load(open(os.path.join(ROOT, "helm", "gibson", "values.yaml"))) or {}).get("webhookGate") or {}).get("probes") or []
-    return docs, probes
+    return docs, gate_probes(docs)
 
 
-def judge(docs: list[dict], probes: list[dict], release_ns: str = "gibson") -> list[str]:
+def gate_probes(docs: list[dict]) -> list[dict]:
+    """The probes that the rendered gate Job walks: `config|webhook|namespace|service|port|path` lines."""
+    for d in docs:
+        if d.get("kind") == "Job" and d["metadata"]["name"] == "gibson-webhook-gate":
+            script = d["spec"]["template"]["spec"]["containers"][0]["args"][0]
+            body = script.split("<<'PROBES'\n", 1)[1].split("\nPROBES", 1)[0]
+            out = []
+            for line in body.splitlines():
+                config, webhook, namespace, service, port, path = line.strip().split("|")
+                out.append({"config": config, "webhook": webhook, "namespace": namespace, "service": service,
+                            "port": int(port), "path": path})
+            return out
+    raise SystemExit("the render has no Job/gibson-webhook-gate: this guard cannot read the probes (this is NOT a pass)")
+
+
+def ignored(docs: list[dict]) -> set[str]:
+    """The names of the webhooks that a render installs at Ignore."""
+    return {w.get("name") for d in docs
+            if d.get("kind") in ("ValidatingWebhookConfiguration", "MutatingWebhookConfiguration")
+            for w in d.get("webhooks") or [] if w.get("failurePolicy") == "Ignore"}
+
+
+def stale(seen: set[str], accepted: dict) -> list[str]:
+    """An accepted exception that no render uses."""
+    return [f"ACCEPTED_IGNORE names {name}, and no render installs that webhook at Ignore: delete the entry"
+            for name in sorted(accepted) if name not in seen]
+
+
+def judge_all(accepted: dict = ACCEPTED_IGNORE) -> list[str]:
+    out, seen = [], set()
+    for profile in PROFILES:
+        docs, probes = render(profile)
+        seen |= ignored(docs)
+        out += [f"[{'+'.join(profile)}] {line}" for line in judge(docs, probes, accepted=accepted)]
+    return out + stale(seen, accepted)
+
+
+def judge(docs: list[dict], probes: list[dict], release_ns: str = "gibson", accepted: dict = ACCEPTED_IGNORE) -> list[str]:
     out = []
     hooks = []  # (config, webhook, dial tuple or None, failurePolicy)
     for d in docs:
@@ -69,7 +114,7 @@ def judge(docs: list[dict], probes: list[dict], release_ns: str = "gibson") -> l
             if not svc:
                 out.append(f"{cfg}/{name}: url-backed (no clientConfig.service); the teardown sweep cannot clear it")
             fp = w.get("failurePolicy")
-            if fp != "Fail" and name not in FLIPPED_BY_HOOK:
+            if fp != "Fail" and name not in accepted:
                 out.append(f"{cfg}/{name}: failurePolicy {fp!r}, a fail-open admission webhook")
             hooks.append((cfg, name, dial, fp))
     # A webhook NAME may appear in both a mutating and a validating
@@ -126,6 +171,15 @@ webhooks:
   failurePolicy: Ignore
   clientConfig: {service: {name: d-svc, namespace: gibson, path: /validate}}
 """
+SPIRE_FIXTURE = """
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata: {name: spire-controller-manager-webhook}
+webhooks:
+- name: vclusterspiffeid.kb.io
+  failurePolicy: Ignore
+  clientConfig: {service: {name: spire-webhook, namespace: gibson, path: /validate}}
+"""
 FIXTURE_PROBES = [
     {"config": "probed", "webhook": "a.example.io", "service": "a-svc", "port": 443, "path": "/validate"},
     {"config": "gone", "webhook": "z.example.io", "service": "z", "port": 443, "path": "/"},
@@ -144,22 +198,42 @@ def selftest() -> int:
     if len(got) != 2 or not any("dials" in g for g in got) or not any("no probe" in g for g in got):
         print(f"SELFTEST FAIL: a probe on the wrong path must fail as a wrong dial AND leave the webhook unprobed, got {got}")
         return 1
-    live = judge(*render())
+    # The exception list: a listed webhook at Ignore passes, and an entry that
+    # no render uses fails.
+    spire = [d for d in yaml.safe_load_all(SPIRE_FIXTURE) if d]
+    listed = {"vclusterspiffeid.kb.io": "fixture"}
+    if judge(spire, [], accepted=listed) or stale(ignored(spire), listed):
+        print("SELFTEST FAIL: a listed webhook at Ignore must pass")
+        return 1
+    if len(judge(spire, [], accepted={})) != 1:
+        print("SELFTEST FAIL: the same webhook with no entry must fail as fail-open")
+        return 1
+    gone = dict(listed, **{"vgone.kb.io": "fixture"})
+    if len(stale(ignored(spire), gone)) != 1:
+        print("SELFTEST FAIL: an entry for a webhook that the render does not contain must fail as stale")
+        return 1
+    spire[0]["webhooks"][0]["failurePolicy"] = "Fail"
+    if len(stale(ignored(spire), listed)) != 1:
+        print("SELFTEST FAIL: an entry for a webhook that renders Fail must fail as stale")
+        return 1
+    live = judge_all()
     if live:
         print("SELFTEST FAIL: the render violates the webhook contracts:\n  " + "\n  ".join(live))
         return 1
-    print("OK: an unprobed Fail webhook, a url-backed one, a fail-open one, a stale probe and a wrong path fail; the render is clean")
+    print("OK: an unprobed Fail webhook, a url-backed one, a fail-open one, a stale probe, a wrong path and a stale "
+          f"exception fail; {len(PROFILES)} profiles are clean")
     return 0
 
 
 def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
-    got = judge(*render())
+    got = judge_all()
     if got:
         print("❌ admission webhooks:\n  " + "\n  ".join(got))
         return 1
-    print("✓ webhooks: every Fail webhook is probed before activation, every webhook is service-backed, none fail open")
+    print(f"✓ webhooks: in {len(PROFILES)} profiles every Fail webhook is probed before activation, every webhook is "
+          f"service-backed, and {len(ACCEPTED_IGNORE)} accepted webhooks use Ignore (ADR-0076)")
     return 0
 
 

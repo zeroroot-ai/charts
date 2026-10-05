@@ -350,9 +350,14 @@ fixture-flag-follows-runner: ## GIBSON_TEST_FIXTURES_ENABLED follows gibson.e2eR
 	@python3 scripts/check-fixture-flag-follows-runner.py --selftest
 	@python3 scripts/check-fixture-flag-follows-runner.py
 
-webhooks: ## Every Fail webhook is probed before activation, every webhook is service-backed, none fail open (charts#17)
+webhooks: ## Every Fail webhook is probed before activation, every webhook is service-backed, and only the two accepted webhooks use Ignore (charts#17, ADR-0076)
 	@python3 scripts/check-webhooks.py --selftest
 	@python3 scripts/check-webhooks.py
+
+.PHONY: spiffeid-selectors
+spiffeid-selectors: ## Each ClusterSPIFFEID names its workload selectors, or its name is on the list in the guard (charts#358)
+	@python3 scripts/check-spiffeid-selectors.py --selftest
+	@python3 scripts/check-spiffeid-selectors.py
 
 edge-config-identical: ## The Envoy edge renders identically on every substrate, one edge (ADR-0079, charts#17)
 	@python3 scripts/check-edge-config-identical.py --selftest
@@ -381,7 +386,7 @@ operator-rbac-fresh: ## The vendored cert-manager and External Secrets RBAC matc
 	@python3 scripts/vendor-operator-rbac.py --selftest
 	@python3 scripts/vendor-operator-rbac.py --check
 
-check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed env-consumed config-consumed contract-pins probes probe-timeouts helper-docs referenced-paths-exist cg-rotation-window email-smtp-external-secret smtp-tls-mode edge-rate-limits secure-pod daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows upgrade-pair envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes edge-grpc-routes edge-jwt-payload-unforgeable netpol-before-hooks openbao-login-diagnosis zitadel-claimed-host openbao-one-replica identity-admission-covers operator-rbac-covers reloader-names purge-tenant-backup-test no-render-time-secrets ## Everything that runs without a cluster
+check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed env-consumed config-consumed contract-pins probes probe-timeouts helper-docs referenced-paths-exist cg-rotation-window email-smtp-external-secret smtp-tls-mode edge-rate-limits secure-pod daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows upgrade-pair envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes edge-grpc-routes edge-jwt-payload-unforgeable netpol-before-hooks openbao-login-diagnosis zitadel-claimed-host openbao-one-replica identity-admission-covers operator-rbac-covers reloader-names purge-tenant-backup-test no-render-time-secrets spiffeid-selectors ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context
