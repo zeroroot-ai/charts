@@ -7363,31 +7363,18 @@ rules:
     resources: ["events"]
     verbs: ["create", "patch"]
 
-  # NO clusterspiffeids GRANT — deliberately removed, do not re-add
-  # without also constraining WHAT may be written.
-  #
-  # This ClusterRole used to hold cluster-wide
-  # get/list/watch/create/update/patch/delete on
-  # `spire.spiffe.io/clusterspiffeids`. A ClusterSPIFFEID maps a pod
-  # selector to a SPIFFE ID, so that grant let one compromised operator
-  # pod write its own CR mapping `spiffe://<td>/platform/daemon` onto its
-  # own pod and mint any platform identity in a single API call —
-  # bypassing the platform-identity admission policy entirely, since that
-  # policy governs pods and workloads, not ClusterSPIFFEIDs.
-  #
-  # It was also dead. `grep -rn "spire.spiffe.io\|ClusterSPIFFEID"` over
-  # zeroroot-ai/gibson returns nothing in Go or YAML: every
-  # ClusterSPIFFEID in this platform is rendered by
-  # gibson-workloads/templates/spire-server/clusterspiffeids.yaml, by
-  # Helm, not by the operator. controller-gen agrees — the generated
-  # operators/tenant/config/rbac/role.yaml has never contained it.
-  #
-  # If the per-tenant ClusterSPIFFEID design is ever built (the
-  # tenant-operator writing one CR per tenant with the literal tenant id),
-  # re-add it together with a ValidatingAdmissionPolicy on
-  # clusterspiffeids CREATE/UPDATE constraining the spiffeIDTemplate this
-  # operator may write to the `spiffe://<td>/tenant/` prefix. The grant
-  # without that constraint is a platform-identity minting primitive.
+  # ClusterSPIFFEIDs of plugin instances (gibson#815). The operator writes
+  # one for each (plugin, tenant): gibson-plugin-<vendor>-<tenant>, with the
+  # ID spiffe://<td>/plugin/<vendor>/<tenant>. A ClusterSPIFFEID maps a pod
+  # selector to a SPIFFE ID, so this grant alone could mint any platform
+  # identity. The admission policy gibson-tenant-operator-clusterspiffeid-scope
+  # (clusterspiffeid-scope-admission.yaml) holds each write of this operator
+  # to the plugin shape, and refuses a change to any other ClusterSPIFFEID.
+  # scripts/check-owner-credential-readers.py does not cover this kind; the
+  # policy and its Deny binding render unconditionally next to this rule.
+  - apiGroups: ["spire.spiffe.io"]
+    resources: ["clusterspiffeids"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
 
   # Per-tenant RoleBindings. The operator creates a RoleBinding in each
   # tenant namespace at provision time, scoped to the chart-defined
@@ -7404,14 +7391,36 @@ rules:
   # operator reference the named ClusterRole from a RoleBinding even
   # though the operator itself doesn't hold every verb in that
   # ClusterRole's rules. Scoped via resourceNames so the operator can
-  # bind ONLY these two ClusterRoles — not arbitrary cluster-admin etc.
+  # bind ONLY these three ClusterRoles — not arbitrary cluster-admin etc.
   # gibson-connector-creds is the daemon's Secret grant (gibson-workloads
   # connector-rbac.yaml); the operator binds it into each tenant namespace
   # so the daemon's Secret access is bounded to tenant namespaces.
+  # gibson-tenant-operator-plugin-namespace holds the rules of the operator
+  # in each tenant-<t>-plugins namespace (gibson#815).
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
-    resourceNames: ["gibson-tenant-operator-tenant-namespace", "gibson-connector-creds"]
+    resourceNames: ["gibson-tenant-operator-tenant-namespace", "gibson-connector-creds", "gibson-tenant-operator-plugin-namespace"]
     verbs: ["bind"]
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/plugin-namespace-cluster-role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gibson-tenant-operator-plugin-namespace
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/component: tenant-operator-plugin-namespace-rbac
+    app.kubernetes.io/part-of: gibson
+rules:
+  - apiGroups: ["apps"]
+    resources: [deployments]
+    verbs: [get, list, create, update, delete]
+  - apiGroups: [""]
+    resources: [serviceaccounts, configmaps]
+    verbs: [get, list, create, update, delete]
+  - apiGroups: ["networking.k8s.io"]
+    resources: [networkpolicies]
+    verbs: [get, list, create, update, delete]
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/tenant-namespace-cluster-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -13595,6 +13604,33 @@ spec:
             # fixed path platform/daemon.
             - name: GIBSON_DAEMON_SPIFFE_ID
               value: "spiffe://localhost.zeroroot.ai/platform/daemon"
+            # Per-tenant plugins (gibson#815). The operator deploys one
+            # instance of a catalog plugin for each tenant that enables it, in
+            # the namespace tenant-<t>-plugins, and writes its ClusterSPIFFEID
+            # spiffe://<td>/plugin/<vendor>/<tenant>. The operator exits when
+            # one of the four required values is empty.
+            #   PLUGIN_SPIRE_CLASS_NAME     the className of the SPIRE
+            #                               controller-manager, or SPIRE
+            #                               ignores the ClusterSPIFFEID.
+            #   PLUGIN_TRUST_DOMAIN         the trust domain of the install.
+            #   PLUGIN_GIBSON_URL           the edge origin; the plugin dials
+            #                               the daemon only through Envoy.
+            #   PLUGIN_WAIT_FOR_SPIRE_IMAGE the image of the init container
+            #                               that waits for the SPIRE socket.
+            #   PLUGIN_ENVOY_CA_FILE        the edge CA that the operator
+            #                               copies into each plugin namespace.
+            #                               Empty when the operator mounts no
+            #                               edge CA: the edge has a public cert.
+            - name: PLUGIN_SPIRE_CLASS_NAME
+              value: "gibson-gibson"
+            - name: PLUGIN_TRUST_DOMAIN
+              value: "localhost.zeroroot.ai"
+            - name: PLUGIN_GIBSON_URL
+              value: "https://api.localhost.zeroroot.ai"
+            - name: PLUGIN_WAIT_FOR_SPIRE_IMAGE
+              value: "ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
+            - name: PLUGIN_ENVOY_CA_FILE
+              value: "/etc/ssl/envoy-ca/envoy-ca.crt"
             # First-tenant seed (gibson#1496): on a self-hosted install with no
             # signup, the operator enqueues the first tenant over its SPIFFE
             # identity via EnqueueTenantProvisioning — the session-less path,
@@ -23560,6 +23596,144 @@ spec:
   namespaceSelector:
     any: true
 ---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/clusterspiffeid-scope-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gibson-tenant-operator-clusterspiffeid-scope
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  # Every field access below is has()-guarded, so an evaluation error means a
+  # malformed policy. That must not turn into no control.
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["spire.spiffe.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["clusterspiffeids"]
+  matchConditions:
+    - name: tenant-operator
+      expression: request.userInfo.username == "system:serviceaccount:gibson:gibson-tenant-operator"
+  variables:
+    - name: obj
+      expression: "request.operation == 'DELETE' ? oldObject : object"
+    - name: labels
+      expression: >-
+        has(variables.obj.metadata.labels) ? variables.obj.metadata.labels : {}
+    - name: managed
+      expression: >-
+        'app.kubernetes.io/managed-by' in variables.labels
+          && variables.labels['app.kubernetes.io/managed-by'] == 'gibson-tenant-operator'
+    - name: oldManaged
+      expression: >-
+        request.operation == 'CREATE'
+          || (has(oldObject.metadata.labels)
+              && 'app.kubernetes.io/managed-by' in oldObject.metadata.labels
+              && oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'gibson-tenant-operator')
+    - name: v
+      expression: >-
+        'gibson.zeroroot.ai/plugin' in variables.labels ? variables.labels['gibson.zeroroot.ai/plugin'] : ''
+    - name: t
+      expression: >-
+        'gibson.zeroroot.ai/tenant' in variables.labels ? variables.labels['gibson.zeroroot.ai/tenant'] : ''
+    - name: pluginNs
+      expression: "'tenant-' + variables.t + '-plugins'"
+  validations:
+    - expression: variables.managed && variables.oldManaged
+      reason: Forbidden
+      message: >-
+        the tenant-operator writes only ClusterSPIFFEIDs labeled
+        app.kubernetes.io/managed-by=gibson-tenant-operator, and changes or
+        deletes only its own (gibson#815)
+    - expression: >-
+        variables.v.matches('^[a-z][a-z0-9-]{2,40}$')
+          && variables.t.matches('^[a-z0-9]([a-z0-9-]*[a-z0-9])?$') && size(variables.t) <= 48
+          && variables.obj.metadata.name == 'gibson-plugin-' + variables.v + '-' + variables.t
+      reason: Forbidden
+      message: >-
+        a plugin ClusterSPIFFEID is named gibson-plugin-<plugin>-<tenant>, from
+        its labels gibson.zeroroot.ai/plugin and gibson.zeroroot.ai/tenant
+    - expression: >-
+        request.operation == 'DELETE' || (
+          has(object.spec)
+          && has(object.spec.className) && object.spec.className == "gibson-gibson"
+          && has(object.spec.spiffeIDTemplate)
+          && object.spec.spiffeIDTemplate == "spiffe://localhost.zeroroot.ai/plugin/" + variables.v + '/' + variables.t
+          && has(object.spec.namespaceSelector) && has(object.spec.namespaceSelector.matchLabels)
+          && !has(object.spec.namespaceSelector.matchExpressions)
+          && object.spec.namespaceSelector.matchLabels == {'kubernetes.io/metadata.name': variables.pluginNs}
+          && has(object.spec.podSelector) && has(object.spec.podSelector.matchLabels)
+          && !has(object.spec.podSelector.matchExpressions)
+          && object.spec.podSelector.matchLabels == {'app.kubernetes.io/component': 'plugin', 'gibson.zeroroot.ai/plugin': variables.v}
+          && has(object.spec.workloadSelectorTemplates)
+          && object.spec.workloadSelectorTemplates == ['k8s:ns:' + variables.pluginNs, 'k8s:sa:gibson-plugin-' + variables.v])
+      reason: Forbidden
+      messageExpression: >-
+        'a plugin ClusterSPIFFEID of the tenant-operator must name the ID spiffe://localhost.zeroroot.ai/plugin/' +
+        variables.v + '/' + variables.t + ', the class gibson-gibson, and select only the plugin pod in ' +
+        variables.pluginNs + ' (gibson#815)'
+    - expression: >-
+        request.operation == 'DELETE' || (
+          has(object.spec)
+          && !has(object.spec.admin) && !has(object.spec.autoPopulateDNSNames)
+          && !has(object.spec.dnsNameTemplates) && !has(object.spec.downstream)
+          && !has(object.spec.fallback) && !has(object.spec.federatesWith)
+          && !has(object.spec.hint) && !has(object.spec.jwtTtl) && !has(object.spec.ttl))
+      reason: Forbidden
+      message: >-
+        a plugin ClusterSPIFFEID of the tenant-operator sets no DNS name,
+        federation, admin, downstream, fallback, hint or TTL field (gibson#815)
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/plugin-namespace-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gibson-tenant-plugin-workloads
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["jobs", "cronjobs"]
+  matchConditions:
+    - name: plugin-namespace
+      expression: request.namespace.matches('^tenant-.+-plugins$')
+  variables:
+    - name: user
+      expression: request.userInfo.username
+    - name: resource
+      expression: request.resource.resource
+    - name: gcUpdate
+      expression: >-
+        request.operation == 'UPDATE' && variables.user == "system:serviceaccount:kube-system:generic-garbage-collector"
+  validations:
+    - expression: >-
+        variables.gcUpdate
+          || (variables.resource == 'deployments' && variables.user == "system:serviceaccount:gibson:gibson-tenant-operator")
+          || (variables.resource == 'replicasets' && variables.user == 'system:serviceaccount:kube-system:deployment-controller')
+          || (variables.resource == 'pods' && variables.user == 'system:serviceaccount:kube-system:replicaset-controller')
+      reason: Forbidden
+      messageExpression: >-
+        'in a plugin namespace only the tenant-operator writes a Deployment, and only the built-in' +
+        ' controllers derive its ReplicaSet and pods; ' + variables.user + ' may not write ' +
+        variables.resource + ' in ' + request.namespace + ' (gibson#815)'
+---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/rolebinding-scope-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -23873,7 +24047,7 @@ spec:
           : 'default'
     - name: claimsPlatformIdentity
       expression: >-
-        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","envoy","openbao","plugin"]
+        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","envoy","openbao"]
           || variables.sa in ["gibson","gibson-ext-authz","gibson-dashboard","gibson-tenant-operator","gibson-connector-operator","gibson-envoy","gibson-ratelimit","gibson-openbao"]
   validations:
     - expression: >-
@@ -23946,7 +24120,7 @@ spec:
           : 'default'
     - name: claimsPlatformIdentity
       expression: >-
-        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","envoy","openbao","plugin"]
+        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","envoy","openbao"]
           || variables.sa in ["gibson","gibson-ext-authz","gibson-dashboard","gibson-tenant-operator","gibson-connector-operator","gibson-envoy","gibson-ratelimit","gibson-openbao"]
     # A restart-only UPDATE by Reloader: the pod template's spec and labels are
     # unchanged, only template annotations moved. Nothing new claims an
@@ -23974,6 +24148,30 @@ spec:
         ' issued to a workload written by the principal that manages this release. Add this' +
         ' principal to spire.identityAdmission.workloadCreators if it legitimately deploys' +
         ' Gibson, or drop the platform component label and ServiceAccount from the pod template.'
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/clusterspiffeid-scope-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gibson-tenant-operator-clusterspiffeid-scope
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  policyName: gibson-tenant-operator-clusterspiffeid-scope
+  validationActions: ["Deny"]
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/plugin-namespace-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gibson-tenant-plugin-workloads
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  policyName: gibson-tenant-plugin-workloads
+  validationActions: ["Deny"]
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/rolebinding-scope-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1

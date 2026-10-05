@@ -103,31 +103,18 @@ rules:
     resources: ["events"]
     verbs: ["create", "patch"]
 
-  # NO clusterspiffeids GRANT — deliberately removed, do not re-add
-  # without also constraining WHAT may be written.
-  #
-  # This ClusterRole used to hold cluster-wide
-  # get/list/watch/create/update/patch/delete on
-  # `spire.spiffe.io/clusterspiffeids`. A ClusterSPIFFEID maps a pod
-  # selector to a SPIFFE ID, so that grant let one compromised operator
-  # pod write its own CR mapping `spiffe://<td>/platform/daemon` onto its
-  # own pod and mint any platform identity in a single API call —
-  # bypassing the platform-identity admission policy entirely, since that
-  # policy governs pods and workloads, not ClusterSPIFFEIDs.
-  #
-  # It was also dead. `grep -rn "spire.spiffe.io\|ClusterSPIFFEID"` over
-  # zeroroot-ai/gibson returns nothing in Go or YAML: every
-  # ClusterSPIFFEID in this platform is rendered by
-  # gibson-workloads/templates/spire-server/clusterspiffeids.yaml, by
-  # Helm, not by the operator. controller-gen agrees — the generated
-  # operators/tenant/config/rbac/role.yaml has never contained it.
-  #
-  # If the per-tenant ClusterSPIFFEID design is ever built (the
-  # tenant-operator writing one CR per tenant with the literal tenant id),
-  # re-add it together with a ValidatingAdmissionPolicy on
-  # clusterspiffeids CREATE/UPDATE constraining the spiffeIDTemplate this
-  # operator may write to the `spiffe://<td>/tenant/` prefix. The grant
-  # without that constraint is a platform-identity minting primitive.
+  # ClusterSPIFFEIDs of plugin instances (gibson#815). The operator writes
+  # one for each (plugin, tenant): gibson-plugin-<vendor>-<tenant>, with the
+  # ID spiffe://<td>/plugin/<vendor>/<tenant>. A ClusterSPIFFEID maps a pod
+  # selector to a SPIFFE ID, so this grant alone could mint any platform
+  # identity. The admission policy gibson-tenant-operator-clusterspiffeid-scope
+  # (clusterspiffeid-scope-admission.yaml) holds each write of this operator
+  # to the plugin shape, and refuses a change to any other ClusterSPIFFEID.
+  # scripts/check-owner-credential-readers.py does not cover this kind; the
+  # policy and its Deny binding render unconditionally next to this rule.
+  - apiGroups: ["spire.spiffe.io"]
+    resources: ["clusterspiffeids"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
 
   # Per-tenant RoleBindings. The operator creates a RoleBinding in each
   # tenant namespace at provision time, scoped to the chart-defined
@@ -144,13 +131,15 @@ rules:
   # operator reference the named ClusterRole from a RoleBinding even
   # though the operator itself doesn't hold every verb in that
   # ClusterRole's rules. Scoped via resourceNames so the operator can
-  # bind ONLY these two ClusterRoles — not arbitrary cluster-admin etc.
+  # bind ONLY these three ClusterRoles — not arbitrary cluster-admin etc.
   # gibson-connector-creds is the daemon's Secret grant (gibson-workloads
   # connector-rbac.yaml); the operator binds it into each tenant namespace
   # so the daemon's Secret access is bounded to tenant namespaces.
+  # gibson-tenant-operator-plugin-namespace holds the rules of the operator
+  # in each tenant-<t>-plugins namespace (gibson#815).
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
-    resourceNames: ["gibson-tenant-operator-tenant-namespace", "gibson-connector-creds"]
+    resourceNames: ["gibson-tenant-operator-tenant-namespace", "gibson-connector-creds", "gibson-tenant-operator-plugin-namespace"]
     verbs: ["bind"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

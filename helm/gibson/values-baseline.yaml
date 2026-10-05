@@ -168,12 +168,8 @@ gibson-workloads:
       audience: "gibson-saas"
   gibson:
     replicas: 1
-    # First-party plugin SVID enrollment. The baseline install always
-    # provisions tenant "primary", so bind plugin SVIDs to it. The owner sub is
-    # per-instance runtime data (a fresh Zitadel org on every cluster recreate),
-    # so platformTenantOwner is NOT set here — it is supplied at deploy via
-    # --set / EXTRA_VALUES. Without the owner set, SVID enrollment stays off (a
-    # safe no-op) rather than binding to a stale sub.
+    # The baseline install always provisions tenant "primary". The e2e
+    # runner tenancy and the Neo4j APOC check of the daemon read this slug.
     platformTenant: "primary"
     # Daemon → setec dispatch. Untrusted tools AND the platform agent
     # (zerocool) run as ephemeral setec sandboxes launched through the frontend
@@ -460,17 +456,6 @@ gibson-workloads:
       allowClusterWideSandboxWrite: false
     multiTenancy:
       enabled: false
-  # First-party plugins (R5): the `plugins` mechanism is shipped by the
-  # gibson-workloads chart and is EMPTY here on purpose. values-baseline.yaml is
-  # the customer-install-grade profile — every first-party image it names must
-  # be an @sha256 digest of a RELEASED image (digest-pin-check, deploy#789). The
-  # github reference plugin's image is published by the integrations-repo CI and
-  # is not yet a released, digest-pinned artifact, so it is brought up through
-  # the sanctioned moving-tag overlay (test/baseline/plugins.values.yaml, layered
-  # by `make baseline-plugins` / EXTRA_VALUES) rather than pinned here. Once the
-  # plugin image is published and a release is cut, promote it into this file
-  # digest-pinned (bump-image-digest) and retire the overlay — the standard
-  # first-party image onboarding lifecycle documented in scripts/baseline-up.sh.
 gibson-operators:
   global:
     domain: "localhost.zeroroot.ai"

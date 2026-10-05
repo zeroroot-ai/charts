@@ -175,9 +175,11 @@ lists.
 {{- $ia := (.Values.spire.identityAdmission | default dict) -}}
 {{- /* PROTECTED_COMPONENTS holds the podSelector component of every
        ClusterSPIFFEID in clusterspiffeids.yaml, and PROTECTED_SAS holds their
-       literal k8s:sa: workload selectors, through the same helpers and the
-       same range over .Values.plugins. A pod that matches EITHER is an
-       identity candidate.
+       literal k8s:sa: workload selectors, through the same helpers. A pod
+       that matches EITHER is an identity candidate. Plugin identities are not
+       in this namespace: the tenant-operator runs each plugin in a
+       tenant-<t>-plugins namespace, and gibson-tenant-plugin-workloads
+       (gibson-operators) guards those (gibson#815).
 
        The two files are held together by a check, not by a comment:
        scripts/check-identity-admission-covers.py renders both and fails when
@@ -185,7 +187,7 @@ lists.
        lists. Two identities stay out on purpose, and the check names them:
        platform/helm-test and platform/e2e-runner (see clusterspiffeids.yaml
        for the reason each carries no privilege). */ -}}
-{{- $protectedComponents := list "daemon" "ext-authz" "ratelimit" "dashboard" "tenant-operator" "connector-operator" "envoy" "openbao" "plugin" -}}
+{{- $protectedComponents := list "daemon" "ext-authz" "ratelimit" "dashboard" "tenant-operator" "connector-operator" "envoy" "openbao" -}}
 {{- $protectedSAs := list
       (include "gibson.serviceAccountName" .)
       (include "gibson.extAuthzServiceAccountName" .)
@@ -195,13 +197,6 @@ lists.
       (include "gibson.envoyServiceAccountName" .)
       (include "gibson.ratelimitServiceAccountName" .)
       (include "gibson.openbaoServiceAccountName" .) -}}
-{{- /* One ServiceAccount for each enabled plugin: the same range and the
-       same name that clusterspiffeids.yaml and plugins/plugins.yaml use. */ -}}
-{{- range $vendor, $p := .Values.plugins }}
-{{- if $p.enabled }}
-{{- $protectedSAs = append $protectedSAs (printf "%s-plugin-%s" $.Release.Name $vendor) }}
-{{- end }}
-{{- end }}
 {{- /* Built-in workload controllers. A pod created by any of these was
        produced from a Deployment/StatefulSet/DaemonSet/Job/CronJob that
        the SECOND policy in this file checked as its own object — which is

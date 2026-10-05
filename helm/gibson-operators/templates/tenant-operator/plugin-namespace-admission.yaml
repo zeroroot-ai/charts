@@ -1,0 +1,85 @@
+{{- /*
+Who may write a workload in a plugin namespace (gibson#815).
+
+The tenant-operator runs each plugin instance in tenant-<t>-plugins. Its
+ClusterSPIFFEID selects the pods with the labels
+app.kubernetes.io/component=plugin and gibson.zeroroot.ai/plugin=<v> and the
+ServiceAccount gibson-plugin-<v>. Like the platform namespace
+(gibson-platform-identity-pods and -workloads in gibson-workloads), each of
+those facts comes from the pod object. A principal that can write a pod there
+can claim the plugin identity of that tenant.
+
+This policy closes each hop in a namespace whose name matches
+^tenant-.+-plugins$:
+
+  Deployment   only the tenant-operator writes it.
+  ReplicaSet   only deployment-controller writes it.
+  Pod          only replicaset-controller creates it.
+  StatefulSet, DaemonSet, Job, CronJob
+               nobody: a plugin instance is one Deployment.
+
+The garbage collector may UPDATE an object (it removes finalizers when an
+owner goes). A pod UPDATE is not matched: its labels and its ServiceAccount
+cannot change. The tenant-operator refuses a namespace with this name that
+it did not make, and the daemon refuses a tenant name that ends in
+-plugins, so a tenant namespace never matches.
+*/ -}}
+{{- $ns := .Values.tenantOperator.namespace | default "gibson" }}
+{{- $operator := printf "system:serviceaccount:%s:gibson-tenant-operator" $ns }}
+{{- $gc := "system:serviceaccount:kube-system:generic-garbage-collector" }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gibson-tenant-plugin-workloads
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["jobs", "cronjobs"]
+  matchConditions:
+    - name: plugin-namespace
+      expression: request.namespace.matches('^tenant-.+-plugins$')
+  variables:
+    - name: user
+      expression: request.userInfo.username
+    - name: resource
+      expression: request.resource.resource
+    - name: gcUpdate
+      expression: >-
+        request.operation == 'UPDATE' && variables.user == {{ $gc | quote }}
+  validations:
+    - expression: >-
+        variables.gcUpdate
+          || (variables.resource == 'deployments' && variables.user == {{ $operator | quote }})
+          || (variables.resource == 'replicasets' && variables.user == 'system:serviceaccount:kube-system:deployment-controller')
+          || (variables.resource == 'pods' && variables.user == 'system:serviceaccount:kube-system:replicaset-controller')
+      reason: Forbidden
+      messageExpression: >-
+        'in a plugin namespace only the tenant-operator writes a Deployment, and only the built-in' +
+        ' controllers derive its ReplicaSet and pods; ' + variables.user + ' may not write ' +
+        variables.resource + ' in ' + request.namespace + ' (gibson#815)'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gibson-tenant-plugin-workloads
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  policyName: gibson-tenant-plugin-workloads
+  validationActions: ["Deny"]
