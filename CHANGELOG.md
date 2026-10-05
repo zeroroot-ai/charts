@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.136.7](https://github.com/zeroroot-ai/charts/compare/v0.136.6...v0.136.7) (2026-10-05)
+
+
+### Bug Fixes
+
+* **pins:** gibson v0.153.1, and the role guard holds the platform-operator too ([#415](https://github.com/zeroroot-ai/charts/issues/415)) ([50ccc9d](https://github.com/zeroroot-ai/charts/commit/50ccc9d0597554ac197a98cda30a0f2ad7e43bcc))
+* **spire:** the chart registers no identity that has no workload ([#409](https://github.com/zeroroot-ai/charts/issues/409)) ([9b9af52](https://github.com/zeroroot-ai/charts/commit/9b9af529afcd1c04cace2a433877ee82f29f5d40))
+
 ## [0.136.6](https://github.com/zeroroot-ai/charts/compare/v0.136.5...v0.136.6) (2026-10-05)
 
 
