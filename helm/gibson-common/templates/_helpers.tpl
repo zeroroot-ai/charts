@@ -60,10 +60,10 @@ Values read: none. Derived from .Release.Name.
   Resolution order:
     1. .Values.gibson.daemonAddress when set (operator escape hatch for
        split-release installs).
-    2. .Values.tenantOperator.daemonGrpcAddress when set (legacy key in
-       the operators chart; kept for backward compat during the migration).
-    3. "<release-fullname-of-workloads>:50051" — the workloads chart's
-       conventional Service name + the daemon's listen port.
+    2. "<daemon Service>:50051". The daemon Service is gibson.fullname of
+       the workloads chart, under the same release: "<release>-gibson-workloads",
+       or the release name alone when it already holds "gibson-workloads".
+       Under the umbrella release `gibson` that is "gibson-gibson-workloads".
 
   Callers in templates:
       env:
@@ -71,22 +71,24 @@ Values read: none. Derived from .Release.Name.
           value: {{ include "gibson.daemonAddress" . | quote }}
 
   Values keys read:
-    - .Values.gibson.daemonAddress       (preferred override)
-    - .Values.tenantOperator.daemonGrpcAddress (legacy override)
+    - .Values.gibson.daemonAddress       (the one override)
     - .Release.Name                      (used to construct the default)
+
+  Bug class it locks: the default named "<release>:50051", a Service that no
+  release renders, and a second values key hid that by overriding it in
+  every install (charts#360).
 */}}
 {{- define "gibson.daemonAddress" -}}
 {{- $override := "" -}}
 {{- if and (hasKey .Values "gibson") .Values.gibson -}}
   {{- $override = .Values.gibson.daemonAddress | default "" -}}
 {{- end -}}
-{{- if and (eq $override "") (hasKey .Values "tenantOperator") .Values.tenantOperator -}}
-  {{- $override = .Values.tenantOperator.daemonGrpcAddress | default "" -}}
-{{- end -}}
 {{- if ne $override "" -}}
 {{- $override -}}
 {{- else -}}
-{{- printf "%s:50051" (default "gibson" .Release.Name) -}}
+{{- $workloads := "gibson-workloads" -}}
+{{- $svc := ternary .Release.Name (printf "%s-%s" .Release.Name $workloads) (contains $workloads .Release.Name) -}}
+{{- printf "%s:50051" ($svc | trunc 63 | trimSuffix "-") -}}
 {{- end -}}
 {{- end -}}
 
