@@ -188,6 +188,14 @@ data:
 
     api_addr = "http://{{ .Release.Name }}-openbao:8200"
     cluster_addr = "http://{{ .Release.Name }}-openbao:8201"
+{{- /* The config above writes `storage "file"`: every pod holds its own data
+       directory. Two pods are two secret stores behind one Service, so a
+       write lands on one and the next read can reach the other. The prod
+       overlay set three replicas with a comment that named Raft storage this
+       chart never had (hosted#400). Fail the render, never the cluster. */ -}}
+{{- if gt (int .Values.openbao.replicas) 1 }}
+{{- fail (printf "openbao.replicas is %v, and this chart stores OpenBao on a file: each replica would be a separate secret store behind one Service. Set openbao.replicas to 1. More replicas need Raft storage in the chart first." .Values.openbao.replicas) }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
