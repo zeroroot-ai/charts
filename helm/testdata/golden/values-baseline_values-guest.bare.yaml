@@ -22347,10 +22347,34 @@ spec:
     spec:
       restartPolicy: OnFailure
       serviceAccountName: iam-admin-pat-escrow
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The script
+      # writes only to /tmp, an emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: escrow
         image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         env:
+        # kubectl writes its discovery cache under $HOME; /tmp is the one
+        # writable path.
+        - name: HOME
+          value: /tmp
         - name: BAO_ADDR
           value: "http://gibson-openbao:8200"
         - name: VAULT_ADMIN_TOKEN
@@ -22471,9 +22495,29 @@ spec:
       restartPolicy: OnFailure
       serviceAccountName: postgres-setup
       automountServiceAccountToken: false
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The script
+      # writes only to /tmp, an emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: setup
         image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         env:
         - name: PGHOST
           value: platform-postgres-rw.gibson.svc
@@ -22638,9 +22682,29 @@ spec:
       restartPolicy: OnFailure
       serviceAccountName: postgres-setup
       automountServiceAccountToken: false
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The script
+      # writes only to /tmp, an emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: setup
         image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         env:
         - name: PGHOST
           value: platform-postgres-rw.gibson.svc
@@ -22758,9 +22822,29 @@ spec:
       restartPolicy: OnFailure
       serviceAccountName: postgres-setup
       automountServiceAccountToken: false
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The script
+      # writes only to /tmp, an emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: setup
         image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         env:
         - name: PGHOST
           value: platform-postgres-rw.gibson.svc
@@ -22878,9 +22962,29 @@ spec:
       restartPolicy: OnFailure
       serviceAccountName: postgres-setup
       automountServiceAccountToken: false
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The script
+      # writes only to /tmp, an emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: setup
         image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         env:
         - name: PGHOST
           value: platform-postgres-rw.gibson.svc
@@ -22977,9 +23081,29 @@ spec:
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The script
+      # writes only to /tmp, an emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: gate
         image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         # busybox ash: no `set -o pipefail` (deploy#603-605). `set -e` only.
         command:
         - sh

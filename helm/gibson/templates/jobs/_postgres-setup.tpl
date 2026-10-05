@@ -52,9 +52,29 @@ spec:
   restartPolicy: OnFailure
   serviceAccountName: postgres-setup
   automountServiceAccountToken: false
+  # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+  # profile, a read-only root filesystem and no capabilities. The script
+  # writes only to /tmp, an emptyDir.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
+  volumes:
+  - name: tmp
+    emptyDir: {}
   containers:
   - name: setup
     image: {{ printf "%s:%s" $img.repository $img.tag | quote }}
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+    volumeMounts:
+    - name: tmp
+      mountPath: /tmp
     env:
     - name: PGHOST
       value: platform-postgres-rw.{{ $root.Release.Namespace }}.svc
