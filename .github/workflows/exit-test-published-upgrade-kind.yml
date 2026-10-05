@@ -65,6 +65,13 @@ on:
         description: The published version to upgrade TO (default, the newest)
         required: false
         type: string
+      upgrade_from_version:
+        description: >-
+          The published version to upgrade FROM (default, the one before). Name
+          the version an environment pins to prove that promotion, or the last
+          version that installs when the previous release cannot.
+        required: false
+        type: string
 
 concurrency:
   group: exit-test-published-upgrade-kind-${{ github.ref }}
@@ -82,4 +89,5 @@ jobs:
       distro: kind
       chart_version: ${{ inputs.chart_version }}
       upgrade_from_previous: true
+      upgrade_from_version: ${{ inputs.upgrade_from_version }}
     secrets: inherit

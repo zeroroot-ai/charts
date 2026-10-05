@@ -20,6 +20,10 @@ So: paginate, compare as tuples, and refuse a list too short to be the real
 one rather than reporting a pair from a partial read.
 
   resolve-upgrade-pair.py --to 0.136.1    print the version to upgrade from
+  resolve-upgrade-pair.py --to 0.136.6 --from 0.136.2
+                                          upgrade from a NAMED version: the one an
+                                          environment pins, or the last one that
+                                          installs when the previous one cannot
   resolve-upgrade-pair.py                 resolve both from the registry
   resolve-upgrade-pair.py --selftest      prove the ordering and the floor
 """
@@ -49,6 +53,19 @@ def previous(tags: list[str], to: str) -> str | None:
     sem = sorted({t for t in tags if SEMVER.match(t)}, key=key)
     below = [t for t in sem if key(t) < key(to)]
     return below[-1] if below else None
+
+
+def named(tags: list[str], to: str, frm: str) -> str | None:
+    """Why `frm` cannot be the version to upgrade from, or None when it can.
+    A named version is checked as hard as a resolved one: it must be published,
+    and it must be below the version under test."""
+    if not SEMVER.match(frm):
+        return f"--from {frm} is not a bare semver"
+    if frm not in tags:
+        return f"--from {frm} is not a published version"
+    if key(frm) >= key(to):
+        return f"--from {frm} is not below {to}: that is not an upgrade"
+    return None
 
 
 def token() -> str:
@@ -99,8 +116,18 @@ def selftest() -> int:
     if previous(["latest", "sha-abc1234", "0.5.0"], "0.6.0") != "0.5.0":
         print("SELFTEST FAIL: a non-semver tag was not ignored")
         return 1
+    named_cases = [
+        ("0.136.2", None), ("0.136.6", "not below"), ("0.137.0", "not a published"),
+        ("9.9.9", "not a published"), ("latest", "not a bare semver"),
+    ]
+    for frm, want in named_cases:
+        got = named(["0.136.2", "0.136.5", "0.136.6", "latest"], "0.136.6", frm)
+        if (got is None) != (want is None) or (want and want not in got):
+            print(f"SELFTEST FAIL: named(--from {frm}) = {got}, want {want}")
+            return 1
     print("resolve-upgrade-pair: selftest OK — version order not string order, "
-          "non-semver tags ignored, and an empty or equal-only list yields nothing")
+          "non-semver tags ignored, an empty or equal-only list yields nothing, and a "
+          "named version must be published and below the target")
     return 0
 
 
@@ -120,7 +147,15 @@ def main() -> int:
         return 1
     if to is None:
         to = max(sem, key=key)
-    prev = previous(tags, to)
+    frm = sys.argv[sys.argv.index("--from") + 1] if "--from" in sys.argv else ""
+    if frm:
+        why = named(tags, to, frm)
+        if why:
+            print(f"::error::resolve-upgrade-pair: {why}", file=sys.stderr)
+            return 1
+        prev = frm
+    else:
+        prev = previous(tags, to)
     if prev is None:
         print(f"::error::resolve-upgrade-pair: no published version below {to} in "
               f"{len(sem)} tag(s); there is nothing to upgrade FROM", file=sys.stderr)
