@@ -19530,6 +19530,9 @@ spec:
     spec:
       restartPolicy: OnFailure
       serviceAccountName: gibson-openbao-jwt-auth-init
+      # The Job talks to OpenBao only, never to the Kubernetes API, so the
+      # pod mounts no ServiceAccount token (ADR-0165, charts#394).
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -19681,6 +19684,10 @@ spec:
 
               echo "=== openbao-jwt-auth-init: OK ==="
           volumeMounts:
+            # The script writes its JSON and PEM files here (ADR-0165: a
+            # read-only root filesystem).
+            - name: tmp
+              mountPath: /tmp
             # gibson-openbao-keys is ESO-managed (templates/secrets/vault-keys.yaml).
             # kubelet projects each key in the Secret as a file under
             # mountPath; the script reads VAULT_ADMIN_TOKEN with cat above.
@@ -19696,7 +19703,7 @@ spec:
               readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false  # writes /tmp/*.json
+            readOnlyRootFilesystem: true  # writes only /tmp, an emptyDir
             capabilities:
               drop: ["ALL"]
           resources:
@@ -19707,6 +19714,8 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: openbao-admin-token
           secret:
             secretName: gibson-openbao-keys
