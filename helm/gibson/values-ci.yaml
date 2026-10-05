@@ -6,15 +6,17 @@
 #
 #   helm install gibson . -f values-baseline.yaml -f values-ci.yaml
 #
-# BYTE-IDENTICAL TO values-developer.yaml BELOW THIS HEADER, and that is
-# deliberate rather than an oversight. The owner decided on 2026-09-15 that
-# every environment below staging shares one footprint. The two files exist so
-# that CI may diverge later without renaming anything, which is the whole
-# reason the ladder names this rung separately.
+# The same content as values-developer.yaml, and that is deliberate. The owner
+# decided on 2026-09-15 that every environment below staging shares one
+# footprint. The two files exist so that CI may diverge later without renaming
+# anything, which is the whole reason the ladder names this rung separately.
 #
-# Nothing forces them equal. A guard that did would defeat the point. If this
-# file ever stops matching values-developer.yaml, say why here, because nothing
-# else will catch it.
+# scripts/check-rungs.sh renders both and fails when a request differs, and
+# when a limit differs that its ALLOWED_LIMIT_DIFFS list does not name. To
+# diverge, add the difference here, name it in that list, and say why here.
+#
+# The OpenBao limit that this file once raised now lives in the baseline
+# (cpu 1000m, memory 1Gi), so this file no longer sets a limit.
 #
 # A CI analysis on 2026-09-15 looked for a divergence worth making and found
 # none. The measured node budget is 1885m of 1900m CPU and 6900Mi of 7000Mi.
@@ -81,28 +83,11 @@ gibson-workloads:
       requests:
         cpu: 10m
         memory: 64Mi
-  # openbao: the request is cut like every other row here, and the LIMIT is
-  # raised, which is the opposite of what the rest of this file does and is
-  # deliberate.
-  #
-  # The chart default limit is 200m. The whole bringup waits on this one
-  # container: ESO's ClusterSecretStore cannot build a client until
-  # /v1/sys/health answers, and nothing behind it is created until that hook
-  # settles. Throttled to a fifth of a core on a loaded 2-core runner, it did
-  # not answer, and the probes failed on a deadline rather than a refusal
-  # (gibson exit-test-bank run 36922487157).
-  #
-  # A CPU limit throttles even when the node is idle, so the limit is the knob
-  # that matters here and the request is not. check-2core-overlay.py sums
-  # REQUESTS against the node budget, so burst room costs nothing it measures.
   openbao:
     resources:
       requests:
         cpu: 10m
         memory: 128Mi
-      limits:
-        cpu: 1000m
-        memory: 256Mi
   # envoy: the chart now reserves 512Mi (the Coraza WASM VM needs it at runtime),
   # but the 2-core test node cannot spare that as a RESERVATION — the limit
   # stays 1Gi so the VM still fits, only the scheduling request is cut.
