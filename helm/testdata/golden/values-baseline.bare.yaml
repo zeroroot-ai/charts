@@ -4530,8 +4530,8 @@ data:
                     xff_num_trusted_hops: 0
                     # Route on the path the upstream will see. Envoy resolves dot
                     # segments and merges repeated slashes before it matches a
-                    # route, so /zitadel.user.v2.UserService//SetEmail or a
-                    # /../ detour cannot pass the 403 routes below.
+                    # route, so /auth/v1/users/me//email or a /../ detour
+                    # cannot pass the 403 and 404 routes below.
                     normalize_path: true
                     merge_slashes: true
                     route_config:
@@ -4589,13 +4589,18 @@ data:
                                       - masked_remote_address:
                                           v4_prefix_mask_len: 32
                                           v6_prefix_mask_len: 64
-                            # The Zitadel console, where the Platform owner
-                            # administers Zitadel (ADR-0093 decision 6). Zitadel
-                            # core serves it, not the login container, so it MUST
-                            # precede the broad /ui/ rule below. Its API calls use
-                            # the Zitadel API routes further down.
-                            - match: { prefix: "/ui/console" }
-                              route: { cluster: zitadel_upstream, timeout: 30s }
+                            # The admin surface of Zitadel has no public route
+                            # (ADR-0093): the console, the admin API, the management
+                            # API and the gRPC services. The edge answers 404 for
+                            # each of them. The Platform owner opens the console
+                            # through a private path, and each in-cluster client
+                            # dials the Zitadel Service by name (ADR-0092). This
+                            # route MUST precede the broad /ui/ rule below, or
+                            # /ui/console reaches the login container. The guard is
+                            # scripts/check-edge-zitadel-routes.py.
+                            - match:
+                                safe_regex: { regex: "^/(?:ui/console|management/v1/|admin/v1/|zitadel\\.).*$" }
+                              direct_response: { status: 404, body: { inline_string: "not found\n" } }
                             # Zitadel v4 Login V2 UI (separate Next.js app,
                             # gibson-zitadel-login). /oauth/v2/authorize 302s the
                             # browser here.
@@ -4644,14 +4649,13 @@ data:
                             # 1), and a rename would free the old address for a
                             # second account. Zitadel lets a user change their own
                             # email and username through the auth API (/users/me)
-                            # and the v2 UserService (self-management is allowed
+                            # and the v2 user API (self-management is allowed
                             # for the caller's own user ID), and it has no setting
                             # that turns this off. So the edge answers 403 for
-                            # these methods, for every caller, the Platform owner
-                            # included: the v2 methods take a user ID, and the
-                            # edge cannot read a gRPC body to tell "self" from
-                            # "other". The console keeps every other call, so
-                            # the Platform owner still administers Zitadel there.
+                            # these calls, for every caller: the v2 calls take a
+                            # user ID, and the edge does not read a body to tell
+                            # "self" from "other". The gRPC form of each call has
+                            # no public route at all (the 404 route above).
                             #
                             # These routes MUST precede the Zitadel API routes
                             # below. The guard is scripts/check-edge-zitadel-routes.py,
@@ -4660,12 +4664,11 @@ data:
                             #
                             # 1. A percent sign in a Zitadel API path. Zitadel's
                             #    router matches on the decoded path, so
-                            #    /zitadel.user.v2.UserService/Set%45mail would miss
-                            #    the exact matches below and still reach SetEmail.
-                            #    No Zitadel API path the platform or the console
-                            #    sends carries one.
+                            #    /auth/v1/users/me/e%6Dail would miss the matches
+                            #    below and still reach the email change. No Zitadel
+                            #    API path that a client sends carries one.
                             - match:
-                                safe_regex: { regex: "^/(?:auth/v1/|v2/|v2beta/|zitadel\\.).*%.*$" }
+                                safe_regex: { regex: "^/(?:auth/v1/|v2/|v2beta/).*%.*$" }
                               direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
                             # 2. A method override header. grpc-gateway turns a form
                             #    POST with X-HTTP-Method-Override into that method,
@@ -4677,32 +4680,7 @@ data:
                                   - name: x-http-method-override
                                     present_match: true
                               direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
-                            # 3. gRPC, gRPC-web and Connect use the same path. One
-                            #    exact path per method: Envoy caps the size of a
-                            #    regex, and an exact path reads plainly.
-                            - match: { path: "/zitadel.auth.v1.AuthService/UpdateMyUserName" }
-                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
-                            - match: { path: "/zitadel.auth.v1.AuthService/SetMyEmail" }
-                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
-                            - match: { path: "/zitadel.user.v2.UserService/SetEmail" }
-                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
-                            - match: { path: "/zitadel.user.v2.UserService/UpdateHumanUser" }
-                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
-                            - match: { path: "/zitadel.user.v2.UserService/UpdateUser" }
-                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
-                            - match: { path: "/zitadel.user.v2beta.UserService/SetEmail" }
-                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
-                            - match: { path: "/zitadel.user.v2beta.UserService/UpdateHumanUser" }
-                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
-                            - match: { path: "/zitadel.resources.user.v3alpha.ZITADELUsers/PatchUser" }
-                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
-                            - match: { path: "/zitadel.resources.user.v3alpha.ZITADELUsers/SetContactEmail" }
-                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
-                            - match: { path: "/zitadel.resources.user.v3alpha.ZITADELUsers/AddUsername" }
-                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
-                            - match: { path: "/zitadel.resources.user.v3alpha.ZITADELUsers/RemoveUsername" }
-                              direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
-                            # 4. REST. The GET on /auth/v1/users/me/email (read your
+                            # 3. REST. The GET on /auth/v1/users/me/email (read your
                             #    own email) still routes.
                             - match:
                                 safe_regex: { regex: "^/auth/v1/users/me/(?:username|email)/?$" }
@@ -4728,25 +4706,14 @@ data:
                                   - name: ":method"
                                     string_match: { safe_regex: { regex: "(?i)^(?:PATCH|PUT)$" } }
                               direct_response: { status: 403, body: { inline_string: "forbidden\n" } }
-                            # Zitadel REST + gRPC management/admin/auth/system APIs.
-                            # The dashboard (server-side) and operators call these
-                            # via the app host (ZITADEL_INTERNAL_ISSUER=app.<domain>):
-                            # password policy (/auth/v1/policies/...), user/org
-                            # creation (/management/v1/...), instance/policy admin
-                            # (/admin/v1/...), the v2 connect/gRPC services
-                            # (/zitadel.*), AND the v2 RESOURCE REST API
-                            # (/v2/users/human, /v2/users, /v2/users/:id/password,
-                            # /v2beta/...) the signup admin client uses. Without
-                            # these the catch-all sends them to the dashboard → 404
-                            # and signup breaks (deploy#630; /v2 gap: signup
-                            # createHumanUser).
+                            # The Zitadel auth API for the signed-in user (password
+                            # policy, own user), and further down the v2 REST API
+                            # (/v2/users/human, /v2/users/:id/password, /v2beta/...).
+                            # The management API, the admin API and the gRPC
+                            # services have no route here (ADR-0093).
                             # NOTE: /auth/v1/ is Zitadel; the dashboard's Auth.js BFF
                             # lives under /api/auth/ and is unaffected.
                             - match: { prefix: "/auth/v1/" }
-                              route: { cluster: zitadel_upstream, timeout: 30s }
-                            - match: { prefix: "/management/v1/" }
-                              route: { cluster: zitadel_upstream, timeout: 30s }
-                            - match: { prefix: "/admin/v1/" }
                               route: { cluster: zitadel_upstream, timeout: 30s }
                             # NO /system/v1/ ROUTE. DO NOT ADD ONE (GHSA-534c,
                             # gibson#1275).
@@ -4776,8 +4743,6 @@ data:
                             - match: { prefix: "/v2/" }
                               route: { cluster: zitadel_upstream, timeout: 30s }
                             - match: { prefix: "/v2beta/" }
-                              route: { cluster: zitadel_upstream, timeout: 30s }
-                            - match: { prefix: "/zitadel." }
                               route: { cluster: zitadel_upstream, timeout: 30s }
                             # Zitadel asset delivery (label-policy logo/icon/font
                             # uploads, deploy#867). The hosted login references
@@ -4977,13 +4942,6 @@ data:
                             default_value: { numerator: 100, denominator: HUNDRED }
                           filter_enforced:
                             default_value: { numerator: 100, denominator: HUNDRED }
-                          # This chain is mostly browser HTTP, but /zitadel.* on
-                          # the app vhost carries Zitadel's connect/gRPC services.
-                          # For those callers RESOURCE_EXHAUSTED (8) means "back
-                          # off"; Envoy's default UNAVAILABLE (14) is retried
-                          # immediately by generated clients. Plain HTTP callers
-                          # still get 429 either way.
-                          rate_limited_as_resource_exhausted: true
                           response_headers_to_add:
                             - append_action: OVERWRITE_IF_EXISTS_OR_ADD
                               header: { key: retry-after, value: "1" }
@@ -5032,7 +4990,7 @@ data:
                               "@type": type.googleapis.com/google.protobuf.StringValue
                               value: |
                                 {
-                                  "directives_map": { "browser": ["Include @recommended-conf","SecRuleEngine On","SecRequestBodyAccess On","SecResponseBodyAccess Off","SecAuditEngine RelevantOnly","SecAuditLogRelevantStatus \"^(?:5[0-9][0-9]|40[0-35-9]|4[1-9][0-9])$\"","SecAuditLogParts ABIJDEFHZ","SecAuditLog /dev/stdout","SecAuditLogFormat JSON","Include @crs-setup-conf","SecAction \"id:900950,phase:1,pass,t:none,nolog, setvar:tx.blocking_paranoia_level=1, setvar:tx.detection_paranoia_level=1, setvar:tx.inbound_anomaly_score_threshold=5, setvar:tx.outbound_anomaly_score_threshold=4, setvar:tx.early_blocking=1, setvar:'tx.allowed_methods=GET HEAD POST OPTIONS PUT PATCH DELETE', setvar:'tx.allowed_request_content_type=|application/x-www-form-urlencoded| |multipart/form-data| |multipart/related| |text/xml| |application/xml| |application/soap+xml| |application/json| |application/cloudevents+json| |application/cloudevents-batch+json| |text/plain| |application/grpc-web| |application/grpc-web+proto| |application/grpc-web-text| |application/grpc-web-text+proto|', setvar:'tx.allowed_request_content_type_charset=|utf-8|iso-8859-1|iso-8859-15|windows-1252|'\"","SecRule REQUEST_URI \"@unconditionalMatch\" \"id:900961,phase:1,pass,nolog,t:none,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:__Secure-authjs.session-token,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:__Secure-authjs.session-token.0,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:__Secure-authjs.session-token.1,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:__Secure-authjs.session-token.2,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:__Secure-authjs.session-token.3,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:authjs.session-token,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:authjs.session-token.0,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:authjs.session-token.1,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:authjs.session-token.2,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:authjs.session-token.3\"","SecRule REQUEST_URI \"@unconditionalMatch\" \"id:900962,phase:1,pass,nolog,t:none,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:__Host-zitadel.useragent,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:sessions\"","SecRule REQUEST_URI \"@rx ^/zitadel\\.\" \"id:900963,phase:1,pass,nolog,t:none,ctl:requestBodyAccess=Off\"","Include @owasp_crs/*.conf","SecRule REQUEST_URI \"@rx ^/ui/(v2/)?login/\" \"id:900960,phase:1,pass,nolog,t:none,ctl:ruleRemoveByTag=attack-sqli,ctl:ruleRemoveByTag=attack-xss,ctl:ruleRemoveByTag=attack-rce,ctl:ruleRemoveByTag=attack-injection-generic,ctl:ruleRemoveByTag=attack-injection-php,ctl:ruleRemoveByTag=attack-java\""] },
+                                  "directives_map": { "browser": ["Include @recommended-conf","SecRuleEngine On","SecRequestBodyAccess On","SecResponseBodyAccess Off","SecAuditEngine RelevantOnly","SecAuditLogRelevantStatus \"^(?:5[0-9][0-9]|40[0-35-9]|4[1-9][0-9])$\"","SecAuditLogParts ABIJDEFHZ","SecAuditLog /dev/stdout","SecAuditLogFormat JSON","Include @crs-setup-conf","SecAction \"id:900950,phase:1,pass,t:none,nolog, setvar:tx.blocking_paranoia_level=1, setvar:tx.detection_paranoia_level=1, setvar:tx.inbound_anomaly_score_threshold=5, setvar:tx.outbound_anomaly_score_threshold=4, setvar:tx.early_blocking=1, setvar:'tx.allowed_methods=GET HEAD POST OPTIONS PUT PATCH DELETE', setvar:'tx.allowed_request_content_type=|application/x-www-form-urlencoded| |multipart/form-data| |multipart/related| |text/xml| |application/xml| |application/soap+xml| |application/json| |application/cloudevents+json| |application/cloudevents-batch+json| |text/plain|', setvar:'tx.allowed_request_content_type_charset=|utf-8|iso-8859-1|iso-8859-15|windows-1252|'\"","SecRule REQUEST_URI \"@unconditionalMatch\" \"id:900961,phase:1,pass,nolog,t:none,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:__Secure-authjs.session-token,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:__Secure-authjs.session-token.0,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:__Secure-authjs.session-token.1,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:__Secure-authjs.session-token.2,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:__Secure-authjs.session-token.3,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:authjs.session-token,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:authjs.session-token.0,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:authjs.session-token.1,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:authjs.session-token.2,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:authjs.session-token.3\"","SecRule REQUEST_URI \"@unconditionalMatch\" \"id:900962,phase:1,pass,nolog,t:none,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:__Host-zitadel.useragent,ctl:ruleRemoveTargetByTag=OWASP_CRS;REQUEST_COOKIES:sessions\"","Include @owasp_crs/*.conf","SecRule REQUEST_URI \"@rx ^/ui/(v2/)?login/\" \"id:900960,phase:1,pass,nolog,t:none,ctl:ruleRemoveByTag=attack-sqli,ctl:ruleRemoveByTag=attack-xss,ctl:ruleRemoveByTag=attack-rce,ctl:ruleRemoveByTag=attack-injection-generic,ctl:ruleRemoveByTag=attack-injection-php,ctl:ruleRemoveByTag=attack-java\""] },
                                   "default_directives": "browser",
                                   "metric_labels": { "chain": "browser" }
                                 }
@@ -5068,11 +5026,11 @@ data:
             # ExternalDomain in the Host header, so we rewrite Host to the public
             # app.<domain> name before proxying upstream.
             #
-            # Pre-auth surface only — /.well-known/openid-configuration and
-            # /oauth/v2/* + /management/v1/* (machine-user OAuth client_credentials
-            # + Zitadel admin API for the daemon's IdP admin client). No
-            # ext_authz / no jwt_authn on this chain — these endpoints exist to
-            # bootstrap auth, they can't depend on it.
+            # Pre-auth surface only: /.well-known/openid-configuration and
+            # /oauth/v2/* (machine-user OAuth client_credentials). The Zitadel
+            # management API has no route here (ADR-0093). No ext_authz and no
+            # jwt_authn on this chain: these endpoints exist to bootstrap auth,
+            # so they cannot depend on it.
             #
             # deploy#1204 — this chain shares the public :10000 listener, and
             # filter-chain selection keys on the connection's SNI. Nothing stopped
@@ -5172,11 +5130,6 @@ data:
                                 host_rewrite_literal: "app.localhost.zeroroot.ai"
                                 timeout: 30s
                             - match: { prefix: "/oauth/v2/" }
-                              route:
-                                cluster: zitadel_upstream
-                                host_rewrite_literal: "app.localhost.zeroroot.ai"
-                                timeout: 30s
-                            - match: { prefix: "/management/v1/" }
                               route:
                                 cluster: zitadel_upstream
                                 host_rewrite_literal: "app.localhost.zeroroot.ai"
@@ -15286,7 +15239,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 6a4b3b34a6730183dbac9ea55bf5e42374b5e9ef7c7bd6955b098aa7eab4608a
+        checksum/config: 0be4602290ffdd6088411c94664cf1ca0b694fcea3f777be821d229cb2e883ae
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
