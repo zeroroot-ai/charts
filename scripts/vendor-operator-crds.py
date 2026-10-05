@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Vendor the operator CRDs into gibson-crds from the umbrella's pinned subcharts.
 
-ADR-0015 and deploy#1728. The umbrella owns cert-manager, external-secrets
+ADR-0083 and deploy#1728. The umbrella owns cert-manager, external-secrets
 and the CloudNativePG operator as subcharts and renders CRs of all three
 (Certificate, Issuer, ExternalSecret, ClusterSecretStore, Cluster). Helm
 refuses a CRD and a CR of that CRD in one release (deploy#1627), so the

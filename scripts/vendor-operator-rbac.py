@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Vendor the RBAC of cert-manager and external-secrets into the umbrella, wave-annotated.
 
-ADR-0015 and deploy#1728. Under Argo the umbrella is one Application applied
+ADR-0083 and deploy#1728. Under Argo the umbrella is one Application applied
 in sync-waves, and the ClusterSecretStore (-10), the ExternalSecrets (-8)
 and the postgres Cluster (-7) are only Healthy once their operator
 reconciles them. So every resource of those operators must sync earlier:

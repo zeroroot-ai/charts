@@ -10,13 +10,13 @@ its owner.
 
 **Chart**:
 The `gibson` umbrella and its sub-charts, published as one signed OCI artifact
-per version. A chart version IS the deployable (ADR-0004).
+per version. A chart version IS the deployable (ADR-0072).
 _Avoid_: the helm, the deployment, the manifests
 
 **Plain Kubernetes cluster**:
 A cluster with a default StorageClass and nothing else assumed. No cloud IAM,
 no cloud KMS, no cloud DNS, no cloud load balancer. The supported self-hosted
-target (ADR-0078). kind is one, and so is k3d.
+target (ADR-0090). kind is one, and so is k3d.
 _Avoid_: vanilla cluster, bare metal, on-prem cluster, plain k8s
 
 **Profile ladder**:
@@ -93,7 +93,7 @@ _Avoid_: secrets file, bootstrap secrets, seed values
 **Registry credential path**:
 The one route a private image credential takes: bringup keyring, then the
 openbao-auto-init sidecar into OpenBao, then an ExternalSecret into a
-dockerconfigjson Secret. Registry-neutral by ADR-0016. There is no second route.
+dockerconfigjson Secret. Registry-neutral by ADR-0084. There is no second route.
 _Avoid_: pull secret setup, image auth
 
 ## Relationships

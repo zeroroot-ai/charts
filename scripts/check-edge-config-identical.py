@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """check-edge-config-identical.py — the Envoy edge renders identically on every substrate.
 
-Rebuilds a guard lost in the 2026-09-04 split (charts#17, ADR-0011: one
+Rebuilds a guard lost in the 2026-09-04 split (charts#17, ADR-0079: one
 edge, one substrate-independent configuration). The Envoy ConfigMaps the
 umbrella renders must be byte-identical across the baseline profile and
 every substrate overlay (eks, gke, aks, guest). A substrate that needs a
-different edge is a second edge, and ADR-0011 forbids that.
+different edge is a second edge, and ADR-0079 forbids that.
 
   check-edge-config-identical.py             exit 1 on a divergence, 0 when identical
   check-edge-config-identical.py --selftest  prove a divergent overlay fails
@@ -47,7 +47,7 @@ def judge(base: dict[str, str], others: dict[str, dict[str, str]]) -> list[str]:
             if cm not in dig:
                 out.append(f"{name}: does not render {cm}")
             elif dig[cm] != h:
-                out.append(f"{name}: {cm} differs from the baseline (one edge, ADR-0011)")
+                out.append(f"{name}: {cm} differs from the baseline (one edge, ADR-0079)")
         for cm in dig:
             if cm not in base:
                 out.append(f"{name}: renders {cm}, which the baseline does not")

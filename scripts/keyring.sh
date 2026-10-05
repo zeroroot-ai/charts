@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# keyring.sh — the bringup keyring: generate, fingerprint, verify (ADR-0015).
+# keyring.sh — the bringup keyring: generate, fingerprint, verify (ADR-0083).
 #
 # The bringup keyring is the small set of secrets without which nothing in
 # the durable bucket is readable. It outlives every cluster and never lives
@@ -207,7 +207,7 @@ cmd_generate() {
   local tmp
   tmp="$(umask 077 && mktemp "$(dirname "$file")/.keyring.XXXXXX")"
   {
-    printf '# bringup keyring (ADR-0015), written %s by scripts/keyring.sh.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '# bringup keyring (ADR-0083), written %s by scripts/keyring.sh.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf '# Never commit. Never copy into a cluster, the bucket or OpenBao.\n'
     printf '# Shape and fingerprints: scripts/keyring.sh, substrate.env.\n'
     local spec name value err
@@ -305,7 +305,7 @@ cmd_verify() {
   # Report supplied and not-supplied separately. An input member is allowed to
   # be absent — it means "not supplied" — but counting it as "present" is how a
   # missing GHCR_PULL_TOKEN read as a green preflight while two first-party
-  # images could not pull (deploy#1795). ADR-0015: a preflight that passes with
+  # images could not pull (deploy#1795). ADR-0083: a preflight that passes with
   # a missing input is a defect in preflight, so at minimum it must NAME what
   # is not there.
   local unsupplied=() supplied=0

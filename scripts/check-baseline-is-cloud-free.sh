@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check-baseline-is-cloud-free.sh — the baseline profile must assume no cloud.
 #
-# ADR-0010 makes a plain Kubernetes cluster the supported self-hosted
+# ADR-0090 makes a plain Kubernetes cluster the supported self-hosted
 # target, with EKS as one specialisation layered on top. The failure mode this
 # guards is quiet: someone adds an IRSA annotation or a gp3 storage class to
 # the base "because that is where the other one had it", and the profile
@@ -50,7 +50,7 @@ check '(storageClass|storageClassName): *"?gp3"?' \
 check 'arn:aws:(kms|iam|secretsmanager)' \
   "An AWS ARN in the baseline render — the baseline profile must not name cloud resources."
 check 'service: *SecretsManager' \
-  "AWS Secrets Manager as the secret backend — the platform's own OpenBao is the one backend on every substrate (ADR-0015)."
+  "AWS Secrets Manager as the secret backend — the platform's own OpenBao is the one backend on every substrate (ADR-0083)."
 # 172.20.0.0/16 is the EKS Service CIDR. kubeadm and kind default to
 # 10.96.0.0/12, so a pinned ClusterIP from the EKS range is not merely
 # suboptimal off EKS — the API server REJECTS the Service outright:
@@ -75,7 +75,7 @@ check 'clusterIP: *"?172\.20\.' \
 # it, and the -6 postgres-setup pre-install hooks blocked on
 # Cluster.status.currentPrimary forever. `helm install` hung for its full 25m
 # timeout and then said only "failed pre-install: timed out waiting for the
-# condition" — 25 minutes to learn nothing. The flag is gone (ADR-0015,
+# condition" — 25 minutes to learn nothing. The flag is gone (ADR-0083,
 # deploy#1730) and this check stays as the structural statement of the rule.
 #
 # So: anything the render points AT, the render must also CREATE.
@@ -92,7 +92,7 @@ requires() {
 # Cluster that serves it has to be in the same render.
 if grep -q "platform-postgres-rw" "$RENDER"; then
   requires '^kind: Cluster$' \
-    "The baseline render uses platform-postgres-rw but renders no CNPG Cluster. The Cluster is structural on every profile (ADR-0015); find what suppressed templates/postgres/platform-postgres-cluster.yaml."
+    "The baseline render uses platform-postgres-rw but renders no CNPG Cluster. The Cluster is structural on every profile (ADR-0083); find what suppressed templates/postgres/platform-postgres-cluster.yaml."
 fi
 
 # Same rule for secrets: every ExternalSecret points at the gibson-secrets
@@ -101,7 +101,7 @@ fi
 # in this render, not merely a name the ExternalSecrets repeat.
 if grep -qE '^ +kind: ClusterSecretStore$' "$RENDER"; then
   if ! awk 'BEGIN{RS="\n---\n"} /(^|\n)kind: ClusterSecretStore\n/ && /name: "gibson-secrets"/{f=1} END{exit f?0:1}' "$RENDER"; then
-    echo "❌ The baseline render points ExternalSecrets at the gibson-secrets ClusterSecretStore but renders no such store. The store is structural on every profile (ADR-0015, deploy#1733)."
+    echo "❌ The baseline render points ExternalSecrets at the gibson-secrets ClusterSecretStore but renders no such store. The store is structural on every profile (ADR-0083, deploy#1733)."
     fail=1
   fi
 fi

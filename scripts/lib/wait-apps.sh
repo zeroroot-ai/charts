@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # wait-apps.sh — "every Argo Application is Synced+Healthy", for EVERY
-# substrate (ADR-0015, deploy#1737, deploy#1746).
+# substrate (ADR-0083, deploy#1737, deploy#1746).
 #
 # Slow is fine; stuck is not. Getting that distinction right is the whole
 # reason this is one file and not two: ENV=kind learned it the hard way
