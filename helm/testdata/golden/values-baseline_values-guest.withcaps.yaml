@@ -6366,6 +6366,27 @@ roleRef:
   name: gibson-zitadel
   apiGroup: rbac.authorization.k8s.io
 ---
+# Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: gibson-connector-operator-metrics
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: gibson-connector-operator
+    app.kubernetes.io/component: connector-operator
+    app.kubernetes.io/part-of: gibson
+    app.kubernetes.io/managed-by: Helm
+spec:
+  selector:
+    app.kubernetes.io/name: gibson-connector-operator
+    app.kubernetes.io/component: connector-operator
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+      protocol: TCP
+---
 # Source: gibson/charts/gibson-operators/templates/platform-operator/service.yaml
 apiVersion: v1
 kind: Service
@@ -18115,6 +18136,35 @@ spec:
       - name: "spire"
         owner: "spire"
 ---
+# Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gibson-connector-operator-rules
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: gibson-connector-operator
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: connector-operator
+spec:
+  groups:
+    - name: connector-operator.grants
+      rules:
+        - alert: ConnectorGrantUnrevoked
+          expr: max(gibson_connector_unrevoked_grants) > 0
+          for: 1h
+          labels:
+            severity: critical
+            component: connector-operator
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/connector-operator.md#connectorgrantunrevoked"
+            summary: "A connector grant stays live after its connector was deleted"
+            description: |
+              The connector-operator released at least one connector past its
+              revoke deadline, and the retry has not revoked the grant for one
+              hour. Each record is a ConfigMap connector-unrevoked-<name> in
+              the tenant namespace.
+---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/prometheusrule.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -18762,6 +18812,27 @@ handler: runc
 scheduling:
   nodeSelector:
     setec.zeroroot.ai/runtime.runc: "true"
+---
+# Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gibson-connector-operator
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: gibson-connector-operator
+    app.kubernetes.io/component: connector-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gibson-connector-operator
+      app.kubernetes.io/component: connector-operator
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 60s
+      scheme: http
 ---
 # Source: gibson/charts/gibson-workloads/templates/envoy/servicemonitor.yaml
 apiVersion: monitoring.coreos.com/v1
