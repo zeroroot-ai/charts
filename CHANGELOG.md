@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.139.1](https://github.com/zeroroot-ai/charts/compare/v0.139.0...v0.139.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **rework:** the guest store logs in as the cluster's External Secrets ([#483](https://github.com/zeroroot-ai/charts/issues/483)) ([d49029f](https://github.com/zeroroot-ai/charts/commit/d49029f6f7e9c850be35091c26e923c425edc4bd))
+
 ## [0.139.0](https://github.com/zeroroot-ai/charts/compare/v0.138.0...v0.139.0) (2026-10-06)
 
 
