@@ -146,6 +146,9 @@ spec:
                when the main container starts (replaces optional: true on those
                configMapKeyRef env refs). */}}
         {{- include "gibson.waitForFgaConfig" . | nindent 8 }}
+        {{- /* ADR-0045, charts#397: ext-authz refuses to start without Redis.
+               Wait for it here, so a cold start does not crash-loop. */}}
+        {{- include "gibson.waitForRedis" . | nindent 8 }}
         {{- /*
           deploy#852: the FGA registry is no longer hydrated from a
           version-pinned OCI artifact by an oras init container. ext-authz now
@@ -213,13 +216,14 @@ spec:
             {{- $fgaAddr = $fgaAddr | trimPrefix "http://" | trimPrefix "https://" }}
             - name: EXT_AUTHZ_FGA_ADDR
               value: "https://{{ $fgaAddr }}"
-            # FGA write events (hosted#204): the daemon and the tenant-operator
-            # announce every tenant-role tuple they write on the Redis channel
-            # gibson:fga.write, and ext-authz evicts that user's cached
-            # decisions on each event, so a demoted or removed user is refused
-            # on their next request. Same Redis and the same password Secret
-            # as the daemon; a password rotation restarts ext-authz with the
-            # daemon. Without the URL the decision cache TTL is the only bound.
+            # Redis is required (ADR-0045, charts#397). ext-authz does not start
+            # without EXT_AUTHZ_REDIS_URL or when Redis does not answer, and a
+            # component call fails closed (Unavailable) when Redis goes down at
+            # request time. Redis holds the replay state of component tokens,
+            # shared by every replica, and carries the FGA write events
+            # (hosted#204) on the channel gibson:fga.write. Same Redis and the
+            # same password Secret as the daemon. make extauthz-redis fails a
+            # profile whose ext-authz pod lacks either variable.
             - name: EXT_AUTHZ_REDIS_URL
               value: {{ include "gibson.redis.url" . | quote }}
             - name: REDIS_PASSWORD

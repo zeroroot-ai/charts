@@ -279,21 +279,7 @@ spec:
               cpu: 100m
               memory: 64Mi
         # Wait for Redis
-        - name: wait-for-redis
-          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
-          command: ['sh', '-c']
-          args:
-            - |
-              until nc -z {{ include "gibson.redis.host" . }} 6379; do
-                echo "Waiting for Redis..."
-                sleep 2
-              done
-              echo "Redis is ready!"
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: ["ALL"]
+        {{- include "gibson.waitForRedis" . | nindent 8 }}
       containers:
         - name: gibson
           image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.gibson.image.repository "tag" .Values.gibson.image.tag "digest" .Values.gibson.image.digest "appVersion" .Chart.AppVersion) | quote }}

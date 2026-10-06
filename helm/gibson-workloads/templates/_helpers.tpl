@@ -230,3 +230,37 @@ Usage: include "gibson.nodeHeapMiB" .Values.dashboard.resources.limits.memory
 {{- end -}}
 {{- $heap -}}
 {{- end -}}
+
+{{/*
+gibson.waitForRedis: an init container that waits until the Redis Service of
+the platform answers on its port. Two pods need Redis before they start: the
+daemon, and ext-authz, which refuses to start without Redis (ADR-0045,
+charts#397). One helper keeps the two the same. It runs as a secure pod
+(ADR-0165).
+*/}}
+{{- define "gibson.waitForRedis" -}}
+- name: wait-for-redis
+  image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+  command: ['sh', '-c']
+  args:
+    - |
+      until nc -z {{ include "gibson.redis.host" . }} {{ int (.Values.redis.service.port | default 6379) }}; do
+        echo "Waiting for Redis..."
+        sleep 2
+      done
+      echo "Redis is ready!"
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 65532
+    capabilities:
+      drop: ["ALL"]
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      cpu: 100m
+      memory: 32Mi
+{{- end }}
