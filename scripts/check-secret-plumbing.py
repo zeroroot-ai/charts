@@ -11,10 +11,18 @@ mistyped *SecretName in values used to reach a cluster. A listed producer
 whose Secret the chart does render is a stale entry and fails too, so the
 list stays honest.
 
+A Secret that a script of a rendered workload WRITES (`kubectl create secret`,
+`kubectl patch secret`, `kubectl replace secret`, `kubectl apply` of a
+`kind: Secret`) is a runtime producer too (ADR-0014). It must have an entry in
+secret-producers.yaml, and the entry must name the workload that writes it.
+The guard resolves a name held in a shell variable from its assignment in the
+same script or from the container env (charts#367).
+
   check-secret-plumbing.py             exit 1 on a dangling or stale entry, 0 when clean
   check-secret-plumbing.py --selftest  prove a dangling reference and a stale entry fail
 """
 import os
+import re
 import subprocess
 import sys
 
@@ -48,6 +56,61 @@ def references(o, owner: str, into: dict) -> None:
             references(i, owner, into)
 
 
+WRITE = re.compile(
+    r"kubectl\s+(?:create\s+secret\s+[a-z-]+|patch\s+secret|replace\s+secret)\s+((?:\"[^\"]+\")|(?:'[^']+')|\S+)")
+ASSIGN = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|\S+)\s*$", re.M)
+
+
+def pod_spec(d: dict) -> dict:
+    if d["kind"] == "CronJob":
+        return d["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+    if d["kind"] == "Pod":
+        return d.get("spec") or {}
+    return d["spec"]["template"]["spec"]
+
+
+def written_secrets(d: dict) -> tuple[set[str], list[str]]:
+    """(Secret names that a container script of d writes, names it could not resolve)."""
+    names, unresolved = set(), []
+    spec = pod_spec(d)
+    for c in (spec.get("initContainers") or []) + (spec.get("containers") or []):
+        script = "\n".join(str(x) for x in (c.get("command") or []) + (c.get("args") or []))
+        env = {e["name"]: e.get("value") for e in c.get("env") or [] if "value" in e}
+        local = {m.group(1): m.group(2).strip("\"'") for m in ASSIGN.finditer(script)}
+        for m in WRITE.finditer(script):
+            raw = m.group(1).strip("\"'")
+            var = re.fullmatch(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?", raw)
+            if var:
+                value = local.get(var.group(1)) or env.get(var.group(1))
+                if value and "$" not in value:
+                    names.add(value)
+                else:
+                    unresolved.append(f"{c.get('name')}: {raw}")
+            elif "$" in raw:
+                unresolved.append(f"{c.get('name')}: {raw}")
+            else:
+                names.add(raw)
+    return names, unresolved
+
+
+def judge_writers(docs: list[dict], producers: dict[str, str]) -> list[str]:
+    out = []
+    for d in docs:
+        if d.get("kind") not in WORKLOADS:
+            continue
+        owner = f"{d['kind']}/{d['metadata']['name']}"
+        names, unresolved = written_secrets(d)
+        for raw in unresolved:
+            out.append(f"unresolved writer: {owner} writes a Secret named {raw}, and the guard cannot resolve the name")
+        for name in sorted(names):
+            entry = producers.get(name)
+            if entry is None:
+                out.append(f"unrecorded writer: {owner} writes Secret {name}, which has no entry in secret-producers.yaml")
+            elif d["metadata"]["name"] not in str(entry):
+                out.append(f"unnamed writer: {owner} writes Secret {name}, and its secret-producers.yaml entry does not name it")
+    return out
+
+
 def judge(docs: list[dict], producers: dict[str, str]) -> list[str]:
     rendered: dict[str, str] = {}
     for d in docs:
@@ -69,7 +132,7 @@ def judge(docs: list[dict], producers: dict[str, str]) -> list[str]:
     for name in sorted(producers):
         if name in rendered:
             out.append(f"stale producer entry: {name} is rendered by a {rendered[name]}; delete it from secret-producers.yaml")
-    return out
+    return out + judge_writers(docs, producers)
 
 
 FIXTURE = """
@@ -103,6 +166,26 @@ spec: {secretName: cert-secret}
 """
 
 
+WRITER_FIXTURE = """
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: rotator, namespace: gibson}
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: c
+              command: [sh, -c]
+              args:
+                - |
+                  STATE="rotation-state"
+                  kubectl create secret generic "$STATE" -n gibson --from-literal=v=1 --dry-run=client -o yaml \\
+                    | kubectl apply -f -
+"""
+
+
 def selftest() -> int:
     docs = [d for d in yaml.safe_load_all(FIXTURE) if d]
     got = judge(docs, {"minted-at-runtime": "an operator mints it", "rendered-secret": "stale"})
@@ -115,7 +198,25 @@ def selftest() -> int:
     if live:
         print("SELFTEST FAIL: the baseline render has a plumbing gap:\n  " + "\n  ".join(live))
         return 1
-    print("OK: a dangling reference and a stale producer entry fail; the render is fully plumbed")
+    writer = yaml.safe_load(WRITER_FIXTURE)
+    cases = [
+        ("a script that writes a Secret with no entry", {}, "unrecorded writer"),
+        ("an entry that does not name the writer", {"rotation-state": "some other job writes it"}, "unnamed writer"),
+    ]
+    for what, prods, want in cases:
+        got = judge_writers([writer], prods)
+        if not any(x.startswith(want) for x in got):
+            print(f"SELFTEST FAIL: {what}: want '{want}', got {got}")
+            return 1
+    if judge_writers([writer], {"rotation-state": "the CronJob rotator writes it"}):
+        print("SELFTEST FAIL: an entry that names the writer must pass")
+        return 1
+    blind = yaml.safe_load(WRITER_FIXTURE.replace('STATE="rotation-state"', 'STATE="$(pick)"'))
+    if not any(x.startswith("unresolved writer") for x in judge_writers([blind], {"rotation-state": "rotator"})):
+        print("SELFTEST FAIL: a Secret name the guard cannot resolve must fail")
+        return 1
+    print("OK: a dangling reference, a stale producer entry, an unrecorded writer, an unnamed writer and an "
+          "unresolved name fail; the render is fully plumbed")
     return 0
 
 
