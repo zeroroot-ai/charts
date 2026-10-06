@@ -129,7 +129,7 @@ secrets:
   # operations. Surfaced as the `gibson-openbao-keys` Secret by the
   # ExternalSecret that reads `gibson-vault-admin-token`, property `token`,
   # from the platform's OpenBao. The openbao-auto-init sidecar seeds that key
-  # with the platform service token it mints (policy platform-admin, never
+  # with the platform service token it mints (policy platform-operator, never
   # root) and keeps it current (deploy#1732).
   # Set `vaultKeys.existingSecret` to skip the template entirely when
   # an operator-owned Secret already exists in-cluster.
@@ -2517,6 +2517,10 @@ certManager:
 # the same Service. The template fails the render above one replica. More
 # replicas need Raft storage in this chart first.
 openbao:
+  # The transit key of the platform-operator (platformBootstrap.vaultTransit.keyName
+  # in gibson-operators). The OpenBao policy of the platform-operator grants
+  # this one key. scripts/check-openbao-policies.py fails when the two differ.
+  platformTransitKey: "master-kek"
   image:
     repository: ghcr.io/zeroroot-ai/mirror/openbao
     tag: "2.5.3@sha256:fdc6da21ca6963560c32336fd7feb9cf2d5e52668f1a1647205a4b41171f0806"

@@ -9,6 +9,24 @@
 */}}
 
 {{/*
+gibson.certManagerVaultPaths: the OpenBao names of the cert-manager Vault
+issuer, as JSON {"approle": ..., "pkiMount": ..., "pkiRole": ...}. The
+approle init Job and the OpenBao policies of its two tokens read the same
+names from here. certManager.issuers.vault.path has the form
+<pki-mount>/sign/<role>, and the render fails on another form.
+*/}}
+{{- define "gibson.certManagerVaultPaths" -}}
+{{- $vi := .Values.certManager.issuers.vault -}}
+{{- $approle := ((($vi.auth | default dict).appRole | default dict).path) | default "approle" -}}
+{{- $issuerPath := required "certManager.issuers.vault.path is required when vault issuer is enabled (e.g. pki_int/sign/gibson)" $vi.path -}}
+{{- $split := splitList "/sign/" $issuerPath -}}
+{{- if ne (len $split) 2 -}}
+{{- fail (printf "certManager.issuers.vault.path %q must be of the form <pki-mount>/sign/<role-name> (e.g. pki_int/sign/gibson)" $issuerPath) -}}
+{{- end -}}
+{{- dict "approle" $approle "pkiMount" (index $split 0) "pkiRole" (index $split 1) | toJson -}}
+{{- end -}}
+
+{{/*
 stripe-mock host — dev-only stub that replaces api.stripe.com in kind so
 the tenant-operator readyz Stripe probe passes without a live Stripe key.
 Disabled in production overlays (stripeMock.enabled: false).
