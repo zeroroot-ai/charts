@@ -754,13 +754,7 @@ Invoked from templates/gibson/statefulset.yaml, where both values are consumed.
 {{- if and $endpoint (not (eq $required true)) -}}
 {{- fail (printf "validateEntitlementsCoherence: gibson.entitlementsEndpoint is set (%q) but gibson.entitlementsRequired is %v. That is the SaaS profile with the fail-closed guard OFF: the daemon computes enforceBilling from entitlementsRequired, so withholdPendingTenant is skipped and a failed or unavailable entitlements-svc silently provisions paid tiers with no billing record (GHSA-455w, gibson#1270 §5). Set gibson.entitlementsRequired: true alongside the endpoint. If you meant the self-hosted profile, clear gibson.entitlementsEndpoint instead — on-prem is supposed to run with no billing backend and the unlimited ConfigProvider is correct there." $endpoint $required) -}}
 {{- end -}}
-{{- $svid := trim .Values.gibson.entitlementsBillingSVID -}}
-{{- if and $endpoint (not $svid) -}}
-{{- fail "validateEntitlementsCoherence: gibson.entitlementsEndpoint is set but gibson.entitlementsBillingSVID is empty. The daemon accepts only the SPIFFE ID in that value as the entitlements server, and it refuses to start without it. Set it to the SPIFFE ID of the entitlements service." -}}
-{{- end -}}
-{{- if and $svid (not (hasPrefix "spiffe://" $svid)) -}}
-{{- fail (printf "validateEntitlementsCoherence: gibson.entitlementsBillingSVID is %q. It must be a SPIFFE ID that starts with spiffe://." $svid) -}}
-{{- end -}}
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "gibson.entitlementsBillingSVID") "use" "nothing: the chart builds the ID from global.spire.trustDomain and the path platform/entitlements-svc (ADR-0164)") -}}
 {{- if and (eq $required true) (not $endpoint) -}}
 {{- fail "validateEntitlementsCoherence: gibson.entitlementsRequired is true but gibson.entitlementsEndpoint is empty. The daemon would fail closed on every provision with no EntitlementsService to dial — a total signup outage, not a safe default. Set the endpoint, or set entitlementsRequired: false for the self-hosted profile." -}}
 {{- end -}}

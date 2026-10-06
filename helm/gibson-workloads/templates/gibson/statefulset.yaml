@@ -697,10 +697,12 @@ spec:
             {{- if .Values.gibson.entitlementsEndpoint }}
             - name: ENTITLEMENTS_ENDPOINT
               value: {{ .Values.gibson.entitlementsEndpoint | quote }}
-            # The one SPIFFE ID the daemon accepts as the entitlements server.
-            # validateEntitlementsCoherence fails the render without it.
+            # The one SPIFFE ID the daemon accepts as the entitlements server:
+            # the trust domain of the install and the fixed path of the
+            # billing component, platform/entitlements-svc (ADR-0164). The
+            # billing chart issues that ID. No env writes the trust domain.
             - name: ENTITLEMENTS_BILLING_SVID
-              value: {{ .Values.gibson.entitlementsBillingSVID | quote }}
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/entitlements-svc") | quote }}
             # The grpcProvider opens a SPIRE X509Source for daemon→entitlements
             # mTLS. Its WorkloadAPISocket option is empty, so go-spiffe reads
             # the socket from SPIFFE_ENDPOINT_SOCKET (the daemon's other mTLS
