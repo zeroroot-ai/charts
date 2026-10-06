@@ -270,9 +270,6 @@ pods:
   'StatefulSet/gibson/gibson-server network':
     digest: 8eccc0baa7624553
     reason: "charts#396 names the hosts of this egress rule. It waits for the policy helper of charts#395."
-  'CronJob/gibson/gibson-redis-rotation read-only':
-    digest: f31a0c09fafb9aac
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'DaemonSet/gibson/gibson-agent read-only':
     digest: eb9676462f099991
     reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths."
@@ -282,12 +279,9 @@ pods:
   'DaemonSet/gibson/node-agent read-only':
     digest: 3b74e134c6bcaaad
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
-  'Deployment/gibson/gibson-dashboard read-only':
-    digest: 879cbd080764eb88
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'Deployment/gibson/gibson-docs-svc read-only':
     digest: f645e1e6ef183e3d
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+    reason: "The image rewrites its own index.html at start, so its root cannot be read-only. docs-site#79 changes the image."
   'Deployment/gibson/gibson-openfga read-only':
     digest: 12dbb1ad617f88db
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
@@ -297,39 +291,9 @@ pods:
   'Deployment/gibson/velero read-only':
     digest: 9f876c717f8d9fa0
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
-  'Job/gibson/gibson-gibson-workloads-fga-init-28a471c8 read-only':
-    digest: 2ba37613d18eaf60
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/gibson-gibson-workloads-first-admin read-only':
-    digest: 59f5eb82522ae549
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/gibson-gibson-workloads-openbao-jwt-auth-init read-only':
-    digest: e2850a4d493053a2
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'Job/gibson/gibson-openfga-migrate read-only':
     digest: ee07f483d0b185d6
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/gibson-webhook-gate read-only':
-    digest: f633b36603a61693
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/gibson-workloads-postgres-setup read-only':
-    digest: f7dddb8c2cbbddf4
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/iam-admin-pat-escrow read-only':
-    digest: 1cf3b2c0791f4404
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/openfga-postgres-setup read-only':
-    digest: f7dddb8c2cbbddf4
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/spire-postgres-setup read-only':
-    digest: f7dddb8c2cbbddf4
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/zitadel-postgres-setup read-only':
-    digest: f7dddb8c2cbbddf4
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Pod/gibson/gibson-gibson-workloads-test-sandbox-host-denied read-only':
-    digest: 1c7ce6f6c7b4dc72
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'Pod/gibson/gibson-openfga-test-connection read-only':
     digest: 1eb6b295da1171fb
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
@@ -343,20 +307,14 @@ pods:
     digest: aa36cea0c9261338
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'StatefulSet/gibson/gibson read-only':
-    digest: e2fb85cf2c0e4305
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'StatefulSet/gibson/gibson-gibson-workloads read-only':
-    digest: e455ca3daf933147
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
+    digest: 0fd9fbd579bd9de9
+    reason: "Neo4j. The image entrypoint writes neo4j.conf under /var/lib/neo4j at start, so the server needs a writable root. The init container runs read-only."
   'StatefulSet/gibson/gibson-openbao read-only':
     digest: d360d26718273c02
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'StatefulSet/gibson/gibson-server read-only':
     digest: e813048e93772592
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'CronJob/gibson/gibson-redis-rotation restricted':
-    digest: f80e1dfdb4e28e7f
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'DaemonSet/gibson/gibson-agent restricted':
     digest: 58a63912eaf1ea86
     reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths."
@@ -372,9 +330,6 @@ pods:
   'DaemonSet/setec-system/setec-runtime-agent restricted':
     digest: a09dad21976b3d3f
     reason: "Expected exception of ADR-0165: the setec node agent installs the runtime on the node and mounts host paths."
-  'Deployment/gibson/gibson-dashboard restricted':
-    digest: 089082bedf97f615
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'Deployment/gibson/gibson-openfga restricted':
     digest: baddd7356598e5f1
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
@@ -390,21 +345,9 @@ pods:
   'Deployment/gibson/velero restricted':
     digest: 0ab124b456a0d1db
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
-  'Job/gibson/gibson-gibson-workloads-fga-init-28a471c8 restricted':
-    digest: ad190cf01bfe8072
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/gibson-gibson-workloads-first-admin restricted':
-    digest: 8adefa8424bb5924
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'Job/gibson/gibson-openfga-migrate restricted':
     digest: 24d76f10e9a9b3f7
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/gibson-webhook-gate restricted':
-    digest: f602697e681058ad
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/gibson-workloads-postgres-setup restricted':
-    digest: d381f6d3d0be9775
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'Job/gibson/gibson-zitadel-cleanup restricted':
     digest: 84b1488c63896262
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
@@ -414,21 +357,6 @@ pods:
   'Job/gibson/gibson-zitadel-setup restricted':
     digest: 6baffe3b90e49860
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/iam-admin-pat-escrow restricted':
-    digest: 2b568598e73d6e07
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/openfga-postgres-setup restricted':
-    digest: d381f6d3d0be9775
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/spire-postgres-setup restricted':
-    digest: d381f6d3d0be9775
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Job/gibson/zitadel-postgres-setup restricted':
-    digest: d381f6d3d0be9775
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Pod/gibson/gibson-gibson-workloads-test-sandbox-host-denied restricted':
-    digest: 6bf3072573486236
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'Pod/gibson/gibson-gibson-workloads-test-spire-attestation restricted':
     digest: 4cf7a827e00d2c33
     reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
@@ -444,12 +372,6 @@ pods:
   'Pod/gibson/gibson-spiffe-oidc-discovery-provider-test-keys restricted':
     digest: 99cb1b43b62a999e
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'StatefulSet/gibson/gibson restricted':
-    digest: 61dc4408c3598f35
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'StatefulSet/gibson/gibson-gibson-workloads restricted':
-    digest: edfcb85284b2ed30
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'StatefulSet/gibson/gibson-openbao restricted':
     digest: aaf4c1a6d2511ae3
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
@@ -465,9 +387,6 @@ pods:
   'Deployment/gibson/external-secrets-webhook token':
     digest: 5401b028ab76cfef
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
-  'Deployment/gibson/gibson-docs-svc token':
-    digest: f905b201ea835d99
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'Deployment/gibson/gibson-spiffe-oidc-discovery-provider token':
     digest: e89690d6cef81447
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
@@ -477,15 +396,6 @@ pods:
   'Deployment/gibson/velero token':
     digest: b91d468512d5e74a
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
-  'Job/gibson/gibson-gibson-workloads-openbao-jwt-auth-init token':
-    digest: 161141aedc79491b
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Pod/gibson/gibson-gibson-workloads-test-go-toolchain token':
-    digest: f905b201ea835d99
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
-  'Pod/gibson/gibson-gibson-workloads-test-service-reachability token':
-    digest: f905b201ea835d99
-    reason: "A first-party pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."
   'Pod/gibson/gibson-openfga-test-connection token':
     digest: f905b201ea835d99
     reason: "An upstream chart renders this pod. Not fixed yet: the fix is a follow-up of charts#394 and needs an install test on main."

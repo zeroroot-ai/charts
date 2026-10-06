@@ -86,9 +86,32 @@ metadata:
 spec:
   restartPolicy: Never
   serviceAccountName: {{ $sa | quote }}
+  # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+  # profile, a read-only root filesystem and no capabilities. kubectl
+  # writes its cache under HOME=/tmp, an emptyDir.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  volumes:
+    - name: tmp
+      emptyDir: {}
   containers:
     - name: probe
       image: "{{ include "gibson-workloads.tests.kubectlImage" . }}"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      env:
+        - name: HOME
+          value: /tmp
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:

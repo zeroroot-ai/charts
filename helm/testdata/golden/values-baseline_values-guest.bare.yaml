@@ -10646,7 +10646,7 @@ spec:
         # PodVolumeRestores in a preserve backup were volumes like these.
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
-        backup.velero.io/backup-volumes-excludes: "spire-agent-socket,shared-identity"
+        backup.velero.io/backup-volumes-excludes: "spire-agent-socket,shared-identity,next-cache,tmp"
         checksum/config: dcd6c1665f0c06b3dbd391768859adb30ff0733ac2f97e512fcac48e5d8f0b82
         checksum/secret: 249fe85522cc62edccdc067d99132e82710d2a5f6c651d1bf310f99322d1c751
         # Pod-roll-on-Secret-change is delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). The prior pattern
@@ -10663,6 +10663,13 @@ spec:
       imagePullSecrets:
         - name: ghcr-credentials
       serviceAccountName: gibson-dashboard
+      # Secure pod (ADR-0165, charts#394): every container runs non-root with
+      # the RuntimeDefault seccomp profile, a read-only root filesystem and no
+      # capabilities.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       priorityClassName: gibson-platform
       topologySpreadConstraints:
         - maxSkew: 1
@@ -10733,6 +10740,13 @@ spec:
               readOnly: true
         - name: wait-for-gibson
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
           command:
             - sh
             - -c
@@ -10772,6 +10786,13 @@ spec:
         # required.
         - name: wait-for-zitadel-client
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
           command:
             - sh
             - -c
@@ -10850,6 +10871,13 @@ spec:
         # post-install Job has populated the map.
         - name: resolve-sa-identity-map
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
           command:
             - sh
             - -c
@@ -11298,7 +11326,10 @@ spec:
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false  # Next.js needs write access for cache
+            # Next.js writes only its image cache (/app/.next/cache) and /tmp,
+            # both emptyDir volumes. Measured with docker on the image: no
+            # write to the root at start or on a request.
+            readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1001  # nextjs user from Dockerfile
             capabilities:
@@ -11327,7 +11358,15 @@ spec:
             - name: shared-identity
               mountPath: /shared
               readOnly: true
+            - name: next-cache
+              mountPath: /app/.next/cache
+            - name: tmp
+              mountPath: /tmp
       volumes:
+        - name: next-cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
         - name: spire-agent-socket
           csi:
             driver: csi.spiffe.io
@@ -11425,6 +11464,9 @@ spec:
       
       imagePullSecrets:
         - name: ghcr-credentials
+      # nginx serves static files and never calls the Kubernetes API, so the
+      # pod mounts no ServiceAccount token (ADR-0165, charts#394).
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 101
@@ -11438,6 +11480,8 @@ spec:
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
+            # Not read-only yet: the image rewrites its own index.html at
+            # start. docs-site#79 changes the image (ADR-0165, charts#394).
             readOnlyRootFilesystem: false
             runAsNonRoot: true
             runAsUser: 101
@@ -14866,13 +14910,19 @@ spec:
           command: ['sh', '-c']
           args:
             - |
-              mkdir -p /var/lib/gibson/.gibson
+              set -e
+              # Runs as the daemon user (the pod securityContext), like the
+              # daemon that writes the same volume. An earlier version ran as
+              # root and left a root-owned config.yaml; the directory is
+              # writable, so rm then cp replaces it (ADR-0165, charts#394).
+              rm -f /var/lib/gibson/.gibson/config.yaml
               cp /etc/gibson/gibson.yaml /var/lib/gibson/.gibson/config.yaml
               echo "Config file copied to /var/lib/gibson/.gibson/config.yaml"
           securityContext:
-            runAsUser: 0
-            runAsGroup: 0
-            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
             - name: config
               mountPath: /etc/gibson
@@ -14947,6 +14997,11 @@ spec:
                 sleep 2
               done
               echo "Redis is ready!"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
       containers:
         - name: gibson
           image: "ghcr.io/zeroroot-ai/gibson:v0.153.2@sha256:b57acca62d5acf01aea285cb1933310febfb29a32e4bf07f7ccc1bfa662edd5c"
@@ -15567,7 +15622,9 @@ spec:
         fsGroupChangePolicy: Always
         runAsGroup: 7474
         runAsNonRoot: true
-        runAsUser: 7474            
+        runAsUser: 7474
+        seccompProfile:
+          type: RuntimeDefault            
       
       terminationGracePeriodSeconds: 3600
       initContainers:
@@ -15576,6 +15633,15 @@ spec:
           - -c
           - cp /var/lib/neo4j/labs/apoc-*-core.jar /plugins/apoc.jar
           name: install-apoc-core
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsGroup: 7474
+            runAsNonRoot: true
+            runAsUser: 7474
           volumeMounts:
           - mountPath: /plugins
             name: neo4j-plugins
@@ -15615,6 +15681,7 @@ spec:
               cpu: 500m
               memory: 2Gi
           securityContext: 
+              allowPrivilegeEscalation: false
               capabilities:
                 drop:
                 - ALL
@@ -15941,6 +16008,9 @@ spec:
     spec:
       restartPolicy: OnFailure
       serviceAccountName: gibson-openbao-jwt-auth-init
+      # The Job talks to OpenBao only, never to the Kubernetes API, so the
+      # pod mounts no ServiceAccount token (ADR-0165, charts#394).
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -16092,6 +16162,10 @@ spec:
 
               echo "=== openbao-jwt-auth-init: OK ==="
           volumeMounts:
+            # The script writes its JSON and PEM files here (ADR-0165: a
+            # read-only root filesystem).
+            - name: tmp
+              mountPath: /tmp
             # gibson-openbao-keys is ESO-managed (templates/secrets/vault-keys.yaml).
             # kubelet projects each key in the Secret as a file under
             # mountPath; the script reads VAULT_ADMIN_TOKEN with cat above.
@@ -16107,7 +16181,7 @@ spec:
               readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false  # writes /tmp/*.json
+            readOnlyRootFilesystem: true  # writes only /tmp, an emptyDir
             capabilities:
               drop: ["ALL"]
           resources:
@@ -16118,6 +16192,8 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: openbao-admin-token
           secret:
             secretName: gibson-openbao-keys
@@ -16171,6 +16247,15 @@ spec:
     spec:
       restartPolicy: OnFailure
       serviceAccountName: gibson-fga-init
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The scripts
+      # write only to /tmp and /model, both emptyDir volumes.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       
       imagePullSecrets:
         - name: ghcr-credentials
@@ -16190,6 +16275,11 @@ spec:
         # shell for the redirect. The runtime image is alpine-based and has one.
         - name: dump-model
           image: "ghcr.io/zeroroot-ai/gibson:v0.153.2@sha256:b57acca62d5acf01aea285cb1933310febfb29a32e4bf07f7ccc1bfa662edd5c"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           imagePullPolicy: Always
           command: ['/bin/sh', '-c']
           args:
@@ -16205,6 +16295,11 @@ spec:
               mountPath: /model
         - name: wait-for-fga
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           command: ['sh', '-c']
           args:
             - |
@@ -16239,6 +16334,11 @@ spec:
         # finding 4 (previous mirror image 404ed on first install).
         - name: fga-init
           image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           imagePullPolicy: IfNotPresent
           command: ['sh', '-c']
           args:
@@ -16561,6 +16661,8 @@ spec:
             - name: CURL_CA_BUNDLE
               value: /etc/gibson/tls/fga-ca/ca.crt
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
             - name: model
               mountPath: /model
               readOnly: true
@@ -16568,6 +16670,8 @@ spec:
               mountPath: /etc/gibson/tls/fga-ca
               readOnly: true
       volumes:
+        - name: tmp
+          emptyDir: {}
         # Written by the dump-model init container, read by fga-init. Not a
         # ConfigMap any more: nothing vendored to mount.
         - name: model
@@ -16781,9 +16885,32 @@ spec:
           
           imagePullSecrets:
             - name: ghcr-credentials
+          # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+          # profile, a read-only root filesystem and no capabilities. kubectl
+          # writes its cache under HOME=/tmp, an emptyDir.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: tmp
+              emptyDir: {}
           containers:
             - name: rotation-controller
               image: "ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              env:
+                - name: HOME
+                  value: /tmp
               imagePullPolicy: IfNotPresent
               command:
                 - /bin/bash
@@ -20224,6 +20351,9 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
+  # The probe does not call the Kubernetes API, so the pod mounts no
+  # ServiceAccount token (ADR-0165, charts#394).
+  automountServiceAccountToken: false
   containers:
     - name: probe
       image: "ghcr.io/zeroroot-ai/mirror/curl:8.10.1@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b"
@@ -21314,6 +21444,9 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   restartPolicy: Never
+  # The probe does not call the Kubernetes API, so the pod mounts no
+  # ServiceAccount token (ADR-0165, charts#394).
+  automountServiceAccountToken: false
   containers:
     - name: assert-toolchain
       # The daemon image itself — same repo@digest the StatefulSet runs — so
@@ -21391,9 +21524,32 @@ metadata:
 spec:
   restartPolicy: Never
   serviceAccountName: "gibson-gibson-workloads-test-sandbox-admission"
+  # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+  # profile, a read-only root filesystem and no capabilities. kubectl
+  # writes its cache under HOME=/tmp, an emptyDir.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  volumes:
+    - name: tmp
+      emptyDir: {}
   containers:
     - name: probe
       image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      env:
+        - name: HOME
+          value: /tmp
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
@@ -22207,15 +22363,28 @@ spec:
       
       imagePullSecrets:
         - name: ghcr-credentials
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault
+      # seccomp profile, a read-only root filesystem and no capabilities.
+      # kubectl writes its cache under HOME=/tmp, an emptyDir.
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
+        runAsGroup: 65532
         fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: first-admin
           image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-2f91a7b@sha256:90405ce6d9a3eb79dc3f46605d075f986079850cd1e9d5549055ac07ee3301f2"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           env:
+            - name: HOME
+              value: /tmp
             - name: BOOTSTRAP_ADMIN_EMAIL
               value: "admin@localhost.zeroroot.ai"
             - name: BOOTSTRAP_TENANT_ID
@@ -22302,6 +22471,8 @@ spec:
                 -setup-secret "gibson-first-tenant-owner-setup" \
                 -setup-secret-key "setup-link"
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
             - name: fga-ca
               mountPath: /etc/ssl/fga-ca
               readOnly: true
@@ -22313,6 +22484,8 @@ spec:
               cpu: 500m
               memory: 256Mi
       volumes:
+        - name: tmp
+          emptyDir: {}
         # OpenFGA's HTTP API serves TLS; bootstrap's FGA client must trust its CA.
         - name: fga-ca
           secret:
@@ -22347,10 +22520,34 @@ spec:
     spec:
       restartPolicy: OnFailure
       serviceAccountName: iam-admin-pat-escrow
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The script
+      # writes only to /tmp, an emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: escrow
         image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         env:
+        # kubectl writes its discovery cache under $HOME; /tmp is the one
+        # writable path.
+        - name: HOME
+          value: /tmp
         - name: BAO_ADDR
           value: "http://gibson-openbao:8200"
         - name: VAULT_ADMIN_TOKEN
@@ -22471,9 +22668,29 @@ spec:
       restartPolicy: OnFailure
       serviceAccountName: postgres-setup
       automountServiceAccountToken: false
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The script
+      # writes only to /tmp, an emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: setup
         image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         env:
         - name: PGHOST
           value: platform-postgres-rw.gibson.svc
@@ -22638,9 +22855,29 @@ spec:
       restartPolicy: OnFailure
       serviceAccountName: postgres-setup
       automountServiceAccountToken: false
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The script
+      # writes only to /tmp, an emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: setup
         image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         env:
         - name: PGHOST
           value: platform-postgres-rw.gibson.svc
@@ -22758,9 +22995,29 @@ spec:
       restartPolicy: OnFailure
       serviceAccountName: postgres-setup
       automountServiceAccountToken: false
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The script
+      # writes only to /tmp, an emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: setup
         image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         env:
         - name: PGHOST
           value: platform-postgres-rw.gibson.svc
@@ -22878,9 +23135,29 @@ spec:
       restartPolicy: OnFailure
       serviceAccountName: postgres-setup
       automountServiceAccountToken: false
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The script
+      # writes only to /tmp, an emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: setup
         image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         env:
         - name: PGHOST
           value: platform-postgres-rw.gibson.svc
@@ -22977,9 +23254,29 @@ spec:
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The script
+      # writes only to /tmp, an emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: gate
         image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         # busybox ash: no `set -o pipefail` (deploy#603-605). `set -e` only.
         command:
         - sh

@@ -140,9 +140,29 @@ spec:
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false
+      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
+      # profile, a read-only root filesystem and no capabilities. The script
+      # writes only to /tmp, an emptyDir.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: tmp
+        emptyDir: {}
       containers:
       - name: gate
         image: {{ include "gibson.toolImage" . | quote }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
         # busybox ash: no `set -o pipefail` (deploy#603-605). `set -e` only.
         command:
         - sh

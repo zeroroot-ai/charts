@@ -202,13 +202,19 @@ spec:
           command: ['sh', '-c']
           args:
             - |
-              mkdir -p /var/lib/gibson/.gibson
+              set -e
+              # Runs as the daemon user (the pod securityContext), like the
+              # daemon that writes the same volume. An earlier version ran as
+              # root and left a root-owned config.yaml; the directory is
+              # writable, so rm then cp replaces it (ADR-0165, charts#394).
+              rm -f /var/lib/gibson/.gibson/config.yaml
               cp /etc/gibson/gibson.yaml /var/lib/gibson/.gibson/config.yaml
               echo "Config file copied to /var/lib/gibson/.gibson/config.yaml"
           securityContext:
-            runAsUser: 0
-            runAsGroup: 0
-            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
             - name: config
               mountPath: /etc/gibson
@@ -283,6 +289,11 @@ spec:
                 sleep 2
               done
               echo "Redis is ready!"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
       containers:
         - name: gibson
           image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.gibson.image.repository "tag" .Values.gibson.image.tag "digest" .Values.gibson.image.digest "appVersion" .Chart.AppVersion) | quote }}

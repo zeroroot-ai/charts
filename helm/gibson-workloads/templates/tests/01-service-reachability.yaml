@@ -39,6 +39,9 @@ metadata:
     {{- include "gibson-workloads.tests.annotations" . | nindent 4 }}
 spec:
   restartPolicy: Never
+  # The probe does not call the Kubernetes API, so the pod mounts no
+  # ServiceAccount token (ADR-0165, charts#394).
+  automountServiceAccountToken: false
   containers:
     - name: probe
       image: "{{ include "gibson-workloads.tests.image" . }}"

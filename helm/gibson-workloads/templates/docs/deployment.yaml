@@ -54,6 +54,9 @@ spec:
              the package happened to be public (deploy#1766). One mechanism:
              the shared helper, from global.imagePullSecrets. */}}
       {{- include "gibson.imagePullSecrets" . | nindent 6 }}
+      # nginx serves static files and never calls the Kubernetes API, so the
+      # pod mounts no ServiceAccount token (ADR-0165, charts#394).
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 101
@@ -70,6 +73,8 @@ spec:
           imagePullPolicy: {{ ((.Values.docs).image).pullPolicy | default "IfNotPresent" }}
           securityContext:
             allowPrivilegeEscalation: false
+            # Not read-only yet: the image rewrites its own index.html at
+            # start. docs-site#79 changes the image (ADR-0165, charts#394).
             readOnlyRootFilesystem: false
             runAsNonRoot: true
             runAsUser: 101
