@@ -1,0 +1,80 @@
+{{- /*
+  connector-operator metrics: a Service, a ServiceMonitor and one alert. The
+  chart ships no monitoring stack, so all three render only where the
+  cluster serves monitoring.coreos.com/v1 (ADR-0087).
+
+  gibson_connector_unrevoked_grants counts the connector grants that the
+  finalizer released past its revoke deadline with no revoke. The operator
+  retries each one every five minutes and deletes the record on success. A
+  value above zero for one hour means that a grant stays live with no
+  connector. The manager serves plain http metrics on :8080.
+*/}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-connector-operator-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: gibson-connector-operator
+    app.kubernetes.io/component: connector-operator
+    app.kubernetes.io/part-of: gibson
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  selector:
+    app.kubernetes.io/name: gibson-connector-operator
+    app.kubernetes.io/component: connector-operator
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+      protocol: TCP
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-connector-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: gibson-connector-operator
+    app.kubernetes.io/component: connector-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gibson-connector-operator
+      app.kubernetes.io/component: connector-operator
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 60s
+      scheme: http
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-connector-operator-rules
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: gibson-connector-operator
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: connector-operator
+spec:
+  groups:
+    - name: connector-operator.grants
+      rules:
+        - alert: ConnectorGrantUnrevoked
+          expr: max(gibson_connector_unrevoked_grants) > 0
+          for: 1h
+          labels:
+            severity: critical
+            component: connector-operator
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/connector-operator.md#connectorgrantunrevoked"
+            summary: "A connector grant stays live after its connector was deleted"
+            description: |
+              The connector-operator released at least one connector past its
+              revoke deadline, and the retry has not revoked the grant for one
+              hour. Each record is a ConfigMap connector-unrevoked-<name> in
+              the tenant namespace.
+{{- end }}
