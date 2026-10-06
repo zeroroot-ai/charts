@@ -252,6 +252,22 @@ jobs:
             echo "KUBECONFIG=/tmp/k3d-gibson.kubeconfig" >> "$GITHUB_ENV"
           fi
 
+      # Hubble on, so the last step can read the verdict of each flow
+      # (ADR-0165 rule 4, D76, charts#489). The shared Cilium values of hosted
+      # keep Hubble off; this upgrade keeps every other value and turns it on
+      # in the agent only. No relay: the check reads each agent with
+      # `hubble observe` in the agent container.
+      - name: Turn on Hubble in Cilium
+        run: |
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          . ./hosted/scripts/lib/cilium.sh
+          helm upgrade cilium "$CILIUM_CHART" --version "$(cilium_version)" \
+            --namespace kube-system --reuse-values --set hubble.enabled=true \
+            --wait --timeout "$CILIUM_TIMEOUT"
+          cilium_verify
+          echo "HUBBLE_SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       # PHASE 1 of an upgrade run: the PREVIOUS published version, converged.
       #
       # This is what makes the test able to catch a migration. Every other exit
@@ -491,6 +507,50 @@ jobs:
           echo "▶ put the edge back"
           kubectl -n "$NS" scale deploy/gibson-envoy --replicas="${edge_replicas:-1}"
           kubectl -n "$NS" rollout status deploy/gibson-envoy --timeout=300s
+
+      # The network policy on the running cluster (ADR-0165 rule 4, D76,
+      # charts#489). After every assertion above, no flow to or from the
+      # release namespace may be dropped by a policy: a drop is a pod that
+      # misses a network label, or a policy that misses a flow. The log names
+      # the source pod, the destination and the port.
+      #
+      # Then the live fixture: a pod with no network label dials Postgres. The
+      # policy must refuse it, and Hubble must show the drop. Without that the
+      # first half could pass on a cluster that records no flow at all.
+      - name: No flow of the release is dropped by a network policy
+        run: |
+          set -euo pipefail
+          python3 scripts/check-hubble-drops.py --namespace "$NS" --since "$HUBBLE_SINCE"
+
+          echo "▶ the fixture: a pod with no client label dials Postgres"
+          fixture_since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          kubectl -n "$NS" apply -f - <<YAML
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: hubble-proof-unlabeled
+          spec:
+            restartPolicy: Never
+            automountServiceAccountToken: false
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 65532
+              seccompProfile:
+                type: RuntimeDefault
+            containers:
+              - name: dial
+                image: ghcr.io/zeroroot-ai/mirror/curl:8.10.1
+                command: ["sh", "-c", "curl -sS --max-time 10 telnet://platform-postgres-rw.${NS}.svc:5432 </dev/null; exit 0"]
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  capabilities:
+                    drop: ["ALL"]
+          YAML
+          kubectl -n "$NS" wait --for=jsonpath='{.status.phase}'=Succeeded pod/hubble-proof-unlabeled --timeout=180s
+          python3 scripts/check-hubble-drops.py --namespace "$NS" --since "$fixture_since" \
+            --expect-drop hubble-proof-unlabeled
+          kubectl -n "$NS" delete pod hubble-proof-unlabeled --wait=false
 
       - name: Diagnose a failure
         if: failure()
