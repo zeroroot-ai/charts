@@ -224,7 +224,7 @@ spec:
                   break
                 fi
                 if [ $i -eq 30 ]; then
-                  echo "[wait-for-stripe-secrets] timed out after 60s waiting for ${secret_name}.STRIPE_SECRET_KEY. Create with: kubectl -n ${ns} create secret generic ${secret_name} --from-literal=STRIPE_SECRET_KEY=sk_test_..." >&2
+                  echo "[wait-for-stripe-secrets] timed out after 60s waiting for ${secret_name}.STRIPE_SECRET_KEY. Its ExternalSecret writes it from OpenBao. Check: kubectl get externalsecret,secret -n ${ns}" >&2
                   exit 1
                 fi
                 sleep 2
@@ -792,11 +792,8 @@ spec:
                    (gibson_<tier>_monthly_usd), so no per-env price IDs are
                    injected. plans.yaml carries the lookupKey per plan. */ -}}
             {{- if .stripeSecretKeySecretRef }}
-            # Externally-provisioned Secret. Production: ExternalSecret
-            # pulls gibson/{env}/dashboard/stripe-secret-key from AWS SM.
-            # Kind dev: create it once by hand —
-            #   kubectl -n gibson create secret generic gibson-stripe-credentials \
-            #     --from-literal=STRIPE_SECRET_KEY=sk_test_...
+            # The gibson-stripe-credentials ExternalSecret writes this Secret
+            # from OpenBao (ADR-0014). Nothing creates it by hand.
             #
             # one-code-path #203: previously `optional: true` with a
             # "runtime graceful-degrades" comment. ONE deployment shape:

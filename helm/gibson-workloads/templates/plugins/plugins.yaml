@@ -10,8 +10,8 @@
   The plugin body is the vendor's SDK wrapped in the plugin `Serve` loop. Its
   connection to the platform is entirely env-driven (zeroroot-ai/sdk, plugin):
 
-    GIBSON_URL             capability-grant enrol endpoint (daemon native-login :8085)
-    GIBSON_DAEMON_ADDR     daemon gRPC (ComponentService + HarnessCallback)
+    GIBSON_URL             the api host of the edge; the SDK enrols there and derives
+                           the gRPC dial target from it (no GIBSON_DAEMON_ADDR)
     GIBSON_PLUGIN_RUNTIME  selects the SDK egress enforcer mode (pod|setec)
     GIBSON_PLUGIN_MANIFEST absolute path to the baked manifest (/etc/gibson/plugin.yaml);
                            the SDK falls back to ./plugin.yaml (CWD) only for local dev
