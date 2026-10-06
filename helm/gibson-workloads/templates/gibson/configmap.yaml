@@ -276,9 +276,12 @@ data:
       enabled: true
       provider: openfga
       fga:
-{{- /* deploy#1382: explicit https:// — the OpenFGA HTTP listener serves
-            TLS; the daemon's FGA client honours the scheme and the pod
-            trusts the issuing CA via SSL_CERT_DIR (statefulset.yaml). */}}
+{{- /* deploy#1382: explicit https://, because the OpenFGA HTTP listener
+            serves TLS. The daemon trusts only the CA in tls.ca_file, not
+            SSL_CERT_DIR. It refuses an https endpoint when tls.enabled is
+            false, and it refuses to start when ca_file is not a readable PEM
+            file. The fga-http-ca volume (statefulset.yaml) mounts the CA at
+            /etc/ssl/fga-ca. make fga-tls checks each render. */}}
         endpoint: {{ printf "https://gibson-openfga:%d" (int (.Values.openfga.service.httpPort | default 8080)) }}
         store_id: ""
         model_id: ""
@@ -299,7 +302,8 @@ data:
         */}}
         timeout_ms: 4000
         tls:
-          enabled: false
+          enabled: true
+          ca_file: "/etc/ssl/fga-ca/ca.crt"
 
 
     {{- if .Values.gibson.sandbox.enabled }}

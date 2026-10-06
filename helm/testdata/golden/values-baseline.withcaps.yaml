@@ -4025,7 +4025,8 @@ data:
         model_id: ""
         timeout_ms: 4000
         tls:
-          enabled: false
+          enabled: true
+          ca_file: "/etc/ssl/fga-ca/ca.crt"
     # sandbox: the Setec connection details, and the ONLY surface the daemon
     # reads them from (config.SandboxConfig, gibson
     # internal/infra/config/sandbox.go). Per-tool registration (the old
@@ -16709,7 +16710,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "tmp,spire-agent-socket"
-        checksum/config: ae1130af84fe7916caa6ea728ec2c2d7a626315d008df9cc94c967c22da80256
+        checksum/config: 1832e16ab3431b10b5d6eb587e2d1816e220d1c88460138b49a964a9e3c343e4
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). Consumer envFrom
         # resolution is frozen for the pod's lifetime; Reloader watches the
         # named Secrets and triggers a rolling restart when any changes.
