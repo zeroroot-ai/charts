@@ -1058,9 +1058,8 @@ Spec: in-cluster-mtls-restoration, Component 2 / Requirement 1.
 
 ACTIVE (Task 18 landed). The body calls `fail` when gibson.auth.spiffe is
 absent or missing workloadAPISocket, or when global.spire.trustDomain is
-empty, and the daemon statefulset
-invokes it. The `dev.disableSPIFFE` escape hatch is kind-only and is rejected in
-production overlays by CI lint.
+empty, and the daemon statefulset invokes it. It has no escape hatch:
+`dev.disableSPIFFE` was deleted (charts#399).
 */}}
 {{- define "gibson.validateSpiffeRequired" -}}
 {{- /*
@@ -1073,9 +1072,7 @@ production overlays by CI lint.
   snake_case form for the daemon binary's config.
 */ -}}
 {{- $spiffe := (.Values.gibson.auth).spiffe -}}
-{{- /* dev.disableSPIFFE escape hatch — kind-only; rejected in prod overlays via CI lint */ -}}
-{{- if (.Values.dev).disableSPIFFE -}}
-{{- else if not (and $spiffe (kindIs "map" $spiffe) $spiffe.workloadAPISocket (include "gibson.trustDomain" .)) -}}
+{{- if not (and $spiffe (kindIs "map" $spiffe) $spiffe.workloadAPISocket (include "gibson.trustDomain" .)) -}}
 {{- fail "gibson.auth.spiffe must be populated in every overlay (gibson.auth.spiffe.workloadAPISocket, and global.spire.trustDomain). See spec in-cluster-mtls-restoration and memory feedback_spiffe_mtls_required.md. Disabling daemon SPIFFE mTLS is not permitted as a debugging shortcut." -}}
 {{- end -}}
 {{- end }}

@@ -5,9 +5,6 @@ namespace-isolation/subchart-workloads.yaml for the design rationale
 (precise ingress, allow-all egress, contained-by-default for everything
 unselected).
 */}}
-{{- $devDisabled := false -}}
-{{- with .Values.dev -}}{{- with .networkPolicy -}}{{- $devDisabled = .disabled -}}{{- end -}}{{- end -}}
-{{- if not $devDisabled -}}
 {{/* OpenBao — the platform secret store, HTTP API on :8200. Callers:
      daemon, ext-authz (Vault/KMS-backed material), both operators
      (per-tenant secret provisioning), the openbao-jwt-auth-init bringup
@@ -230,4 +227,3 @@ spec:
         - podSelector: {}
   egress:
     - {}
-{{- end }}

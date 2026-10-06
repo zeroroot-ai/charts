@@ -489,9 +489,8 @@ gibson:
   # unified-identity-and-authorization Phase H/8.5: secure-by-default
   # posture, the chart's gateway path is the only supported one, and
   # validateAllPathsViaEnvoy hard-requires this in every overlay (Envoy is
-  # required infrastructure — deploy#200). Disable only for Kind clusters
-  # whose CNI doesn't implement NetworkPolicies (set dev.networkPolicy.disabled=true
-  # to also bypass the validator). Spec Req 3.5.
+  # required infrastructure — deploy#200). Each cluster runs Cilium, which
+  # enforces it (hosted#436). Spec Req 3.5.
   networkPolicy:
     enabled: true
     # Additional ingress rules appended to the daemon NetworkPolicy.
@@ -2310,28 +2309,6 @@ sdk:
   # gibson-extauthz-rpc-registry ConfigMap. The ext-authz Deployment
   # then mounts the ConfigMap directly at /etc/gibson/registry.yaml.
   embeddedRegistry: ""
-
-# =============================================================================
-# Dev-only escape hatches (Phase H/8.5)
-# =============================================================================
-# Last-resort overrides for dev clusters where a normal precondition can't
-# be satisfied (e.g., Kind without Calico/Cilium can't enforce
-# NetworkPolicies, so the validateAllPathsViaEnvoy check would fail).
-# Production overlays MUST leave every flag here false.
-dev:
-  networkPolicy:
-    # When true, validateAllPathsViaEnvoy stops requiring
-    # gibson.networkPolicy.enabled=true. Use ONLY for Kind clusters whose
-    # CNI doesn't support NetworkPolicies. (Envoy is always enabled per
-    # deploy#200.)
-    disabled: false
-  dataPlane:
-    # When true, validateTenantStoresConfigured does not require all four
-    # data-plane stores to be configured.  Use ONLY for Kind dev clusters
-    # where in-chart data-plane provisioning is deferred.  Production and
-    # staging overlays MUST leave this false (default).
-    # Spec: database-per-tenant-data-plane Phase I Task 9.4, Requirement 16.2.
-    disabled: false
 
 # =============================================================================
 # cert-manager integration (Phase H/8.3)
