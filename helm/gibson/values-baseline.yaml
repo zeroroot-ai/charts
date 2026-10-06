@@ -663,10 +663,18 @@ gibson-operators:
       digest: ""
 global:
   spire:
-    # The SPIFFE trust domain of this install (ADR-0164). Set your own, as you
-    # set global.domain. scripts/baseline-up.sh keeps the trust domain of an
-    # install that already runs, because a trust domain cannot change in place.
-    trustDomain: localhost.zeroroot.ai
+    # The SPIFFE trust domain of this install (ADR-0164). scripts/baseline-up.sh
+    # keeps the trust domain of an install that already runs, because a trust
+    # domain cannot change in place.
+    #
+    # It stays zeroroot.ai until the pinned daemon follows the configured trust
+    # domain. gibson v0.153.2 compiles the callback peer IDs of the dashboard,
+    # Envoy and the daemon in the zeroroot.ai domain and refuses to start
+    # with other callback peers (internal/engine/harness/callback_method_policy.go).
+    # With localhost.zeroroot.ai here, the daemon crash-looped on kind and the
+    # three install exit tests failed (run 37449866458). Change this value
+    # only after the gibson pin that reads the trust domain.
+    trustDomain: zeroroot.ai
   # No backend selector and no key prefix (deploy#1733). The
   # platform's own OpenBao is the one External Secrets backend, so an install
   # stands up nothing extra. The earlier `kubernetes` backend pointed ESO at a
