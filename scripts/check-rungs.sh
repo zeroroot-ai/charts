@@ -16,11 +16,11 @@
 # So this asserts the thing that matters: a rung must actually SHRINK the
 # baseline. Rendering is not enough.
 #
-# WHAT IT DOES NOT DO. It does not require developer and CI to be equal. They
-# ship identical content today, and the reason they are two files is that
-# either may change later without a rename (ADR-0090). A guard forcing them
-# equal would defeat the naming. It REPORTS whether they agree, so a divergence
-# is visible on the run that introduces it rather than discovered months later.
+# DEVELOPER AND CI. They ship the same content (ADR-0090), and the two names
+# exist so either may change later. So the guard does not force the files
+# equal. It forces the RENDERS to agree on every request, and permits a limit
+# difference only when ALLOWED_LIMIT_DIFFS names it as
+# "<Kind>/<name>/<container>:<cpu|memory>". Any other render difference fails.
 #
 # The node budget itself is not checked here. That needs the Velero release,
 # the metrics-server add-on and a local cluster's own control plane, none of
@@ -33,6 +33,9 @@ ROOT="$(cd "$HERE/.." && pwd)"
 CHART="$ROOT/helm/gibson"
 BASE="$CHART/values-baseline.yaml"
 RUNGS="developer ci"
+# Limit differences between the developer and ci renders that are allowed,
+# one "<Kind>/<name>/<container>:<cpu|memory>" per word. Empty today.
+ALLOWED_LIMIT_DIFFS=""
 
 command -v helm >/dev/null || { echo "helm is required" >&2; exit 2; }
 [ -r "$BASE" ] || { echo "check-rungs: no $BASE" >&2; exit 2; }
@@ -114,13 +117,81 @@ done
 
 [ "$fail" = 0 ] || exit 1
 
-# Report, never enforce.
-if diff -q "$WORK/developer.yaml" "$WORK/ci.yaml" >/dev/null 2>&1; then
-  echo "  developer and ci render identically, as they are meant to today"
-else
-  echo "  NOTE: developer and ci no longer render identically. That is allowed"
-  echo "        (ADR-0090 keeps them separate so either may change). Say why in"
-  echo "        the file that changed, because nothing else records it."
-fi
+# compare_rungs <developer render> <ci render> — fail on any difference but a
+# named limit.
+compare_rungs() {
+  ALLOWED="$ALLOWED_LIMIT_DIFFS" python3 - "$1" "$2" <<'PY'
+import copy, os, sys, yaml
+allowed = set(os.environ.get("ALLOWED", "").split())
+def load(p):
+    return [d for d in yaml.safe_load_all(open(p, encoding="utf-8")) if d]
+dev, ci = load(sys.argv[1]), load(sys.argv[2])
+def key(d):
+    return (d.get("kind"), (d.get("metadata") or {}).get("namespace"), (d.get("metadata") or {}).get("name"))
+def containers(d):
+    spec = d.get("spec") or {}
+    spec = (spec.get("jobTemplate") or {}).get("spec", spec)
+    spec = (spec.get("template") or {}).get("spec") or {}
+    return (spec.get("initContainers") or []) + (spec.get("containers") or [])
+bad = []
+dmap = {key(d): d for d in dev}
+for c in ci:
+    d = dmap.get(key(c))
+    if d is None:
+        bad.append(f"{key(c)} renders in ci only"); continue
+    c = copy.deepcopy(c)
+    for dc, cc in zip(containers(d), containers(c)):
+        name = f"{c['kind']}/{c['metadata']['name']}/{cc.get('name')}"
+        dr, cr = dc.get("resources") or {}, cc.get("resources") or {}
+        if (dr.get("requests") or {}) != (cr.get("requests") or {}):
+            bad.append(f"{name}: requests differ: developer {dr.get('requests')}, ci {cr.get('requests')}")
+        for res in ("cpu", "memory"):
+            dl, cl = (dr.get("limits") or {}).get(res), (cr.get("limits") or {}).get(res)
+            if dl != cl:
+                if f"{name}:{res}" in allowed:
+                    cr.setdefault("limits", {})[res] = dl
+                else:
+                    bad.append(f"{name}: the {res} limit differs: developer {dl}, ci {cl}, and ALLOWED_LIMIT_DIFFS does not name it")
+        # The resources are judged above. Take the developer copy, so that the
+        # whole-object comparison below sees only the other fields.
+        if "resources" in dc:
+            cc["resources"] = copy.deepcopy(dc["resources"])
+        else:
+            cc.pop("resources", None)
+    if c != d and not any(x.startswith(f"{c['kind']}/{c['metadata']['name']}/") for x in bad):
+        bad.append(f"{key(c)} differs between developer and ci outside the container resources")
+for d in dev:
+    if key(d) not in {key(c) for c in ci}:
+        bad.append(f"{key(d)} renders in developer only")
+for b in bad:
+    print(f"✗ check-rungs: {b}", file=sys.stderr)
+sys.exit(1 if bad else 0)
+PY
+}
+
+# --- failing fixtures for the developer/ci comparison ----------------------
+cp "$WORK/developer.yaml" "$WORK/fx-dev.yaml"
+python3 - "$WORK/developer.yaml" "$WORK/fx-req.yaml" "$WORK/fx-lim.yaml" <<'PY'
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+def first_container(ds):
+    for d in ds:
+        if d.get("kind") == "Deployment":
+            return d["spec"]["template"]["spec"]["containers"][0]
+req = [dict(d) for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+first_container(req).setdefault("resources", {}).setdefault("requests", {})["cpu"] = "999m"
+yaml.safe_dump_all(req, open(sys.argv[2], "w"))
+lim = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+first_container(lim).setdefault("resources", {}).setdefault("limits", {})["memory"] = "3Gi"
+yaml.safe_dump_all(lim, open(sys.argv[3], "w"))
+PY
+if compare_rungs "$WORK/fx-dev.yaml" "$WORK/fx-req.yaml" 2>/dev/null; then
+  echo "✗ check-rungs self-test: a ci request that differs from developer passed" >&2; exit 2; fi
+if compare_rungs "$WORK/fx-dev.yaml" "$WORK/fx-lim.yaml" 2>/dev/null; then
+  echo "✗ check-rungs self-test: a ci limit that differs and is not named passed" >&2; exit 2; fi
+echo "✅ self-test: a request difference and an unnamed limit difference between developer and ci fail"
+
+compare_rungs "$WORK/developer.yaml" "$WORK/ci.yaml" || exit 1
+echo "  developer and ci agree on every request, and on every limit but the named ones"
 
 echo "✅ check-rungs: every rung of the ladder renders and shrinks the baseline"
