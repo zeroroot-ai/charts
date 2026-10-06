@@ -4014,6 +4014,15 @@ setec:
     # mounting the CA *private key* Secret into the frontend pod.
     tlsCertSecretName: "setec-frontend-tls"
     tlsClientCASecretName: "setec-frontend-tls"
+    # clients enrolls each Gibson cluster that may call the frontend
+    # (setec#233). The frontend refuses a caller whose certificate carries no
+    # listed SPIFFE ID. spiffePath, not a full ID: the setec chart builds
+    # spiffe://<global.spire.trustDomain>/<path>, so the ID follows the trust
+    # domain of the install (ADR-0164). The daemon client certificate
+    # (templates/setec/frontend-tls.yaml) carries the same ID as a URI SAN.
+    clients:
+      - name: gibson
+        spiffePath: platform/daemon
 
 # =============================================================================
 # First admin (deploy#1631). A self-hosted install has no self-serve signup, so
