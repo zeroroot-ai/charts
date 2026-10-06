@@ -10,7 +10,9 @@ the namespace name starts with `tenant-`.
 
 The rules are the objects of one plugin instance: its Deployment, its
 ServiceAccount, the ConfigMap gibson-envoy-ca (a copy of the edge CA, never
-the Secret of the edge) and the NetworkPolicies of the namespace. No Secret.
+the Secret of the edge), the NetworkPolicies of the namespace and the
+CiliumNetworkPolicy of each instance (DNS, the hosts of its catalog entry and
+the edge host). No Secret.
 The operator references this name as a Go constant in the catalog plugin
 controller of gibson. A change of the name breaks each plugin namespace.
 */ -}}
@@ -31,4 +33,7 @@ rules:
     verbs: [get, list, create, update, delete]
   - apiGroups: ["networking.k8s.io"]
     resources: [networkpolicies]
+    verbs: [get, list, create, update, delete]
+  - apiGroups: ["cilium.io"]
+    resources: [ciliumnetworkpolicies]
     verbs: [get, list, create, update, delete]
