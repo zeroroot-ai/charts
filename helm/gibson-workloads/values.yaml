@@ -217,6 +217,12 @@ gibson:
   # Leave empty for self-hosted installs — do NOT set a no-op literal value.
   entitlementsEndpoint: ""
 
+  # The SPIFFE ID of the entitlements service. The daemon accepts only this
+  # identity on the entitlements mTLS connection (ENTITLEMENTS_BILLING_SVID).
+  # Required when entitlementsEndpoint is set. It must start with spiffe://.
+  # Leave empty for self-hosted installs.
+  entitlementsBillingSVID: ""
+
   # Entitlements-required guard (/ deploy#1055, gibson#1097+#1098).
   #
   # SaaS profile ONLY. When true the daemon refuses to serve if the
