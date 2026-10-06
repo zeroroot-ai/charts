@@ -7764,39 +7764,21 @@ rules:
       - delete
 ---
 # Source: gibson/charts/gibson-workloads/templates/gibson/connector-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: gibson-gibson-workloads-connectorinstances
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-rules:
-  - apiGroups: ["gibson.zeroroot.ai"]
-    resources: ["connectorinstances"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["gibson.zeroroot.ai"]
-    resources: ["connectorinstances/status"]
-    verbs: ["get"]
----
-# Source: gibson/charts/gibson-workloads/templates/gibson/connector-rbac.yaml
-# #1562: the daemon materializes the connector credential Secret
+# The connector operator materializes the connector credential Secret
 # (<connector>-connector-cred, a "Bearer <token>" the ToolHive proxy forwards)
-# into each tenant namespace from its connector-token loop. The Secret is
-# namespaced and lives in every tenant namespace.
+# into each tenant namespace (gibson#663). The Secret is namespaced and lives
+# in every tenant namespace.
 #
 # This ClusterRole carries the rules only. There is no ClusterRoleBinding:
 # the tenant-operator binds it into each tenant namespace with a RoleBinding
-# when it provisions the namespace (gibson#137, operator v0.137.0), so the
-# daemon reads and writes Secrets in tenant namespaces and nowhere else. The
+# when it provisions the namespace (gibson#137), so the connector operator
+# reads and writes Secrets in tenant namespaces and nowhere else. The
 # name is fixed because the operator binds it by name; its own ClusterRole
 # may `bind` exactly this name (gibson-operators tenant-operator/cluster-role).
-# The operator learns the daemon's ServiceAccount from
-# DAEMON_SERVICE_ACCOUNT_NAME, and scripts/check-daemon-sa-binding.py keeps
-# that value equal to the ServiceAccount the daemon StatefulSet runs as.
+# The tenant operator learns the connector operator's ServiceAccount from
+# CONNECTOR_OPERATOR_SERVICE_ACCOUNT_NAME, and
+# scripts/check-connector-creds-binding.py keeps that value equal to the
+# ServiceAccount the connector operator runs as.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -7811,25 +7793,6 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
----
-# Source: gibson/charts/gibson-workloads/templates/gibson/tenants-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: gibson-gibson-workloads-tenants-read
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-rules:
-  - apiGroups: ["gibson.zeroroot.ai"]
-    resources: ["tenants"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["gibson.zeroroot.ai"]
-    resources: ["tenants/status"]
-    verbs: ["get"]
 ---
 # Source: gibson/charts/gibson-workloads/templates/operations/active-session-backfill/job.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -9265,46 +9228,6 @@ subjects:
     name: gibson-openbao
     namespace: gibson
 ---
-# Source: gibson/charts/gibson-workloads/templates/gibson/connector-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: gibson-gibson-workloads-connectorinstances
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: gibson-gibson-workloads-connectorinstances
-subjects:
-  - kind: ServiceAccount
-    name: gibson
-    namespace: gibson
----
-# Source: gibson/charts/gibson-workloads/templates/gibson/tenants-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: gibson-gibson-workloads-tenants-read
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: gibson-gibson-workloads-tenants-read
-subjects:
-  - kind: ServiceAccount
-    name: gibson
-    namespace: gibson
----
 # Source: gibson/charts/gibson-workloads/templates/operations/active-session-backfill/job.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -10038,17 +9961,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
 rules:
-  # secrets get, on one name. The init container wait-for-idp-admin-secret
-  # polls that Secret with `kubectl get secret <name>` before the daemon
-  # container starts. The daemon's Go code reads no Secret in this
-  # namespace through the API. No list and no watch: a namespace-wide
-  # read would also reach the Zitadel owner credentials (iam-admin-pat,
-  # iam-admin, the System API key), which only bootstrap may read
-  # (scripts/check-owner-credential-readers.py).
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames: ["idp-admin-credentials"]
-    verbs: ["get"]
+  # No Secret rule (gibson#664, charts#435): the daemon holds no Kubernetes
+  # client, and make connector-creds-binding fails on a Secret grant to it.
   # pods get/list/watch — used by the wait-for-prerequisites init
   # container to poll for tenant-operator Pod Ready before the daemon
   # container starts.
@@ -13570,14 +13484,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            # The daemon's ServiceAccount, the subject of the per-tenant
-            # RoleBinding to ClusterRole gibson-connector-creds (gibson#137).
-            # It is the workloads release's gibson.serviceAccount.name;
-            # scripts/check-daemon-sa-binding.py fails the render when the
-            # two disagree, because a wrong name is a 403 on every connector
-            # credential write.
-            - name: DAEMON_SERVICE_ACCOUNT_NAME
-              value: "gibson"
+            # The connector operator's ServiceAccount, the subject of the
+            # per-tenant RoleBinding to ClusterRole gibson-connector-creds
+            # (gibson#664). It is the name the connector-operator Deployment
+            # runs as; scripts/check-connector-creds-binding.py fails the render
+            # when the two disagree, because a wrong name is a 403 on every
+            # connector credential write.
+            - name: CONNECTOR_OPERATOR_SERVICE_ACCOUNT_NAME
+              value: "gibson-connector-operator"
             # GIBSON_APP_URL — the PRODUCT-surface origin (app.<domain>) the
             # tenant-operator reads to build the two human-facing links it
             # emails: the tenant-member invitation accept-link and the new
@@ -18484,56 +18398,9 @@ spec:
             - name: spire-agent-socket
               mountPath: /run/spire/agent
               readOnly: true
-        # Wait for ESO to materialise the daemon's IdP-admin Secret.
-        #
-        # ESO is required infrastructure (one-code-path #203). The Secret
-        # is owned by the ExternalSecret at
-        # templates/gibson/idp-admin-externalsecret.yaml, which
-        # materialises asynchronously from the bootstrap-secrets-backend.
-        # The daemon container's `secretKeyRef` lookups would
-        # CreateContainerConfigError if the Secret didn't exist yet, so
-        # we block here until it does.
-        #
-        # Spec: .spec-workflow/specs/deploy-simplification (Phase 3.1).
-        - name: wait-for-idp-admin-secret
-          # kubectl image (bitnamilegacy mirror) ships kubectl + bash —
-          # the only two things this step needs. Pinned to the chart-wide
-          # kubectl version used by other hooks.
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
-          command: ['/bin/bash', '-c']
-          args:
-            - |
-              set -eu
-              name="idp-admin-credentials"
-              ns="gibson"
-              echo "[wait-for-idp-admin-secret] waiting for Secret ${ns}/${name} (ESO-managed)..."
-              # 5 min budget. Backend mint + ESO refreshInterval (60s) covers
-              # the common case well under this; surface obvious failures fast.
-              for i in $(seq 1 150); do
-                if kubectl get secret -n "${ns}" "${name}" \
-                    -o jsonpath='{.data.client_id}' 2>/dev/null \
-                    | base64 -d 2>/dev/null | grep -q .; then
-                  echo "[wait-for-idp-admin-secret] ok (client_id present)"
-                  exit 0
-                fi
-                sleep 2
-              done
-              echo "[wait-for-idp-admin-secret] timed out after 5 min; the bootstrap-secrets Job may not have completed or ESO may not be syncing — check kubectl get externalsecret -n ${ns}" >&2
-              exit 1
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65532
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
+        # No wait for the IdP-admin Secret (gibson#664, charts#435): the
+        # daemon holds no Secret grant. Its secretKeyRef entries make the
+        # kubelet hold the container until ESO has written the Secret.
         # Setup config directory with correct config file location.
         # Spec 3 R3 — directories are now under /var/lib/gibson because the
         # nonroot user has no $HOME; HOME=/var/lib/gibson is exported in the
