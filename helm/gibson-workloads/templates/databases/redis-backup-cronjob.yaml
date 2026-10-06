@@ -71,7 +71,9 @@ spec:
           labels:
             {{- include "gibson.selectorLabels" . | nindent 12 }}
             app.kubernetes.io/component: redis-backup
-            {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "redis") "kubeApi" true "internet" true) | nindent 12 }}
+            {{- /* fqdn object-store (D76): the upload goes to AWS S3, with
+                   STS for the IRSA role. */}}
+            {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "redis") "kubeApi" true "fqdn" "object-store") | nindent 12 }}
         spec:
           restartPolicy: OnFailure
           # Never the namespace `default` SA: it carries no IRSA association,

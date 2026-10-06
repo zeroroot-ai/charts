@@ -1232,7 +1232,13 @@ A new pod gets labels, not a new policy. Input is a dict:
   datastore     postgres | redis | openbao | neo4j. Required with role datastore.
   clients       the data stores that the pod reaches, from the same four names.
   kubeApi       true when the pod calls the Kubernetes API.
-  internet      true when the pod reaches hosts outside the cluster.
+  internet      true when the pod reaches any host outside the cluster (the
+                Cilium world entity). Use it only when the hosts are not
+                known at render time, for example an API address that a
+                tenant sets.
+  fqdn          the name of an egress host group. The pod reaches only the
+                host names of that group (toFQDNs). The groups and their
+                hosts are in gibson.egressFqdnGroups (helm/gibson).
   namespaces    true when the pod reaches pods in other namespaces.
   edge          true for the public edge. Each source reaches its listener.
   controlPlane  true for a server that the API server or a node dials
@@ -1241,7 +1247,8 @@ A new pod gets labels, not a new policy. Input is a dict:
   {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "redis") "kubeApi" true) | nindent 8 }}
 
 scripts/check-secure-pod.py fails on a pod with no role, and on a pod that
-reaches a data store or the internet with no label for it.
+reaches a data store or the internet with no label for it. A pod with only
+the egress-fqdn label must not reach the world entity.
 */}}
 {{- define "gibson.netLabels" -}}
 {{- $roles := list "platform" "datastore" "system" -}}
@@ -1267,6 +1274,13 @@ gibson.zeroroot.ai/kube-api: "true"
 {{- end }}
 {{- if .internet }}
 gibson.zeroroot.ai/egress-internet: "true"
+{{- end }}
+{{- with .fqdn }}
+{{- $groups := list "zitadel" "tenant-operator" "cert-manager" "external-dns" "object-store" }}
+{{- if not (has . $groups) }}
+{{- fail (printf "gibson.netLabels: egress host group %v is not one of %s" . (join ", " $groups)) }}
+{{- end }}
+gibson.zeroroot.ai/egress-fqdn: {{ . }}
 {{- end }}
 {{- if .namespaces }}
 gibson.zeroroot.ai/egress-namespaces: "true"

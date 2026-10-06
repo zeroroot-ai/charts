@@ -92,6 +92,11 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: daemon
+        {{- /* internet (D76): the daemon calls the LLM and embedding provider
+               APIs, the OAuth token endpoints of the connector vendors and the
+               SMTP relay. A tenant sets the base URL of each provider, so the
+               hosts are not known at render time and a host list cannot
+               name them. */}}
         {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis" "openbao" "neo4j") "kubeApi" true "internet" true "namespaces" true) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)

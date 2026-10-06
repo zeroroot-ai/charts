@@ -807,11 +807,14 @@ zitadel:
     seccompProfile:
       type: RuntimeDefault
   # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  # egress-fqdn zitadel: ZITADEL sends mail through the SMTP relay of
+  # platformBootstrap.zitadel.smtp. External identity providers are off
+  # (AllowExternalIDP: false). The chart gives the login UI these labels too.
   podAdditionalLabels:
     gibson.zeroroot.ai/net-role: platform
     gibson.zeroroot.ai/client-postgres: "true"
     gibson.zeroroot.ai/kube-api: "true"
-    gibson.zeroroot.ai/egress-internet: "true"
+    gibson.zeroroot.ai/egress-fqdn: zitadel
   cleanupJob:
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
     podAdditionalLabels:
@@ -1314,11 +1317,13 @@ spire:
       seccompProfile:
         type: RuntimeDefault
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    # No egress label: the server uses the disk KeyManager, no
+    # UpstreamAuthority and no federation. It calls only the API server and
+    # Postgres.
     podLabels:
       gibson.zeroroot.ai/net-role: platform
       gibson.zeroroot.ai/client-postgres: "true"
       gibson.zeroroot.ai/kube-api: "true"
-      gibson.zeroroot.ai/egress-internet: "true"
       gibson.zeroroot.ai/ingress-control-plane: "true"
     # Velero fs-backup skips these: sockets and scratch. spire-data (the
     # datastore volume) stays in the backup. scripts/check-velero-volume-excludes.sh.
@@ -1431,10 +1436,12 @@ spire:
 
 cert-manager:
   # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  # egress-fqdn cert-manager: the ACME directory of Let's Encrypt, and the
+  # hosts of the solver (the self-check, or Route53 and its name servers).
   podLabels:
     gibson.zeroroot.ai/net-role: system
     gibson.zeroroot.ai/kube-api: "true"
-    gibson.zeroroot.ai/egress-internet: "true"
+    gibson.zeroroot.ai/egress-fqdn: cert-manager
   # Canonical names (cert-manager, cert-manager-webhook, cert-manager-cainjector)
   # rather than gibson-cert-manager-*: the vendored RBAC in templates/operators/
   # names these ServiceAccounts, and the admission inventory pins the webhook
@@ -1547,10 +1554,11 @@ external-secrets:
 
 external-dns:
   # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  # egress-fqdn external-dns: the API of the DNS provider (Route53 for aws).
   podLabels:
     gibson.zeroroot.ai/net-role: system
     gibson.zeroroot.ai/kube-api: "true"
-    gibson.zeroroot.ai/egress-internet: "true"
+    gibson.zeroroot.ai/egress-fqdn: external-dns
   fullnameOverride: external-dns
   # The provider is the one per-cloud seam these two operators keep
   #. `inmemory` starts on a cluster with no cloud attached: it

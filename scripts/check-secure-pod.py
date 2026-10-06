@@ -12,8 +12,10 @@ shipped profile and checks each pod template against them.
                   CiliumClusterwideNetworkPolicy denies all traffic of the
                   namespace by default, with DNS allowed. Each pod has a
                   network role label. Only a pod with the client label of a
-                  data store reaches that data store, and only a pod with the
-                  egress-internet label reaches the internet. No Kubernetes
+                  data store reaches that data store. Only a pod with the
+                  egress-internet label reaches the world entity. A pod
+                  with the egress-fqdn label reaches only host names
+                  (toFQDNs). No Kubernetes
                   NetworkPolicy selects a pod of the release namespace.
   5. image        Each image comes from ghcr.io/zeroroot-ai/ and has a digest.
   6. exceptions   Each exception is a named entry with a reason in
@@ -247,8 +249,11 @@ def network_findings(docs: list[dict]) -> dict[str, list[str]]:
                 bad.append(f"a data store pod has no {NET}datastore label")
         mine = [(p, r, rns) for p, r, rns in rules if cp.rule_selects(r, rns, ep)]
         for p, r, rns in mine:
-            if cp.egress_internet(r) and labels.get(NET + "egress-internet") != "true":
+            internet = labels.get(NET + "egress-internet") == "true"
+            if cp.egress_world(r) and not internet:
                 bad.append(f"{p['kind']}/{p['metadata']['name']} opens egress to the internet, and the pod has no {NET}egress-internet label")
+            elif cp.egress_fqdn(r) and not internet and NET + "egress-fqdn" not in labels:
+                bad.append(f"{p['kind']}/{p['metadata']['name']} opens egress to host names, and the pod has no {NET}egress-fqdn label")
         for sep, store in stores:
             if labels.get(NET + "datastore") == store or labels.get(f"{NET}client-{store}") == "true":
                 continue
@@ -431,6 +436,21 @@ spec:
   endpointSelector: {matchLabels: {gibson.zeroroot.ai/egress-internet: "true"}}
   egress: [{toEntities: [world]}]
 ---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: {name: egress-fqdn-mail, namespace: fixture}
+spec:
+  endpointSelector: {matchLabels: {gibson.zeroroot.ai/egress-fqdn: mail}}
+  egress: [{toFQDNs: [{matchName: smtp.example.com}]}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: mailer, namespace: fixture}
+spec:
+  template:
+    metadata: {labels: {app: mailer, gibson.zeroroot.ai/net-role: platform, gibson.zeroroot.ai/egress-fqdn: mail}}
+""" + POD + """
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata: {name: app, namespace: fixture}
@@ -534,6 +554,10 @@ def _fqdn_with_no_label(docs):
     _cilium(docs, "platform")["spec"]["egress"].append({"toFQDNs": [{"matchName": "api.example.com"}]})
 
 
+def _world_with_fqdn_label(docs):
+    _cilium(docs, "egress-fqdn-mail")["spec"]["egress"].append({"toEntities": ["world"]})
+
+
 def _tag_only(docs):
     _container(docs)["image"] = "ghcr.io/zeroroot-ai/app:v1.0.0"
 
@@ -561,6 +585,7 @@ FIXTURES_THAT_MUST_FAIL = {
     "rule 4: a pod with no client label reaches a data store": ("network", _egress_to_store),
     "rule 4: a pod with no egress label reaches the world": ("network", _internet_with_no_label),
     "rule 4: a pod with no egress label reaches a host name": ("network", _fqdn_with_no_label),
+    "rule 4: a pod with only the egress-fqdn label reaches the world": ("network", _world_with_fqdn_label),
     "rule 5: an image with a tag and no digest": ("image", _tag_only),
     "rule 5: an image from a different registry": ("image", _other_registry),
     "the namespace has no restricted label": ("namespace-label", _no_label),

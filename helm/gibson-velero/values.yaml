@@ -58,6 +58,8 @@ schedule:
 # ---------------------------------------------------------------------------
 velero:
   # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels in the umbrella).
+  # egress-internet: Velero writes to the bucket at bucket.endpoint, an S3
+  # store that this release names and the umbrella cannot read.
   podLabels:
     gibson.zeroroot.ai/net-role: system
     gibson.zeroroot.ai/kube-api: "true"
@@ -172,6 +174,8 @@ velero:
       memory: 512Mi
   nodeAgent:
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels in the umbrella).
+    # egress-internet: the node agent writes the kopia volume data to the
+    # same bucket as the server.
     podLabels:
       gibson.zeroroot.ai/net-role: system
       gibson.zeroroot.ai/kube-api: "true"

@@ -46,7 +46,10 @@
 {{- $podLabels := dict "app.kubernetes.io/name" $name "app.kubernetes.io/part-of" "gibson" "app.kubernetes.io/component" "plugin" "gibson.zeroroot.ai/plugin" $vendor }}
 {{- /* The network labels (ADR-0165 rule 4, D76): a plugin is in no shared
        group. It reaches its vendor API outside the cluster and the edge,
-       and nothing dials it but the kubelet probes. */}}
+       and nothing dials it but the kubelet probes. internet: the vendor
+       hosts differ for each plugin and include self-hosted vendor
+       instances. The plugin manifest names them, and the SDK egress
+       enforcer (GIBSON_PLUGIN_RUNTIME) applies that list in the process. */}}
 {{- $podLabels = merge $podLabels (include "gibson.netLabels" (dict "role" "system" "internet" true) | fromYaml) }}
 {{- /* SSL_CERT_DIR unions the Envoy edge CA (/etc/ssl/envoy-ca — the trust
        anchor for the capability-grant enrol POST to the public issuer URL
