@@ -386,77 +386,8 @@ gibson:
     registration: 50100
     metrics: 9090
 
-  # Outbound mail transport — one Mailer for BOTH the daemon's outbound
-  # message paths: gibson#632 invitation accept-links, AND (as of the
-  # signup-email-delivery companion to gibson#1228 / dashboard#991) self-serve
-  # signup email verification.
-  #
-  # provider=log is a NON-DELIVERING development stub: it drops the message
-  # and logs only recipient/subject/length, never the body (a body carries a
-  # single-use link, and a log line is a durable, widely-readable sink). It
-  # is fine for invitations, where a failed send degrades gracefully. It is
-  # NOT fine for signup verification: the gibson daemon's mailer package
-  # (internal/platform/mailer, mailer.RequireDelivering) refuses to wire the
-  # signup verification sender behind a non-delivering transport, and when
-  # `registration` is open (the default, see the top of this file) the daemon
-  # REFUSES TO START without a delivering transport, GIBSON_APP_URL, a
-  # verification store and a rate limiter all present.
-  #
-  # Every profile that leaves `registration` at open MUST set
-  # provider=smtp here (or the daemon will not boot):
-  #   - kind: wired to the in-cluster mailpit dev sink (mailpit.enabled +
-  #     values-kind.yaml) — no SMTP account needed, dev-only.
-  #   - staging/prod: wired to the SES SMTP relay stage 0 mints. The
-  #     bringup writes the relay credential into the keyring Secret as
-  #     `smtp-username` and `smtp-password`, and the openbao-auto-init
-  #     sidecar seeds `ses-smtp-credentials` from those two inputs (see
-  #     smtp.externalSecret below and files/openbao-seed-keys.txt) — but
-  #     ANY delivering SMTP relay works, the chart does not hardcode SES
-  #     anywhere. The dashboard reads the same key.
-  email:
-    provider: "log"                 # GIBSON_EMAIL_PROVIDER: log | smtp — MUST be
-                                     # "smtp" wherever `registration` is open.
-    from: "no-reply@gibson.local"   # GIBSON_EMAIL_FROM
-    smtp:
-      host: ""                      # GIBSON_SMTP_HOST (required when provider=smtp)
-      port: 587                     # GIBSON_SMTP_PORT
-      # SES (and most managed SMTP relays) route bounce/complaint events by
-      # this header. Optional; only meaningful against SES. GIBSON_SMTP_
-      # CONFIGURATION_SET — leave empty for providers that don't use it.
-      configurationSet: ""
-      # --- Credentials, path A: inline plain value + a Secret holding just
-      #     the password. Use when the operator supplies SMTP creds directly
-      #     (any provider, no ExternalSecret machinery required). Ignored
-      #     when smtp.externalSecret.enabled is true (path B, below).
-      #     THE CHART RENDERS NO SECRET FOR PATH A — deliberately. The
-      #     operator's own secret tooling provides the Secret named here, in
-      #     the release namespace, before install (deploy#1355). Path B,
-      #     the ExternalSecret from OpenBao, needs no such step.
-      #     A dangling name here is the operator's to resolve, not a chart
-      #     bug — the secret-plumbing guard allowlists the CI fixture's
-      #     example name for exactly this reason.
-      username: ""                  # GIBSON_SMTP_USERNAME (empty = no auth)
-      passwordSecretName: ""        # Secret holding the SMTP password
-      passwordSecretKey: "password"  # key within that Secret
-      # --- Credentials, path B: ESO-synced from a backend secret that
-      #     carries BOTH a username and a password property in one place —
-      #     the natural shape of an IAM-style SMTP credential pair (e.g. SES
-      #     SMTP: an IAM access key id as the username, its SES-v4-derived
-      #     secret as the password). Not SES-specific: any provider whose
-      #     credentials are seeded as one backend secret with these two
-      #     properties fits. Overrides path A when enabled.
-      externalSecret:
-        enabled: false
-        # The OpenBao key the ClusterSecretStore reads, flat under
-        # `secret/data/`. The default `ses-smtp-credentials` is a
-        # seed-table key an operator fills in with
-        # scripts/baseline-set-secret.sh. Override it for any other delivering
-        # provider whose credentials are seeded as one key with a username
-        # and a password property.
-        remoteKey: "ses-smtp-credentials"
-        usernameProperty: "username"
-        passwordProperty: "password"
-        refreshInterval: "60s"
+  # Outbound mail: the one value global.email of the umbrella (hosted#223).
+  # gibson.email was deleted, and setting it fails the render.
 
   service:
     type: ClusterIP
@@ -498,7 +429,6 @@ gibson:
 
   config:
     core:
-      parallelLimit: 10
       timeout: "5m"
       debug: false
     logging:
@@ -542,19 +472,6 @@ gibson:
         keyPath: /etc/gibson/tls/metrics/tls.key
         clientCAPath: /etc/gibson/tls/metrics/ca.crt
 
-    # Identity / gateway-coupling controls (spec zitadel-envoy-gateway-migration).
-    #
-    # When requireEnvoy=true the daemon expects every request to
-    # arrive via the gateway with HMAC-signed identity headers. Envoy and
-    # ext-authz are both unconditionally enabled (deploy#200, deploy#188 —
-    # ext-authz toggle deleted), so no further coupling check is needed. Default is
-    # false because daemon-side enforcement does not land until task 15
-    # (`internal/identity/interceptor.go`); shipping the validation now lets
-    # the Phase 0 dev overlay opt in via `--set gibson.config.identity.requireEnvoy=true`,
-    # and task 15 will flip the default to true.
-    identity:
-      requireEnvoy: false
-
   # Authentication and authorization configuration
   auth:
     # Authentication mode: dev | enterprise | saas
@@ -578,11 +495,6 @@ gibson:
     # Clock skew tolerance for token expiry validation
     # Allows for time differences between servers
     clockSkew: "30s"
-
-    # Trust localhost connections without authentication
-    # WARNING: Only use in development environments
-    # When true, requests from 127.0.0.1 bypass auth
-    trustLocalhost: false
 
     # OIDC providers configuration (supports multiple providers)
     # Each provider represents an identity provider that issues JWT tokens
@@ -626,13 +538,6 @@ gibson:
       #     token: "dev-token-user"
       #     roles: ["viewer"]
       #     tenant: "dev"
-
-  # Authorization enforcement configuration
-  authz:
-    # enforcementSource is fixed to "fga" after authz-07.
-    # This field is retained for config-file backwards compatibility only;
-    # the daemon ignores any value other than "fga".
-    enforcementSource: "fga"
 
   resources:
     requests:
@@ -1010,7 +915,7 @@ dashboard:
     # is deleted along with nodemailer, resend and @aws-sdk/client-ses. The
     # daemon sends signup verification and invitations and Zitadel owns password
     # reset and address verification, so the platform's one relay credential
-    # reaches the daemon through gibson.email.smtp and never this chart's
+    # reaches the daemon through global.email and never this chart's
     # dashboard. A provider knob here described a sender that did not exist.
 
     # Post-logout redirect URI(s) — RP-initiated OIDC logout
@@ -1112,7 +1017,7 @@ dashboard:
   # No billing email is configured here, and none was ever sent from here.
   # This block used to point at dashboard.auth.email, which dashboard#181
   # deleted together with the dashboard's whole mailer. The platform's one
-  # relay credential reaches the daemon through gibson.email.smtp. Whether a
+  # relay credential reaches the daemon through global.email. Whether a
   # billing notification is sent at all is the daemon's question, not this
   # chart's, and no template here renders one.
 
@@ -2178,7 +2083,7 @@ stripeMock:
 #
 # gibson#1228 makes the daemon refuse to serve the self-serve signup RPCs —
 # and refuse to BOOT at all when `registration` is open, which it is
-# by default — unless gibson.email.provider=smtp (a transport that actually
+# by default — unless global.email.provider=smtp (a transport that actually
 # Delivers()). Kind has no SMTP account to hand it, and "log" no longer
 # satisfies that requirement (it is a non-delivering stub by design — see
 # gibson.email above). mailpit is the dev-only delivering sink that closes
@@ -2191,7 +2096,7 @@ stripeMock:
 # This is the "dev-profile sink" shape calls for, not a disabled
 # required service: mailpit backs signup delivery ONLY on kind (enabled here
 # defaults false; values-kind.yaml flips it on alongside
-# gibson.email.provider=smtp pointed at this Service). Staging/prod are wired
+# global.email.provider=smtp pointed at this Service). Staging/prod are wired
 # to SES's SMTP endpoint instead (values-aws-prod.yaml) — mailpit is never
 # reachable from outside the kind cluster and MUST NOT be enabled in any
 # staging/prod overlay.

@@ -433,55 +433,41 @@ spec:
             - name: GIBSON_TEST_FIXTURES_ENABLED
               value: "true"
             {{- end }}
+            {{- /* Outbound mail: the one value global.email (hosted#223,
+                   gibson.email in gibson-common). gibson.email was deleted. */}}
+            {{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "gibson.email") "use" "global.email") }}
+            {{- $mail := include "gibson.email" . | fromJson }}
             - name: GIBSON_EMAIL_PROVIDER
-              value: {{ (((.Values.gibson).email).provider) | default "log" | quote }}
+              value: {{ $mail.provider | quote }}
             - name: GIBSON_EMAIL_FROM
-              value: {{ (((.Values.gibson).email).from) | default "no-reply@gibson.local" | quote }}
-            {{- if eq ((((.Values.gibson).email).provider) | default "log") "smtp" }}
+              value: {{ $mail.from | quote }}
+            {{- if eq $mail.provider "smtp" }}
             - name: GIBSON_SMTP_HOST
-              value: {{ required "gibson.email.smtp.host is required when gibson.email.provider=smtp" .Values.gibson.email.smtp.host | quote }}
+              value: {{ $mail.host | quote }}
             - name: GIBSON_SMTP_PORT
-              value: {{ (.Values.gibson.email.smtp.port | default 587) | quote }}
-            {{- if .Values.gibson.email.smtp.configurationSet }}
+              value: {{ $mail.port | quote }}
+            {{- with $mail.configurationSet }}
             # SES (and most managed relays) route bounce/complaint events by this
-            # header (X-SES-CONFIGURATION-SET). Optional — leave unset for
-            # providers that don't use a configuration set.
+            # header (X-SES-CONFIGURATION-SET). Empty for other relays.
             - name: GIBSON_SMTP_CONFIGURATION_SET
-              value: {{ .Values.gibson.email.smtp.configurationSet | quote }}
+              value: {{ . | quote }}
             {{- end }}
-            {{- if .Values.gibson.email.smtp.externalSecret.enabled }}
-            # Credentials path B: BOTH username and password come from the
-            # ExternalSecret-synced Secret (templates/secrets/email-smtp-secret.yaml),
-            # which reads gibson.email.smtp.externalSecret.remoteKey (default
-            # "ses-smtp-credentials", a key in the secret store, OpenBao on
-            # every profile, ADR-0014; see secret-contract.yaml). Not SES-specific —
-            # any delivering provider whose credentials are seeded as one backend
-            # secret with a username + password property fits this path.
+            {{- with $mail.credentialsSecret }}
+            # The relay credential: one Secret with the keys username and
+            # password. secretStore: the ExternalSecret
+            # templates/secrets/email-smtp-secret.yaml writes it. secret: the
+            # operator creates it. The tenant-operator and Zitadel read the
+            # same Secret.
             - name: GIBSON_SMTP_USERNAME
               valueFrom:
                 secretKeyRef:
-                  # Local Secret key — always "username", normalised by the
-                  # ExternalSecret's target template regardless of what
-                  # property name the backend secret uses (that mapping is
-                  # externalSecret.usernameProperty, consumed only by
-                  # templates/secrets/email-smtp-secret.yaml).
-                  name: {{ include "gibson.emailSmtpSecret.name" . | quote }}
+                  name: {{ . | quote }}
                   key: "username"
             - name: GIBSON_SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "gibson.emailSmtpSecret.name" . | quote }}
+                  name: {{ . | quote }}
                   key: "password"
-            {{- else if .Values.gibson.email.smtp.username }}
-            # Credentials path A: inline plain-value username + a Secret holding
-            # just the password (e.g. mailpit needs neither — no auth in kind).
-            - name: GIBSON_SMTP_USERNAME
-              value: {{ .Values.gibson.email.smtp.username | quote }}
-            - name: GIBSON_SMTP_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "gibson.email.smtp.passwordSecretName is required when smtp.username is set" .Values.gibson.email.smtp.passwordSecretName | quote }}
-                  key: {{ .Values.gibson.email.smtp.passwordSecretKey | default "password" | quote }}
             {{- end }}
             {{- end }}
             # Provider catalogue hot-reload path (spec: gibson#296).

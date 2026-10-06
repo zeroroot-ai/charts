@@ -160,7 +160,7 @@ global:
     # same mechanism global.platformOwner.offlineSetup uses, reused here
     # rather than a second one (ADR-0027). Set this explicitly on a profile
     # with no delivering mail transport
-    # (gibson-workloads.gibson.email.provider != "smtp") — the render fails
+    # (global.email.provider != "smtp") — the render fails
     # otherwise, naming both keys. Ignored when firstTenant.enabled is false.
     offlineSetup: false
     # setupSecretRef names the Secret (and the key within it) the
@@ -203,7 +203,7 @@ global:
     # one-time, expiring link to a Secret readable only by cluster
     # administrators (ADR-0093 decision 8). Set this explicitly on a
     # profile with no delivering mail transport
-    # (gibson-workloads.email.provider != "smtp") — the render fails
+    # (global.email.provider != "smtp") — the render fails
     # otherwise, naming both keys, so a cluster can never be left unable to
     # reach the one person who can sign in and set everything else up.
     offlineSetup: false
@@ -218,6 +218,55 @@ global:
     # new setup link. A reviewed change to this value, committed and
     # rolled out like any other — never a live-cluster action.
     setupGeneration: 1
+  # The one mail value of the install (hosted#223, ADR-0027). The daemon, the
+  # tenant-operator's welcome mail and Zitadel's SMTP provider (the
+  # PlatformBootstrap) all read it, so the three cannot drift apart. The old
+  # blocks gibson-workloads.gibson.email, gibson-operators.tenantOperator.smtp
+  # and gibson-operators.platformBootstrap.zitadel.smtp were deleted, and
+  # setting one fails the render.
+  #
+  # provider: log   the daemon logs each mail and sends none. The
+  #                 tenant-operator sends its welcome mail to the in-cluster
+  #                 mailpit sink. Zitadel gets no SMTP provider, so set
+  #                 global.platformOwner.offlineSetup (and
+  #                 global.firstTenant.offlineSetup when it is enabled).
+  # provider: smtp  all three send through smtp.host.
+  #
+  # Worked example, an SES relay whose credential is seeded in the secret
+  # store under ses-smtp-credentials (properties username and password):
+  #
+  #   global:
+  #     email:
+  #       provider: smtp
+  #       from: "no-reply@example.com"
+  #       fromName: "Example"
+  #       smtp:
+  #         host: "email-smtp.us-east-1.amazonaws.com"
+  #         port: 587
+  #         tlsMode: starttls        # starttls (587) | implicit (465) | plaintext
+  #         configurationSet: ""     # SES only; empty for other relays
+  #         credentials:
+  #           source: secretStore    # secretStore | secret | none
+  #           remoteKey: "ses-smtp-credentials"
+  #           secretName: ""         # source secret: a Secret with keys username, password
+  #
+  # source secretStore renders the ExternalSecret <release>-email-smtp from
+  # remoteKey. source secret names a Secret the operator creates. source none
+  # is a relay that takes no credential, and it is the only source allowed
+  # with tlsMode plaintext.
+  email:
+    provider: "log"
+    from: ""
+    fromName: ""
+    smtp:
+      host: ""
+      port: 587
+      tlsMode: "starttls"
+      configurationSet: ""
+      credentials:
+        source: "secretStore"
+        remoteKey: "ses-smtp-credentials"
+        secretName: ""
 
 # In-cluster CNPG `Cluster` shape (deploy#1389), rendered by
 # templates/postgres/platform-postgres-cluster.yaml on EVERY profile
@@ -454,19 +503,6 @@ gibson-workloads:
     required:
       - gibson-iam-admin
       - gibson-tenant-operator
-  gibson:
-    embedder:
-      cache:
-        # Without a hydrated model cache the daemon's GraphRAG bridge falls
-        # back to its built-in 10-second HuggingFace download against a
-        # READ-ONLY rootfs — CrashLoopBackOff at 'failed to create embedder'
-        # (observed live on staging 2026-06-11). kind uses initMode=image
-        # with a locally-built model image; that image is not published to
-        # ghcr, so the umbrella uses the chart's `download` init container
-        # (proper timeout, hydrates the PVC once; NAT egress to
-        # huggingface.co is available on EKS).
-        enabled: true
-        initMode: download
   spire:
     controllerManager:
       # MUST equal the className the umbrella's spire sub-chart computes for

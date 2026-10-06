@@ -3,6 +3,10 @@
 # scripts/check-optional-references.py reads this file. A case with no entry
 # fails, and so does an entry that matches no case. Keyed by content.
 cases:
+  ? helm/gibson-common/templates/_helpers.tpl default {{- $_ := set $out "configurationSet" ($s.configurationSet | default "") -}}
+  : global.email.smtp.configurationSet is optional; only SES routes bounce events by it, and the daemon gets no GIBSON_SMTP_CONFIGURATION_SET when it is empty.
+  ? helm/gibson-common/templates/_helpers.tpl default {{- $out := dict "provider" $provider "from" $from "fromName" ($e.fromName | default "") "host" "" "port" "" "tlsMode" "" "configurationSet" "" "credentialsSource" "" "credentialsSecret" "" "remoteKey" "" -}}
+  : global.email.fromName is optional with provider log, where no sender name is used; with provider smtp gibson.email requires it and fails the render without it.
   helm/gibson-common/templates/_helpers.tpl default {{- $digest := .digest | default "" -}}: The registry host and the digest are optional parts of an image reference; the helper builds the reference without them.
   ? 'helm/gibson-common/templates/_helpers.tpl default {{- $hasCluster := contains "name: gibson_daemon_grpc" ($envoyCfg | default "") -}}'
   : The validator searches the Envoy config text; empty text makes the search fail, and the validator then fails the render.

@@ -15,7 +15,7 @@ of them.
 MAIL. Zitadel emails the setup link through its own invite-code flow, for
 BOTH the Platform owner and the seeded first tenant's Owner — the same
 mechanism, reused rather than a second one (ADR-0027). A profile that ships
-no delivering transport (gibson-workloads.gibson.email.provider != "smtp")
+no delivering transport (global.email.provider != "smtp")
 must say so on purpose with offlineSetup: true on whichever of the two is in
 play, or the operator/first-admin Job would try to send a link nothing can
 deliver and that person could never sign in. Offline mode instead writes a
@@ -36,10 +36,9 @@ This template renders no resource: it exists to run these checks on every
 {{- fail (printf "global.platformOwner.email and global.firstTenant.ownerEmail are both %q. They must be different addresses: the Platform owner administers Zitadel and belongs to no tenant, and the first tenant's Owner is a tenant user with no Zitadel administrator role (ADR-0093 decision 6)." $ownerEmail) -}}
 {{- end -}}
 {{- end -}}
-{{- $wl := index .Values "gibson-workloads" | default dict -}}
-{{- $mailConfigured := eq ((($wl.gibson | default dict).email | default dict).provider | default "log") "smtp" -}}
+{{- $mailConfigured := eq (include "gibson.email" . | fromJson).provider "smtp" -}}
 {{- if and (not $mailConfigured) (not $po.offlineSetup) -}}
-{{- fail "global.platformOwner.email has no way to reach its owner: gibson-workloads.gibson.email.provider is not \"smtp\" (no delivering mail transport) and global.platformOwner.offlineSetup is not true. Configure real mail, or set global.platformOwner.offlineSetup: true so the platform-operator writes a one-time setup link to global.platformOwner.setupSecretRef instead (ADR-0093 decision 8)." -}}
+{{- fail "global.platformOwner.email has no way to reach its owner: global.email.provider is not \"smtp\" (no delivering mail transport) and global.platformOwner.offlineSetup is not true. Configure real mail, or set global.platformOwner.offlineSetup: true so the platform-operator writes a one-time setup link to global.platformOwner.setupSecretRef instead (ADR-0093 decision 8)." -}}
 {{- end -}}
 {{- if $po.offlineSetup -}}
 {{- if not (($po.setupSecretRef | default dict).name) -}}
@@ -51,7 +50,7 @@ This template renders no resource: it exists to run these checks on every
 {{- end -}}
 {{- if $ft.enabled -}}
 {{- if and (not $mailConfigured) (not $ft.offlineSetup) -}}
-{{- fail "global.firstTenant.ownerEmail has no way to reach its Owner: gibson-workloads.gibson.email.provider is not \"smtp\" (no delivering mail transport) and global.firstTenant.offlineSetup is not true. Configure real mail, or set global.firstTenant.offlineSetup: true so the first-admin Job writes a one-time setup link to global.firstTenant.setupSecretRef instead (ADR-0093 decision 8, hosted#202)." -}}
+{{- fail "global.firstTenant.ownerEmail has no way to reach its Owner: global.email.provider is not \"smtp\" (no delivering mail transport) and global.firstTenant.offlineSetup is not true. Configure real mail, or set global.firstTenant.offlineSetup: true so the first-admin Job writes a one-time setup link to global.firstTenant.setupSecretRef instead (ADR-0093 decision 8, hosted#202)." -}}
 {{- end -}}
 {{- if $ft.offlineSetup -}}
 {{- if not (($ft.setupSecretRef | default dict).name) -}}

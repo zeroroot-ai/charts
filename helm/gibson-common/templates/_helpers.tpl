@@ -1328,6 +1328,63 @@ here. The render fails on any other name.
 {{- end -}}
 
 {{/*
+gibson.email: the one mail value of the install, global.email (hosted#223,
+ADR-0027), checked and returned as JSON. The daemon, the tenant-operator and
+the PlatformBootstrap (Zitadel) read it; nothing else names a mail transport.
+
+  provider  log   the daemon logs each mail. The tenant-operator sends its
+                  welcome mail to the in-cluster mailpit (no TLS, no
+                  credential). Zitadel gets no SMTP provider.
+            smtp  all three send through smtp.host.
+  from, fromName  the sender. fromName is required with smtp (Zitadel).
+  smtp.tlsMode    starttls (587), implicit (465) or plaintext.
+  smtp.credentials.source
+            secretStore  the ExternalSecret <release>-email-smtp reads
+                         remoteKey (properties username and password)
+            secret       secretName, keys username and password
+            none         a relay that takes no credential
+
+The returned credentialsSecret names the Secret that holds username and
+password, or is empty.
+*/}}
+{{- define "gibson.email" -}}
+{{- $e := required "global.email is required: the one mail value of the install (hosted#223)." ((.Values.global).email) -}}
+{{- $provider := required "global.email.provider is required: log or smtp." $e.provider -}}
+{{- if not (has $provider (list "log" "smtp")) -}}
+{{- fail (printf "global.email.provider is %q: use log or smtp." $provider) -}}
+{{- end -}}
+{{- $from := required "global.email.from is required: the sender address of each mail." $e.from -}}
+{{- $out := dict "provider" $provider "from" $from "fromName" ($e.fromName | default "") "host" "" "port" "" "tlsMode" "" "configurationSet" "" "credentialsSource" "" "credentialsSecret" "" "remoteKey" "" -}}
+{{- if eq $provider "smtp" -}}
+{{- $s := required "global.email.smtp is required when global.email.provider is smtp." $e.smtp -}}
+{{- $_ := set $out "fromName" (required "global.email.fromName is required when global.email.provider is smtp: Zitadel names the sender." $e.fromName) -}}
+{{- $_ := set $out "host" (required "global.email.smtp.host is required when global.email.provider is smtp." $s.host) -}}
+{{- $_ := set $out "port" (toString (required "global.email.smtp.port is required when global.email.provider is smtp." $s.port)) -}}
+{{- $mode := required "global.email.smtp.tlsMode is required: starttls, implicit or plaintext." $s.tlsMode -}}
+{{- if not (has $mode (list "starttls" "implicit" "plaintext")) -}}
+{{- fail (printf "global.email.smtp.tlsMode is %q: use starttls (port 587, dial plaintext then upgrade), implicit (port 465, TLS from the first byte) or plaintext (no encryption, for a sink that offers no STARTTLS)." $mode) -}}
+{{- end -}}
+{{- $_ := set $out "tlsMode" $mode -}}
+{{- $_ := set $out "configurationSet" ($s.configurationSet | default "") -}}
+{{- $c := required "global.email.smtp.credentials is required when global.email.provider is smtp." $s.credentials -}}
+{{- $src := required "global.email.smtp.credentials.source is required: secretStore, secret or none." $c.source -}}
+{{- $_ := set $out "credentialsSource" $src -}}
+{{- if eq $src "secretStore" -}}
+{{- $_ := set $out "remoteKey" (required "global.email.smtp.credentials.remoteKey is required when the source is secretStore." $c.remoteKey) -}}
+{{- $_ := set $out "credentialsSecret" (printf "%s-email-smtp" .Release.Name) -}}
+{{- else if eq $src "secret" -}}
+{{- $_ := set $out "credentialsSecret" (required "global.email.smtp.credentials.secretName is required when the source is secret." $c.secretName) -}}
+{{- else if ne $src "none" -}}
+{{- fail (printf "global.email.smtp.credentials.source is %q: use secretStore, secret or none." $src) -}}
+{{- end -}}
+{{- if and (eq $mode "plaintext") (ne $src "none") -}}
+{{- fail "global.email.smtp.tlsMode is plaintext and the relay takes a credential: the credential would cross the network in the clear, and net/smtp refuses PlainAuth over a cleartext link. Use starttls or implicit, or credentials.source none for a sink." -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
+{{/*
 gibson.assertKeysDeleted: the render fails when a deleted values key is set,
 even to false or an empty string. A silent ignore would keep an old setting in an overlay that nobody
 reads. `use` names what replaces the keys. charts#392 (the trust domain keys)
