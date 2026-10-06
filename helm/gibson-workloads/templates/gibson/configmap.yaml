@@ -19,11 +19,6 @@ data:
     core:
       # Spec 3 R3 — daemon runs as nonroot uid 65532; HOME is /var/lib/gibson.
       home_dir: /var/lib/gibson/.gibson
-      # Nil-safe access: .Values.gibson.config.core may be unset when an
-      # overlay only contributes other gibson.config.* subkeys (e.g.,
-      # values-kind.yaml only sets gibson.config.identity). Parenthesized
-      # paths return nil instead of erroring on missing intermediates.
-      timeout: {{ ((.Values.gibson.config).core).timeout | default "5m" }}
 
     security:
       {{- /* Spec first-deploy-unblock-and-ha R6.2: render the security block
@@ -160,7 +155,6 @@ data:
 
     logging:
       level: {{ ((.Values.gibson.config).logging).level | default "info" }}
-      format: {{ ((.Values.gibson.config).logging).format | default "json" }}
 
     registry:
       type: platform
@@ -230,9 +224,7 @@ data:
     # the bootstrap credential reaches the tenant-operator instead.
     # Spec: per-tenant-data-plane-completion Req 1, D1, D5; Tasks 6, 25.
     #
-    # Host resolution order (gibson.tenant.dbHost):
-    #   1. dataPlane.postgres.host (explicit override — RDS, Aurora, etc.)
-    #   2. {{ .Release.Name }}-tenant-postgresql Service (in-chart subchart)
+    # Host: dataPlane.postgres.host (gibson.tenant.dbHost).
     tenant_postgres:
       host: {{ $tenantPgHost | quote }}
       port: {{ .Values.dataPlane.postgres.port | default 5432 }}
@@ -257,11 +249,6 @@ data:
       enabled: false
       metrics:
         enabled: false
-
-    tracing:
-      enabled: {{ (((.Values.gibson).tracing).enabled) | default false }}
-      sample_rate: 1
-      service_name: gibson
 
     # Prometheus metrics listener (Spec security-hardening R20).
     # Daemon-owned :9090 mTLS endpoint; cert material mounted from the

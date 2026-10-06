@@ -805,15 +805,7 @@ tolerations:
 {{- end }}
 
 {{- define "gibson.tenant.dbHost" -}}
-{{- if .Values.dataPlane.postgres.host }}
-{{- .Values.dataPlane.postgres.host }}
-{{- else if (index .Values "tenant-postgresql" "enabled") }}
-{{- include "gibson.tenant.postgresql.host" . }}
-{{- end }}
-{{- end }}
-
-{{- define "gibson.tenant.postgresql.host" -}}
-{{- printf "%s-tenant-postgresql" .Release.Name }}
+{{- with .Values.dataPlane.postgres.host }}{{ . }}{{ end }}
 {{- end }}
 
 

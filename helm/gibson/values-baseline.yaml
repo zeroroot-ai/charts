@@ -255,7 +255,6 @@ gibson-workloads:
       annotations: {}
     zitadel:
       issuer: ""
-      authUrl: ""
     postgres:
       host: "platform-postgres-rw.gibson.svc.cluster.local"
   extAuthz:
@@ -493,9 +492,6 @@ gibson-operators:
         namespaceTemplate: "tenant-{tenant_id}"
         authMethod: "jwt"
         mountPath: "secret"
-  dashboard:
-    zitadel:
-      issuer: ""
   envoy:
     service:
       # Must match envoy.service.clusterIP above — same Service, and the
@@ -546,7 +542,6 @@ gibson-operators:
   platformBootstrap:
     zitadel:
       issuer: "http://gibson-zitadel:8080"
-      externalDomain: ""
       adminTokenRef:
         name: iam-admin-pat
         key: pat
