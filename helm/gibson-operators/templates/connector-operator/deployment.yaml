@@ -84,6 +84,17 @@ spec:
             # the daemon SVID pinned at the mTLS handshake.
             - name: GIBSON_DAEMON_SPIFFE_ID
               value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/daemon") | quote }}
+            # The caller check of each connector proxy (MCPServer and
+            # MCPRemoteProxy). The operator writes an inline oidcConfig (this
+            # SPIRE OIDC issuer and its JWKS, audience gibson-connector-proxy)
+            # and one Cedar policy that admits only GIBSON_DAEMON_SPIFFE_ID.
+            # The operator refuses to start without both values. The issuer
+            # and the JWKS are the ones the OpenBao JWT auth uses
+            # (vault.jwtAuth.*).
+            - name: CONNECTOR_PROXY_OIDC_ISSUER
+              value: {{ required "vault.jwtAuth.spireOidcIssuer is REQUIRED: each connector proxy checks the daemon JWT-SVID against this issuer." ((.Values.vault).jwtAuth).spireOidcIssuer | quote }}
+            - name: CONNECTOR_PROXY_JWKS_URL
+              value: {{ ((.Values.vault).jwtAuth).spireOidcJwksURL | default (printf "%s/keys" (((.Values.vault).jwtAuth).spireOidcIssuer)) | quote }}
             # SPIRE Workload API socket the X509Source streams SVIDs from.
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"
