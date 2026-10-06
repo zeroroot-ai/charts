@@ -1760,57 +1760,6 @@ envoy:
   logLevel: info
 
   # ---------------------------------------------------------------------------
-  # In-cluster OIDC filter chain (deploy#1204).
-  #
-  # envoy.yaml carries a filter chain selected on the SNI
-  # `gibson-envoy.<ns>.svc.cluster.local`, once used by the daemon's IdP admin
-  # client to reach OIDC discovery over cluster DNS. Since ADR-0092 no client
-  # uses it (they dial Zitadel by Service name); charts#163 deletes it.
-  # That chain is deliberately pre-auth — no jwt_authn, no ext_authz — because
-  # the endpoints on it exist to bootstrap auth.
-  #
-  # The chain shares the public :10000 listener, so an internet client that
-  # simply sets that SNI against the public edge (and ignores the certificate
-  # mismatch) selects it. It served a `domains: ["*"]` virtual host, which made
-  # it an auth-free wildcard that would silently inherit any route added to it
-  # later. deploy#1204 closes both halves:
-  #
-  #   1. The virtual host now matches only the in-cluster Service FQDNs, so a
-  #      request has to be addressed to Envoy by its cluster name to match at
-  #      all. This is source-IP independent and is the control that actually
-  #      contains the structural risk.
-  #   2. filter_chain_match gains source_prefix_ranges, so chain selection
-  #      itself is restricted to in-cluster sources.
-  #
-  # internalChain.sourcePrefixRanges is the list for (2). The default is the
-  # private/loopback space, which blocks any client whose packets arrive with a
-  # public source address.
-  #
-  # NARROW THIS PER ENVIRONMENT. On EKS the default is NOT sufficient on its
-  # own: the internet-facing NLB runs in IP-target mode with client-IP
-  # preservation off, so Envoy sees the NLB ENI address — which is RFC1918 and
-  # therefore inside the default set. Pin the pod-carrying PRIVATE subnet CIDRs
-  # (which exclude the public subnets the NLB ENIs live in) to make (2) bite:
-  #
-  #   envoy:
-  #     internalChain:
-  #       sourcePrefixRanges:
-  #         - { address_prefix: "10.40.64.0", prefix_len: 18 }
-  #
-  # Control (1) holds regardless of how this is set.
-  internalChain:
-    sourcePrefixRanges:
-      - { address_prefix: "10.0.0.0", prefix_len: 8 }
-      - { address_prefix: "172.16.0.0", prefix_len: 12 }
-      - { address_prefix: "192.168.0.0", prefix_len: 16 }
-      # CGNAT — EKS VPC-CNI custom networking hands pods addresses here.
-      - { address_prefix: "100.64.0.0", prefix_len: 10 }
-      - { address_prefix: "127.0.0.0", prefix_len: 8 }
-      # IPv6 unique-local + loopback, for dual-stack clusters.
-      - { address_prefix: "fc00::", prefix_len: 7 }
-      - { address_prefix: "::1", prefix_len: 128 }
-
-  # ---------------------------------------------------------------------------
   # Edge rate limiting (deploy#1189).
   #
   # Before this existed, `grep -E 'ratelimit|rate_limit|connection_limit'` over
@@ -2056,9 +2005,6 @@ envoy:
     type: NodePort
     httpsPort: 443
     nodePort: 30443
-    # Fixed ClusterIP for kind dev (needed by charts that hardcode the IP).
-    # Leave empty (default) to let Kubernetes assign it.
-    clusterIP: ""
     # Service annotations for cloud load-balancer controllers. A substrate
     # overlay (values-eks) adds the provider's keys
     # here, and MUST include whatever makes that provider preserve the client

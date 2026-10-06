@@ -335,16 +335,12 @@ global:
   environment: ""
 
 
-# Envoy gateway — tenant-operator reads these for hostAliases + TLS mounts.
+# Envoy gateway — tenant-operator reads these for TLS mounts.
 # Envoy is required infrastructure (deploy#200 / one-code-path epic). The
 # chart unconditionally references Envoy; there is no `.enabled` opt-out.
-# clusterIP MUST be set in kind overlays (where pods need a hostAlias pin);
-# in production the value stays empty (public DNS resolves to the ALB).
 # tls.secretName MUST be set on every install — it names the cert-manager-
 # managed Secret consumers mount to trust the Envoy edge CA.
 envoy:
-  service:
-    clusterIP: ""
   tls:
     secretName: "gibson-envoy-tls"
     # CA trust anchor the operators mount to validate Envoy's edge serving

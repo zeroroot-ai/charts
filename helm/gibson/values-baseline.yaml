@@ -108,24 +108,6 @@ gibson-workloads:
     service:
       type: LoadBalancer
       httpsPort: 443
-      # A PINNED ClusterIP, required by the chart: consuming pods (dashboard,
-      # bootstrap Job, daemon) reach Envoy through a hostAlias, and a hostAlias
-      # takes an IP, not a Service name (deploy#200).
-      #
-      # It therefore has to sit inside the cluster's Service CIDR, and that is
-      # cluster-specific. 10.96.0.0/12 is the kubeadm and kind default, so this
-      # is the right default for a plain Kubernetes cluster. EKS uses 172.20.0.0/16, and
-      # this profile was extracted from the EKS one and carried 172.20.0.250
-      # across — kind rejected it outright (deploy#1627):
-      #
-      #   Service "gibson-envoy" is invalid: spec.clusterIPs: failed to
-      #   allocate IP 172.20.0.250: the provided IP is not in the valid range.
-      #   The range of valid IPs is 10.96.0.0/16
-      #
-      # A customer whose Service CIDR is neither must override this. There is no
-      # portable default, which is why the chart requires the value rather than
-      # inventing one.
-      clusterIP: "10.96.0.250"
       annotations: {}
     tls:
       selfSigned: false
@@ -497,10 +479,6 @@ gibson-operators:
     zitadel:
       issuer: ""
   envoy:
-    service:
-      # Must match envoy.service.clusterIP above — same Service, and the
-      # dashboard's hostAlias points at this IP.
-      clusterIP: "10.96.0.250"
     tls:
       secretName: "gibson-envoy-tls"
   # Names below are the UMBRELLA-rendered names (release `gibson`), not the

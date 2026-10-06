@@ -47,16 +47,11 @@ spec:
   # Structural, not an overlay knob: an edge that cannot see its clients has
   # no per-client limit and no WAF worth the name.
   externalTrafficPolicy: Local
-  # Pin the ClusterIP so dashboard / bootstrap-job hostAliases can target
-  # Envoy by a stable address. Required for the in-cluster path where pods
-  # need to reach the same hostname (app.<domain>) the browser uses, but
-  # via the cluster network rather than the host's NodePort.
-  #
-  # REQUIRED in every overlay (Envoy is required infrastructure — deploy#200).
-  # Production overlays may still pin a clusterIP — the Service is exposed
-  # externally via NodePort/LoadBalancer; pinning the ClusterIP doesn't
-  # change the external surface.
-  clusterIP: {{ required "envoy.service.clusterIP is REQUIRED — pin a stable ClusterIP so consuming pods (dashboard, bootstrap-job, daemon) can reach Envoy by a hostAlias. Allocate one outside the cluster's auto-assignment range. See deploy#200." .Values.envoy.service.clusterIP | quote }}
+  # No pinned ClusterIP (charts#163, ADR-0092). An in-cluster caller reaches
+  # Envoy by the Service name, or by api.<domain> through the CoreDNS record
+  # that each bringup writes (scripts/baseline-up.sh). The render fails when
+  # a values file sets envoy.service.clusterIP.
+  {{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "envoy.service.clusterIP" "dashboard.envoy.service.clusterIP" "envoy.internalChain") "use" "the Envoy Service name, or api.<domain> through the CoreDNS record of the bringup (ADR-0092, charts#163)") }}
   selector:
     {{- include "gibson.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: envoy

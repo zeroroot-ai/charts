@@ -116,12 +116,6 @@ spec:
         {{- toYaml $podLabels | nindent 8 }}
     spec:
       {{- include "gibson.imagePullSecrets" $root | nindent 6 }}
-      # Resolve the platform hostnames (api/app/... .selfhosted) to the in-cluster
-      # Envoy, same as the daemon + dashboard (deploy#200). Capability-grant enrol
-      # follows the discovery doc's issuer URL (https://api.<domain>/capabilitygrant
-      # /v1/register) — without this alias that GET fails in-cluster with "no such
-      # host" and the plugin never registers.
-      {{- include "gibson.hostAliases" $root | nindent 6 }}
       serviceAccountName: {{ $saName }}
       securityContext:
         runAsNonRoot: true

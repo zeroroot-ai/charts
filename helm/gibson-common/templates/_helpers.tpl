@@ -93,59 +93,6 @@ Values read: none. Derived from .Release.Name.
 {{- end -}}
 
 {{/*
-  gibson.hostAliases
-
-  Emits the hostAliases block (yaml subtree) that pins the public Envoy
-  hostnames (app.<domain>, api.<domain>, www.<domain>, docs.<domain>) to
-  the Envoy Service's ClusterIP. Required for any pod that dials Envoy by its
-  public hostname (dashboard signin callback, daemon OIDC discovery,
-  tenant-operator Zitadel admin client, plugins).
-
-  Emits nothing (just the leading whitespace/comment marker) when:
-    - .Values.envoy.service.clusterIP is unset (production / EKS — no
-      hostAlias pin needed because public DNS resolves to the public
-      ALB; only dev/kind needs the pin).
-
-  Envoy is required infrastructure (deploy#200); there is no `.enabled`
-  toggle. The only knob is whether to pin a hostAlias (kind) or rely on
-  DNS (prod), which the clusterIP value controls.
-
-  Usage in a Deployment / StatefulSet template:
-      spec:
-        template:
-          spec:
-            {{- include "gibson.hostAliases" . | nindent 6 }}
-            securityContext: …
-
-  The helper emits the WHOLE `hostAliases:` key when present, so the
-  caller is responsible only for nindent and for choosing the surrounding
-  insertion point. When disabled, the helper emits no output at all so
-  the surrounding template stays valid.
-
-  Values keys read:
-    - .Values.envoy.service.clusterIP
-    - .Values.global.domain (REQUIRED — see gibson.domain; no fallback)
-
-  Note: `auth.<domain>` is NOT emitted (the platform domain normalization
-  epic, deploy#630, retired the `auth.` subdomain in favor of a single
-  `app.<domain>` host; slice S12 / deploy#642 removed it from here — this
-  note used to describe that removal as pending, it has since landed).
-*/}}
-{{- define "gibson.hostAliases" -}}
-{{- if and (hasKey .Values "envoy") .Values.envoy -}}
-{{- if and (hasKey .Values.envoy "service") .Values.envoy.service.clusterIP -}}
-hostAliases:
-  - ip: {{ .Values.envoy.service.clusterIP | quote }}
-    hostnames:
-      - {{ include "gibson.appHost" . | quote }}
-      - {{ include "gibson.apiHost" . | quote }}
-      - {{ include "gibson.wwwHost" . | quote }}
-      - {{ include "gibson.docsHost" . | quote }}
-{{- end -}}
-{{- end -}}
-{{- end -}}
-
-{{/*
   Identity-provider addressing (ADR-0092). Every in-cluster Zitadel client
   CONNECTS to the Zitadel Service by Kubernetes DNS and CLAIMS the public
   host in the x-zitadel-instance-host header. Zitadel selects its instance
