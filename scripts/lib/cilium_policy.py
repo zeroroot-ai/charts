@@ -102,17 +102,25 @@ def egress_reaches(rule: dict, ns: str | None, dst: dict, port: int | None = Non
     return False
 
 
-def egress_internet(rule: dict) -> bool:
-    """True when the rule lets a pod reach hosts outside the cluster."""
+def egress_world(rule: dict) -> bool:
+    """True when the rule lets a pod reach each host outside the cluster."""
     for e in rule.get("egress") or []:
         if WORLD_ENTITIES & set(e.get("toEntities") or []):
-            return True
-        if e.get("toFQDNs"):
             return True
         cidrs = list(e.get("toCIDR") or []) + [c.get("cidr") for c in e.get("toCIDRSet") or []]
         if OPEN_CIDRS & set(cidrs):
             return True
     return False
+
+
+def egress_fqdn(rule: dict) -> bool:
+    """True when the rule lets a pod reach named hosts outside the cluster."""
+    return any(e.get("toFQDNs") for e in rule.get("egress") or [])
+
+
+def egress_internet(rule: dict) -> bool:
+    """True when the rule lets a pod reach hosts outside the cluster."""
+    return egress_world(rule) or egress_fqdn(rule)
 
 
 def reaches(all_rules: list, src: dict, dst: dict, port: int | None = None) -> bool:

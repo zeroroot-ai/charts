@@ -26,7 +26,11 @@ spec:
         app.kubernetes.io/name: gibson-tenant-operator
         app.kubernetes.io/part-of: gibson
         app.kubernetes.io/component: tenant-operator
-        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis" "openbao" "neo4j") "kubeApi" true "internet" true "namespaces" true "controlPlane" true) | nindent 8 }}
+        {{- /* fqdn tenant-operator (D76): the operator sends the welcome mail
+               through the SMTP relay, and it calls AWS KMS when kms.keyARN is
+               set. An external Vault, JWKS URL or tenant Postgres is in the
+               group too. All other peers are in the cluster. */}}
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis" "openbao" "neo4j") "kubeApi" true "fqdn" "tenant-operator" "namespaces" true "controlPlane" true) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a

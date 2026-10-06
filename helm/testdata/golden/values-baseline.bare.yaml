@@ -10534,7 +10534,7 @@ spec:
         app.kubernetes.io/version: "v1.21.1"
         app.kubernetes.io/managed-by: Helm
         helm.sh/chart: cert-manager-v1.21.1
-        gibson.zeroroot.ai/egress-internet: "true"
+        gibson.zeroroot.ai/egress-fqdn: cert-manager
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/net-role: system
       annotations:
@@ -10834,7 +10834,7 @@ spec:
       labels:
         app.kubernetes.io/name: external-dns
         app.kubernetes.io/instance: gibson
-        gibson.zeroroot.ai/egress-internet: "true"
+        gibson.zeroroot.ai/egress-fqdn: external-dns
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/net-role: system
     spec:
@@ -11147,7 +11147,6 @@ spec:
         app.kubernetes.io/component: connector-operator
         gibson.zeroroot.ai/net-role: platform
         gibson.zeroroot.ai/kube-api: "true"
-        gibson.zeroroot.ai/egress-internet: "true"
         gibson.zeroroot.ai/egress-namespaces: "true"
         gibson.zeroroot.ai/ingress-control-plane: "true"
       annotations:
@@ -11616,7 +11615,7 @@ spec:
         gibson.zeroroot.ai/client-openbao: "true"
         gibson.zeroroot.ai/client-neo4j: "true"
         gibson.zeroroot.ai/kube-api: "true"
-        gibson.zeroroot.ai/egress-internet: "true"
+        gibson.zeroroot.ai/egress-fqdn: tenant-operator
         gibson.zeroroot.ai/egress-namespaces: "true"
         gibson.zeroroot.ai/ingress-control-plane: "true"
       annotations:
@@ -14952,7 +14951,7 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: login
         gibson.zeroroot.ai/client-postgres: "true"
-        gibson.zeroroot.ai/egress-internet: "true"
+        gibson.zeroroot.ai/egress-fqdn: zitadel
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/net-role: platform
     spec:
@@ -15102,7 +15101,7 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: start
         gibson.zeroroot.ai/client-postgres: "true"
-        gibson.zeroroot.ai/egress-internet: "true"
+        gibson.zeroroot.ai/egress-fqdn: zitadel
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/net-role: platform
     spec:
@@ -17883,7 +17882,6 @@ spec:
         release: gibson
         release-namespace: gibson
         gibson.zeroroot.ai/client-postgres: "true"
-        gibson.zeroroot.ai/egress-internet: "true"
         gibson.zeroroot.ai/ingress-control-plane: "true"
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/net-role: platform
@@ -20051,6 +20049,35 @@ spec:
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
+  name: gibson-egress-fqdn-object-store
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-egress-fqdn
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Pods of the object-store egress group reach only these host names."
+  endpointSelector:
+    matchLabels:
+      gibson.zeroroot.ai/egress-fqdn: object-store
+  egress:
+    - toFQDNs:
+        - matchName: s3.amazonaws.com
+        - matchPattern: '*.s3.amazonaws.com'
+        - matchPattern: s3.*.amazonaws.com
+        - matchPattern: '*.s3.*.amazonaws.com'
+        - matchName: sts.amazonaws.com
+        - matchPattern: sts.*.amazonaws.com
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
   name: gibson-egress-namespaces
   namespace: gibson
   labels:
@@ -20276,12 +20303,13 @@ spec:
       velero.io/exclude-from-backup: "true"
       # The network labels of each instance and each CNPG Job (ADR-0165 rule
       # 4, D76): the Postgres data store, a client of its own replicas, the
-      # API server for the instance manager, and the archive bucket.
+      # API server for the instance manager, and the archive bucket. The
+      # bucket is the object-store egress group: AWS S3 or backup.endpointURL.
       gibson.zeroroot.ai/net-role: datastore
       gibson.zeroroot.ai/datastore: postgres
       gibson.zeroroot.ai/client-postgres: "true"
       gibson.zeroroot.ai/kube-api: "true"
-      gibson.zeroroot.ai/egress-internet: "true"
+      gibson.zeroroot.ai/egress-fqdn: object-store
   instances: 3
   # A primary roll promotes a replica first, then restarts the old primary as
   # a replica. `restart` would take the primary down before anything else.

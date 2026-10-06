@@ -11,8 +11,10 @@ a new policy, and no policy lists each internal peer.
   3. data stores      Postgres, Redis, OpenBao and Neo4j each admit only the
                       pods with their client label.
   4. kube-api         Pods with the kube-api label reach the API server.
-  5. internet         Pods with the egress-internet label reach hosts outside
-                      the cluster.
+  5. internet         Pods with the egress-internet label reach each host
+                      outside the cluster. Pods with the egress-fqdn label
+                      reach only the host names of their group
+                      (_egress-fqdn.tpl).
   6. namespaces       Pods with the egress-namespaces label reach pods in other
                       namespaces. The policies of those namespaces still apply.
   7. edge             The public edge accepts each source on its listener.
@@ -258,6 +260,48 @@ spec:
   egress:
     - toEntities:
         - world
+{{- /* One policy for each egress host group with at least one host. The
+       DNS rule of the default deny lets Cilium see each lookup, so it
+       learns the addresses of these names. A value that names a host by
+       its IP address gives a /32 CIDR (the MinIO of the kind rungs). */}}
+{{- range $group, $hosts := include "gibson.egressFqdnGroups" . | fromYaml }}
+{{- $names := list }}
+{{- $cidrs := list }}
+{{- range $h := $hosts }}
+{{- if $h.cidr }}
+{{- $cidrs = append $cidrs $h.cidr }}
+{{- else }}
+{{- $names = append $names $h }}
+{{- end }}
+{{- end }}
+{{- if $hosts }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $rel }}-egress-fqdn-{{ $group }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: network-egress-fqdn
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Pods of the {{ $group }} egress group reach only these host names."
+  endpointSelector:
+    matchLabels:
+      gibson.zeroroot.ai/egress-fqdn: {{ $group }}
+  egress:
+    {{- if $names }}
+    - toFQDNs:
+        {{- toYaml $names | nindent 8 }}
+    {{- end }}
+    {{- if $cidrs }}
+    - toCIDR:
+        {{- toYaml ($cidrs | uniq) | nindent 8 }}
+    {{- end }}
+{{- end }}
+{{- end }}
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
