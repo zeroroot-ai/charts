@@ -12068,6 +12068,30 @@ spec:
             limits:
               cpu: 100m
               memory: 64Mi
+        - name: wait-for-redis
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          command: ['sh', '-c']
+          args:
+            - |
+              until nc -z gibson-redis-stack 6379; do
+                echo "Waiting for Redis..."
+                sleep 2
+              done
+              echo "Redis is ready!"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
       containers:
         - name: ext-authz
           image: "ghcr.io/zeroroot-ai/ext-authz:v0.153.2@sha256:88594342226685717a8a6a259ba18e744a7aacfaa7bc7e1a9440df22c19982a2"
@@ -12096,13 +12120,14 @@ spec:
               value: ":9002"
             - name: EXT_AUTHZ_FGA_ADDR
               value: "https://gibson-openfga:8080"
-            # FGA write events (hosted#204): the daemon and the tenant-operator
-            # announce every tenant-role tuple they write on the Redis channel
-            # gibson:fga.write, and ext-authz evicts that user's cached
-            # decisions on each event, so a demoted or removed user is refused
-            # on their next request. Same Redis and the same password Secret
-            # as the daemon; a password rotation restarts ext-authz with the
-            # daemon. Without the URL the decision cache TTL is the only bound.
+            # Redis is required (ADR-0045, charts#397). ext-authz does not start
+            # without EXT_AUTHZ_REDIS_URL or when Redis does not answer, and a
+            # component call fails closed (Unavailable) when Redis goes down at
+            # request time. Redis holds the replay state of component tokens,
+            # shared by every replica, and carries the FGA write events
+            # (hosted#204) on the channel gibson:fga.write. Same Redis and the
+            # same password Secret as the daemon. make extauthz-redis fails a
+            # profile whose ext-authz pod lacks either variable.
             - name: EXT_AUTHZ_REDIS_URL
               value: "redis://:${REDIS_PASSWORD}@gibson-redis-stack:6379"
             - name: REDIS_PASSWORD
@@ -15001,8 +15026,17 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
             capabilities:
               drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
       containers:
         - name: gibson
           image: "ghcr.io/zeroroot-ai/gibson:v0.153.2@sha256:b57acca62d5acf01aea285cb1933310febfb29a32e4bf07f7ccc1bfa662edd5c"
