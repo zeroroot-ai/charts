@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.138.0](https://github.com/zeroroot-ai/charts/compare/v0.137.0...v0.138.0) (2026-10-06)
+
+
+### Features
+
+* **alerts:** each alert rule names a runbook section, and a guard holds it ([#466](https://github.com/zeroroot-ai/charts/issues/466)) ([269e373](https://github.com/zeroroot-ai/charts/commit/269e3733ee45c2b9cacc34439eb99159b5fe22cf))
+* **dashboard:** the dashboard gets no Stripe value, and gets the account link ([#473](https://github.com/zeroroot-ai/charts/issues/473)) ([42f41ea](https://github.com/zeroroot-ai/charts/commit/42f41ea94e2d69f8e3eb67d17b927ef7d5ebe684))
+* **ext-authz:** Redis is required, and a guard holds it in each profile ([#471](https://github.com/zeroroot-ai/charts/issues/471)) ([0f3ca38](https://github.com/zeroroot-ai/charts/commit/0f3ca38f169f9b9374aaf579207a1316af3ca4e4))
+* **guards:** each optional reference and empty default has a reason ([#451](https://github.com/zeroroot-ai/charts/issues/451)) ([27300ad](https://github.com/zeroroot-ai/charts/commit/27300ad1c4a92aae58260e65b7b2699e0aa12552))
+* **guards:** no first-party template makes secret material at render time ([#429](https://github.com/zeroroot-ai/charts/issues/429)) ([23867e1](https://github.com/zeroroot-ai/charts/commit/23867e1e181a85c98e32e022b7f81dba2bf91bf8)), closes [#366](https://github.com/zeroroot-ai/charts/issues/366)
+* **guards:** no published profile renders a closed image ([#456](https://github.com/zeroroot-ai/charts/issues/456)) ([458826e](https://github.com/zeroroot-ai/charts/commit/458826e6271a0723e6f9401a5e98f3d323dbc1a8)), closes [#373](https://github.com/zeroroot-ai/charts/issues/373)
+* **guards:** the operator CRD bundle matches the operators and kinds of the chart ([#464](https://github.com/zeroroot-ai/charts/issues/464)) ([e81f33f](https://github.com/zeroroot-ai/charts/commit/e81f33fdeade9fbdd8141a1024f27bc6e1cfa007)), closes [#370](https://github.com/zeroroot-ai/charts/issues/370)
+* **secrets:** the producer list names the one writer of each Secret ([#455](https://github.com/zeroroot-ai/charts/issues/455)) ([611d277](https://github.com/zeroroot-ai/charts/commit/611d27789170683c6c369b34c51884d673dc50fb))
+* **signup:** one chart value selects the registration rung ([#457](https://github.com/zeroroot-ai/charts/issues/457)) ([ecadb52](https://github.com/zeroroot-ai/charts/commit/ecadb526231b72014ea33d7d562b92d9bbdc67f6))
+* **spiffe:** one value names the trust domain of the install ([#434](https://github.com/zeroroot-ai/charts/issues/434)) ([dfbd455](https://github.com/zeroroot-ai/charts/commit/dfbd45568a52ba2d09a8e032b6ccf74fdd820216))
+
+
+### Bug Fixes
+
+* **daemon:** the impersonation key Secret leaves with the feature ([#450](https://github.com/zeroroot-ai/charts/issues/450)) ([d08d765](https://github.com/zeroroot-ai/charts/commit/d08d7656698d722e543ce42b1f8f8c35e7f41e9c)), closes [#363](https://github.com/zeroroot-ai/charts/issues/363)
+* **guards:** the env gate skips only a forked image ([#460](https://github.com/zeroroot-ai/charts/issues/460)) ([ee73504](https://github.com/zeroroot-ai/charts/commit/ee735044bb8af30173b49f7889cc6c06ed1a45ba)), closes [#386](https://github.com/zeroroot-ai/charts/issues/386)
+* **guards:** the webhook guard states the accepted exception and reads each profile ([#428](https://github.com/zeroroot-ai/charts/issues/428)) ([847d475](https://github.com/zeroroot-ai/charts/commit/847d4750a14b98c29acd1665bf144805d985a0d6)), closes [#358](https://github.com/zeroroot-ai/charts/issues/358)
+* **jobs:** six bring-up Jobs run as secure pods ([#468](https://github.com/zeroroot-ai/charts/issues/468)) ([012a2ae](https://github.com/zeroroot-ai/charts/commit/012a2aeeea2d942072cb2e3ddfe3a647a8c2b712))
+* **monitoring:** the monitoring templates follow the no-stack rule ([#453](https://github.com/zeroroot-ai/charts/issues/453)) ([7572732](https://github.com/zeroroot-ai/charts/commit/7572732febd76cc707e1d7a0afa9760b94ac50d1)), closes [#371](https://github.com/zeroroot-ai/charts/issues/371)
+* **operators:** the daemon address helper has one override ([#448](https://github.com/zeroroot-ai/charts/issues/448)) ([c2abf3c](https://github.com/zeroroot-ai/charts/commit/c2abf3c29aa7768e6fe49b142800e3f6be03e4d7)), closes [#360](https://github.com/zeroroot-ai/charts/issues/360)
+* **profiles:** the developer and ci rungs render the same, and a guard says so ([#454](https://github.com/zeroroot-ai/charts/issues/454)) ([47cd816](https://github.com/zeroroot-ai/charts/commit/47cd81646c9a3cb4c0fa3994f7866c362c98dd36)), closes [#372](https://github.com/zeroroot-ai/charts/issues/372)
+* **registry:** the image pull credential has one chain ([#449](https://github.com/zeroroot-ai/charts/issues/449)) ([c7eee5f](https://github.com/zeroroot-ai/charts/commit/c7eee5fe52e7174e405cf17b5792f889a278491e))
+* **rework:** the dashboard keeps its Stripe values until the dashboard pin ([#474](https://github.com/zeroroot-ai/charts/issues/474)) ([0c91f7b](https://github.com/zeroroot-ai/charts/commit/0c91f7b0e5e132e960a4828264e0bd1405d9e651))
+* **secrets:** a Secret that a chart script writes has a producer entry ([#452](https://github.com/zeroroot-ai/charts/issues/452)) ([8044389](https://github.com/zeroroot-ai/charts/commit/804438918f51b687b72fadf8db764c4dc864c13b)), closes [#367](https://github.com/zeroroot-ai/charts/issues/367)
+* **values:** the dev escape hatches leave the chart ([#469](https://github.com/zeroroot-ai/charts/issues/469)) ([12a691c](https://github.com/zeroroot-ai/charts/commit/12a691c17b04ba0332dd7a683e0d8c04a83af147)), closes [#399](https://github.com/zeroroot-ai/charts/issues/399)
+* **values:** the values guard ignores comments, and the unread keys leave ([#447](https://github.com/zeroroot-ai/charts/issues/447)) ([ffac9d2](https://github.com/zeroroot-ai/charts/commit/ffac9d222459191eb7365fe559dc601852c76fe0)), closes [#361](https://github.com/zeroroot-ai/charts/issues/361)
+
 ## [0.137.0](https://github.com/zeroroot-ai/charts/compare/v0.136.9...v0.137.0) (2026-10-05)
 
 
