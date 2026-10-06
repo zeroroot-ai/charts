@@ -14266,7 +14266,7 @@ spec:
         # rotated. Reloader runs cluster-wide and watches the explicitly-
         # named Secrets below; when any of them changes, Reloader triggers
         # a rolling restart of this Deployment.
-        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-gibson-workloads-dashboard-secrets,gibson-stripe-credentials"
+        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-gibson-workloads-dashboard-secrets"
     spec:
       
       imagePullSecrets:
@@ -14459,14 +14459,6 @@ spec:
             limits:
               cpu: 100m
               memory: 64Mi
-        # one-code-path #203: wait-for-stripe-secrets blocks pod start
-        # until the Stripe Secrets (secret key + publishable key + webhook)
-        # are materialised. The STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY /
-        # STRIPE_WEBHOOK_SECRET env entries are required; an empty
-        # publishable key silently breaks the card-first Payment Element
-        # (dashboard#783), so we fail the pod at boot instead. Gated on the same
-        # value flags as the env entries: if you wired secretRefs in
-        # values, the Secrets MUST exist by pod-start.
         # Spec: canonical-service-identity Req 5 — resolve the readable SA
         # names in serviceAccounts.required against the gibson-sa-identity-map
         # ConfigMap (populated by the post-install Zitadel Job) into:
@@ -14787,13 +14779,6 @@ spec:
             - name: GIBSON_PUBLIC_URL
               value: "https://api.localhost.zeroroot.ai"
 
-            # PUBLIC_URL — required by the dashboard's env-validator.
-            # Public base URL of the dashboard (matches AUTH_URL in
-            # single-origin deploys). Used for Stripe checkout return_url,
-            # billing-portal success_url, transactional emails.
-            - name: PUBLIC_URL
-              value: "https://app.localhost.zeroroot.ai"
-
             # Neo4j connection URI for the dashboard knowledge-graph client.
             # Required — the dashboard Neo4j driver uses this at startup.
             - name: NEO4J_URI
@@ -14884,16 +14869,6 @@ spec:
                   key: captcha-secret-key
             - name: DASHBOARD_METRICS_ALLOWED_CIDRS
               value: "" 
-
-            # Stripe billing (spec stripe-billing-integration; CLAUDE.md
-            # tier-repricing). Wired from .Values.dashboard.billing.*.
-            # The dashboard runtime graceful-degrades to the "Pricing
-            # temporarily unavailable" placeholder on /pricing (R7.3) when
-            # STRIPE_SECRET_KEY / STRIPE_PRICE_* are unset. Setting
-            # paidTiersEnabled=true ALSO forces a startup-time check
-            # (instrumentation.ts → validateBillingConfig) that throws if
-            # any required var is missing; leave it false for free-tier-only
-            # deployments.
 
           # one-code-path #203: was `optional: true`. The chart renders
           # the dashboard-config ConfigMap unconditionally, so the
