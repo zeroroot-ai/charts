@@ -1,0 +1,40 @@
+# The chart source installs on a plain Kubernetes cluster (charts#433).
+#
+# In plain words: charts main must come up on kind, before a release carries
+# it. The published install tests prove the artifact after the release. This
+# test proves the source on main, so a chart defect shows before the release.
+#
+# The steps are published-install.yml with from_source: true. One copy of the
+# steps, so the source claim and the published claim cannot drift apart.
+#
+# ADR-0080: an exit test never runs on a pull request. It runs on push to
+# main, daily, and on dispatch. The shared exit-tests-off-pr check holds that
+# (charts#380).
+name: exit-test-baseline-install
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'helm/**'
+      - 'scripts/baseline-up.sh'
+      - '.github/workflows/published-install.yml'
+      - '.github/workflows/exit-test-baseline-install.yml'
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: exit-test-baseline-install-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    uses: ./.github/workflows/published-install.yml
+    with:
+      distro: kind
+      from_source: true
+    secrets: inherit

@@ -18,10 +18,17 @@
 # STEPS live here, once. The two callers choose a distribution and nothing
 # else. There is no second copy to drift from.
 #
-# WHY THIS IS NOT exit-test-baseline-install (in zeroroot-ai/hosted)
+# THE SOURCE MODE (charts#433)
 #
-# That one answers "does charts main install?" — it builds from a source
-# checkout. Valuable, and not what a stranger does. A stranger runs
+# exit-test-baseline-install.yml calls these steps with from_source: true. It
+# answers "does charts main install?" from this checkout. It moved here from
+# zeroroot-ai/hosted, because it describes the chart. The published mode
+# below is what a stranger does.
+#
+# WHY THE PUBLISHED MODE IS NOT ENOUGH ALONE
+#
+# The source mode builds from a checkout. Valuable, and not what a stranger
+# does. A stranger runs
 # `helm install` against the artifact in the registry. charts#82 is what that
 # gap bought: `helm install gibson-crds` had been failing on every cluster for
 # some time because the release record exceeded the 1 MiB Secret cap, and
@@ -66,6 +73,15 @@ on:
         required: false
         type: string
         default: ""
+      from_source:
+        description: >-
+          Install the chart source of this checkout in place of a published
+          version (charts#433). This answers "does charts main install?", the
+          question the baseline install exit test asks. chart_version and the
+          upgrade inputs do not apply.
+        required: false
+        type: boolean
+        default: false
       upgrade_from_previous:
         description: >-
           Install the PREVIOUS published version first, converge it, then upgrade
@@ -80,7 +96,7 @@ permissions:
 
 jobs:
   install:
-    name: published install on ${{ inputs.distro }}
+    name: ${{ inputs.from_source && 'source' || 'published' }} install on ${{ inputs.distro }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -146,6 +162,15 @@ jobs:
         id: version
         run: |
           set -euo pipefail
+          if [ "${{ inputs.from_source }}" = true ]; then
+            if [ "${{ inputs.upgrade_from_previous }}" = true ] || [ -n "${{ inputs.chart_version }}" ]; then
+              echo "::error::from_source installs this checkout; chart_version and upgrade_from_previous do not apply"
+              exit 1
+            fi
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "installing the chart source at $(git rev-parse HEAD)"
+            exit 0
+          fi
           v="${{ inputs.chart_version }}"
           if [ -z "$v" ]; then
             # The newest published umbrella. A tag list, not a guess: the four
@@ -261,7 +286,9 @@ jobs:
       # rung did not travel in the artifact the claim "the only thing an
       # installer needs is helm" would be false. Passing a local overlay here
       # instead would test a path nobody outside this organization can run.
-      - name: Install the published charts at the developer rung
+      # From source, CHART_VERSION is empty, so baseline-up.sh installs the
+      # charts of this checkout (LOCAL mode) at the same rung.
+      - name: Install the charts at the developer rung
         env:
           CHART_VERSION: ${{ steps.version.outputs.version }}
           SUBSTRATE_ENV: ${{ runner.temp }}/substrate/kind/substrate.env
@@ -297,6 +324,7 @@ jobs:
       # Without this, a future edit that quietly passes a local file would
       # still go green and the stranger claim would rot silently.
       - name: The rung travelled inside the artifact
+        if: ${{ !inputs.from_source }}
         env:
           CHART_VERSION: ${{ steps.version.outputs.version }}
         run: |
