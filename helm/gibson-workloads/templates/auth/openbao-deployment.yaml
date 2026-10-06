@@ -69,8 +69,10 @@ The seed inputs that are not self-generated randoms arrive through the
 bringup keyring Secret: the GHCR pull token (member GHCR_PULL_TOKEN,
 scripts/keyring.sh) as `ghcr-pull-token`, and the SMTP relay credential
 (SMTP_USER from substrate.env, SMTP_PASSWORD from the keyring) as
-`smtp-username` and `smtp-password`. The chart projects those three keys,
-and only those three, into the sidecar; the seed table names which OpenBao
+`smtp-username` and `smtp-password`, and the Stripe account as
+`stripe-secret-key`, `stripe-publishable-key` and `stripe-webhook-secret`
+(charts#486). The chart projects those six keys, and only those six, into
+the sidecar; the seed table names which OpenBao
 property each fills. There is no platform LLM credential: a tenant's LLM
 providers and their keys live in that tenant's provider configuration and
 reach the daemon through the secrets broker.
@@ -1027,6 +1029,18 @@ spec:
                       elif [ "$present" != "true" ]; then
                         val=""; write=1
                       fi ;;
+                    inputor)
+                      # inputor:<file>:<literal> (charts#486): the keyring
+                      # input when the bringup supplied one, else the literal.
+                      # A non-empty input replaces the stored value, as
+                      # `input` does; an empty one leaves it, and an absent
+                      # property gets the literal.
+                      val=$(seed_input input "${arg%%:*}" "$prop")
+                      if [ -n "$val" ] && [ "$val" != "$curval" ]; then
+                        write=1
+                      elif [ -z "$val" ] && [ "$present" != "true" ]; then
+                        val="${arg#*:}"; write=1
+                      fi ;;
                     svctoken)
                       val=$(kube_read_token "$PLATFORM_TOKEN_SECRET")
                       if [ -n "$val" ] && [ "$val" != "$curval" ]; then write=1; fi ;;
@@ -1218,7 +1232,8 @@ spec:
                 return 1
               }
 
-              # The keyring inputs (ghcr-pull-token, smtp-username,
+              # The keyring inputs (ghcr-pull-token, smtp-username, the three
+              # stripe-* members,
               # smtp-password) follow the keyring: a member set AFTER the
               # bringup reaches the Secret through keyring-to-cluster.sh and the
               # kubelet, and this pass writes it into OpenBao without a pod
@@ -1459,6 +1474,15 @@ spec:
                 path: smtp-username
               - key: smtp-password
                 path: smtp-password
+              # The Stripe account (charts#486): written by the bringup from
+              # the keyring members STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY
+              # and STRIPE_WEBHOOK_SECRET, the empty string when not supplied.
+              - key: stripe-secret-key
+                path: stripe-secret-key
+              - key: stripe-publishable-key
+                path: stripe-publishable-key
+              - key: stripe-webhook-secret
+                path: stripe-webhook-secret
   volumeClaimTemplates:
     {{- if .Values.openbao.persistence.enabled }}
     - metadata:
