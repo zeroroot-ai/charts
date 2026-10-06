@@ -187,7 +187,7 @@ data:
       # laptop) has never been able to use the internal name either. Envoy
       # already routes gibson.harness.v1.HarnessCallbackService for exactly
       # these callers, so both reach the daemon by the same path.
-      advertise_address: {{ (((.Values.gibson.config).callback).advertiseAddress) | default (include "gibson.apiEndpoint" .) | quote }}
+      advertise_address: {{ include "gibson.apiEndpoint" . | quote }}
 
     registration:
       enabled: true
@@ -292,7 +292,7 @@ data:
 {{- /* deploy#1382: explicit https:// — the OpenFGA HTTP listener serves
             TLS; the daemon's FGA client honours the scheme and the pod
             trusts the issuing CA via SSL_CERT_DIR (statefulset.yaml). */}}
-        endpoint: {{ ((.Values.gibson.authz).fga).endpoint | default (printf "https://gibson-openfga:%d" (int (.Values.openfga.service.httpPort | default 8080))) | required "gibson.authz.fga.endpoint must resolve to the in-cluster OpenFGA HTTP endpoint — one-code-path slice deploy#195 requires FGA at daemon startup" }}
+        endpoint: {{ printf "https://gibson-openfga:%d" (int (.Values.openfga.service.httpPort | default 8080)) }}
         store_id: ""
         model_id: ""
         {{- /*
@@ -310,7 +310,7 @@ data:
           so the chart contradicted itself. It is now 5s. If you change either
           number, change both.
         */}}
-        timeout_ms: {{ ((.Values.gibson.authz).fga).timeoutMs | default 4000 }}
+        timeout_ms: 4000
         tls:
           enabled: false
 
