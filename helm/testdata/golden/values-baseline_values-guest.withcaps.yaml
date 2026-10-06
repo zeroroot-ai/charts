@@ -4479,7 +4479,7 @@ data:
                     match_typed_subject_alt_names:
                       - san_type: URI
                         matcher:
-                          exact: "spiffe://zeroroot.ai/platform/daemon"
+                          exact: "spiffe://localhost.zeroroot.ai/platform/daemon"
                   validation_context_sds_secret_config:
                     name: "ROOTCA"
                     sds_config:
@@ -4577,7 +4577,7 @@ data:
                     match_typed_subject_alt_names:
                       - san_type: URI
                         matcher:
-                          exact: "spiffe://zeroroot.ai/platform/daemon"
+                          exact: "spiffe://localhost.zeroroot.ai/platform/daemon"
                   validation_context_sds_secret_config:
                     name: "ROOTCA"
                     sds_config:
@@ -4788,7 +4788,7 @@ data:
                     match_typed_subject_alt_names:
                       - san_type: URI
                         matcher:
-                          exact: "spiffe://zeroroot.ai/platform/ratelimit"
+                          exact: "spiffe://localhost.zeroroot.ai/platform/ratelimit"
                   validation_context_sds_secret_config:
                     name: "ROOTCA"
                     sds_config:
@@ -4846,7 +4846,7 @@ data:
                     match_typed_subject_alt_names:
                       - san_type: URI
                         matcher:
-                          exact: "spiffe://zeroroot.ai/platform/ext-authz"
+                          exact: "spiffe://localhost.zeroroot.ai/platform/ext-authz"
                   validation_context_sds_secret_config:
                     name: "ROOTCA"
                     sds_config:
@@ -4979,7 +4979,7 @@ data:
       # Trust localhost connections without authentication (dev only)
       # SPIFFE/SPIRE workload identity configuration
       spiffe:
-        trust_domain: "zeroroot.ai"
+        trust_domain: "localhost.zeroroot.ai"
         workload_api_socket: "/run/spire/sockets/api.sock"
       # Local tokens are for dev mode only (no K8s, no SSO).
       local:
@@ -5417,7 +5417,7 @@ data:
                         match_typed_subject_alt_names:
                           - san_type: URI
                             matcher:
-                              exact: "spiffe://zeroroot.ai/platform/envoy"
+                              exact: "spiffe://localhost.zeroroot.ai/platform/envoy"
                       validation_context_sds_secret_config:
                         name: "ROOTCA"
                         sds_config:
@@ -5766,7 +5766,7 @@ data:
       },
       "workload_api": {
         "socket_path": "/spiffe-workload-api/spire-agent.sock",
-        "trust_domain": "zeroroot.ai"
+        "trust_domain": "localhost.zeroroot.ai"
       }
     }
   spiffe-helper.conf: |
@@ -5796,7 +5796,7 @@ data:
         "socket_path": "/tmp/spire-agent/public/spire-agent.sock",
         "trust_bundle_format": "spiffe",
         "trust_bundle_path": "/run/spire/bundle/bundle.spiffe",
-        "trust_domain": "zeroroot.ai"
+        "trust_domain": "localhost.zeroroot.ai"
       },
       "health_checks": {
         "bind_address": "0.0.0.0",
@@ -5940,7 +5940,7 @@ data:
         "jwt_issuer": "https://gibson-spiffe-oidc-discovery-provider",
         "log_format": "text",
         "log_level": "info",
-        "trust_domain": "zeroroot.ai"
+        "trust_domain": "localhost.zeroroot.ai"
       }
     }
 ---
@@ -5981,7 +5981,7 @@ data:
     validatingWebhookConfigurationName: gibson-gibson-controller-manager-webhook
     entryIDPrefix: example-cluster
     clusterName: example-cluster
-    trustDomain: zeroroot.ai
+    trustDomain: localhost.zeroroot.ai
     ignoreNamespaces:
       - kube-system
       - kube-public
@@ -9132,7 +9132,7 @@ spec:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: spire-agent
-        checksum/config: "28aa29846f84788fee6403060720ae661a5669fea528b98f4833fc34ca4da934"
+        checksum/config: "0aa212259aa874c4435cc0a44a1dd27be95984294fcc31f3161cdaa929049a63"
         backup.velero.io/backup-volumes-excludes: spire-agent-admin-socket-dir,spire-agent-persistence
       labels:
         app.kubernetes.io/name: "agent"
@@ -9340,7 +9340,7 @@ spec:
               value: "gibson-gibson-workloads:50051"
             # the daemon SVID pinned at the mTLS handshake.
             - name: GIBSON_DAEMON_SPIFFE_ID
-              value: "spiffe://zeroroot.ai/platform/daemon"
+              value: "spiffe://localhost.zeroroot.ai/platform/daemon"
             # SPIRE Workload API socket the X509Source streams SVIDs from.
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"
@@ -9994,11 +9994,11 @@ spec:
               # (gibson-workloads:50051) was fixed in tenant-operator#70.
               value: "gibson-gibson-workloads:50051"
             # the operator dials the daemon over SPIFFE mTLS and
-            # authorises the daemon's SVID at the TLS handshake. Defaults to
-            # the platform daemon SVID; override per-environment if the
-            # trust domain differs.
+            # authorises the daemon's SVID at the TLS handshake. The ID is the
+            # trust domain of the install (global.spire.trustDomain) and the
+            # fixed path platform/daemon.
             - name: GIBSON_DAEMON_SPIFFE_ID
-              value: "spiffe://zeroroot.ai/platform/daemon"
+              value: "spiffe://localhost.zeroroot.ai/platform/daemon"
             # First-tenant seed (gibson#1496): on a self-hosted install with no
             # signup, the operator enqueues the first tenant over its SPIFFE
             # identity via EnqueueTenantProvisioning — the session-less path,
@@ -11542,7 +11542,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 73a7de55c0908de9b8eec46234cae08137e25b40d3bdccf922c039b7de9bed1d
+        checksum/config: ff4f282dde3810a644df6fb7c69560d53e213a350fad2cff375c276b850d74d9
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -12091,7 +12091,7 @@ spec:
             - name: EXT_AUTHZ_REGISTRY_URL
               value: "https://gibson-gibson-workloads:8086/authz/registry.yaml"
             - name: EXT_AUTHZ_DAEMON_SVID
-              value: "spiffe://zeroroot.ai/platform/daemon"
+              value: "spiffe://localhost.zeroroot.ai/platform/daemon"
             - name: EXT_AUTHZ_REGISTRY_FETCH_TIMEOUT
               value: "600s"
             # Per-kid Capability-Grant key descriptor endpoint (ext-authz#103). ext-authz fetches GET {KEYS_URL}/{kid} to verify a
@@ -12202,12 +12202,12 @@ spec:
             # agent DaemonSet writes to. Required by main.go.
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"
-            # Envoy peer SPIFFE ID — pin the gRPC peer (Envoy) to this SVID.
-            # Must match the ClusterSPIFFEID registered for the Envoy
-            # ServiceAccount (templates/spiffe/envoy-spiffeid.yaml). Comma-
-            # separated list also accepted.
+            # Envoy peer SPIFFE ID: pin the gRPC peer (Envoy) to this SVID. It
+            # is the ID of the Envoy ClusterSPIFFEID
+            # (templates/spire-server/clusterspiffeids.yaml): the trust domain
+            # of the install and the fixed path platform/envoy.
             - name: EXT_AUTHZ_ENVOY_SVID
-              value: "spiffe://zeroroot.ai/platform/envoy"
+              value: "spiffe://localhost.zeroroot.ai/platform/envoy"
           volumeMounts:
             - name: grant-key
               mountPath: /etc/ext-authz/grant-key
@@ -12367,7 +12367,7 @@ spec:
         # A quota change is a ConfigMap change; roll the pod so ratelimit
         # re-reads it (RUNTIME_WATCH_ROOT is off: watching a projected
         # ConfigMap is racy across the kubelet's symlink swap).
-        checksum/config: 1cd9261f8a8f9338806057996d1aeadad7089447f25ff4ff0298d3c26760004f
+        checksum/config: 288e43221526164b9c5693df433907de86b597a87dbd007617df9a9e7c3d32fe
     spec:
       
       imagePullSecrets:
@@ -12773,7 +12773,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/config: d43907d00492a1ff490d809a542ee80716850474da24ff5af9e35fb3a185214a
+        checksum/config: 80f07258a4b9477af35f5c36726f10a5622e25ddf2c9177d3086ab8ef981af94
         backup.velero.io/backup-volumes-excludes: certdir,nginx-tmp,spiffe-workload-api,spire-oidc-sockets
       labels:
         app.kubernetes.io/name: spiffe-oidc-discovery-provider
@@ -14739,7 +14739,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "tmp,spire-agent-socket"
-        checksum/config: 388f29ebfe62f9ca80a044fbdc8abcb28c11f784bd34ac06afd6fc4047ec087d
+        checksum/config: 0903e2db7fce86c05eba7dbc799f0a2028975dfe57426cb632c90c0658541bbf
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). Consumer envFrom
         # resolution is frozen for the pod's lifetime; Reloader watches the
         # named Secrets and triggers a rolling restart when any changes.
@@ -15167,22 +15167,22 @@ spec:
                   # secret is provisioned); revisit under one-code-path.
                   optional: true
             # Envoy SPIFFE ID the daemon's identity interceptor pins peer
-            # cert URI SAN against. REQUIRED — chart fails to render if
-            # .Values.spiffe.envoyID is empty.
+            # cert URI SAN against: the trust domain of the install and the
+            # fixed path platform/envoy.
             - name: GIBSON_SPIFFE_ENVOY_ID
-              value: "spiffe://zeroroot.ai/platform/envoy"
+              value: "spiffe://localhost.zeroroot.ai/platform/envoy"
             # Peer SPIFFE IDs for the harness callback listener allowlist.
             # REQUIRED when SPIFFE is configured — the daemon fails to start
             # otherwise (fail-closed per critical-tls-no-fallbacks Req 1.5).
-            # Comma-separated list rendered from .Values.spiffe.callbackPeerSVIDs.
+            # Comma-separated list built from the paths in .Values.spiffe.callbackPeers.
             - name: GIBSON_CALLBACK_PEER_SVIDS
-              value: "spiffe://zeroroot.ai/platform/dashboard,spiffe://zeroroot.ai/platform/envoy,spiffe://zeroroot.ai/platform/daemon"
+              value: "spiffe://localhost.zeroroot.ai/platform/dashboard,spiffe://localhost.zeroroot.ai/platform/envoy,spiffe://localhost.zeroroot.ai/platform/daemon"
             # Additional inbound mTLS allow-list for the daemon's main gRPC
             # listener. Envoy is always accepted via
             # GIBSON_SPIFFE_ENVOY_ID; the entries here are direct control-
             # plane callers (today: the tenant-operator). Comma-separated.
             - name: GIBSON_SPIFFE_ALLOWED_PEER_IDS
-              value: "spiffe://zeroroot.ai/platform/tenant-operator,spiffe://zeroroot.ai/platform/connector-operator"
+              value: "spiffe://localhost.zeroroot.ai/platform/tenant-operator,spiffe://localhost.zeroroot.ai/platform/connector-operator"
             # deploy#852: the daemon serves its compiled-in authz registry to
             # ext-authz over mTLS (single source of truth — no version-pinned
             # OCI artifact to drift). Pin the listener port + the reader
@@ -15192,7 +15192,7 @@ spec:
             - name: GIBSON_AUTHZ_REGISTRY_PORT
               value: "8086"
             - name: GIBSON_AUTHZ_REGISTRY_READER_SVIDS
-              value: "spiffe://zeroroot.ai/platform/ext-authz"
+              value: "spiffe://localhost.zeroroot.ai/platform/ext-authz"
             # gRPC reflection on the daemon listeners. OFF by default;
             # set .Values.spiffe.grpcReflection to "1" in dev overlays only.
             # Spec: critical-tls-no-fallbacks Component 3 / Requirement 4.
@@ -15744,9 +15744,9 @@ spec:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: spire-server
-        checksum/config: f2bb6a7a4aba3af5bdb7c891a12d913fb8383348cf7a9682717d6fbf107873d0
+        checksum/config: adcdefddf2b21389cb917740f99efc189199c9c7481077fb8abe44f6a76ff9e3
         checksum/config2: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
-        checksum/config3: 967569fd565458246292b70c701e9d3834656c8ce3bfc35a15cab1d2d6ded536
+        checksum/config3: 17cd78e2eb8597f34d280fcd9a99eb63c90b2c1340225132f251c316d9dec934
         checksum/configTornjak: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         backup.velero.io/backup-volumes-excludes: server-tmp,spire-server-socket,spire-controller-manager-tmp
       labels:
@@ -17557,7 +17557,7 @@ metadata:
     app.kubernetes.io/component: spire-controller-manager
 spec:
   className: "gibson-gibson"
-  spiffeIDTemplate: "spiffe://zeroroot.ai/platform/daemon"
+  spiffeIDTemplate: "spiffe://localhost.zeroroot.ai/platform/daemon"
   podSelector:
     matchLabels:
       app.kubernetes.io/component: daemon
@@ -17583,7 +17583,7 @@ metadata:
     app.kubernetes.io/component: spire-controller-manager
 spec:
   className: "gibson-gibson"
-  spiffeIDTemplate: "spiffe://zeroroot.ai/platform/ext-authz"
+  spiffeIDTemplate: "spiffe://localhost.zeroroot.ai/platform/ext-authz"
   podSelector:
     matchLabels:
       app.kubernetes.io/component: ext-authz
@@ -17611,7 +17611,7 @@ metadata:
     app.kubernetes.io/component: spire-controller-manager
 spec:
   className: "gibson-gibson"
-  spiffeIDTemplate: "spiffe://zeroroot.ai/platform/ratelimit"
+  spiffeIDTemplate: "spiffe://localhost.zeroroot.ai/platform/ratelimit"
   podSelector:
     matchLabels:
       app.kubernetes.io/component: ratelimit
@@ -17637,7 +17637,7 @@ metadata:
     app.kubernetes.io/component: spire-controller-manager
 spec:
   className: "gibson-gibson"
-  spiffeIDTemplate: "spiffe://zeroroot.ai/platform/dashboard"
+  spiffeIDTemplate: "spiffe://localhost.zeroroot.ai/platform/dashboard"
   podSelector:
     matchLabels:
       app.kubernetes.io/component: dashboard
@@ -17663,7 +17663,7 @@ metadata:
     app.kubernetes.io/component: spire-controller-manager
 spec:
   className: "gibson-gibson"
-  spiffeIDTemplate: "spiffe://zeroroot.ai/platform/tenant-operator"
+  spiffeIDTemplate: "spiffe://localhost.zeroroot.ai/platform/tenant-operator"
   podSelector:
     matchLabels:
       app.kubernetes.io/component: tenant-operator
@@ -17689,7 +17689,7 @@ metadata:
     app.kubernetes.io/component: spire-controller-manager
 spec:
   className: "gibson-gibson"
-  spiffeIDTemplate: "spiffe://zeroroot.ai/platform/connector-operator"
+  spiffeIDTemplate: "spiffe://localhost.zeroroot.ai/platform/connector-operator"
   podSelector:
     matchLabels:
       app.kubernetes.io/component: connector-operator
@@ -17715,7 +17715,7 @@ metadata:
     app.kubernetes.io/component: spire-controller-manager
 spec:
   className: "gibson-gibson"
-  spiffeIDTemplate: "spiffe://zeroroot.ai/platform/envoy"
+  spiffeIDTemplate: "spiffe://localhost.zeroroot.ai/platform/envoy"
   podSelector:
     matchLabels:
       app.kubernetes.io/component: envoy
@@ -17741,7 +17741,7 @@ metadata:
     app.kubernetes.io/component: spire-controller-manager
 spec:
   className: "gibson-gibson"
-  spiffeIDTemplate: "spiffe://zeroroot.ai/platform/openbao"
+  spiffeIDTemplate: "spiffe://localhost.zeroroot.ai/platform/openbao"
   podSelector:
     matchLabels:
       app.kubernetes.io/component: openbao
@@ -17767,7 +17767,7 @@ metadata:
     app.kubernetes.io/component: spire-controller-manager
 spec:
   className: "gibson-gibson"
-  spiffeIDTemplate: "spiffe://zeroroot.ai/platform/helm-test"
+  spiffeIDTemplate: "spiffe://localhost.zeroroot.ai/platform/helm-test"
   podSelector:
     matchLabels:
       app.kubernetes.io/component: helm-test
@@ -21421,7 +21421,7 @@ spec:
           set -eu
           ERR='::error file=helm-test::'
           SOCK='/run/spire/sockets/api.sock'
-          EXPECT_TD='zeroroot.ai'
+          EXPECT_TD='localhost.zeroroot.ai'
 
           if [ ! -S "$SOCK" ]; then
             echo "$ERR spire-attestation: workload-api socket missing at $SOCK"
@@ -23668,20 +23668,6 @@ spec:
 
           # config|webhook|namespace|service|port|path, one per line.
           cat >/tmp/probes <<'PROBES'
-          cert-manager-webhook|webhook.cert-manager.io|gibson|cert-manager-webhook|443|/mutate
-          cert-manager-webhook|webhook.cert-manager.io|gibson|cert-manager-webhook|443|/validate
-          cnpg-mutating-webhook-configuration|mbackup.cnpg.io|gibson|cnpg-webhook-service|443|/mutate-postgresql-cnpg-io-v1-backup
-          cnpg-mutating-webhook-configuration|mcluster.cnpg.io|gibson|cnpg-webhook-service|443|/mutate-postgresql-cnpg-io-v1-cluster
-          cnpg-mutating-webhook-configuration|mdatabase.cnpg.io|gibson|cnpg-webhook-service|443|/mutate-postgresql-cnpg-io-v1-database
-          cnpg-mutating-webhook-configuration|mscheduledbackup.cnpg.io|gibson|cnpg-webhook-service|443|/mutate-postgresql-cnpg-io-v1-scheduledbackup
-          cnpg-validating-webhook-configuration|vbackup.cnpg.io|gibson|cnpg-webhook-service|443|/validate-postgresql-cnpg-io-v1-backup
-          cnpg-validating-webhook-configuration|vcluster.cnpg.io|gibson|cnpg-webhook-service|443|/validate-postgresql-cnpg-io-v1-cluster
-          cnpg-validating-webhook-configuration|vdatabase.cnpg.io|gibson|cnpg-webhook-service|443|/validate-postgresql-cnpg-io-v1-database
-          cnpg-validating-webhook-configuration|vpooler.cnpg.io|gibson|cnpg-webhook-service|443|/validate-postgresql-cnpg-io-v1-pooler
-          cnpg-validating-webhook-configuration|vscheduledbackup.cnpg.io|gibson|cnpg-webhook-service|443|/validate-postgresql-cnpg-io-v1-scheduledbackup
-          externalsecret-validate|validate.externalsecret.external-secrets.io|gibson|external-secrets-webhook|443|/validate-external-secrets-io-v1-externalsecret
-          secretstore-validate|validate.clustersecretstore.external-secrets.io|gibson|external-secrets-webhook|443|/validate-external-secrets-io-v1-clustersecretstore
-          secretstore-validate|validate.secretstore.external-secrets.io|gibson|external-secrets-webhook|443|/validate-external-secrets-io-v1-secretstore
           gibson-tenant-operator-owner-ref|ownerref.gibson.zeroroot.ai|gibson|gibson-tenant-operator-webhook|443|/mutate-owner-ref
           gibson-tenant-operator-tenant-validator|tenant.gibson.zeroroot.ai|gibson|gibson-tenant-operator-webhook|443|/validate-tenant
           setec-mutating-sandboxclass|msandboxclass.setec.zeroroot.ai|setec-system|setec-webhook|443|/mutate-setec-zeroroot-ai-v1alpha1-sandboxclass
