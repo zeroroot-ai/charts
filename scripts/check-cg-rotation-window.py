@@ -22,10 +22,10 @@ and the safe-looking response is to stop rotating.
 WHY A GATE AND NOT A GOLDEN
 
 The window is OFF in every profile, so every committed golden shows two files
-and no previous remoteRef. A reviewer comparing this Secret with its two
-siblings — the ext-authz grant key and the impersonation key, which both
-project `previous` unconditionally because their Go loaders tolerate an empty
-value — reads the asymmetry as a missing half. It is not: this loader treats a
+and no previous remoteRef. A reviewer comparing this Secret with its
+sibling, the ext-authz grant key, which projects `previous` unconditionally
+because its Go loader tolerates an empty value, reads the asymmetry as a
+missing half. It is not: this loader treats a
 `previous.kid` that exists but is EMPTY as a broken mount, errors the Minter
 constructor, and disables capability grants outright. Projecting the pair
 unconditionally would be the defect.
