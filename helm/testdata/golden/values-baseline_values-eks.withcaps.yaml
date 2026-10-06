@@ -4684,9 +4684,9 @@ data:
                             # comment for the full timeout derivation. MUST stay
                             # above the catch-all or it is shadowed and the bucket
                             # never fires. Sizing rationale: values.yaml
-                            # envoy.rateLimit.appSignupSubmit. Per-client
-                            # descriptors are deliberately absent until the edge has
-                            # a real client address (#1196 CloudFront -> #1241).
+                            # envoy.rateLimit.appSignupSubmit. The per-client quota
+                            # is the rate_limits descriptor below
+                            # (envoy.rateLimit.perClient.appSignupSubmit).
                             - match:
                                 prefix: "/signup"
                                 headers:
@@ -15124,7 +15124,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: ee1e353408186ef2aade0b495437a57201fe0cc76713e1dc13942629a9f7cbe5
+        checksum/config: ff4f282dde3810a644df6fb7c69560d53e213a350fad2cff375c276b850d74d9
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #

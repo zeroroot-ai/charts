@@ -1962,9 +1962,10 @@ envoy:
     # abuse control — it MUST stay far above aggregate legitimate traffic
     # because one signup drives many in-cluster Zitadel admin calls through
     # this same chain, and a browser page load fans out to dozens of asset
-    # requests. Per-client tightening needs a real client address, which this
-    # edge does not have (deploy#1241); that lands behind CloudFront
-    # (deploy#1196). 4000 rps sustained, 8000 burst — mirrors apiBaseline.
+    # requests. Per-client limits are separate: the rate-limit service holds
+    # them (envoy.rateLimit.perClient below), keyed by the client address that
+    # the L4 load balancer preserves (ADR-0079). 4000 rps sustained, 8000
+    # burst — mirrors apiBaseline.
     publicBaseline:
       maxTokens: 8000
       tokensPerFill: 4000
@@ -1979,10 +1980,11 @@ envoy:
     # sustained is ~860k signup attempts/day: orders of magnitude above
     # legitimate use, while capping what an unauthenticated flood can extract
     # from Stripe, the tenant operator and the SES quota. An absolute
-    # ceiling, not per-client — one abuser can still drain the shared bucket
-    # and 429 legitimate signups for its duration, which is the accepted cost
-    # until the real client address exists (#1196 CloudFront, then #1241
-    # descriptors).
+    # ceiling, not per-client. The per-client quota of the rate-limit service
+    # (envoy.rateLimit.perClient.appSignupSubmit) bounds one client, and this
+    # fuse bounds all of them together. When the rate-limit service does not
+    # answer, the edge admits the request under this fuse only (fails open,
+    # ADR-0079), and the EdgePerClientQuotaFailingOpen alert fires.
     appSignupSubmit:
       maxTokens: 20
       tokensPerFill: 10
