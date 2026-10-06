@@ -5,6 +5,10 @@
 #   vault-auth-method-deny-list  fails on a token of a retired OpenBao login method (ADR-0009).
 #                                The exceptions are in .github/.vault-auth-deny-list-allowlist.json,
 #                                each keyed by the content of its line.
+#   exit-tests-off-pr            fails when an exit-test-* workflow has a pull_request,
+#                                pull_request_target or merge_group trigger, or has no
+#                                schedule (ADR-0080). The one shared check, with its
+#                                fixtures, is in zeroroot-ai/.github.
 #
 # The reusables live in zeroroot-ai/.github. None needs a secret: the
 # checkout uses the calling repository's own GITHUB_TOKEN, and the scanners
@@ -43,3 +47,6 @@ jobs:
 
   vault-auth-method-deny-list:
     uses: zeroroot-ai/.github/.github/workflows/vault-auth-method-deny-list.yml@105df5cab9e7bee2b55197d1e307050c1a365abc # v0.14.2
+
+  exit-tests-off-pr:
+    uses: zeroroot-ai/.github/.github/workflows/exit-tests-off-pr.yml@105df5cab9e7bee2b55197d1e307050c1a365abc # v0.14.2
