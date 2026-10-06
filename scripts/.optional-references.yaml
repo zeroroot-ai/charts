@@ -51,6 +51,8 @@ cases:
   helm/gibson-workloads/templates/ext-authz/deployment.yaml optional secretKeyRef gibson-native-login-oidc/client_id: The platform-operator mints the client at run time; ext-authz builds the human-client list from both ids, and an empty id matches no token (charts#148).
   ? helm/gibson-workloads/templates/gibson/statefulset.yaml default {{- $lokiUrl := (((.Values.gibson).lokiUrl)) | default "" }}
   : The chart ships no Loki; empty disables log queries, and the daemon reports the log backend as unavailable.
+  ? 'helm/gibson-workloads/templates/gibson/statefulset.yaml default {{- fail (printf "gibson.auditExport.lockMode %q must be GOVERNANCE or COMPLIANCE: the lock mode the durable bucket policy requires under audit/ (charts#446)" ($ax.lockMode | default "")) }}'
+  : The empty default only prints an absent lock mode in the failure message; the render fails.
   helm/gibson-workloads/templates/gibson/statefulset.yaml optional configMap gibson-sa-identity-map: The Zitadel bootstrap writes the map after install; the identity resolver returns no match for an unknown sub (canonical-service-identity Req 8.2).
   helm/gibson-workloads/templates/gibson/statefulset.yaml optional configMapKeyRef gibson-fga-config/model_id: The fga-init Job writes the ConfigMap after install; the daemon's ResolveWithRetry waits for both values before the FGA authorizer starts.
   helm/gibson-workloads/templates/gibson/statefulset.yaml optional configMapKeyRef gibson-fga-config/store_id: The fga-init Job writes the ConfigMap after install; the daemon's ResolveWithRetry waits for both values before the FGA authorizer starts.
@@ -58,4 +60,6 @@ cases:
   helm/gibson-workloads/templates/gibson/statefulset.yaml optional secretKeyRef gibson-native-login-oidc/client_id: The /.well-known/gibson-login endpoint answers 503 while the native-login client is not minted; a required ref crashlooped the daemon (gibson#623).
   ? helm/gibson/templates/app-url-guard.yaml default {{- $checks := list (dict "label" "gibson-workloads.gibson.appUrl" "value" ((((index .Values "gibson-workloads") | default dict).gibson | default dict).appUrl | default "")) (dict "label" "gibson-operators.gibson.appUrl" "value" ((((index .Values "gibson-operators") | default dict).gibson | default dict).appUrl | default "")) -}}
   : The guard reads an absent appUrl as empty and checks only a set value.
+  ? helm/gibson/templates/postgres/platform-postgres-cluster.yaml default {{- $axBucket := ((((index .Values "gibson-workloads") | default dict).gibson | default dict).auditExport | default dict).bucket | default "" }}
+  : An absent export bucket reads as empty, which differs from the archive bucket, so the render fails with a named error.
   helm/gibson/templates/webhook-gate.yaml default {{- if eq ($p.component | default "") "setec" -}}: A probe with no component is not the setec probe; the empty default only selects the branch.
