@@ -164,8 +164,10 @@ tenantOperator:
   # stripe-mock service in kind (stripeMock.enabled: true). Leave empty
   # in production.
   billing:
-    # The operator compares no key prefix to a declared mode. Stripe moves to
-    # the billing component in gibson#713 (ADR-0060).
+    # The Stripe mode guard is the dashboard's, not the operator's: both read
+    # the same key out of the same Secret, and only the dashboard compares its
+    # prefix to a declared mode. See dashboard.billing.stripeExpectedMode in
+    # gibson-workloads.
     stripeAPIBaseURL: ""
   # devMode was deleted in deploy#205 (one-code-path epic): the operator
   # binary boots identically in every environment. Capability misses always

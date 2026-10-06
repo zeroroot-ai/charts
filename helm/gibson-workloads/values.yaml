@@ -1065,12 +1065,49 @@ dashboard:
     metrics:
       allowedCIDRs: ""                 # DASHBOARD_METRICS_ALLOWED_CIDRS
 
-  # The account link of the billing component (ADR-0060, charts#375). The
-  # dashboard shows it when both are set. Both or neither: half a pair fails
-  # the render. The dashboard holds no Stripe client (dashboard#256).
-  accountLink:
-    url: ""     # DASHBOARD_ACCOUNT_URL
-    label: ""   # DASHBOARD_ACCOUNT_LINK_LABEL
+  # ---------------------------------------------------------------------------
+  # Stripe billing configuration (spec: stripe-billing-integration)
+  # ---------------------------------------------------------------------------
+  # The Stripe secrets come from OpenBao through an ExternalSecret
+  # (ADR-0014): the gibson-stripe-credentials Secret above.
+  #
+  # To enable paid-tier checkout flows, set paidTiersEnabled: true AND
+  # configure all STRIPE_PRICE_* env vars via the price ID fields below.
+  # Prices are obtained from the Stripe Dashboard or stripe-bootstrap.ts.
+  #
+  # The dashboard will throw at pod startup if:
+  #   - paidTiersEnabled=true AND any required env var is missing, OR
+  #   - NODE_ENV=production AND STRIPE_SECRET_KEY starts with sk_test_
+  billing:
+    # Master switch — set false to operate in free/solo-only mode.
+    # Safe default: existing deployments without billing config are unaffected.
+    paidTiersEnabled: false           # DASHBOARD_BILLING_PAID_TIERS_ENABLED
+
+    # Card-first-signup Stripe mode guard (dashboard#767). REQUIRED when
+    # paidTiersEnabled — "test" (staging, dummy cards) or "live" (prod,
+    # real cards). Empty here; overlays that enable paid tiers must set
+    # it (instrumentation.ts fails closed if it disagrees with the key).
+    stripeExpectedMode: ""            # STRIPE_EXPECTED_MODE
+
+    # Stripe Customer Portal configuration ID (bpc_...).
+    # Created by: npx ts-node scripts/stripe-bootstrap.ts --test  (test mode)
+    #             npx ts-node scripts/stripe-bootstrap.ts --live  (live mode)
+    portalConfigurationId: ""         # STRIPE_PORTAL_CONFIGURATION_ID
+
+    # ESO-mounted Stripe secret key ref.
+    # AWS SM path: gibson/{env}/dashboard/stripe-secret-key
+    # stripeSecretKeySecretRef points to the ExternalSecret / SecretStore
+    # that mounts STRIPE_SECRET_KEY into the pod.
+    stripeSecretKeySecretRef: ""      # (ESO ref — not the key value)
+
+    # ESO-mounted Stripe webhook signing secret ref.
+    # AWS SM path: gibson/{env}/dashboard/stripe-webhook-secret
+    stripeWebhookSecretSecretRef: ""  # (ESO ref — not the key value)
+
+    # Per-plan Stripe price IDs are no longer pinned here. The dashboard
+    # resolves them at runtime by stable lookup_key (gibson_<tier>_monthly_usd,
+    # declared per plan in plans.yaml), identical across every Stripe account
+    # and test/live mode (dashboard#872). No per-env price_xxx IDs in git.
 
   # No billing email is configured here, and none was ever sent from here.
   # This block used to point at dashboard.auth.email, which dashboard#181
