@@ -6,8 +6,8 @@ ENTITLEMENTS_BILLING_SVID as the entitlements server, and it refuses to start
 without it. The chart builds the ID from global.spire.trustDomain and the
 fixed path of the billing component (ADR-0164). No values file writes it.
 
-BILLING_PATH is the path that the billing chart issues to its pods: hosted
-gitops/saas-overlay/entitlements-svc/templates/clusterspiffeid.yaml,
+BILLING_PATH is the path that the billing chart issues to its pods
+(zeroroot-ai/hosted gitops/saas-overlay/entitlements-svc/templates/clusterspiffeid.yaml),
 spiffeIDTemplate spiffe://<trust domain>/platform/entitlements-svc. A change
 of either side must change the other.
 
@@ -64,7 +64,7 @@ def selftest():
         print("SELFTEST FAIL: a matching value must pass")
         return 1
     for what, got, w in (("a missing env", [], want), ("another path", ["spiffe://example.org/platform/billing"], want),
-                         ("another trust domain", [f"spiffe://zeroroot.ai/{BILLING_PATH}"], want),
+                         ("another trust domain", [f"spiffe://other.example/{BILLING_PATH}"], want),
                          ("an env with no endpoint", want, []), ("no daemon", None, [])):
         if not judge(what, got, w):
             print(f"SELFTEST FAIL: {what}: the guard passed it")
