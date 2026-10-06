@@ -8,14 +8,6 @@
   fails the build on a header with no define under it.
 */}}
 
-{{/*
-stripe-mock host — dev-only stub that replaces api.stripe.com in kind so
-the tenant-operator readyz Stripe probe passes without a live Stripe key.
-Disabled in production overlays (stripeMock.enabled: false).
-*/}}
-{{- define "gibson.stripeMock.host" -}}
-{{- printf "%s-stripe-mock" .Release.Name }}
-{{- end }}
 
 {{/*
 gibson.emailSmtpSecret.name — the K8s Secret name the daemon's SMTP
@@ -37,29 +29,6 @@ releases in one namespace from colliding.
 {{- printf "%s-cg-signing-key" (include "gibson.fullname" .) }}
 {{- end }}
 
-{{/*
-Stripe credentials Secret name.
-
-The tenant-operator reads STRIPE_SECRET_KEY from this Secret as STRIPE_API_KEY
-until gibson#713 moves Stripe into the billing component. The dashboard reads
-no Stripe value (dashboard#256, charts#375).
-*/}}
-{{- define "gibson.stripeSecrets.name" -}}
-gibson-stripe-credentials
-{{- end }}
-
-{{/*
-Billing-webhook shared-secret Secret name (deploy#1314).
-
-Materialised by templates/secrets/billing-webhook-secret.yaml with the single
-key GIBSON_BILLING_WEBHOOK_SECRET. Both ends of the SetTenantBillingActive hop
-reference it by this literal name — the daemon StatefulSet's secretKeyRef and,
-once dashboard#1016 is decided, the caller workload — so it is intentionally
-NOT release-prefixed and environment-stable, exactly like the Stripe Secret.
-*/}}
-{{- define "gibson.billingWebhookSecret.name" -}}
-gibson-billing-webhook-secret
-{{- end }}
 
 {{/*
 gibson.envoyEdge.caRequired — TRUE when consumers must mount the Envoy

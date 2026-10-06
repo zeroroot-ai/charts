@@ -165,7 +165,50 @@ unconditionally — there is no `envoy.enabled` opt-out.
   publishes the same value, so Envoy and the Service cannot drift apart.
 */ -}}
 {{- $gibsonCallbackPort := required "gibson.service.callback.port is required — Envoy's gibson_daemon_callback cluster dials the daemon's harness callback listener there, and HarnessCallbackService is served on that listener alone (gibson#1450). Without it the edge route for /gibson.harness.v1.HarnessCallbackService/ points at nothing." ((.Values.gibson.service).callback).port -}}
+{{- /*
+  envoy.extraRoutes (charts#375, ADR-0060, ADR-0074): the one typed list of
+  extra edge routes. A private overlay adds a component the core chart does
+  not ship (the billing webhook and its two redirect endpoints) through it.
+  Each entry states every field; nothing has a default:
+
+    path            the exact request path on the app host, e.g. /api/billing/webhook
+    rewrite         the path the service serves (optional; the same path when absent)
+    service         the Service name that serves it, in the release namespace
+    port            its port
+    rateLimitClass  login | catch-all: the per-client quota it shares
+    auth            signed-request: the service verifies a signature on each
+                    request (a webhook); own-sign-in: the service signs the
+                    user in itself, as its own client of the identity provider.
+                    The edge adds no authentication for either, so the mode
+                    must be stated, never assumed.
+
+  One route and one cluster render for each entry, on the browser chain.
+*/ -}}
+{{- $extraRoutes := list -}}
+{{- $rlClass := dict "login" "app_login" "catch-all" "app_catch_all" -}}
+{{- range $i, $r := (.Values.envoy.extraRoutes | default list) -}}
+{{- if not (and $r.path (hasPrefix "/" (toString $r.path))) -}}
+{{- fail (printf "envoy.extraRoutes[%d].path must be an absolute request path (charts#375)" $i) -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" (toString ($r.service | default ""))) -}}
+{{- fail (printf "envoy.extraRoutes[%d].service must name a Service in the release namespace (charts#375)" $i) -}}
+{{- end -}}
+{{- if not $r.port -}}
+{{- fail (printf "envoy.extraRoutes[%d].port is required (charts#375)" $i) -}}
+{{- end -}}
+{{- if not (hasKey $rlClass (toString ($r.rateLimitClass | default ""))) -}}
+{{- fail (printf "envoy.extraRoutes[%d].rateLimitClass must be login or catch-all (charts#375)" $i) -}}
+{{- end -}}
+{{- if not (has (toString ($r.auth | default "")) (list "signed-request" "own-sign-in")) -}}
+{{- fail (printf "envoy.extraRoutes[%d].auth must be signed-request or own-sign-in: the edge adds no authentication to an extra route, so the entry states who authenticates the request (charts#375)" $i) -}}
+{{- end -}}
+{{- $extraRoutes = append $extraRoutes (dict
+      "path" $r.path "rewrite" ($r.rewrite | default "") "service" $r.service "port" (int $r.port)
+      "descriptor" (get $rlClass (toString $r.rateLimitClass)) "auth" $r.auth
+      "cluster" (printf "extra_%s_%d" (replace "-" "_" $r.service) (int $r.port))) -}}
+{{- end -}}
 {{- $ctx := dict
+    "extraRoutes"      $extraRoutes
     "release"          .Release.Name
     "namespace"        .Release.Namespace
     "envoyServiceType"     .Values.envoy.service.type

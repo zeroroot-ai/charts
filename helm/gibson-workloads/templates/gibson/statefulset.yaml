@@ -743,35 +743,28 @@ spec:
             # not only by the umbrella's signup-seam.bats CI fixtures — the
             # dangerous overlay is the one this repo never sees (GHSA-455w).
             {{- include "gibson.validateEntitlementsCoherence" . }}
+            {{- /* The neutral connection points of the platform (ADR-0060,
+                   charts#375). A private component (billing) uses them; each
+                   is empty by default, and an empty caller identity accepts
+                   no caller. The identities are paths under the trust domain
+                   of the install. */}}
+            {{- with .Values.gibson.connectionPoints }}
+            {{- if .signupStepUrl }}
+            - name: GIBSON_SIGNUP_STEP_URL
+              value: {{ .signupStepUrl | quote }}
+            {{- end }}
+            {{- if .signupStepCompleterPath }}
+            - name: GIBSON_SIGNUP_STEP_COMPLETER_SVID
+              value: {{ include "gibson.spiffeID" (dict "ctx" $ "path" .signupStepCompleterPath) | quote }}
+            {{- end }}
+            {{- if .tenantActivationPath }}
+            - name: GIBSON_TENANT_ACTIVATION_SVID
+              value: {{ include "gibson.spiffeID" (dict "ctx" $ "path" .tenantActivationPath) | quote }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.gibson.entitlementsRequired }}
             - name: GIBSON_ENTITLEMENTS_REQUIRED
               value: "true"
-            {{- end }}
-            # ----------------------------------------------------------------
-            # Billing-webhook shared secret (gibson#1230 / gibson#1270,
-            # deploy#1314). Authenticates TenantProvisioningService.
-            # SetTenantBillingActive — the ONLY writer of tenant_status.
-            # billing_active. The daemon fails CLOSED when this is empty
-            # (billing_webhook_auth.go), so paid signups queue at
-            # status='pending' and never provision until BOTH this daemon end
-            # AND the caller end (dashboard#1016) hold the same value.
-            #
-            # Gated on entitlementsRequired — the ONE condition under which the
-            # withhold bites (ListPendingTenantProvisioning only holds a paid
-            # pending row while billing_active is false when the deployment
-            # enforces entitlements). That keeps this a SaaS-profile-only hard
-            # dependency: self-hosted / OSS renders never reference the Secret,
-            # so their daemon boots with no billing backend. Where it IS
-            # rendered the ref is REQUIRED (no optional: true — one-code-path /
-            # deploy#203): the daemon waits for the ESO-delivered Secret rather
-            # than booting with an empty secret that silently refuses callers.
-            # The value is delivered, never baked.
-            {{- if .Values.gibson.entitlementsRequired }}
-            - name: GIBSON_BILLING_WEBHOOK_SECRET  # allowlist-nul-byte-hazard: terraform/kind mint it as base62 (random_password special=false) — NUL-free by construction; daemon reads it raw via os.Getenv (deploy#1314)
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "gibson.billingWebhookSecret.name" . }}
-                  key: GIBSON_BILLING_WEBHOOK_SECRET
             {{- end }}
             # ----------------------------------------------------------------
             # Setec sandbox wiring.

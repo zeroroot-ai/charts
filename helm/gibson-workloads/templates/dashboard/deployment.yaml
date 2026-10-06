@@ -700,6 +700,30 @@ spec:
               value: {{ .label | quote }}
             {{- end }}
             {{- end }}
+            {{- /* The texts of the signup step of the billing component
+                   (ADR-0060, charts#375). All six or none: the dashboard
+                   stops at boot on a partial group. */}}
+            {{- $st := .Values.dashboard.signupStep | default dict }}
+            {{- $stKeys := list "title" "text" "buttonLabel" "waitingText" "failureText" "retryLabel" }}
+            {{- $stSet := 0 }}
+            {{- range $k := $stKeys }}{{- if get $st $k }}{{- $stSet = add1 $stSet }}{{- end }}{{- end }}
+            {{- if and (gt $stSet 0) (lt $stSet 6) }}
+            {{- fail "dashboard.signupStep: set all six texts or none (title, text, buttonLabel, waitingText, failureText, retryLabel) (charts#375)" }}
+            {{- end }}
+            {{- if eq $stSet 6 }}
+            - name: DASHBOARD_SIGNUP_STEP_TITLE
+              value: {{ $st.title | quote }}
+            - name: DASHBOARD_SIGNUP_STEP_TEXT
+              value: {{ $st.text | quote }}
+            - name: DASHBOARD_SIGNUP_STEP_BUTTON_LABEL
+              value: {{ $st.buttonLabel | quote }}
+            - name: DASHBOARD_SIGNUP_STEP_WAITING_TEXT
+              value: {{ $st.waitingText | quote }}
+            - name: DASHBOARD_SIGNUP_STEP_FAILURE_TEXT
+              value: {{ $st.failureText | quote }}
+            - name: DASHBOARD_SIGNUP_STEP_RETRY_LABEL
+              value: {{ $st.retryLabel | quote }}
+            {{- end }}
 
           # one-code-path #203: was `optional: true`. The chart renders
           # the dashboard-config ConfigMap unconditionally, so the
