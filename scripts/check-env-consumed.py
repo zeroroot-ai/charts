@@ -114,8 +114,8 @@ IMAGE_SERVICE = {
 }
 # First-party images built from a fork, so no reader set of ours governs them.
 # Each entry states its reason. Any other first-party image needs a reader set,
-# or the gate fails: a plugin image of `integrations` has none today, so a
-# render that holds one fails until its reader set is vendored (charts#386).
+# or the gate fails: a render that holds one fails until its reader set is
+# vendored (charts#386).
 #   zitadel-login  a fork of zitadel/zitadel; it reads Zitadel's own env.
 UNGOVERNED = {"zitadel-login"}
 
@@ -383,18 +383,18 @@ def selftest() -> int:
             "          env:\n"
             "            - name: ZITADEL_WHATEVER\n              value: f\n"
         )
-        # A plugin image with no reader set fails the gate: it is first-party
+        # A first-party image with no reader set fails the gate: it is first-party
         # source, so an env var that no plugin reads must not ship silently.
         plugin = tmp / "helm" / "testdata" / "golden" / "p.yaml"
         plugin.write_text(
             "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n"
             "      containers:\n"
-            "        - name: plugin\n          image: ghcr.io/zeroroot-ai/integrations/acme:v1\n"
+            "        - name: plugin\n          image: ghcr.io/zeroroot-ai/acme-plugin:v1\n"
             "          env:\n"
             "            - name: PLUGIN_UNREAD\n              value: x\n"
         )
         _, _, pnotes = violations(tmp, c)
-        if not any(n.startswith("integrations:") for n in pnotes):
+        if not any(n.startswith("acme-plugin:") for n in pnotes):
             print(f"SELFTEST FAIL: a plugin image with no reader set must fail, got notes={pnotes}")
             return 1
         plugin.unlink()
