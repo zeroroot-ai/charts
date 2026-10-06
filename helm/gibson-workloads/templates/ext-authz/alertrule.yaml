@@ -1,0 +1,42 @@
+{{- /*
+ext-authz refuses component calls because Redis does not answer (ADR-0045,
+charts#397).
+
+ext-authz keeps the replay state of component tokens in Redis. When Redis does
+not answer at request time, it fails closed: the component call gets
+Unavailable, and the counter
+extauthz_cgjwt_component_replay_state_unavailable_total grows (gibson#824).
+Each component call then fails, so this pages.
+
+Renders only where prometheus-operator CRDs exist, like the Redis rules.
+*/}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-ext-authz-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ext-authz
+spec:
+  groups:
+    - name: ext-authz-redis
+      rules:
+        - alert: ExtAuthzRefusesCallsRedisDown
+          expr: |
+            sum(increase(extauthz_cgjwt_component_replay_state_unavailable_total[5m])) > 0
+          for: 2m
+          labels:
+            severity: page
+            component: ext-authz
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/ext-authz.md#extauthzrefusescallsredisdown"
+            summary: "ext-authz refuses component calls because Redis does not answer"
+            description: |
+              ext-authz could not read or write the replay state of component
+              tokens in Redis in the last 5 minutes, so it refused those calls
+              with Unavailable. Every component call fails until Redis answers.
+              Check gibson-redis-stack, its password Secret and the network
+              policy between ext-authz and Redis.
+{{- end }}

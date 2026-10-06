@@ -10,6 +10,7 @@ The commands in these pages read the cluster. They change nothing. A fix goes th
 | [dashboard-auth.md](dashboard-auth.md) | Sign-in through the dashboard |
 | [redis.md](redis.md) | redis-stack |
 | [sandbox.md](sandbox.md) | Sandbox dispatch through setec |
+| [ext-authz.md](ext-authz.md) | The Redis dependency of ext-authz |
 | [ratelimit.md](ratelimit.md) | The per-client quota of the edge |
 | [plugin-rotation.md](plugin-rotation.md) | Secret rotation to plugins |
 
