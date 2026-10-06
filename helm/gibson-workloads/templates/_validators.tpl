@@ -628,11 +628,11 @@ the estate ran a log store nothing read. That site now keys off
 `observability.provider`, and the boolean is retired with the rest.
 
 Dead config that reads as configuration is worse than no config: it earns
-trust it cannot honour. Ignoring a stale key reproduces exactly that
-failure, so the retired names are a render error carrying the
-replacement. `jaeger.enabled` is NOT in this set —
-templates/observability/jaeger-deployment.yaml still gates on it, so it
-remains a live knob.
+trust it cannot honor. Ignoring a stale key reproduces exactly that
+failure, so the retired names are a render error that tells the operator
+to delete them. `jaeger.enabled` is not in this set: no template reads it
+either, and a hosted overlay still sets it (lane 11 list), so a fail here
+would break that render before the overlay drops it.
 
 Spec: deploy#1199 (b). Parent enum: deploy#313.
 ========================================================================= */}}
@@ -652,7 +652,7 @@ Spec: deploy#1199 (b). Parent enum: deploy#313.
 {{- end -}}
 {{- end -}}
 {{- if $set -}}
-{{- fail (printf "validateObservabilityRetiredToggles: %s. These keys are retired. observability.provider went with the in-chart prometheus/grafana/loki/promtail stack, which the chart no longer ships in ANY profile: it emits ServiceMonitors, PrometheusRules and grafana_dashboard ConfigMaps for a stack the cluster already runs, each gated on .Capabilities.APIVersions.Has. The other five were retired in deploy#313 and NO template has read them since — setting them changes nothing, which is how values-aws-prod.yaml came to render the entire in-chart prometheus/grafana/loki/promtail stack while declaring observability disabled (deploy#1199 b). Delete them and set observability.provider instead: 'in-chart' deploys the stack in-cluster; 'external-grafana-cloud' deploys none of it and leaves the ServiceMonitors for an external scraper. Note jaeger.enabled is still live and is not affected." (join ", " $set)) -}}
+{{- fail (printf "validateObservabilityRetiredToggles: %s. These keys are retired, and no template reads them. The chart ships no monitoring stack (ADR-0087). It emits only ServiceMonitor and PrometheusRule objects, and only when the cluster serves monitoring.coreos.com/v1, for a stack that the cluster runs. Delete these keys from your values file. No other value replaces them." (join ", " $set)) -}}
 {{- end -}}
 {{- end -}}
 
