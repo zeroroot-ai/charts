@@ -1127,14 +1127,6 @@ dashboard:
   # billing notification is sent at all is the daemon's question, not this
   # chart's, and no template here renders one.
 
-  # Public URL for checkout success/cancel redirects.
-  # Should match the dashboard's external URL (NEXTAUTH_URL).
-  publicUrl: ""                       # PUBLIC_URL
-
-  # Development settings
-  # WARNING: NEVER set disableAuth to true in production
-  disableAuth: false
-
   # Ingress configuration for external access
   ingress:
     enabled: false
@@ -2289,36 +2281,23 @@ sdk:
   # Bump in lockstep with the gibson daemon image digest.
   # Spec: private-authz-registry Task 10.
   version: "v0.124.3"
-  # OCI repo holding the registry.yaml artifact (oras pull source).
-  # Now a PRIVATE GHCR package — anonymous pulls will fail with 401.
-  # The existing imagePullSecrets (e.g. ghcr-credentials) provide auth.
-  # Do NOT change this back to ghcr.io/zeroroot-ai/sdk-registry; that
-  # public OCI tag is no longer published after spec private-authz-registry.
+  # OCI repo holding the registry.yaml artifact (oras pull source). The
+  # package is public, so a pull from ghcr.io needs no credential.
   # For air-gapped installs, set bypassRegistryValidation=true and supply
   # embeddedRegistry instead.
   registry: "ghcr.io/zeroroot-ai/internal-authz-registry"
   # Name of the kubernetes.io/dockerconfigjson Secret that the ext-authz
-  # `pull-registry` init container uses to authenticate `oras pull`
-  # against the private OCI registry above.
+  # `pull-registry` init container uses to authenticate `oras pull`, for an
+  # install that mirrors the registry into a private registry.
   #
   # Pod-level imagePullSecrets only authenticate KUBELET image pulls;
   # they do NOT propagate to runtime tools like `oras` running inside an
   # init container. This Secret is projected as $DOCKER_CONFIG/config.json
   # into the init container so oras finds it via standard docker auth.
   #
-  # The Secret must be PRE-CREATED in the release namespace before
-  # `helm install/upgrade`:
-  #   kubectl create secret docker-registry ghcr-credentials \
-  #     -n <namespace> \
-  #     --docker-server=ghcr.io \
-  #     --docker-username=<github-user> \
-  #     --docker-password=$(gh auth token)
-  # The chart does NOT create it (avoids embedding a PAT in values).
-  #
-  # Default `ghcr-credentials` matches the chart-wide imagePullSecrets
-  # convention and the `gibson.validateGhcrCredentials` render-time guard.
-  # Set to empty string only if `sdk.registry` is publicly pullable.
-  # Spec: zero-trust-hardening follow-up (private GHCR auth in init container).
+  # The chart's registry-credentials ExternalSecret writes this Secret from
+  # the ClusterSecretStore (the keyring, OpenBao and ExternalSecret chain,
+  # ADR-0084). Nothing creates it by hand.
   imagePullSecret: "ghcr-credentials"
   # Set true to bypass validateRegistryFromSDK — the operator commits to
   # supplying a baked-in registry on a custom ext-authz image. Discouraged

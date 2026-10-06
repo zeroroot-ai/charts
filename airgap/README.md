@@ -75,10 +75,10 @@ cosign verify --offline \
 `cosign verify --offline` still needs the Sigstore trust root. Fetch it once on
 a connected host with `cosign initialize` and carry `~/.sigstore/root` across.
 
-**3. Point the install at the mirror.** Set `global.imagePullSecrets` to a
-secret holding the mirror credential — the chart's `validateGhcrCredentials`
-guard fails the render if private images are pulled without one — and override
-the per-sub-chart image repositories in your own values file. The umbrella keys
+**3. Point the install at the mirror.** Set `global.registry` to the mirror,
+set `imageCredentials.registry`, `username` and `remoteKey` to the mirror
+credential in your secret store, and override the per-sub-chart image
+repositories in your own values file. The umbrella keys
 image repositories per sub-chart in `helm/gibson*/values.yaml`.
 
 **4. Mirror the trivy databases.** The tool runner's trivy fetches its
