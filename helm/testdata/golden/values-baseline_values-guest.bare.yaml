@@ -6199,6 +6199,13 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  # The egress policy of each connector, by host name (gibson#758,
+  # ADR-0165 rule 4). The operator writes one CiliumNetworkPolicy for each
+  # connector with a host list, next to its NetworkPolicy, in the tenant
+  # namespace. Without this rule each reconcile fails on EgressPolicy.
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumnetworkpolicies"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
 
   # ToolHive primitives — the operator reconciles each ConnectorInstance into
   # an MCPServer (Hosted) or MCPRemoteProxy (Remote). The ToolHive CRDs are
