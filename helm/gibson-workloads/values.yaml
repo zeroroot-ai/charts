@@ -157,6 +157,25 @@ secrets:
 # Sub-feature toggles on this block (`networkPolicy.enabled`,
 # `podDisruptionBudget.enabled`, `serviceAccount.create`,
 # `config.metrics.enabled`, etc.) remain legitimate.
+# -----------------------------------------------------------------------------
+# Registration rung (ADR-0074, charts#374). One value, one of three names:
+#
+#   closed    every signup is refused, and /signup redirects to /login. A
+#             platform admin provisions each tenant through the admin API.
+#   approval  anyone may register, and an administrator approves each account
+#             before it is usable. No mail transport is needed.
+#   open      self-serve signup, with no card (the OSS default).
+#
+# The chart renders SIGNUP_SELF_SERVE on the daemon and on the dashboard from
+# this one value (gibson.registrationKnob), so the two cannot disagree. The
+# render fails on any other name.
+#
+# SECURITY NOTE: on `open`, an internet-exposed install lets any reachable
+# user create an account. A public self-hosted install that does not want
+# that sets `approval` or `closed`.
+# -----------------------------------------------------------------------------
+registration: open
+
 gibson:
   # First-party plugin SVID enrollment binding. platformTenant is the
   # install tenant slug a plugin's SPIFFE JWT-SVID maps to; the daemon resolves
@@ -182,26 +201,6 @@ gibson:
   podDisruptionBudget:
     enabled: ~        # auto-on when replicas > 1
   topologySpreadConstraints: ~  # falls back to chart-default zone-spread.
-
-  # Signup seam knob (/ deploy#1055, gibson#1094).
-  #
-  # Default (true): self-serve no-card signup is enabled. A fresh install of
-  # the core umbrella lets users sign up without payment details (unlimited-
-  # but-metered, no entitlements check). This is the correct default for OSS /
-  # self-hosted installs.
-  #
-  # Set to false for a closed front-door: all signup attempts are denied and
-  # operators must provision tenants via the admin API. Documented override for
-  # operators who want to run a private, invite-only instance.
-  #
-  # SECURITY NOTE: an internet-exposed OSS instance allows open
-  # tenant creation — any reachable user can create an account — until this
-  # knob is set to false. Operators running a public self-hosted install who
-  # do not want open signup MUST set gibson.signupSelfServe: false explicitly.
-  #
-  # Maps to SIGNUP_SELF_SERVE env on the daemon StatefulSet (gibson#1094).
-  # The dashboard reads the same knob independently (dashboard#917).
-  signupSelfServe: true
 
   # Entitlements seam knob (/ deploy#1032).
   # The deployment-profile seam for the EntitlementsService gRPC boundary.
@@ -399,11 +398,11 @@ gibson:
   # NOT fine for signup verification: the gibson daemon's mailer package
   # (internal/platform/mailer, mailer.RequireDelivering) refuses to wire the
   # signup verification sender behind a non-delivering transport, and when
-  # gibson.signupSelfServe is true (the default — see above) the daemon
+  # `registration` is open (the default, see the top of this file) the daemon
   # REFUSES TO START without a delivering transport, GIBSON_APP_URL, a
   # verification store and a rate limiter all present.
   #
-  # Every profile that leaves signupSelfServe at its default true MUST set
+  # Every profile that leaves `registration` at open MUST set
   # provider=smtp here (or the daemon will not boot):
   #   - kind: wired to the in-cluster mailpit dev sink (mailpit.enabled +
   #     values-kind.yaml) — no SMTP account needed, dev-only.
@@ -416,7 +415,7 @@ gibson:
   #     anywhere. The dashboard reads the same key.
   email:
     provider: "log"                 # GIBSON_EMAIL_PROVIDER: log | smtp — MUST be
-                                     # "smtp" wherever gibson.signupSelfServe is true.
+                                     # "smtp" wherever `registration` is open.
     from: "no-reply@gibson.local"   # GIBSON_EMAIL_FROM
     smtp:
       host: ""                      # GIBSON_SMTP_HOST (required when provider=smtp)
@@ -922,12 +921,7 @@ dashboard:
 
   # Signup seam knobs for the dashboard (/ deploy#1055, dashboard#917).
   #
-  # signup.selfServe (bool, default true):
-  #   Whether the /signup page is accessible. When true (default) the page gate
-  #   allows unauthenticated users to reach the signup form. When false, /signup
-  #   redirects to /login — the front door is login-only (admin provisioning).
-  #   Must match gibson.signupSelfServe — both daemon and dashboard must agree.
-  #   Maps to SIGNUP_SELF_SERVE env on the dashboard Deployment.
+  # The /signup page follows `registration` (top of this file).
   #
   # signup.wwwUrl (string, default ""):
   #   When set, the signup / onboarding flow directs unauthenticated users to
@@ -935,8 +929,6 @@ dashboard:
   #   Unset (default) → in-app signup flow, no external marketing redirect.
   #   Maps to WWW_URL env on the dashboard Deployment (already wired; this
   #   block just documents the signup use of the existing wwwUrl knob).
-  signup:
-    selfServe: true  # SIGNUP_SELF_SERVE — matches gibson.signupSelfServe
 
   # Marketing host origin for the www/app middleware split (deploy#630 S11).
   # Empty → derived from global.domain via gibson.wwwOrigin
@@ -2185,7 +2177,7 @@ stripeMock:
 # deploy companion to gibson#1228 / dashboard#991).
 #
 # gibson#1228 makes the daemon refuse to serve the self-serve signup RPCs —
-# and refuse to BOOT at all when gibson.signupSelfServe is true, which it is
+# and refuse to BOOT at all when `registration` is open, which it is
 # by default — unless gibson.email.provider=smtp (a transport that actually
 # Delivers()). Kind has no SMTP account to hand it, and "log" no longer
 # satisfies that requirement (it is a non-delivering stub by design — see

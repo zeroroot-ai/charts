@@ -44,6 +44,10 @@
 #     patches before Helm gets to update the policy itself.
 #
 gibson-workloads:
+  # Self-hosted profile: open registration, no card (ADR-0074). Set approval
+  # or closed for a public install that must not let anyone sign up.
+  # SIGNUP_SELF_SERVE renders "true" on the daemon and the dashboard.
+  registration: open
   # Who may create a workload whose pod template claims a Gibson platform
   # identity (spire.identityAdmission.workloadCreators). Required because
   # the admission policy ships in Deny.
@@ -206,11 +210,6 @@ gibson-workloads:
       cache:
         enabled: false
         initMode: skip
-    # Self-hosted profile: signup seam is ON by default (no-card open signup).
-    # This is the OSS/self-hosted default — no card required, unlimited-but-metered.
-    # Set to false for a closed front-door install (admin-only provisioning).
-    # signup-seam.bats asserts SIGNUP_SELF_SERVE=true in this render.
-    signupSelfServe: true
     # Self-hosted profile: entitlements seam knob is UNSET (ConfigProvider).
     # The no-closed-refs guard asserts this renders with no billing image ref.
     entitlementsEndpoint: ""
@@ -243,10 +242,6 @@ gibson-workloads:
       provider: "log"
       from: "no-reply@localhost.zeroroot.ai"
   dashboard:
-    # Self-hosted profile: signup page accessible (matches signupSelfServe above).
-    # signup-seam.bats asserts SIGNUP_SELF_SERVE=true on the dashboard in this render.
-    signup:
-      selfServe: true
     replicas: 1
     resources:
       requests:

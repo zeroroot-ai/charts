@@ -33,7 +33,7 @@ gibson.validateSpiffeRequired in templates/_helpers.tpl. Daemon SPIFFE
 mTLS stays ON in every overlay, with no debugging shortcuts permitted.
 */}}
 {{- include "gibson.validateSpiffeRequired" . }}
-{{- include "gibson.assertTrustDomainKnobsDeleted" (dict "ctx" . "keys" (list "spiffe.envoyID" "spiffe.daemonID" "spiffe.trustDomain" "spiffe.callbackPeerSVIDs" "spiffe.allowedPeerIDs" "spiffe.authzRegistryReaderSVIDs" "envoy.spiffe.trustDomain" "spire.server.trustDomain" "spire.agent.trustDomain" "gibson.auth.spiffe.trustDomain" "gibson.auth.spiffe.infrastructureIDs")) }}
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "spiffe.envoyID" "spiffe.daemonID" "spiffe.trustDomain" "spiffe.callbackPeerSVIDs" "spiffe.allowedPeerIDs" "spiffe.authzRegistryReaderSVIDs" "envoy.spiffe.trustDomain" "spire.server.trustDomain" "spire.agent.trustDomain" "gibson.auth.spiffe.trustDomain" "gibson.auth.spiffe.infrastructureIDs") "use" "the one value global.spire.trustDomain; each SPIFFE ID is built from it and a path (ADR-0164, charts#392)") }}
 {{- include "gibson.validateEnvoySdsWired" . }}
 {{- /* Phase H/8.4 validators (templates/_validators.tpl) */ -}}
 {{- include "gibson.validateAllPathsViaEnvoy" . }}
@@ -415,7 +415,7 @@ spec:
             # platform. resolveSignupMailer warns once at startup and leaves
             # the signup mailer unwired; RequestEmailVerification then refuses
             # each call with FailedPrecondition, creating no state. So a
-            # profile with gibson.signupSelfServe left at its default (true)
+            # profile with `registration: open` (the default)
             # still boots, but self-serve signup is inert until provider=smtp
             # is set here (kind: mailpit dev sink, values-kind.yaml;
             # staging/prod: SES SMTP, values-aws-prod.yaml).
@@ -714,15 +714,13 @@ spec:
               credential is injected into the microVM env here.
             */}}
             # ----------------------------------------------------------------
-            # Signup seam knob (/ deploy#1055, gibson#1094).
-            # SIGNUP_SELF_SERVE=true (default) → daemon serves public signup.
-            # Absent/false → PolicyAdminOnly (signup denied for all callers).
-            #
-            # Default: true (self-hosted OSS default — no-card open signup).
-            # Override to false for a closed front-door install.
-            {{- if .Values.gibson.signupSelfServe }}
+            # Signup seam knob (deploy#1055, gibson#1094): the registration
+            # rung, from the one value `registration` (gibson.registrationKnob).
+            # Absent: closed. "approval": approval. "true": open.
+            {{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "gibson.signupSelfServe" "dashboard.signup.selfServe") "use" "registration: closed, approval or open (charts#374)") }}
+            {{- with include "gibson.registrationKnob" . }}
             - name: SIGNUP_SELF_SERVE
-              value: "true"
+              value: {{ . | quote }}
             {{- end }}
             # ----------------------------------------------------------------
             # Entitlements provider seam knob (/ deploy#1032).

@@ -13,8 +13,8 @@
 # deploy#1039 says the self-serve path must return admin-only PermissionDenied.
 # That is true only when the front door is closed. ADR-0074 (as amended
 # 2026-08-13, deploy#1039) matches the shipped default: self-serve signup is
-# ON in both profiles (signupSelfServe: true — GitLab self-managed model),
-# and closed registration is the operator override signupSelfServe: false.
+# ON in both profiles (`registration: open`, the GitLab self-managed model),
+# and `registration: closed` is the operator override (charts#374).
 # See helm/gibson/values-baseline.yaml (+ values-eks.yaml on EKS): open
 # card-free signup is the shipped OSS default.
 #
@@ -193,7 +193,9 @@ fi
 # redirect elsewhere is a different surface, not the front door.
 SIGNUP_CODE="$(edge_status "$EDGE" "$APP_HOST" "/signup")"
 SIGNUP_REDIRECT="$(edge_redirect "$EDGE" "$APP_HOST" "/signup")"
-if [ "$SELF_SERVE" = "true" ]; then
+# "true" is the open rung and "approval" the approval rung. Both serve the
+# signup page; only the closed rung redirects it.
+if [ "$SELF_SERVE" = "true" ] || [ "$SELF_SERVE" = "approval" ]; then
   case "$SIGNUP_CODE" in
     200)
       pass "GET https://${APP_HOST}/signup -> 200 with SIGNUP_SELF_SERVE=true (seam coherent; the shipped open default per ADR-0074 as amended)"

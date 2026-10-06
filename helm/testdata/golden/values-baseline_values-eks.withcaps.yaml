@@ -14643,11 +14643,12 @@ spec:
             # Never use the config-derived gibson.wwwOrigin as a self-hosted
             # fallback: that would set WWW_URL to www.<self-hosted-domain> which
             # is unreachable and breaks the coherence guard (signup-seam.bats).
-            # Signup seam gate (/ deploy#1055, dashboard#917).
+            # Signup seam gate (deploy#1055, dashboard#917).
             # SIGNUP_SELF_SERVE present → /signup page is accessible.
             # Absent → /signup redirects to /login (closed front door).
-            # Default: true (matches gibson.signupSelfServe — both must agree).
-            # Read server-side only; not exposed to the browser.
+            # The value comes from `registration`, the same one value the
+            # daemon reads (gibson.registrationKnob), so the two cannot
+            # disagree. Read server-side only; not exposed to the browser.
             - name: SIGNUP_SELF_SERVE
               value: "true"
             # Docs URL — points to the in-cluster docs-svc when enabled (core
@@ -18699,7 +18700,7 @@ spec:
             # platform. resolveSignupMailer warns once at startup and leaves
             # the signup mailer unwired; RequestEmailVerification then refuses
             # each call with FailedPrecondition, creating no state. So a
-            # profile with gibson.signupSelfServe left at its default (true)
+            # profile with `registration: open` (the default)
             # still boots, but self-serve signup is inert until provider=smtp
             # is set here (kind: mailpit dev sink, values-kind.yaml;
             # staging/prod: SES SMTP, values-aws-prod.yaml).
@@ -18849,12 +18850,9 @@ spec:
             - name: SSL_CERT_DIR
               value: "/etc/ssl/certs:/etc/ssl/fga-ca"
             # ----------------------------------------------------------------
-            # Signup seam knob (/ deploy#1055, gibson#1094).
-            # SIGNUP_SELF_SERVE=true (default) → daemon serves public signup.
-            # Absent/false → PolicyAdminOnly (signup denied for all callers).
-            #
-            # Default: true (self-hosted OSS default — no-card open signup).
-            # Override to false for a closed front-door install.
+            # Signup seam knob (deploy#1055, gibson#1094): the registration
+            # rung, from the one value `registration` (gibson.registrationKnob).
+            # Absent: closed. "approval": approval. "true": open.
             - name: SIGNUP_SELF_SERVE
               value: "true"
             # ----------------------------------------------------------------

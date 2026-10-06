@@ -479,17 +479,15 @@ spec:
             - name: WWW_URL
               value: {{ .Values.dashboard.wwwUrl | quote }}
             {{- end }}
-            # Signup seam gate (/ deploy#1055, dashboard#917).
+            # Signup seam gate (deploy#1055, dashboard#917).
             # SIGNUP_SELF_SERVE present → /signup page is accessible.
             # Absent → /signup redirects to /login (closed front door).
-            # Default: true (matches gibson.signupSelfServe — both must agree).
-            # Read server-side only; not exposed to the browser.
-            {{- /* deploy#1220: `| default true` swallowed an explicit
-                   `selfServe: false`, so a self-hosted install could not
-                   close the self-serve front door. */}}
-            {{- if ne (include "gibson.trueUnlessSet" ((.Values.dashboard.signup).selfServe)) "false" }}
+            # The value comes from `registration`, the same one value the
+            # daemon reads (gibson.registrationKnob), so the two cannot
+            # disagree. Read server-side only; not exposed to the browser.
+            {{- with include "gibson.registrationKnob" . }}
             - name: SIGNUP_SELF_SERVE
-              value: "true"
+              value: {{ . | quote }}
             {{- end }}
             # Docs URL — points to the in-cluster docs-svc when enabled (core
             # optional-by-toggle, deploy#1034 /). When docs.enabled=false

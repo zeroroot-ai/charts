@@ -1,4 +1,4 @@
-{{- include "gibson.assertTrustDomainKnobsDeleted" (dict "ctx" . "keys" (list "tenantOperator.daemonSpiffeID" "connectorOperator.daemonSpiffeID")) }}
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "tenantOperator.daemonSpiffeID" "connectorOperator.daemonSpiffeID") "use" "the one value global.spire.trustDomain; each SPIFFE ID is built from it and a path (ADR-0164, charts#392)") }}
 {{- /*
   tenant-operator is structural infrastructure (one-code-path /
   deploy#188). The previous outer `.Values.tenantOperator.enabled`

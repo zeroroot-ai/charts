@@ -12,6 +12,7 @@ cases:
   : The validator searches the Envoy config text; empty text makes the search fail, and the validator then fails the render.
   helm/gibson-common/templates/_helpers.tpl default {{- $override = .Values.gibson.daemonAddress | default "" -}}: gibson.daemonAddress is the optional override; empty means the helper builds the daemon Service address.
   helm/gibson-common/templates/_helpers.tpl default {{- $registry := .registry | default "" -}}: The registry host and the digest are optional parts of an image reference; the helper builds the reference without them.
+  helm/gibson-common/templates/_helpers.tpl default {{- $rung := .Values.registration | default "" | toString -}}: An absent rung reads as empty, which is not closed, approval or open, so the render fails with a named error (ADR-0074).
   ? helm/gibson-common/templates/_helpers.tpl default {{- $td := (((.Values.global).spire).trustDomain) | default "" | toString -}}
   : gibson.trustDomain reads an absent trust domain as empty and then fails the render with a named error (ADR-0164).
   ? helm/gibson-common/templates/_helpers.tpl default {{- (splitList ":" (.Values.redis.addr | default "")) | first | default (printf "%s-redis-stack" .Release.Name) -}}
