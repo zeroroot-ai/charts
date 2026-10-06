@@ -336,7 +336,25 @@ helm upgrade --install gibson-operator-crds "${OPCRDS_CHART[@]}" \
   --namespace "$NS" --wait --timeout 5m
 fi
 mapfile -t CRDS_CHART < <(chart_args gibson-crds)
-helm upgrade --install gibson-crds "${CRDS_CHART[@]}" \
+# The guest cluster also runs Prometheus Operator, which owns the
+# monitoring.coreos.com CRDs. gibson-crds carries its guest values for that
+# (values-guest.yaml: prometheus-operator-crds off). Without them the release
+# fails on the ownership of prometheusrules.monitoring.coreos.com (exit test
+# run 37443559557, charts#369). The values travel in the artifact.
+CRDS_VALUES=()
+if [ "$OVERLAY" = guest ]; then
+  if [ -n "$CHART_VERSION" ]; then
+    CRDS_DIR="$(mktemp -d)"
+    helm pull "oci://${REGISTRY}/gibson-crds" --version "$CHART_VERSION" \
+      --untar --untardir "$CRDS_DIR" >/dev/null
+    CRDS_VALUES=(-f "${CRDS_DIR}/gibson-crds/values-guest.yaml")
+  else
+    CRDS_VALUES=(-f "${CHART_DIR}/gibson-crds/values-guest.yaml")
+  fi
+  [ -r "${CRDS_VALUES[1]}" ] || { echo "FATAL: gibson-crds carries no values-guest.yaml, so the guest overlay cannot keep the cluster's monitoring CRDs" >&2; exit 1; }
+  log "guest overlay: gibson-crds keeps the cluster's monitoring CRDs (gibson-crds/values-guest.yaml)"
+fi
+helm upgrade --install gibson-crds "${CRDS_CHART[@]}" "${CRDS_VALUES[@]}" \
   --namespace "$NS" --wait --timeout 5m
 # Established, not merely created: a CRD the API server has not accepted yet is
 # indistinguishable from a missing one when the umbrella's manifests are
