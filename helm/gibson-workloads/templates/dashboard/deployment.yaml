@@ -73,16 +73,6 @@ spec:
       {{- /* Spec 3 §3 R8 — HA topology spread + anti-affinity. */}}
       {{- include "gibson.spread" (dict "ctx" . "component" "dashboard") | nindent 6 }}
       {{- /*
-        hostAliases — the dashboard's server side dials ADMIN_ENVOY_BASE_URL,
-        which is the public api.<global.domain> host, and on a local cluster
-        the pod resolves that name only through this alias to Envoy's pinned
-        ClusterIP. Identity calls no longer need it: since v0.128.0 they go
-        to the Zitadel Service by name (ADR-0092). The alias leaves when each
-        bringup writes the CoreDNS record for api.<domain> (hosted#397), and
-        charts#163 deletes the helper.
-      */}}
-      {{- include "gibson.hostAliases" . | nindent 6 }}
-      {{- /*
         Per epic one-code-path (deploy#186), slices deploy#196 + #201 +
         #203: the `.Values.zitadel.enabled` and `.Values.spire.enabled`
         gates have been deleted (Zitadel + SPIRE are structurally

@@ -4241,128 +4241,6 @@ data:
             # No separate auth. vhost, no dual-serving.
             # =====================================================================
     
-            # =====================================================================
-            # gibson-envoy.<ns>.svc.cluster.local — in-cluster OIDC discovery hop.
-            # Spec tier-2-host-aliases-cluster-dns. NO LONGER USED BY THE DAEMON
-            # OR THE FIRST-ADMIN JOB: both dial Zitadel by Service name and claim
-            # the host by header (ADR-0092). This chain is deleted by charts#163
-            # once no client uses it. The Zitadel instance router only matches its registered
-            # ExternalDomain in the Host header, so we rewrite Host to the public
-            # app.<domain> name before proxying upstream.
-            #
-            # Pre-auth surface only: /.well-known/openid-configuration and
-            # /oauth/v2/* (machine-user OAuth client_credentials). The Zitadel
-            # management API has no route here (ADR-0093). No ext_authz and no
-            # jwt_authn on this chain: these endpoints exist to bootstrap auth,
-            # so they cannot depend on it.
-            #
-            # deploy#1204 — this chain shares the public :10000 listener, and
-            # filter-chain selection keys on the connection's SNI. Nothing stopped
-            # an internet client from opening a TLS connection to the public edge
-            # with SNI `gibson-envoy.<ns>.svc.cluster.local` (the certificate will
-            # not validate for that name, but nothing forces the client to care)
-            # and landing on an auth-free chain. Two independent restrictions now
-            # apply:
-            #
-            #   1. source_prefix_ranges below — chain selection additionally
-            #      requires an in-cluster source address. Envoy evaluates
-            #      source_prefix_ranges as part of filter_chain_match, so a
-            #      connection from outside the configured ranges never selects this
-            #      chain and falls through to SNI-appropriate chains (i.e. no
-            #      match → connection closed). Populated from
-            #      envoy.internalChain.sourcePrefixRanges; see that value for why
-            #      the default must be narrowed on EKS, where the internet-facing
-            #      NLB's ENI address is itself RFC1918.
-            #
-            #   2. the virtual host's `domains` (below) — no longer ["*"]. This one
-            #      does not depend on source IP at all: a request must carry an
-            #      :authority of Envoy's in-cluster Service name to match any route
-            #      here. That is what stops this auth-free vhost from silently
-            #      inheriting any route added to it later, which is the durable
-            #      risk. Keep BOTH — (1) is defence in depth, (2) is the invariant.
-            - filter_chain_match:
-                server_names:
-                  - "gibson-envoy.gibson.svc.cluster.local"
-                  - "gibson-envoy.gibson.svc"
-                source_prefix_ranges:
-                  - address_prefix: "10.0.0.0"
-                    prefix_len: 8
-                  - address_prefix: "172.16.0.0"
-                    prefix_len: 12
-                  - address_prefix: "192.168.0.0"
-                    prefix_len: 16
-                  - address_prefix: "100.64.0.0"
-                    prefix_len: 10
-                  - address_prefix: "127.0.0.0"
-                    prefix_len: 8
-                  - address_prefix: "fc00::"
-                    prefix_len: 7
-                  - address_prefix: "::1"
-                    prefix_len: 128
-              transport_socket:
-                name: envoy.transport_sockets.tls
-                typed_config:
-                  "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
-                  common_tls_context:
-                    tls_certificates:
-                      - certificate_chain: { filename: /etc/envoy/tls/tls.crt }
-                        private_key:       { filename: /etc/envoy/tls/tls.key }
-                    alpn_protocols: ["h2", "http/1.1"]
-              filters:
-                - name: envoy.filters.network.http_connection_manager
-                  typed_config:
-                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
-                    stat_prefix: cluster_oidc_ingress
-                    codec_type: AUTO
-                    # Client-IP contract. The L4 load balancer preserves
-                    # the client IP, so the socket peer IS the client. Trust it and
-                    # nothing else: never a client-supplied x-forwarded-for, and no
-                    # trusted-hop count, which is only correct behind an ALB.
-                    use_remote_address: true
-                    xff_num_trusted_hops: 0
-                    route_config:
-                      name: cluster_oidc_routes
-                      # The edge owns the headers that select a Zitadel instance
-                      # (ADR-0092, charts#161). Zitadel trusts them, so a client on
-                      # the internet must never supply them. This runs in the router,
-                      # after ext_authz, which adds none of these four.
-                      request_headers_to_remove:
-                        - x-zitadel-instance-host
-                        - x-zitadel-public-host
-                        - x-forwarded-host
-                        - forwarded
-                      virtual_hosts:
-                        - name: cluster_oidc
-                          # deploy#1204 — was ["*"]. An auth-free wildcard vhost
-                          # matches every :authority, so any route added here later
-                          # becomes reachable by anything that reaches the chain.
-                          # Pinned to the in-cluster Service names
-                          # (https://gibson-envoy.<ns>.svc.cluster.local:<httpsPort>),
-                          # with and without the explicit port, since a non-443
-                          # httpsPort (kind uses 30443) is carried in the Host
-                          # header and Envoy does not strip it. Anything else gets
-                          # no vhost match → 404, never an unauthenticated route.
-                          domains:
-                            - "gibson-envoy.gibson.svc.cluster.local"
-                            - "gibson-envoy.gibson.svc.cluster.local:443"
-                            - "gibson-envoy.gibson.svc"
-                            - "gibson-envoy.gibson.svc:443"
-                          routes:
-                            - match: { prefix: "/.well-known/" }
-                              route:
-                                cluster: zitadel_upstream
-                                host_rewrite_literal: "app.localhost.zeroroot.ai"
-                                timeout: 30s
-                            - match: { prefix: "/oauth/v2/" }
-                              route:
-                                cluster: zitadel_upstream
-                                host_rewrite_literal: "app.localhost.zeroroot.ai"
-                                timeout: 30s
-                    http_filters:
-                      - name: envoy.filters.http.router
-                        typed_config:
-                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
-    
       # ===========================================================================
       # Upstream clusters.
       # ===========================================================================
@@ -8406,16 +8284,10 @@ spec:
   # Structural, not an overlay knob: an edge that cannot see its clients has
   # no per-client limit and no WAF worth the name.
   externalTrafficPolicy: Local
-  # Pin the ClusterIP so dashboard / bootstrap-job hostAliases can target
-  # Envoy by a stable address. Required for the in-cluster path where pods
-  # need to reach the same hostname (app.<domain>) the browser uses, but
-  # via the cluster network rather than the host's NodePort.
-  #
-  # REQUIRED in every overlay (Envoy is required infrastructure — deploy#200).
-  # Production overlays may still pin a clusterIP — the Service is exposed
-  # externally via NodePort/LoadBalancer; pinning the ClusterIP doesn't
-  # change the external surface.
-  clusterIP: "10.96.0.250"
+  # No pinned ClusterIP (charts#163, ADR-0092). An in-cluster caller reaches
+  # Envoy by the Service name, or by api.<domain> through the CoreDNS record
+  # that each bringup writes (scripts/baseline-up.sh). The render fails when
+  # a values file sets envoy.service.clusterIP.
   selector:
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
@@ -10712,13 +10584,6 @@ spec:
                     app.kubernetes.io/instance: gibson
                     app.kubernetes.io/component: dashboard
                 topologyKey: kubernetes.io/hostname
-      hostAliases:
-        - ip: "10.96.0.250"
-          hostnames:
-            - "app.localhost.zeroroot.ai"
-            - "api.localhost.zeroroot.ai"
-            - "www.localhost.zeroroot.ai"
-            - "docs.localhost.zeroroot.ai"
       initContainers:
         - name: wait-for-spire-socket
           image: ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
@@ -11608,7 +11473,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 73a7de55c0908de9b8eec46234cae08137e25b40d3bdccf922c039b7de9bed1d
+        checksum/config: aaed02bdfc7f27743036e18c4d0e737fcb9eb6653afc67057a9de112fa305b0b
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #

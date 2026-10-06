@@ -179,27 +179,20 @@ EOF
 echo "principal: ${PRINCIPAL}"
 
 # ---------------------------------------------------------------------------
-# The pinned Envoy ClusterIP.
+# The Service CIDR anchor, for the API server egress rule below.
 #
-# The chart REQUIRES one: consuming pods reach Envoy through a hostAlias, and a
-# hostAlias takes an IP, not a Service name (deploy#200). That IP has to sit
-# inside the cluster's Service CIDR, which differs per distribution — kind and
-# kubeadm use 10.96.0.0/12, EKS uses 172.20.0.0/16. A profile can only ship one
-# guess, and the wrong guess is fatal: the API server refuses the Service with
-# "failed to allocate IP ...: the provided IP is not in the valid range"
-# (deploy#1627).
-#
-# So it is DISCOVERED. The `kubernetes` Service in `default` is always the first
-# address of the Service CIDR, which makes it a reliable anchor on any
-# distribution without asking the operator what their CIDR is.
+# The `kubernetes` Service in `default` is always the first address of the
+# Service CIDR, which makes it a reliable anchor on any distribution without
+# asking the operator what their CIDR is. No Envoy ClusterIP is pinned any
+# more (charts#163, ADR-0092): an in-cluster caller reaches Envoy by its
+# Service name, or by api.<domain> through the CoreDNS record written below.
 log "discovering the Service CIDR"
 K8S_SVC_IP="$(kubectl get svc kubernetes -n default -o jsonpath='{.spec.clusterIP}')"
 case "$K8S_SVC_IP" in
   *.*.*.*) ;;
   *) echo "FATAL: could not read the kubernetes Service ClusterIP" >&2; exit 1 ;;
 esac
-ENVOY_CLUSTER_IP="${ENVOY_CLUSTER_IP:-${K8S_SVC_IP%.*.*}.0.250}"
-echo "service CIDR anchor: ${K8S_SVC_IP} -> pinning envoy at ${ENVOY_CLUSTER_IP}"
+echo "service CIDR anchor: ${K8S_SVC_IP}"
 # The SPIFFE trust domain (ADR-0164). It comes from the profile, or from
 # TRUST_DOMAIN. A trust domain cannot change on a running install: every SVID,
 # every agent and the SPIRE CA belong to it. So when the platform already
@@ -450,6 +443,23 @@ helm upgrade --install velero "${VELERO_CHART[@]}" \
   --set "bucket.endpoint=${BUCKET_ENDPOINT}" \
   --wait --timeout 10m
 
+# The platform hosts in cluster DNS (charts#163, ADR-0092). Plugins, setec
+# sandboxes and the dashboard reach the edge on api.<domain> the way an outside
+# client does. CoreDNS answers that name with the Envoy Service, by name, never
+# by a pinned address. k3s imports kube-system/coredns-custom; every other
+# distribution gets the record in kube-system/coredns.
+log "cluster DNS: the platform hosts lead to the Envoy Service"
+# shellcheck source=lib/coredns-platform-hosts.sh
+. "$(dirname "$0")/lib/coredns-platform-hosts.sh"
+PLATFORM_DOMAIN="$(values_domain "$VALUES" ${OVERLAY_FILE:+"$OVERLAY_FILE"} ${RUNG_FILE:+"$RUNG_FILE"})"
+DNS_MODE=corefile
+if kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null | grep -q '+k3s'; then
+  DNS_MODE=custom
+fi
+coredns_publish_platform_hosts "$DNS_MODE" "${RELEASE}-envoy.${NS}.svc.cluster.local" \
+  "api.${PLATFORM_DOMAIN}" "app.${PLATFORM_DOMAIN}"
+echo "  ✓ api.${PLATFORM_DOMAIN} and app.${PLATFORM_DOMAIN} -> ${RELEASE}-envoy.${NS}.svc.cluster.local (${DNS_MODE})"
+
 log "phase 2 — the platform"
 mapfile -t GIBSON_CHART < <(chart_args gibson)
 helm upgrade --install "$RELEASE" "${GIBSON_CHART[@]}" \
@@ -461,9 +471,6 @@ helm upgrade --install "$RELEASE" "${GIBSON_CHART[@]}" \
   "${TRUST_DOMAIN_ARGS[@]}" \
   --set-json "gibson-workloads.spire.identityAdmission.workloadCreators=[\"${PRINCIPAL}\"]" \
   --set "global.networkPolicy.apiServerCIDRs={${API_CIDRS}}" \
-  --set "gibson-workloads.envoy.service.clusterIP=${ENVOY_CLUSTER_IP}" \
-  --set "gibson-workloads.dashboard.envoy.service.clusterIP=${ENVOY_CLUSTER_IP}" \
-  --set "gibson-operators.envoy.service.clusterIP=${ENVOY_CLUSTER_IP}" \
   --namespace "$NS" --timeout 30m
 
 log "waiting for OpenBao to bootstrap and ESO to converge"

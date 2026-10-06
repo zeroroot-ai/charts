@@ -76,12 +76,13 @@ cnpg-netpol-covers-jobs: ## Every pod CNPG creates, bootstrap Jobs included, has
 values-no-duplicate-keys: ## No values file declares a key twice (YAML keeps the last and drops the first, silently)
 	@./scripts/check-values-no-duplicate-keys.sh
 
-.PHONY: envoy-anchor
 smtp-host-resolves: ## An in-cluster SMTP_HOST names a Service the release renders (charts#114)
 	@./scripts/check-smtp-host-resolves.py --selftest
 
-envoy-anchor: ## Every subchart pinning Envoy's ClusterIP gets the discovered value, not the shipped kind default
-	@./scripts/check-envoy-anchor-one-value.sh
+.PHONY: no-pinned-addressing
+no-pinned-addressing: ## No hostAliases, no pinned Envoy address, and no public origin as an unexplained dial target (ADR-0092, charts#163)
+	@python3 scripts/check-no-pinned-addressing.py --selftest
+	@python3 scripts/check-no-pinned-addressing.py
 
 .PHONY: openbao-seed-inputor
 openbao-seed-inputor: ## The inputor seed kind takes the keyring value when present and the placeholder when not (charts#486)
@@ -435,7 +436,7 @@ operator-rbac-fresh: ## The vendored cert-manager and External Secrets RBAC matc
 	@python3 scripts/vendor-operator-rbac.py --selftest
 	@python3 scripts/vendor-operator-rbac.py --check
 
-check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed env-consumed config-consumed contract-pins probes probe-timeouts helper-docs referenced-paths-exist cg-rotation-window email-smtp-external-secret smtp-tls-mode edge-rate-limits secure-pod daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows upgrade-pair envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes edge-grpc-routes edge-jwt-payload-unforgeable netpol-before-hooks openbao-login-diagnosis zitadel-claimed-host openbao-one-replica identity-admission-covers operator-rbac-covers reloader-names purge-tenant-backup-test no-render-time-secrets spiffeid-selectors trust-domain-literal optional-references no-closed-images operator-crd-bundle alert-runbooks registration-rung extauthz-redis secret-contract egress-policy-type openbao-seed-inputor ## Everything that runs without a cluster
+check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed env-consumed config-consumed contract-pins probes probe-timeouts helper-docs referenced-paths-exist cg-rotation-window email-smtp-external-secret smtp-tls-mode edge-rate-limits secure-pod daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows upgrade-pair platform-owner-values no-owner-password-secret edge-zitadel-routes edge-grpc-routes edge-jwt-payload-unforgeable netpol-before-hooks openbao-login-diagnosis zitadel-claimed-host openbao-one-replica identity-admission-covers operator-rbac-covers reloader-names purge-tenant-backup-test no-render-time-secrets spiffeid-selectors trust-domain-literal optional-references no-closed-images operator-crd-bundle alert-runbooks registration-rung extauthz-redis secret-contract egress-policy-type no-pinned-addressing openbao-seed-inputor ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context

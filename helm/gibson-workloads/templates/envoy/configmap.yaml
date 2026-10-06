@@ -80,27 +80,6 @@ unconditionally — there is no `envoy.enabled` opt-out.
 {{- $jwksUriAuthority := include "gibson.zitadel.externalDomain" . -}}
 {{- $jwksUri := default (printf "%s://%s/oauth/v2/keys" $jwksScheme $jwksUriAuthority) ((.Values.envoy.zitadel).jwks).uri -}}
 {{- /*
-  deploy#1204 — source CIDRs allowed to select the pre-auth in-cluster OIDC
-  filter chain (SNI gibson-envoy.<ns>.svc.cluster.local), which carries no
-  jwt_authn and no ext_authz. See envoy.internalChain.sourcePrefixRanges in
-  values.yaml for why this exists and why it MUST be narrowed on EKS.
-
-  Fail the render, never default: an unset OR EMPTY list would emit a
-  filter_chain_match with no source restriction at all, silently re-opening
-  that auth-free chain to anything that sets the SNI. `required` alone is not
-  enough — it passes an empty list through — so the length is checked too. A
-  /0 entry is rejected for the same reason: it restricts nothing.
-*/ -}}
-{{- $internalChainSourceRanges := ((.Values.envoy.internalChain).sourcePrefixRanges) | default list -}}
-{{- if eq (len $internalChainSourceRanges) 0 -}}
-{{- fail "envoy.internalChain.sourcePrefixRanges must be a NON-EMPTY list of {address_prefix, prefix_len} entries — it restricts which source CIDRs may select the pre-auth in-cluster OIDC filter chain, which carries no jwt_authn and no ext_authz (deploy#1204). Leaving it empty publishes that auth-free chain to any client that sets SNI gibson-envoy.<ns>.svc.cluster.local." -}}
-{{- end -}}
-{{- range $internalChainSourceRanges -}}
-{{- if or (not .address_prefix) (eq (int .prefix_len) 0) -}}
-{{- fail (printf "envoy.internalChain.sourcePrefixRanges entry %v is invalid — each entry needs a non-empty address_prefix and a prefix_len greater than 0. A /0 range restricts nothing and would re-open the pre-auth in-cluster OIDC filter chain to the internet (deploy#1204)." .) -}}
-{{- end -}}
-{{- end -}}
-{{- /*
   deploy#1189 — edge rate-limit buckets.
 
   Every bucket is REQUIRED and hard-validated; there is no `enabled` knob and
@@ -192,7 +171,6 @@ unconditionally — there is no `envoy.enabled` opt-out.
     "extAuthzGrpcPort" (.Values.extAuthz.ports.grpc    | default 9001)
     "zitadelDashboardClientId" "${DASHBOARD_CLIENT_ID}"
     "zitadelNativeLoginClientId" "${NATIVE_LOGIN_CLIENT_ID}"
-    "internalChainSourcePrefixRanges" $internalChainSourceRanges
     "rateLimit"        $rl
     "streamKeepalive"  $ka
 -}}
