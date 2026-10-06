@@ -4658,26 +4658,10 @@ data:
                             # The dashboard serves nothing under /assets.
                             - match: { prefix: "/assets/" }
                               route: { cluster: zitadel_upstream, timeout: 30s }
-                            # Closed billing tier's Stripe webhook receiver
-                            # (gibson#798/#800). Stripe POSTs here; routed to the
-                            # hosted gibson-billing-webhook workload, NOT the
-                            # dashboard (whose billing webhook is retired). On-prem
-                            # has no such workload — the cluster 503s, but on-prem
-                            # receives no Stripe webhooks, so the path is never hit.
-                            #
-                            # prefix_rewrite is REQUIRED: the receiver's mux serves
-                            # POST /webhook (+ GET /healthz) only — the public
-                            # /api/billing/webhook path is an edge-side convention.
-                            # Forwarding it verbatim 404s every Stripe delivery,
-                            # which Stripe reports as a failing endpoint while the
-                            # tenant's subscription_status never lands in
-                            # tenant_quotas. Ground truth: billing
-                            # cmd/billing-webhook/main.go.
-                            - match: { path: "/api/billing/webhook" }
-                              route:
-                                cluster: gibson_billing_webhook
-                                timeout: 30s
-                                prefix_rewrite: "/webhook"
+                            # envoy.extraRoutes (charts#375): one route for each
+                            # entry, an exact path, with its rate-limit class. A
+                            # component outside the core chart (the private
+                            # billing component) comes in only through this list.
                             # -------------------------------------------------------
                             # Signup submission bucket (deploy#1242). The signup
                             # Server Action POSTs to its page URL (/signup — Next.js
@@ -5337,24 +5321,6 @@ data:
                         socket_address:
                           address: "gibson-docs-svc"
                           port_value: 8080
-    
-        # gibson#798/#800 — the closed billing tier's Stripe webhook receiver.
-        # Plain HTTP/1.1 (Go net/http). Deployed only in hosted overlays
-        # (gibson-billing-webhook, gitops apps/manifests/gibson-workloads); on-prem
-        # has no such Service so STRICT_DNS yields no endpoints and the route 503s,
-        # which is fine — on-prem receives no Stripe webhooks.
-        - name: gibson_billing_webhook
-          type: STRICT_DNS
-          connect_timeout: 5s
-          load_assignment:
-            cluster_name: gibson_billing_webhook
-            endpoints:
-              - lb_endpoints:
-                  - endpoint:
-                      address:
-                        socket_address:
-                          address: "gibson-billing-webhook"
-                          port_value: 8090
     
         # gibson#623 — daemon's dedicated native-login bootstrap listener (:8085).
         # Plaintext HTTP/1.1: the endpoint is unauthenticated by design and serves
@@ -13348,7 +13314,7 @@ spec:
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket"
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
-        secret.reloader.stakater.com/reload: "gibson-stripe-credentials,gibson-tenant-operator-vault"
+        secret.reloader.stakater.com/reload: "gibson-tenant-operator-vault"
     spec:
       
       imagePullSecrets:
@@ -13702,11 +13668,6 @@ spec:
               value: "true"
             - name: ORPHAN_REAPER_GRACE_SECONDS
               value: "300"
-            - name: STRIPE_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: "gibson-stripe-credentials"
-                  key: STRIPE_SECRET_KEY
             - name: SMTP_HOST
               value: "gibson-mailpit"
             - name: SMTP_PORT
@@ -15162,7 +15123,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 73a7de55c0908de9b8eec46234cae08137e25b40d3bdccf922c039b7de9bed1d
+        checksum/config: a06e5bf0f53304079ab192565d8dc92bf884142e4bfc2ac03c1d94c3080b75aa
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -18906,25 +18867,6 @@ spec:
             # not only by the umbrella's signup-seam.bats CI fixtures — the
             # dangerous overlay is the one this repo never sees (GHSA-455w).
             # ----------------------------------------------------------------
-            # Billing-webhook shared secret (gibson#1230 / gibson#1270,
-            # deploy#1314). Authenticates TenantProvisioningService.
-            # SetTenantBillingActive — the ONLY writer of tenant_status.
-            # billing_active. The daemon fails CLOSED when this is empty
-            # (billing_webhook_auth.go), so paid signups queue at
-            # status='pending' and never provision until BOTH this daemon end
-            # AND the caller end (dashboard#1016) hold the same value.
-            #
-            # Gated on entitlementsRequired — the ONE condition under which the
-            # withhold bites (ListPendingTenantProvisioning only holds a paid
-            # pending row while billing_active is false when the deployment
-            # enforces entitlements). That keeps this a SaaS-profile-only hard
-            # dependency: self-hosted / OSS renders never reference the Secret,
-            # so their daemon boots with no billing backend. Where it IS
-            # rendered the ref is REQUIRED (no optional: true — one-code-path /
-            # deploy#203): the daemon waits for the ESO-delivered Secret rather
-            # than booting with an empty secret that silently refuses callers.
-            # The value is delivered, never baked.
-            # ----------------------------------------------------------------
             # Setec sandbox wiring.
             #
             # There is exactly ONE env var here, and it is a metrics label.
@@ -22256,35 +22198,6 @@ spec:
       # one key name, no prefix.
       remoteRef: { key: zitadel-masterkey, property: value }
 ---
-# Source: gibson/charts/gibson-workloads/templates/secrets/billing-webhook-secret.yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: gibson-billing-webhook-secret
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: secrets
-spec:
-  refreshInterval: 60s
-  secretStoreRef:
-    name: "gibson-secrets"
-    kind: ClusterSecretStore
-  target:
-    name: gibson-billing-webhook-secret
-    creationPolicy: Owner
-    template:
-      type: Opaque
-      data:
-        GIBSON_BILLING_WEBHOOK_SECRET: "{{ .billing_webhook_secret }}"
-  data:
-    - secretKey: billing_webhook_secret
-      remoteRef: { key: gibson-billing-webhook-secret, property: secret }
----
 # Source: gibson/charts/gibson-workloads/templates/secrets/cg-signing-key.yaml
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -22347,45 +22260,6 @@ spec:
   data:
     - secretKey: vault_admin_token
       remoteRef: { key: gibson-vault-admin-token, property: token }
----
-# Source: gibson/charts/gibson-workloads/templates/secrets/stripe-credentials.yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: gibson-stripe-credentials
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: secrets
-spec:
-  refreshInterval: 60s
-  secretStoreRef:
-    name: "gibson-secrets"
-    kind: ClusterSecretStore
-  target:
-    name: gibson-stripe-credentials
-    creationPolicy: Owner
-    template:
-      type: Opaque
-      data:
-        STRIPE_SECRET_KEY: "{{ .dashboard_stripe_secret_key }}"
-        STRIPE_WEBHOOK_SECRET: "{{ .dashboard_stripe_webhook_secret }}"
-        # Publishable key (pk_test_/pk_live_): NOT secret, but per-env (test vs
-        # live mode) so it must be runtime-injected — the signup page server
-        # component reads it and passes it to the inline Payment Element. The
-        # shared :main image can't bake a build-time NEXT_PUBLIC key (dashboard#783).
-        STRIPE_PUBLISHABLE_KEY: "{{ .dashboard_stripe_publishable_key }}"
-  data:
-    - secretKey: dashboard_stripe_secret_key
-      remoteRef: { key: gibson-stripe-credentials, property: secret_key }
-    - secretKey: dashboard_stripe_webhook_secret
-      remoteRef: { key: gibson-stripe-credentials, property: webhook_secret }
-    - secretKey: dashboard_stripe_publishable_key
-      remoteRef: { key: gibson-stripe-credentials, property: publishable_key }
 ---
 # Source: gibson/charts/gibson-workloads/templates/setec/daemon-client-secret.yaml
 # The mirror. Key names are preserved verbatim (tls.crt / tls.key / ca.crt)

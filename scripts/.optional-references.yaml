@@ -59,3 +59,11 @@ cases:
   ? helm/gibson/templates/app-url-guard.yaml default {{- $checks := list (dict "label" "gibson-workloads.gibson.appUrl" "value" ((((index .Values "gibson-workloads") | default dict).gibson | default dict).appUrl | default "")) (dict "label" "gibson-operators.gibson.appUrl" "value" ((((index .Values "gibson-operators") | default dict).gibson | default dict).appUrl | default "")) -}}
   : The guard reads an absent appUrl as empty and checks only a set value.
   helm/gibson/templates/webhook-gate.yaml default {{- if eq ($p.component | default "") "setec" -}}: A probe with no component is not the setec probe; the empty default only selects the branch.
+  ? "helm/gibson-workloads/templates/envoy/configmap.yaml default {{- $extraRoutes = append $extraRoutes (dict \"path\" $r.path \"rewrite\" ($r.rewrite | default \"\") \"service\" $r.service \"port\" (int $r.port) \"descriptor\" (get $rlClass (toString $r.rateLimitClass)) \"auth\" $r.auth \"cluster\" (printf \"extra_%s_%d\" (replace \"-\" \"_\" $r.service) (int $r.port))) -}}"
+  : rewrite is the optional prefix rewrite of an extra route; empty means the edge forwards the path as it is (charts#375).
+  ? "helm/gibson-workloads/templates/envoy/configmap.yaml default {{- if not (has (toString ($r.auth | default \"\")) (list \"signed-request\" \"own-sign-in\")) -}}"
+  : The validator normalizes an absent mode to empty; the empty string is no known mode, and the render fails with a named error (charts#375).
+  ? "helm/gibson-workloads/templates/envoy/configmap.yaml default {{- if not (hasKey $rlClass (toString ($r.rateLimitClass | default \"\"))) -}}"
+  : The validator normalizes an absent class to empty; the empty string is no known class, and the render fails with a named error (charts#375).
+  ? "helm/gibson-workloads/templates/envoy/configmap.yaml default {{- if not (regexMatch \"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$\" (toString ($r.service | default \"\"))) -}}"
+  : The validator normalizes an absent service to empty; the empty string fails the name pattern, and the render fails with a named error (charts#375).
