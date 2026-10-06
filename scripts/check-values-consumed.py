@@ -13,9 +13,8 @@ How a key is resolved to a consumer:
 
   * Collect every value reference in scope as a dotted CHAIN: `.Values.a.b.c`,
     `index .Values "dashed" "key"`, and `$.Values.a.b`. A parenthesised chain
-    like `((.Values.a).b).c` yields `a`, which is deliberate: a short chain
-    consumes everything beneath it, so under-reading a chain can only make the
-    gate more permissive, never wrong.
+    like `((.Values.a).b).c` yields `a.b.c`. A comment is not a reader: the
+    scan strips template comments and YAML comment lines first.
   * A declared key is consumed when any reference chain is a PREFIX of it, or
     equal to it. That is what makes `{{ toYaml .Values.gibson.resources }}`
     consume `gibson.resources.limits.cpu` without naming it.
@@ -103,6 +102,17 @@ def charts() -> dict[str, dict]:
     return found
 
 
+# A comment is not a reader. A template comment or a YAML comment line that
+# names a key used to count as a consumer, so a key whose only "reader" was the
+# comment that called it ignored passed the gate (charts#361).
+TEMPLATE_COMMENT = re.compile(r"\{\{-?\s*/\*.*?\*/\s*-?\}\}", re.S)
+YAML_COMMENT = re.compile(r"^[ \t]*#.*$", re.M)
+
+
+def strip_comments(text: str) -> str:
+    return YAML_COMMENT.sub("", TEMPLATE_COMMENT.sub("", text))
+
+
 def template_text(chart_dir: str) -> str:
     buf = []
     for dirpath, dirs, files in os.walk(chart_dir):
@@ -114,18 +124,54 @@ def template_text(chart_dir: str) -> str:
         if parts and (parts[0] == "charts" or parts[0].startswith(".") or "testdata" in parts):
             dirs[:] = []
             continue
-        if "templates" not in parts and not any(f.endswith(".tpl") for f in files):
+        # files/ holds config that a template renders with tpl, so its
+        # `.Values` references are reads too (files/coraza, files/envoy).
+        if "templates" not in parts and "files" not in parts and not any(f.endswith(".tpl") for f in files):
             continue
         for f in files:
-            if f.endswith((".yaml", ".yml", ".tpl", ".txt")):
-                buf.append(open(os.path.join(dirpath, f), encoding="utf-8", errors="replace").read())
+            if f.endswith((".yaml", ".yml", ".tpl", ".txt", ".conf", ".json", ".lua")):
+                buf.append(strip_comments(open(os.path.join(dirpath, f), encoding="utf-8", errors="replace").read()))
     return "\n".join(buf)
+
+
+# `((.Values.a).b).c` is the chain a.b.c. Fold each parenthesised chain into
+# the field access that follows it, innermost first, before the chain scan.
+# Without this the scan read the chain as `a`, and `a` "consumed" every key
+# below it, an unread one too (charts#361).
+PAREN = re.compile(r"\(\s*(\$?\.Values(?:\.%s)+)(?:\s*\|\s*default\s+\(?dict\)?)?\s*\)((?:\.%s)+)" % (SEG, SEG))
+# A chain that an `if` or `hasKey` only TESTS reads that key, not the keys
+# below it: `if and (hasKey .Values "envoy") .Values.envoy` must not consume
+# `envoy.zitadel.dashboardClientId`. Such a chain is recorded with EXACT.
+EXACT = "="
+TEST_ACTION = re.compile(r"\{\{-?\s*(?:else\s+)?if\b")
+
+
+def fold_parens(text: str) -> str:
+    while True:
+        folded = PAREN.sub(r"\1\2", text)
+        if folded == text:
+            return text
+        text = folded
+
+
+def test_only(text: str, start: int, end: int) -> bool:
+    """True when the chain at text[start:end] is only tested, not read for its children."""
+    nxt = text[end:end + 1]
+    if nxt in (".", "|") or text[end:].lstrip().startswith("|"):
+        return False
+    before = text[max(0, start - 8):start]
+    if before.rstrip().endswith("hasKey"):
+        return True
+    action = text.rfind("{{", 0, start)
+    return action != -1 and "}}" not in text[action:start] and bool(TEST_ACTION.match(text, action))
 
 
 def chains(text: str) -> set[str]:
     out = set()
+    text = fold_parens(text)
     for m in CHAIN.finditer(text):
-        out.add(m.group(1).lstrip("."))
+        chain = m.group(1).lstrip(".")
+        out.add(chain + EXACT if test_only(text, m.start(), m.end()) else chain)
     for m in INDEXED.finditer(text):
         parts = re.findall(r'"([^"]+)"', m.group(1))
         if parts:
@@ -160,7 +206,12 @@ def cross_chart_refs(text: str, known: set[str]) -> dict[str, set[str]]:
         if chart not in known:
             continue
         for dm in re.finditer(r"\$%s((?:\.%s)+)" % (re.escape(var), SEG), text):
-            out.setdefault(chart, set()).add(dm.group(1).lstrip("."))
+            chain = dm.group(1).lstrip(".")
+            # A bare `$wl.envoy` handed to a helper reads only what the helper
+            # reads, and the library chart's chains already hold that.
+            rest = text[dm.end():dm.end() + 40]
+            piped = rest.lstrip().startswith("|")
+            out.setdefault(chart, set()).add(chain if rest[:1] in (".", "") or piped else chain + EXACT)
     for m in DIRECT.finditer(text):
         if m.group(1) in known:
             out.setdefault(m.group(1), set()).add(m.group(2).lstrip("."))
@@ -181,6 +232,10 @@ def consumed(key: str, refs: set[str]) -> bool:
         return True
     for r in refs:
         if not r:
+            continue
+        if r.endswith(EXACT):
+            if key == r[:-1]:
+                return True
             continue
         if key == r or key.startswith(r + ".") or key.startswith(r + "["):
             return True
@@ -244,7 +299,7 @@ def scan(root: str) -> tuple[list[str], list[str]]:
             if not isinstance(vals, dict):
                 continue
             refs = refs_by_chart.get(name, set())
-            tops = {r.split(".")[0] for r in refs}
+            tops = {r.rstrip(EXACT).split(".")[0] for r in refs}
             for top in sorted(vals):
                 if top in c["deps"] or top in cs or top == "global":
                     continue
@@ -337,18 +392,31 @@ def selftest() -> int:
                 "upstream": {"whatever": 1},                   # dependency passthrough
                 "annotations": {"unused.example.com/x": "1"},  # free-form
                 "gatedSeam": {"enabled": True},               # read by a Chart.yaml condition
+                "onlyInComment": {"ignoredKnobQrs": ""},      # named only by comments
+                "paren": {"read": "p", "unreadSiblingQrs": ""},  # a paren chain reads one child
+                "tested": {"svc": {"ip": "1"}, "unreadTestedQrs": ""},  # tested, one child read
             },
             'a: {{ .Values.read }}\n'
             'b: {{ toYaml .Values.deep }}\n'
             'c: {{ include "c.h" . }}\n'
             'd: {{ index .Values "dashed-key" "inner" }}\n'
-            'e: {{ .Values.live.used }}\n',
+            'e: {{ .Values.live.used }}\n'
+            '{{- /* .Values.onlyInComment.ignoredKnobQrs is intentionally ignored */ -}}\n'
+            '# ignoredKnobQrs: a YAML comment is not a reader either\n'
+            'f: {{ .Values.onlyInComment.other | default "" }}\n'
+            'g: {{ ((.Values.paren).read) | default "" }}\n'
+            '{{- if and (hasKey .Values "tested") .Values.tested -}}\n'
+            '{{- if hasKey .Values.tested "svc" }}h: {{ ((.Values.tested | default dict).svc).ip }}{{ end -}}\n'
+            '{{- end -}}\n',
         )
         bad, stale = scan(d)
         want = [
             "x:dead (whole top-level block: names no dependency in x/Chart.yaml "
             "and no template reads it)",
             "x:live.deadChild = 'unreadLeafXyz'",
+            "x:onlyInComment.ignoredKnobQrs = ''",
+            "x:paren.unreadSiblingQrs = ''",
+            "x:tested.unreadTestedQrs = ''",
         ]
         if sorted(bad) != sorted(want):
             print(f"SELFTEST FAIL:\n  want {sorted(want)}\n  got  {sorted(bad)}")
@@ -361,6 +429,9 @@ def selftest() -> int:
         open(os.path.join(d, "scripts", ".values-consumed-exemptions.txt"), "w").write(
             "x:dead set by an operator at install time\n"
             "x:live.deadChild set by an operator at install time\n"
+            "x:onlyInComment.ignoredKnobQrs set by an operator at install time\n"
+            "x:paren.unreadSiblingQrs set by an operator at install time\n"
+            "x:tested.unreadTestedQrs set by an operator at install time\n"
             "x:gone.away this target no longer exists\n"
         )
         bad, stale = scan(d)

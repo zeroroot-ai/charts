@@ -44,11 +44,8 @@ unconditionally — there is no `envoy.enabled` opt-out.
   into the ConfigMap; the Envoy pod's `render-envoy-config` initContainer
   substitutes it using `sed` against the mounted Secret before the main
   envoy container starts. The Stakater Reloader annotation on the
-  Deployment rolls the pods when the Secret changes.
-
-  `envoy.zitadel.dashboardClientId` is now intentionally ignored — kept
-  in values.yaml as a deprecated/empty default for backward compatibility
-  while gitops overlays drop it. Setting it has no effect.
+  Deployment rolls the pods when the Secret changes. No values key holds
+  the client ID.
 */ -}}
 {{- $envoyNodePort := .Values.envoy.service.nodePort | default "" -}} {{/* allowlist-silent-default: nodePort is kind-only; empty signals ClusterIP/LoadBalancer mode. */}}
 {{- /* Spec eliminate-permissive-authz Req 1 — `zitadelJwksScheme` and

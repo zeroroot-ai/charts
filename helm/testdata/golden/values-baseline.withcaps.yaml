@@ -18729,9 +18729,8 @@ spec:
             # The daemon's TenantAdminService uses these to call the IdP's
             # management API. `provider` is read from values; the rest are
             # pulled from the K8s Secret named by
-            # .Values.idp.adminCredentialsSecret — either chart-materialized
-            # (templates/secrets/idp-admin-credentials.yaml) or owned by
-            # external-secrets-operator when idp.createSecret=false.
+            # .Values.idp.adminCredentialsSecret. The platform-operator's
+            # OIDCClient reconciler writes it.
             # ---------------------------------------------------------------
             - name: GIBSON_IDP_PROVIDER
               value: "zitadel"

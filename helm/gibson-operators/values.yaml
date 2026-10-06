@@ -341,14 +341,6 @@ global:
     - name: ghcr-credentials
   environment: ""
 
-# SPIRE workload identity — REQUIRED infrastructure for tenant-operator
-# and platform-operator deployments (deploy#201 / epic deploy#186). Both
-# operators dial the daemon over SPIFFE mTLS and authenticate to the
-# dashboard admin API by minting short-lived JWT-SVIDs. There is no
-# "disable SPIRE" path; the deployment templates always mount the
-# Workload API socket and a wait-for-spire-socket init container blocks
-# pod start until /run/spire/agent/spire-agent.sock is ready.
-spire: {}
 
 # Envoy gateway — tenant-operator reads these for hostAliases + TLS mounts.
 # Envoy is required infrastructure (deploy#200 / one-code-path epic). The
@@ -374,21 +366,6 @@ envoy:
     # never advanced to wave 10 and the leaf was never created. deploy#971.
     caSecretName: "gibson-selfsigned-ca"
 
-# Zitadel IdP — drives ZitadelOIDCExternalSecret + deployment env vars.
-#
-# Per epic one-code-path (deploy#186), slice deploy#196: Zitadel is
-# structurally required. The previous `enabled: false` opt-out has been
-# deleted — Zitadel is the identity provider for every signed-in user, so
-# rendering the chart with Zitadel "off" used to produce a tenant-operator
-# pod that silently no-ops the entire IAM provisioning saga (NoopClient
-# injection at the operator end). Whether Zitadel runs as an in-cluster
-# subchart (kind/dev) or as an external instance (prod) is now expressed
-# only by the chart-level `dashboard.zitadel.issuer`. The connect address is the
-# gibson.zitadel.url helper for every client (ADR-0092). There is no "Zitadel off" state.
-zitadel:
-  zitadel:
-    configmapConfig:
-      ExternalDomain: ""
 
 # OpenFGA.
 # One-code-path slice deploy#195: FGA is a hard dependency of the
@@ -530,8 +507,6 @@ dataPlane:
     # No token knob: the operator reads its own token from
     # gibson-tenant-operator-vault, which the openbao-auto-init sidecar mints
     # with the tenant-operator policy (templates/tenant-operator/deployment.yaml).
-  redis:
-    adminURL: ""
 
 # AWS (IRSA annotations, KMS key ARN, region).
 aws:
