@@ -241,8 +241,11 @@ jobs:
             # shellcheck source=/dev/null
             . ./hosted/scripts/lib/cilium.sh
             cilium_install kind --set "k8sServiceHost=gibson-control-plane"
-            cilium_verify
+            # The Cilium operator registers the CiliumNetworkPolicy CRD after
+            # it starts, so verify only once the node is Ready, in the order
+            # of hosted's recreate-kind.sh (exit test run 37448588132).
             kubectl wait --for=condition=Ready nodes --all --timeout=300s
+            cilium_verify
           else
             CLUSTER=gibson ./hosted/scripts/cluster-k3d.sh create
             CLUSTER=gibson ./hosted/scripts/cluster-k3d.sh verify
