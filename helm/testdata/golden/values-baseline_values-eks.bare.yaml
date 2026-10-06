@@ -1777,7 +1777,18 @@ spec:
         - protocol: TCP
           port: 7979
   egress:
-    - {}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/pdb.yaml
 apiVersion: policy/v1
@@ -21242,6 +21253,41 @@ spec:
     name: "setec-frontend-ca"
     kind: "Issuer"
     group: "cert-manager.io"
+---
+# Source: gibson/templates/networkpolicy-platform-operators.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-operator-external-dns-hosts
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: external-dns
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchPattern: "*.amazonaws.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
 ---
 # Source: gibson/templates/postgres/platform-postgres-cluster.yaml
 apiVersion: postgresql.cnpg.io/v1

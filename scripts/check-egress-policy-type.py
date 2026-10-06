@@ -49,9 +49,41 @@ def group(d: dict) -> str:
 
 
 def selects(selector: dict, labels: dict) -> bool:
-    if selector.get("matchExpressions"):
-        return True  # be strict: an expression selector may select the pod
-    return all(labels.get(k) == v for k, v in (selector.get("matchLabels") or {}).items())
+    """A Kubernetes label selector against the full labels of one pod."""
+    for k, v in (selector.get("matchLabels") or {}).items():
+        if labels.get(k) != v:
+            return False
+    for e in selector.get("matchExpressions") or []:
+        k, op, vals = e.get("key"), e.get("operator"), e.get("values") or []
+        if op == "In" and labels.get(k) not in vals:
+            return False
+        if op == "NotIn" and k in labels and labels[k] in vals:
+            return False
+        if op == "Exists" and k not in labels:
+            return False
+        if op == "DoesNotExist" and k in labels:
+            return False
+    return True
+
+
+WORKLOADS = ("Deployment", "StatefulSet", "DaemonSet", "Job", "Pod")
+
+
+def pods(docs: list) -> list[tuple[str, str, dict]]:
+    """(namespace, workload, pod labels) of each rendered pod template."""
+    out = []
+    for d in docs:
+        if d.get("kind") == "CronJob":
+            t = (((d.get("spec") or {}).get("jobTemplate") or {}).get("spec") or {}).get("template") or {}
+        elif d.get("kind") == "Pod":
+            t = d
+        elif d.get("kind") in WORKLOADS:
+            t = (d.get("spec") or {}).get("template") or {}
+        else:
+            continue
+        labels = (t.get("metadata") or {}).get("labels") or {}
+        out.append((d["metadata"].get("namespace"), f"{d['kind']}/{d['metadata']['name']}", labels))
+    return out
 
 
 def judge(docs: list) -> list[str]:
@@ -61,22 +93,27 @@ def judge(docs: list) -> list[str]:
         if (group(d), d.get("kind")) in OTHER_TYPES:
             bad.append(f"{d['kind']}/{d['metadata']['name']}: a second policy type for egress "
                        f"({group(d)}); the chart renders CiliumNetworkPolicy only")
+    rendered = pods(docs)
     for c in docs:
         if c.get("kind") != "CiliumNetworkPolicy":
             continue
         if not any(r.get("toFQDNs") for r in (c.get("spec") or {}).get("egress") or []):
             continue
         ns = c["metadata"].get("namespace")
-        labels = ((c["spec"].get("endpointSelector") or {}).get("matchLabels")) or {}
-        for n in docs:
-            if n.get("kind") != "NetworkPolicy" or n["metadata"].get("namespace") != ns:
-                continue
-            spec = n.get("spec") or {}
-            if not selects(spec.get("podSelector") or {}, labels):
-                continue
-            if any(not r.get("to") for r in spec.get("egress") or []):
-                bad.append(f"NetworkPolicy/{n['metadata']['name']} gives an allow-all egress rule to the pod "
-                           f"that CiliumNetworkPolicy/{c['metadata']['name']} limits by host name")
+        sel = (c["spec"].get("endpointSelector") or {})
+        limited = [(w, l) for n, w, l in rendered if n == ns and selects(sel, l)]
+        if not limited:
+            bad.append(f"CiliumNetworkPolicy/{c['metadata']['name']} selects no rendered pod")
+        for w, labels in limited:
+            for n in docs:
+                if n.get("kind") != "NetworkPolicy" or n["metadata"].get("namespace") != ns:
+                    continue
+                spec = n.get("spec") or {}
+                if not selects(spec.get("podSelector") or {}, labels):
+                    continue
+                if any(not r.get("to") for r in spec.get("egress") or []):
+                    bad.append(f"NetworkPolicy/{n['metadata']['name']} gives an allow-all egress rule to {w}, "
+                               f"which CiliumNetworkPolicy/{c['metadata']['name']} limits by host name")
     return sorted(set(bad))
 
 
@@ -107,6 +144,8 @@ def render_helper(values: dict) -> tuple[int, str]:
 
 
 def selftest() -> int:
+    pod = {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "a", "namespace": "g"},
+           "spec": {"template": {"metadata": {"labels": {"app": "a", "tier": "web"}}}}}
     np_all = {"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
               "metadata": {"name": "np", "namespace": "g"},
               "spec": {"podSelector": {"matchLabels": {"app": "a"}}, "egress": [{}]}}
@@ -117,11 +156,18 @@ def selftest() -> int:
                                  "egress": [{"to": [{"podSelector": {"matchLabels": {"app": "db"}}}]}]})
     se = {"apiVersion": "networking.istio.io/v1", "kind": "ServiceEntry", "metadata": {"name": "se"}}
     ccnp = {"apiVersion": "cilium.io/v2", "kind": "CiliumClusterwideNetworkPolicy", "metadata": {"name": "c"}}
-    if judge([cnp, np_peer]):
+    np_other = dict(np_all, metadata={"name": "jobs", "namespace": "g"},
+                    spec={"podSelector": {"matchExpressions": [{"key": "app", "operator": "In", "values": ["job"]}]},
+                          "egress": [{}]})
+    if judge([cnp, np_other, pod]):
+        print("SELFTEST FAIL: an allow-all policy for other pods (an In expression) must pass")
+        return 1
+    if judge([cnp, np_peer, pod]):
         print("SELFTEST FAIL: a host policy with a peer-only NetworkPolicy must pass")
         return 1
     for what, docs in (("an Istio ServiceEntry", [se]), ("a clusterwide Cilium policy", [ccnp]),
-                       ("an allow-all NetworkPolicy on a host-limited pod", [cnp, np_all])):
+                       ("an allow-all NetworkPolicy on a host-limited pod", [cnp, np_all, pod]),
+                       ("a host policy that selects no pod", [cnp])):
         if len(judge(docs)) != 1:
             print(f"SELFTEST FAIL: {what} must give one finding, got {judge(docs)}")
             return 1
