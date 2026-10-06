@@ -4063,8 +4063,6 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/version: 1.18.1
         helm.sh/chart: velero-12.1.0
-        gibson.zeroroot.ai/egress-internet: "true"
-        gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/net-role: system
       annotations:
         prometheus.io/path: /metrics
@@ -4168,8 +4166,6 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/version: 1.18.1
         helm.sh/chart: velero-12.1.0
-        gibson.zeroroot.ai/egress-internet: "true"
-        gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/net-role: system
       annotations:
         prometheus.io/path: /metrics
@@ -4332,6 +4328,85 @@ spec:
   config:
     region: "us-east-1"
     s3ForcePathStyle: "true"
+---
+# Source: gibson-velero/templates/network-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: gibson-velero-gibson-default-deny
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: gibson-velero
+    app.kubernetes.io/component: network-default-deny
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Each pod of the namespace gibson denies all traffic, except DNS (ADR-0165 rule 4)."
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: gibson
+  enableDefaultDeny:
+    ingress: true
+    egress: true
+  ingress:
+    - {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+---
+# Source: gibson-velero/templates/network-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-velero-velero
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: gibson-velero
+    app.kubernetes.io/component: network-velero
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Velero reaches the API server and the backup bucket only."
+  specs:
+    - endpointSelector:
+        matchLabels:
+          app.kubernetes.io/name: velero
+      egress:
+        - toEntities:
+            - kube-apiserver
+        - toFQDNs:
+            - matchName: "s3.us-east-1.amazonaws.com"
+            - matchName: "example-durable-bucket.s3.us-east-1.amazonaws.com"
+          toPorts:
+            - ports:
+                - port: "443"
+                  protocol: TCP
+    - endpointSelector:
+        matchExpressions:
+        - key: velero.io/repo-name
+          operator: Exists
+      egress:
+        - toEntities:
+            - kube-apiserver
+        - toFQDNs:
+            - matchName: "s3.us-east-1.amazonaws.com"
+            - matchName: "example-durable-bucket.s3.us-east-1.amazonaws.com"
+          toPorts:
+            - ports:
+                - port: "443"
+                  protocol: TCP
 ---
 # Source: gibson-velero/templates/schedule.yaml
 apiVersion: velero.io/v1

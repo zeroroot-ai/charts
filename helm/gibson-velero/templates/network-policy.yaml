@@ -1,0 +1,121 @@
+{{- /*
+The network policy of the Velero namespace (ADR-0165 rule 4, D76).
+
+Velero runs in its own namespace, so no policy of the umbrella selects its
+pods. This release brings its own:
+
+  1. default deny  One CiliumClusterwideNetworkPolicy selects each pod of the
+                   release namespace. It allows DNS to kube-dns and nothing
+                   else, in both directions. The same shape as the umbrella.
+  2. velero        The server, the node agent and the repository maintenance
+                   Jobs reach the API server and the backup bucket, and
+                   nothing else.
+
+The bucket allow names only the bucket host:
+  - bucket.endpoint empty (AWS S3): the host names s3.<region>.amazonaws.com
+    and <bucket>.s3.<region>.amazonaws.com, on 443.
+  - bucket.endpoint a host name: that name, on the port of the URL.
+  - bucket.endpoint an IP address (the kind MinIO): that address, on the
+    port of the URL.
+
+scripts/check-namespace-policy.py fails on a namespace that a render creates
+or fills with pods and that no policy covers.
+*/}}
+{{- $ns := .Release.Namespace }}
+{{- $rel := .Release.Name }}
+{{- $bucket := .Values.bucket }}
+{{- $endpoint := trim $bucket.endpoint }}
+{{- $host := "" }}
+{{- $port := "443" }}
+{{- if $endpoint }}
+{{- $u := urlParse $endpoint }}
+{{- if not (has $u.scheme (list "http" "https")) }}
+{{- fail (printf "bucket.endpoint (%s) must be an http or https URL: the network policy allows only the bucket host." $endpoint) }}
+{{- end }}
+{{- $parts := splitList ":" $u.host }}
+{{- $host = first $parts }}
+{{- if gt (len $parts) 1 }}
+{{- $port = last $parts }}
+{{- else if eq $u.scheme "http" }}
+{{- $port = "80" }}
+{{- end }}
+{{- end }}
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: {{ $rel }}-{{ $ns }}-default-deny
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: {{ $rel }}
+    app.kubernetes.io/component: network-default-deny
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Each pod of the namespace {{ $ns }} denies all traffic, except DNS (ADR-0165 rule 4)."
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: {{ $ns }}
+  enableDefaultDeny:
+    ingress: true
+    egress: true
+  ingress:
+    - {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $rel }}-velero
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: {{ $rel }}
+    app.kubernetes.io/component: network-velero
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Velero reaches the API server and the backup bucket only."
+  specs:
+    {{- range $sel := list (dict "matchLabels" (dict "app.kubernetes.io/name" "velero")) (dict "matchExpressions" (list (dict "key" "velero.io/repo-name" "operator" "Exists"))) }}
+    - endpointSelector:
+        {{- toYaml $sel | nindent 8 }}
+      egress:
+        - toEntities:
+            - kube-apiserver
+        {{- if not $endpoint }}
+        - toFQDNs:
+            - matchName: {{ printf "s3.%s.amazonaws.com" $bucket.region | quote }}
+            - matchName: {{ printf "%s.s3.%s.amazonaws.com" $bucket.name $bucket.region | quote }}
+          toPorts:
+            - ports:
+                - port: "443"
+                  protocol: TCP
+        {{- else if regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$" $host }}
+        - toCIDR:
+            - {{ printf "%s/32" $host }}
+          toPorts:
+            - ports:
+                - port: {{ $port | quote }}
+                  protocol: TCP
+        {{- else }}
+        - toFQDNs:
+            - matchName: {{ $host | quote }}
+          toPorts:
+            - ports:
+                - port: {{ $port | quote }}
+                  protocol: TCP
+        {{- end }}
+    {{- end }}
