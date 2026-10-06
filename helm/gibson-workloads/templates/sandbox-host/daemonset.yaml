@@ -43,6 +43,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: sandbox-eviction-handler
+        {{- include "gibson.netLabels" (dict "role" "platform" "kubeApi" true "namespaces" true) | nindent 8 }}
     spec:
       serviceAccountName: {{ include "gibson.fullname" . }}-sandbox-eviction-handler
       # Pin to sandbox-host nodes provisioned by the production-eks-deploy

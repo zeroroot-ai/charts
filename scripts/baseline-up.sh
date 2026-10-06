@@ -145,16 +145,19 @@ log "target cluster"
 # sed reads its input to the end, so there is no broken pipe.
 kubectl cluster-info 2>/dev/null | sed -n '1p'
 
-# The cluster must run Cilium (ADR-0087, charts#395). The chart renders
-# CiliumNetworkPolicy for egress by host name, and a cluster without the CRD
-# refuses the install halfway, or, with a plugin that enforces nothing, runs
-# with no egress control at all. So stop here, before anything is installed.
+# The cluster must run Cilium (ADR-0087, charts#395). The network policy of
+# the chart is Cilium-native (ADR-0165 rule 4, D76): a clusterwide default
+# deny and label policies. A cluster without the CRDs refuses the install
+# halfway, or, with a plugin that enforces nothing, runs with no network
+# control at all. So stop here, before anything is installed.
 log "preflight: the network plugin is Cilium"
-if ! kubectl get crd ciliumnetworkpolicies.cilium.io >/dev/null 2>&1; then
-  echo "FATAL: the CiliumNetworkPolicy CRD is absent. Gibson needs Cilium as the network plugin of the cluster (ADR-0087): the chart limits the egress of each platform pod by host name, and only Cilium enforces that. Install Cilium, then run this again." >&2
-  exit 2
-fi
-echo "  ✓ the CiliumNetworkPolicy CRD exists"
+for crd in ciliumnetworkpolicies.cilium.io ciliumclusterwidenetworkpolicies.cilium.io; do
+  if ! kubectl get crd "$crd" >/dev/null 2>&1; then
+    echo "FATAL: the CRD $crd is absent. Gibson needs Cilium as the network plugin of the cluster (ADR-0087): the network policy of the chart is Cilium-native, and only Cilium enforces it. Install Cilium, then run this again." >&2
+    exit 2
+  fi
+done
+echo "  ✓ the Cilium policy CRDs exist"
 
 
 # ---------------------------------------------------------------------------

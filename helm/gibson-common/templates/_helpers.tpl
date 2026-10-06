@@ -1179,77 +1179,6 @@ declare the `spire-agent-socket` volume with the matching mount path.
 {{- end -}}
 {{- end -}}
 
-gibson.netpolEgressAPIServer — one egress rule per CIDR in
-global.networkPolicy.apiServerCIDRs, ports 443 and 6443, and nothing at all
-when the list is empty.
-
-A pod whose policy narrows egress can still reach the kube-apiserver on
-kind, whose policy engine leaves node-bound traffic alone; on EKS the AWS VPC
-CNI network policy agent enforces egress toward the control-plane ENIs like
-any other destination, and the same policy drops it. OpenBao's Kubernetes
-auth does a TokenReview on every login: with that dropped, every login took
-the 30 s API timeout and answered "permission denied", the seeder could not
-renew its own token, and every ExternalSecret went NotReady (staging bringup
-2026-09-10, the first from fresh). An estate names the CIDRs its API server
-answers from; the shipped default is empty. On EKS that is two entries: the
-VPC CIDR for the control-plane ENIs, and the `kubernetes` Service ClusterIP,
-because the VPC CNI agent judges egress against the destination before
-kube-proxy rewrites it (measured 2026-09-10: the ENIs answered, the ClusterIP
-timed out).
-*/}}
-{{- define "gibson.netpolEgressAPIServer" -}}
-{{- $cidrs := list -}}
-{{- with .Values.global -}}{{- with .networkPolicy -}}{{- $cidrs = .apiServerCIDRs | default list -}}{{- end -}}{{- end -}}
-{{- range $cidr := $cidrs }}
-- to:
-    - ipBlock:
-        cidr: {{ $cidr | quote }}
-  ports:
-    - protocol: TCP
-      port: 443
-    - protocol: TCP
-      port: 6443
-{{- end }}
-{{- end -}}
-
-{{/* ---------------------------------------------------------------------
-     gibson.netpolEgressDNS — the DNS egress rule every narrowed policy
-     needs (deploy#1462).
-
-     Under the namespace default-deny (deploy#1365) a pod selected by a
-     policy with policyTypes: [Egress] can reach ONLY what that policy's
-     egress rules allow. Replacing `- {}` with named rules therefore
-     severs name resolution unless DNS is restored explicitly, and a pod
-     that cannot resolve is an outage no render catches.
-
-     kube-dns rather than an ipBlock: the Service ClusterIP is not what
-     NetworkPolicy matches — it matches the BACKING POD, so the selector
-     names the CoreDNS pods. `k8s-app: kube-dns` is CoreDNS's label on
-     both EKS and kind (the Deployment is named coredns; the label is
-     retained for compatibility), and `kubernetes.io/metadata.name` is
-     applied to every namespace by the apiserver since 1.22, so no
-     cluster-specific labelling is assumed.
-
-     UDP *and* TCP :53 — a response larger than the UDP payload limit
-     sets TC and the resolver retries over TCP. Allowing only UDP works
-     until a record grows, which is the worst possible failure mode.
---------------------------------------------------------------------- */}}
-
-{{- define "gibson.netpolEgressDNS" -}}
-- to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: kube-system
-      podSelector:
-        matchLabels:
-          k8s-app: kube-dns
-  ports:
-    - protocol: UDP
-      port: 53
-    - protocol: TCP
-      port: 53
-{{- end -}}
-
 {{/*
 gibson.toolImage — the ONE alpine-k8s tool image (kubectl + sh) that every
 first-party Job, init container and gate runs. It used to be a literal in
@@ -1352,76 +1281,61 @@ and charts#374 (the signup keys) both call it.
 {{- end -}}
 
 {{/*
-gibson.ciliumEgressPolicy: one CiliumNetworkPolicy that permits a pod to
-reach a list of hosts by name (ADR-0165 rule 4, ADR-0087, charts#395).
+gibson.netLabels: the network labels of one pod (ADR-0165 rule 4, D76).
 
-A Kubernetes NetworkPolicy matches addresses and labels and cannot name a
-host. Cilium can, and every cluster runs it (hosted#436). So this is the one
-policy type the chart renders for egress by host name. scripts/
-check-egress-policy-type.py fails on a second type, and on a pod that also
-gets an allow-all egress rule from a NetworkPolicy, because Cilium unions
-allow rules and the allow-all one would win.
+The chart renders one set of Cilium policies that select pods by these labels.
+A new pod gets labels, not a new policy. Input is a dict:
 
-The policy also permits DNS to kube-dns with a DNS rule: Cilium learns the
-address of a host name only from a lookup it sees.
+  role          platform | datastore | system. Required.
+                platform:  the pod talks to each other platform pod.
+                datastore: the pod is a data store. Only its clients reach it.
+                system:    a cluster operator. It is in no shared group.
+  datastore     postgres | redis | openbao | neo4j. Required with role datastore.
+  clients       the data stores that the pod reaches, from the same four names.
+  kubeApi       true when the pod calls the Kubernetes API.
+  internet      true when the pod reaches hosts outside the cluster.
+  namespaces    true when the pod reaches pods in other namespaces.
+  edge          true for the public edge. Each source reaches its listener.
+  controlPlane  true for a server that the API server or a node dials
+                (an admission webhook, the SPIRE server agent port).
 
-  {{ include "gibson.ciliumEgressPolicy" (dict
-       "ctx" $
-       "name" "gibson-dashboard-egress"
-       "selector" (dict "app.kubernetes.io/component" "dashboard")
-       "hosts" (list (dict "host" "api.stripe.com" "ports" (list 443))
-                     (dict "pattern" "*.amazonaws.com" "ports" (list 443)))) }}
+  {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "redis") "kubeApi" true) | nindent 8 }}
 
-Each host entry names `host` (an exact name) or `pattern` (a Cilium
-matchPattern), and a list of TCP `ports`. The render fails on an empty host
-list, on an entry with neither key, and on an entry with no port.
+scripts/check-secure-pod.py fails on a pod with no role, and on a pod that
+reaches a data store or the internet with no label for it.
 */}}
-{{- define "gibson.ciliumEgressPolicy" -}}
-{{- $hosts := .hosts | default list -}}
-{{- if not $hosts -}}
-{{- fail (printf "gibson.ciliumEgressPolicy %s: the host list is empty; a pod with no host to reach needs no host policy" .name) -}}
+{{- define "gibson.netLabels" -}}
+{{- $roles := list "platform" "datastore" "system" -}}
+{{- $stores := list "postgres" "redis" "openbao" "neo4j" -}}
+{{- if not (has .role $roles) -}}
+{{- fail (printf "gibson.netLabels: role %v is not one of %s" .role (join ", " $roles)) -}}
 {{- end -}}
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: {{ .name }}
-  namespace: {{ .ctx.Release.Namespace }}
-  labels:
-    {{- include "gibson.labels" .ctx | nindent 4 }}
-spec:
-  endpointSelector:
-    matchLabels:
-      {{- toYaml .selector | nindent 6 }}
-  egress:
-    - toEndpoints:
-        - matchLabels:
-            io.kubernetes.pod.namespace: kube-system
-            k8s-app: kube-dns
-      toPorts:
-        - ports:
-            - port: "53"
-              protocol: ANY
-          rules:
-            dns:
-              - matchPattern: "*"
-    {{- range $h := $hosts }}
-    {{- if not (or $h.host $h.pattern) }}
-    {{- fail (printf "gibson.ciliumEgressPolicy %s: a host entry names neither host nor pattern" $.name) }}
-    {{- end }}
-    {{- if not $h.ports }}
-    {{- fail (printf "gibson.ciliumEgressPolicy %s: the host %s names no port" $.name ($h.host | default $h.pattern)) }}
-    {{- end }}
-    - toFQDNs:
-        {{- if $h.host }}
-        - matchName: {{ $h.host | quote }}
-        {{- else }}
-        - matchPattern: {{ $h.pattern | quote }}
-        {{- end }}
-      toPorts:
-        - ports:
-            {{- range $port := $h.ports }}
-            - port: {{ $port | toString | quote }}
-              protocol: TCP
-            {{- end }}
-    {{- end }}
+gibson.zeroroot.ai/net-role: {{ .role }}
+{{- if eq .role "datastore" }}
+{{- if not (has .datastore $stores) }}
+{{- fail (printf "gibson.netLabels: datastore %v is not one of %s" .datastore (join ", " $stores)) }}
+{{- end }}
+gibson.zeroroot.ai/datastore: {{ .datastore }}
+{{- end }}
+{{- range $s := .clients | default list }}
+{{- if not (has $s $stores) }}
+{{- fail (printf "gibson.netLabels: client of %v: not one of %s" $s (join ", " $stores)) }}
+{{- end }}
+gibson.zeroroot.ai/client-{{ $s }}: "true"
+{{- end }}
+{{- if .kubeApi }}
+gibson.zeroroot.ai/kube-api: "true"
+{{- end }}
+{{- if .internet }}
+gibson.zeroroot.ai/egress-internet: "true"
+{{- end }}
+{{- if .namespaces }}
+gibson.zeroroot.ai/egress-namespaces: "true"
+{{- end }}
+{{- if .edge }}
+gibson.zeroroot.ai/ingress-edge: "true"
+{{- end }}
+{{- if .controlPlane }}
+gibson.zeroroot.ai/ingress-control-plane: "true"
+{{- end }}
 {{- end -}}

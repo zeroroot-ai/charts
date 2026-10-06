@@ -1,0 +1,414 @@
+{{/*
+The network policy of the release (ADR-0165 rule 4, D76). Cilium enforces it on
+each cluster (ADR-0087, hosted#436). The policies select pods by label, and
+gibson.netLabels (gibson-common) writes the labels. A new pod gets labels, not
+a new policy, and no policy lists each internal peer.
+
+  1. default deny     One CiliumClusterwideNetworkPolicy selects each pod of the
+                      release namespace. It allows DNS to kube-dns and nothing
+                      else, in both directions.
+  2. platform         Platform pods reach each other.
+  3. data stores      Postgres, Redis, OpenBao and Neo4j each admit only the
+                      pods with their client label.
+  4. kube-api         Pods with the kube-api label reach the API server.
+  5. internet         Pods with the egress-internet label reach hosts outside
+                      the cluster.
+  6. namespaces       Pods with the egress-namespaces label reach pods in other
+                      namespaces. The policies of those namespaces still apply.
+  7. edge             The public edge accepts each source on its listener.
+  8. control plane    Admission webhooks and the SPIRE server agent port accept
+                      the API server and the nodes.
+  9. metrics          The cluster scrapers reach the metrics ports.
+
+Cilium allows a flow only when the egress side and the ingress side both allow
+it. So a pod with no client label cannot reach a data store, even with a
+broad egress label. scripts/check-secure-pod.py checks this on each render.
+
+Each policy applies in wave -20, before each hook Job (check-netpol-before-hooks.py).
+*/}}
+{{- $ns := .Release.Namespace }}
+{{- $rel := .Release.Name }}
+{{- $role := "gibson.zeroroot.ai/net-role" }}
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: {{ $rel }}-{{ $ns }}-default-deny
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-default-deny
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Each pod of the namespace {{ $ns }} denies all traffic, except DNS (ADR-0165 rule 4)."
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: {{ $ns }}
+  enableDefaultDeny:
+    ingress: true
+    egress: true
+  ingress:
+    - {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $rel }}-platform
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Platform pods reach each other."
+  endpointSelector:
+    matchLabels:
+      {{ $role }}: platform
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            {{ $role }}: platform
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            {{ $role }}: platform
+{{- /* name, ports, extra ingress rules for the store pods, extra egress rules for the store pods */}}
+{{- $esoNs := ((((index .Values "gibson-workloads" | default dict).externalSecrets | default dict).clusterSecretStore | default dict).serviceAccount | default dict).namespace | default $ns }}
+{{- $stores := list
+  (dict "name" "postgres" "ports" (list 5432 8000))
+  (dict "name" "redis" "ports" (list 6379))
+  (dict "name" "openbao" "ports" (list 8200))
+  (dict "name" "neo4j" "ports" (list 7687 7474))
+}}
+{{- range $s := $stores }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $rel }}-datastore-{{ $s.name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: network-datastore
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+specs:
+  - description: "The {{ $s.name }} data store admits only its clients."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/datastore: {{ $s.name }}
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/client-{{ $s.name }}: "true"
+        toPorts:
+          - ports:
+              {{- range $p := $s.ports }}
+              - port: {{ $p | quote }}
+                protocol: TCP
+              {{- end }}
+      {{- if eq $s.name "postgres" }}
+      {{- /* On a guest cluster the CloudNativePG operator of the cluster runs
+             in its own namespace and reads the instance status on :8000
+             (charts#369). On the other profiles the operator of this chart
+             has the client label. */}}
+      - fromEndpoints:
+          - matchLabels:
+              app.kubernetes.io/name: cloudnative-pg
+            matchExpressions:
+              - key: k8s:io.kubernetes.pod.namespace
+                operator: Exists
+        toPorts:
+          - ports:
+              - port: "8000"
+                protocol: TCP
+      {{- end }}
+      {{- if eq $s.name "openbao" }}
+      - fromEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/datastore: openbao
+        toPorts:
+          - ports:
+              - port: "8201"
+                protocol: TCP
+      {{- if ne $esoNs $ns }}
+      {{- /* On a guest cluster the External Secrets of the cluster runs in
+             its own namespace and logs in to OpenBao (charts#369). */}}
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: {{ $esoNs }}
+              app.kubernetes.io/name: external-secrets
+        toPorts:
+          - ports:
+              - port: "8200"
+                protocol: TCP
+      {{- end }}
+    {{- /* OpenBao fetches the JWKS of the SPIRE OIDC provider when it writes
+           the JWT auth config, and it talks to its own replicas. */}}
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              app.kubernetes.io/name: spiffe-oidc-discovery-provider
+        toPorts:
+          - ports:
+              - port: "8443"
+                protocol: TCP
+              - port: "443"
+                protocol: TCP
+      - toEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/datastore: openbao
+        toPorts:
+          - ports:
+              - port: "8201"
+                protocol: TCP
+  - description: "The SPIRE OIDC provider serves its public keys to OpenBao."
+    endpointSelector:
+      matchLabels:
+        app.kubernetes.io/name: spiffe-oidc-discovery-provider
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/datastore: openbao
+        toPorts:
+          - ports:
+              - port: "8443"
+                protocol: TCP
+              - port: "443"
+                protocol: TCP
+      {{- end }}
+  - description: "The clients of the {{ $s.name }} data store reach it."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/client-{{ $s.name }}: "true"
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/datastore: {{ $s.name }}
+        toPorts:
+          - ports:
+              {{- range $p := $s.ports }}
+              - port: {{ $p | quote }}
+                protocol: TCP
+              {{- end }}
+{{- end }}
+---
+{{- /* The API server. Cilium knows the addresses of the kube-apiserver entity
+       on each cluster. global.networkPolicy.apiServerCIDRs adds the addresses
+       that an estate names (for example the control-plane ENIs of EKS). */}}
+{{- $cidrs := ((.Values.global).networkPolicy | default dict).apiServerCIDRs | default list }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $rel }}-kube-api
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-kube-api
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Pods with the kube-api label reach the Kubernetes API server."
+  endpointSelector:
+    matchLabels:
+      gibson.zeroroot.ai/kube-api: "true"
+  egress:
+    - toEntities:
+        - kube-apiserver
+    {{- if $cidrs }}
+    - toCIDR:
+        {{- toYaml $cidrs | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    {{- end }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $rel }}-egress-internet
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-egress-internet
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Pods with the egress-internet label reach hosts outside the cluster."
+  endpointSelector:
+    matchLabels:
+      gibson.zeroroot.ai/egress-internet: "true"
+  egress:
+    - toEntities:
+        - world
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $rel }}-egress-namespaces
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-egress-namespaces
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Pods with the egress-namespaces label reach pods in other namespaces, for example setec and the tenant plugins."
+  endpointSelector:
+    matchLabels:
+      gibson.zeroroot.ai/egress-namespaces: "true"
+  egress:
+    - toEndpoints:
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: NotIn
+              values:
+                - {{ $ns }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $rel }}-edge
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-edge
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+specs:
+  - description: "The public edge accepts each source on its listener."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/ingress-edge: "true"
+    ingress:
+      - fromEntities:
+          - all
+        toPorts:
+          - ports:
+              # The listener of the edge (gibson-workloads envoy/deployment.yaml).
+              - port: "10000"
+                protocol: TCP
+  {{- /* A pod that calls the public host name of the platform reaches the
+         edge in the cluster, for example a plugin that enrols. */}}
+  - description: "Each pod of the release reaches the edge listener."
+    endpointSelector:
+      matchExpressions:
+        - key: {{ $role }}
+          operator: Exists
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/ingress-edge: "true"
+        toPorts:
+          - ports:
+              - port: "10000"
+                protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $rel }}-control-plane
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-control-plane
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+{{- /* The API server dials an admission webhook, and a SPIRE agent on the
+       host network dials the SPIRE server. On EKS the API server answers
+       from control-plane ENIs, which Cilium sees as the world entity. The
+       webhook gate, a platform pod, probes each webhook before it activates
+       (templates/webhook-gate.yaml). */}}
+{{- $cpPorts := list 8081 9443 10250 }}
+specs:
+  - description: "Admission webhooks and the SPIRE server accept the API server, the nodes and the platform pods."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/ingress-control-plane: "true"
+    ingress:
+      - fromEntities:
+          - kube-apiserver
+          - host
+          - remote-node
+          - world
+        toPorts:
+          - ports:
+              {{- range $p := $cpPorts }}
+              - port: {{ $p | quote }}
+                protocol: TCP
+              {{- end }}
+      - fromEndpoints:
+          - matchLabels:
+              {{ $role }}: platform
+        toPorts:
+          - ports:
+              {{- range $p := $cpPorts }}
+              - port: {{ $p | quote }}
+                protocol: TCP
+              {{- end }}
+  - description: "Platform pods reach the webhook ports."
+    endpointSelector:
+      matchLabels:
+        {{ $role }}: platform
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/ingress-control-plane: "true"
+        toPorts:
+          - ports:
+              {{- range $p := $cpPorts }}
+              - port: {{ $p | quote }}
+                protocol: TCP
+              {{- end }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $rel }}-metrics
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-metrics
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "The cluster scrapers reach the metrics ports."
+  endpointSelector:
+    matchExpressions:
+      - key: {{ $role }}
+        operator: Exists
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: prometheus
+          matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
+        - matchLabels:
+            app: grafana-agent
+          matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
+      toPorts:
+        - ports:
+            {{- range $p := list 2112 3000 7979 8008 8080 9090 9187 9402 9901 9002 }}
+            - port: {{ $p | quote }}
+              protocol: TCP
+            {{- end }}

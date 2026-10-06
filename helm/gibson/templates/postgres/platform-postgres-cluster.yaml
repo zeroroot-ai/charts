@@ -93,6 +93,10 @@ spec:
   inheritedMetadata:
     labels:
       velero.io/exclude-from-backup: "true"
+      # The network labels of each instance and each CNPG Job (ADR-0165 rule
+      # 4, D76): the Postgres data store, a client of its own replicas, the
+      # API server for the instance manager, and the archive bucket.
+      {{- include "gibson.netLabels" (dict "role" "datastore" "datastore" "postgres" "clients" (list "postgres") "kubeApi" true "internet" true) | nindent 6 }}
 {{- $instances := int $pg.instances }}
 {{- /* The redundancy posture (deploy#1729). Aurora leaves the
        platform only because this Cluster carries the same durability, so

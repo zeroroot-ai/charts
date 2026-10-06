@@ -106,9 +106,8 @@ spec:
   template:
     metadata:
       labels:
-        # networkpolicy-bringup-jobs.yaml selects this label; without it the
-        # namespace default-deny severs the pod from CoreDNS and OpenBao.
         app.kubernetes.io/component: iam-admin-pat-escrow
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "openbao") "kubeApi" true) | nindent 8 }}
     spec:
       restartPolicy: OnFailure
       serviceAccountName: iam-admin-pat-escrow

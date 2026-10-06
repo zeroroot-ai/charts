@@ -57,6 +57,11 @@ schedule:
 # departure from its defaults.
 # ---------------------------------------------------------------------------
 velero:
+  # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels in the umbrella).
+  podLabels:
+    gibson.zeroroot.ai/net-role: system
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/egress-internet: "true"
   image:
     repository: ghcr.io/zeroroot-ai/mirror/velero
     tag: "v1.18.1@sha256:11459094b1b21ec7c817b08f8067d9e89380835547915cac9c4132ff05b55b90"
@@ -144,6 +149,11 @@ velero:
       cpu: "1"
       memory: 512Mi
   nodeAgent:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels in the umbrella).
+    podLabels:
+      gibson.zeroroot.ai/net-role: system
+      gibson.zeroroot.ai/kube-api: "true"
+      gibson.zeroroot.ai/egress-internet: "true"
     resources:
       requests:
         cpu: 50m

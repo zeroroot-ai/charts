@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""check-netpol-before-hooks.py: a hook Job's NetworkPolicy applies before the Job.
+"""check-netpol-before-hooks.py: a hook Job's network policy applies before the Job.
 
 WHY THIS EXISTS
 The namespace has a default-deny policy. A bringup Job reaches its peers only
-through an allow policy that selects its pod labels. Argo runs these Jobs as
+through an allow policy that selects its pod labels. The chart renders Cilium
+policies that select pods by label (D76, helm/gibson/templates/network-policies.yaml). Argo runs these Jobs as
 Sync hooks in early waves; a resource with no sync-wave is wave 0. On an
 upgrade that changes a Job's labels, the Job then runs under the OLD allow
 policy. On staging (2026-09-27) the postgres-setup Jobs waited forever for
@@ -11,8 +12,9 @@ Postgres this way. kind enforces no NetworkPolicy, so it could not show it.
 
 WHAT IT CHECKS, on every rendered golden (helm/testdata/golden/*.yaml)
   For every Job with an argocd.argoproj.io/hook annotation, every
-  NetworkPolicy in the same namespace whose non-empty podSelector selects the
-  Job's pod labels has a sync-wave lower than the Job's sync-wave.
+  NetworkPolicy or CiliumNetworkPolicy in the same namespace with a rule whose
+  non-empty selector selects the Job's pod labels has a sync-wave lower than
+  the Job's sync-wave.
 
 USAGE
   scripts/check-netpol-before-hooks.py             check the goldens
@@ -40,11 +42,15 @@ def wave(obj: dict) -> int:
 def selects(selector: dict, labels: dict) -> bool:
     if not selector:
         return False  # the namespace-wide default deny; ordering does not matter for it
+
+    def norm(k: str) -> str:
+        return k.split(":", 1)[1] if ":" in k else k  # Cilium writes a source prefix (k8s:)
+
     for k, v in (selector.get("matchLabels") or {}).items():
-        if labels.get(k) != v:
+        if labels.get(norm(k)) != v:
             return False
     for e in selector.get("matchExpressions") or []:
-        k, op, vals = e.get("key"), e.get("operator"), e.get("values") or []
+        k, op, vals = norm(e.get("key")), e.get("operator"), e.get("values") or []
         if op == "In" and labels.get(k) not in vals:
             return False
         if op == "NotIn" and labels.get(k) in vals:
@@ -56,12 +62,20 @@ def selects(selector: dict, labels: dict) -> bool:
     return True
 
 
+def selectors(p: dict) -> list[dict]:
+    """The pod selector of each rule of a policy."""
+    if p.get("kind") == "NetworkPolicy":
+        return [(p.get("spec") or {}).get("podSelector") or {}]
+    rules = ([p["spec"]] if p.get("spec") else []) + list(p.get("specs") or [])
+    return [r.get("endpointSelector") or {} for r in rules]
+
+
 def check(paths: list[str]) -> list[str]:
     problems: list[str] = []
     for path in paths:
         with open(path, encoding="utf-8") as f:
             docs = [d for d in yaml.safe_load_all(f) if isinstance(d, dict)]
-        pols = [d for d in docs if d.get("kind") == "NetworkPolicy"]
+        pols = [d for d in docs if d.get("kind") in ("NetworkPolicy", "CiliumNetworkPolicy")]
         for job in (d for d in docs if d.get("kind") == "Job"):
             ann = (job.get("metadata") or {}).get("annotations") or {}
             if "argocd.argoproj.io/hook" not in ann:
@@ -72,9 +86,9 @@ def check(paths: list[str]) -> list[str]:
             for p in pols:
                 if (p.get("metadata") or {}).get("namespace") != ns:
                     continue
-                if selects((p.get("spec") or {}).get("podSelector") or {}, labels) and wave(p) >= jw:
+                if any(selects(sel, labels) for sel in selectors(p)) and wave(p) >= jw:
                     problems.append(
-                        f"{os.path.basename(path)}: NetworkPolicy/{p['metadata']['name']} (wave {wave(p)}) "
+                        f"{os.path.basename(path)}: {p['kind']}/{p['metadata']['name']} (wave {wave(p)}) "
                         f"selects hook Job/{job['metadata']['name']} (wave {jw}); the policy must apply first")
     return sorted(set(problems))
 
@@ -94,8 +108,13 @@ def selftest() -> int:
         return _doc("NetworkPolicy", "gibson-bringup-jobs", w, {"spec": {"podSelector": {"matchExpressions": [
             {"key": "app.kubernetes.io/component", "operator": "In", "values": [comp]}]}}})
     deny = _doc("NetworkPolicy", "default-deny", None, {"spec": {"podSelector": {}}})
+    def cilium(w):
+        return _doc("CiliumNetworkPolicy", "gibson-datastore-postgres", w, {"specs": [
+            {"endpointSelector": {"matchLabels": {"gibson.zeroroot.ai/datastore": "postgres"}}},
+            {"endpointSelector": {"matchLabels": {"k8s:app.kubernetes.io/component": "postgres-setup"}}}]})
     cases = {"early_policy": ([job, pol(-20), deny], True), "policy_without_wave": ([job, pol(None)], False),
-             "policy_same_wave": ([job, pol(-6)], False), "unrelated_policy": ([job, pol(None, "other")], True)}
+             "policy_same_wave": ([job, pol(-6)], False), "unrelated_policy": ([job, pol(None, "other")], True),
+             "early_cilium_policy": ([job, cilium(-20)], True), "late_cilium_policy": ([job, cilium(None)], False)}
     for name, (docs, want_ok) in cases.items():
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, name + ".yaml")
@@ -114,11 +133,11 @@ def main(argv: list[str]) -> int:
     paths = sorted(glob.glob("helm/testdata/golden/*.yaml"))
     problems = check(paths)
     if problems:
-        print("❌ a hook Job would run before the NetworkPolicy that lets it reach its peers")
+        print("❌ a hook Job would run before the network policy that lets it reach its peers")
         for p in problems:
             print("   " + p)
         return 1
-    print(f"✅ every hook Job's NetworkPolicy applies in an earlier wave ({len(paths)} renders)")
+    print(f"✅ every hook Job's network policy applies in an earlier wave ({len(paths)} renders)")
     return 0
 
 

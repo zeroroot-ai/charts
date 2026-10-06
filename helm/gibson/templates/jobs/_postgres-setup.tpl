@@ -43,11 +43,9 @@ Input: (dict "root" $ "entries" (list (dict "role" "db" "opts" "secret")) "extra
 {{- $img := $root.Values.postgresSetup.image -}}
 metadata:
   labels:
-    # networkpolicy-bringup-jobs.yaml selects this label for egress.
     app.kubernetes.io/component: postgres-setup
-    # The opt-in the platform-postgres instances policy admits on :5432
-    # (gibson-workloads namespace-isolation/subchart-workloads.yaml).
-    gibson.zeroroot.ai/platform-postgres-client: "true"
+    # The Postgres data store admits its clients on :5432 (templates/network-policies.yaml).
+    {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres")) | nindent 4 }}
 spec:
   restartPolicy: OnFailure
   serviceAccountName: postgres-setup

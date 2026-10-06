@@ -21,11 +21,11 @@ Deploy posture (post-cutover):
                      ▼
                    handler
 
-The daemon Service is ClusterIP-only across every overlay; ingress is
-gated by templates/gibson/networkpolicy.yaml so only Envoy and Prometheus
-can reach the daemon ports. Liveness/readiness probes use HTTP /healthz on
-the dedicated `health` (8080) container port — kubelet reaches that from
-the node IP and is not subject to the daemon NetworkPolicy.
+The daemon Service is ClusterIP-only across every overlay. The network
+policy of the release (umbrella templates/network-policies.yaml) lets only
+the platform pods and the metrics scrapers reach the daemon ports.
+Liveness/readiness probes use HTTP /healthz on the dedicated `health` (8080)
+container port. The kubelet reaches that from the node, which Cilium allows.
 
 When gibson.auth.spiffe is missing or empty the chart fails to render
 (guard added by spec in-cluster-mtls-restoration Phase 6); see
@@ -94,6 +94,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: daemon
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis" "openbao" "neo4j") "kubeApi" true "internet" true "namespaces" true) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a

@@ -505,6 +505,10 @@ neo4j:
   disableLookups: true
   neo4j:
     name: gibson-neo4j
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    labels:
+      gibson.zeroroot.ai/net-role: datastore
+      gibson.zeroroot.ai/datastore: neo4j
     minimumClusterSize: 1
     acceptLicenseAgreement: "yes"
     edition: community
@@ -669,6 +673,11 @@ neo4j:
     apoc.import.file.enabled: "false"
 
 openfga:
+  # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  commonLabels:
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/client-postgres: "true"
+    gibson.zeroroot.ai/kube-api: "true"
   # deploy#1170 — the openfga subchart defaults to `openfga/openfga` on Docker
   # Hub with an empty tag (so the tag falls out of the subchart's appVersion
   # and moves silently on every dependency bump). Pin it to the ghcr mirror
@@ -774,6 +783,18 @@ openfga:
       enabled: false
 
 zitadel:
+  # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  podAdditionalLabels:
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/client-postgres: "true"
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/egress-internet: "true"
+  cleanupJob:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podAdditionalLabels:
+      gibson.zeroroot.ai/net-role: platform
+      gibson.zeroroot.ai/client-postgres: "true"
+      gibson.zeroroot.ai/kube-api: "true"
   # Identity provider — sole canonical IdP for the gibson stack.
   # Postgres: shared platform-postgres-rw, role/db zitadel.
 
@@ -1094,12 +1115,22 @@ zitadel:
   # unaffected — it honours the argocd.* annotations below, and sync-waves order
   # hooks and ordinary resources on a single axis.
   initJob:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podAdditionalLabels:
+      gibson.zeroroot.ai/net-role: platform
+      gibson.zeroroot.ai/client-postgres: "true"
+      gibson.zeroroot.ai/kube-api: "true"
     annotations:
       helm.sh/hook: post-install,post-upgrade
       argocd.argoproj.io/hook: Sync
       argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
       argocd.argoproj.io/sync-wave: "-4"
   setupJob:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podAdditionalLabels:
+      gibson.zeroroot.ai/net-role: platform
+      gibson.zeroroot.ai/client-postgres: "true"
+      gibson.zeroroot.ai/kube-api: "true"
     # The upstream default is 300s, and a COLD bringup does not fit in it.
     # MEASURED (kind, deploy#1737, 2026-09-02): 8m27s. The pod SUCCEEDED —
     # "setup completed", iam-admin, iam-admin-pat and login-client all
@@ -1123,6 +1154,9 @@ zitadel:
       argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
       argocd.argoproj.io/sync-wave: "-3"
   login:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podAdditionalLabels:
+      gibson.zeroroot.ai/net-role: platform
     image:
       # deploy#888: self-hosted Login V2 image — a THIN fork of the upstream
       # Zitadel login app (zeroroot-ai/zitadel-login) that adds the logo
@@ -1196,6 +1230,10 @@ zitadel:
 # `gibson-workloads.redis.*`, which is a different tree.
 
 spire:
+  spiffe-csi-driver:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: system
   global:
     spire:
       # No trustDomain here: Helm gives the SPIRE chart the top-level
@@ -1233,6 +1271,13 @@ spire:
     deleteHooks:
       enabled: false
   spire-server:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: platform
+      gibson.zeroroot.ai/client-postgres: "true"
+      gibson.zeroroot.ai/kube-api: "true"
+      gibson.zeroroot.ai/egress-internet: "true"
+      gibson.zeroroot.ai/ingress-control-plane: "true"
     # Velero fs-backup skips these: sockets and scratch. spire-data (the
     # datastore volume) stays in the backup. scripts/check-velero-volume-excludes.sh.
     podAnnotations:
@@ -1302,16 +1347,27 @@ spire:
 # and are never refused by a webhook whose pod is not up yet.
 # =============================================================================
   spire-agent:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: system
     # The agent's SVID cache: it re-attests on start, a restored copy is
     # stale. Velero fs-backup skips it.
     podAnnotations:
       backup.velero.io/backup-volumes-excludes: "spire-agent-admin-socket-dir,spire-agent-persistence"
   spiffe-oidc-discovery-provider:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: platform
     # Sockets and a cert scratch dir. Velero fs-backup skips them.
     podAnnotations:
       backup.velero.io/backup-volumes-excludes: "certdir,nginx-tmp,spiffe-workload-api,spire-oidc-sockets"
 
 cert-manager:
+  # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  podLabels:
+    gibson.zeroroot.ai/net-role: system
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/egress-internet: "true"
   # Canonical names (cert-manager, cert-manager-webhook, cert-manager-cainjector)
   # rather than gibson-cert-manager-*: the vendored RBAC in templates/operators/
   # names these ServiceAccounts, and the admission inventory pins the webhook
@@ -1340,6 +1396,11 @@ cert-manager:
     annotations:
       argocd.argoproj.io/sync-wave: "-20"
   webhook:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: system
+      gibson.zeroroot.ai/kube-api: "true"
+      gibson.zeroroot.ai/ingress-control-plane: "true"
     deploymentAnnotations:
       argocd.argoproj.io/sync-wave: "-20"
     serviceAnnotations:
@@ -1352,6 +1413,10 @@ cert-manager:
     validatingWebhookConfigurationAnnotations:
       argocd.argoproj.io/sync-wave: "-20"
   cainjector:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: system
+      gibson.zeroroot.ai/kube-api: "true"
     deploymentAnnotations:
       argocd.argoproj.io/sync-wave: "-20"
     serviceAnnotations:
@@ -1361,6 +1426,11 @@ cert-manager:
         argocd.argoproj.io/sync-wave: "-20"
 
 external-secrets:
+  # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  podLabels:
+    gibson.zeroroot.ai/net-role: system
+    gibson.zeroroot.ai/client-openbao: "true"
+    gibson.zeroroot.ai/kube-api: "true"
   # Canonical name: the ClusterSecretStore (gibson-workloads) authenticates to
   # OpenBao as ServiceAccount `external-secrets` in the release namespace, and
   # the OpenBao kubernetes auth role binds exactly that name.
@@ -1376,6 +1446,11 @@ external-secrets:
     annotations:
       argocd.argoproj.io/sync-wave: "-20"
   webhook:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: system
+      gibson.zeroroot.ai/kube-api: "true"
+      gibson.zeroroot.ai/ingress-control-plane: "true"
     # The two ValidatingWebhookConfigurations (secretstore-validate,
     # externalsecret-validate).
     annotations:
@@ -1391,6 +1466,10 @@ external-secrets:
       annotations:
         argocd.argoproj.io/sync-wave: "-20"
   certController:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: system
+      gibson.zeroroot.ai/kube-api: "true"
     rbac:
       create: false
     deploymentAnnotations:
@@ -1400,6 +1479,11 @@ external-secrets:
         argocd.argoproj.io/sync-wave: "-20"
 
 external-dns:
+  # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  podLabels:
+    gibson.zeroroot.ai/net-role: system
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/egress-internet: "true"
   fullnameOverride: external-dns
   # The provider is the one per-cloud seam these two operators keep
   #. `inmemory` starts on a cluster with no cloud attached: it
@@ -1416,18 +1500,13 @@ external-dns:
     - service
     - ingress
 
-# The hosts each platform pod reaches outside the cluster, by name (ADR-0165
-# rule 4, charts#396). The chart renders one CiliumNetworkPolicy for each list
-# (gibson.ciliumEgressPolicy). Add a host here for a private endpoint; never
-# open egress to all. Each entry: host (exact) or pattern, and TCP ports.
-egressHosts:
-  # The DNS provider of external-dns, when it is not inmemory. AWS: Route53
-  # and STS (IRSA) answer on regional and global amazonaws.com names.
-  externalDns:
-    - pattern: "*.amazonaws.com"
-      ports: [443]
-
 cnpg:
+  # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  podLabels:
+    gibson.zeroroot.ai/net-role: system
+    gibson.zeroroot.ai/client-postgres: "true"
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/ingress-control-plane: "true"
   # Operator-substitution seam; see the block at the top of this file.
   enabled: true
   # The CNPG operator locates its own Deployment by the hardcoded label

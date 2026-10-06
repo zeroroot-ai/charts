@@ -8,10 +8,13 @@ shipped profile and checks each pod template against them.
   2. read-only    The root filesystem of each container is read-only.
   3. token        The pod mounts a ServiceAccount token only when its
                   ServiceAccount has a grant on helm/gibson/rbac-allowlist.yaml.
-  4. network      A policy denies all traffic in the namespace by default, a
-                  policy selects the pod, and no egress rule of the pod is open
-                  to each host. The guard reads NetworkPolicy and
-                  CiliumNetworkPolicy.
+  4. network      Cilium policies select pods by label (D76). A
+                  CiliumClusterwideNetworkPolicy denies all traffic of the
+                  namespace by default, with DNS allowed. Each pod has a
+                  network role label. Only a pod with the client label of a
+                  data store reaches that data store, and only a pod with the
+                  egress-internet label reaches the internet. No Kubernetes
+                  NetworkPolicy selects a pod of the release namespace.
   5. image        Each image comes from ghcr.io/zeroroot-ai/ and has a digest.
   6. exceptions   Each exception is a named entry with a reason in
                   helm/gibson/secure-pod-exceptions.yaml. The key is the
@@ -39,6 +42,8 @@ import sys
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "scripts", "lib"))
+import cilium_policy as cp  # noqa: E402
 EXCEPTIONS = os.path.join(ROOT, "helm", "gibson", "secure-pod-exceptions.yaml")
 RBAC_ALLOWLIST = os.path.join(ROOT, "helm", "gibson", "rbac-allowlist.yaml")
 INSTALL_SCRIPT = os.path.join(ROOT, "scripts", "baseline-up.sh")
@@ -53,7 +58,10 @@ PROFILES = (
 # pods to each profile, so the policies of the umbrella apply to them.
 SIDE_RELEASES = ("helm/gibson-velero",)
 WORKLOADS = ("Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Pod")
-POLICIES = ("NetworkPolicy", "CiliumNetworkPolicy")
+POLICIES = ("NetworkPolicy", "CiliumNetworkPolicy", "CiliumClusterwideNetworkPolicy")
+NET = "gibson.zeroroot.ai/"
+NET_ROLES = {"platform", "datastore", "system"}
+
 REGISTRY = "ghcr.io/zeroroot-ai/"
 DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 ENFORCE = "pod-security.kubernetes.io/enforce"
@@ -67,7 +75,6 @@ SAFE_SYSCTLS = {
     "net.ipv4.tcp_keepalive_probes",
 }
 SELINUX_TYPES = {None, "", "container_t", "container_init_t", "container_kvm_t", "container_engine_t"}
-OPEN_CIDRS = {"0.0.0.0/0", "::/0"}
 
 
 # ------------------------------------------------------------------ render
@@ -179,82 +186,81 @@ def rule_token(ns: str, spec: dict, accounts: dict, granted: set[str]) -> list[s
     return []
 
 
-def selects(selector: dict | None, labels: dict) -> bool:
-    sel = selector or {}
-    for e in sel.get("matchExpressions") or []:
-        k, op, vals = e.get("key"), e.get("operator"), e.get("values") or []
-        if op == "In" and labels.get(k) not in vals:
-            return False
-        if op == "NotIn" and labels.get(k) in vals:
-            return False
-        if op == "Exists" and k not in labels:
-            return False
-        if op == "DoesNotExist" and k in labels:
-            return False
-    return all(labels.get(k) == v for k, v in (sel.get("matchLabels") or {}).items())
-
-
-def policy_selector(p: dict) -> dict:
-    spec = p.get("spec") or {}
-    return spec.get("endpointSelector" if p["kind"] == "CiliumNetworkPolicy" else "podSelector") or {}
-
-
-def denies_all(p: dict) -> bool:
-    """True for a policy that selects each pod and allows nothing in either direction."""
-    spec = p.get("spec") or {}
-    sel = policy_selector(p)
-    if sel.get("matchLabels") or sel.get("matchExpressions"):
+def is_default_deny(rule: dict) -> bool:
+    """A rule that denies all traffic in both directions and allows DNS only."""
+    dd = rule.get("enableDefaultDeny") or {}
+    if dd.get("ingress") is False or dd.get("egress") is False:
         return False
-    if p["kind"] == "CiliumNetworkPolicy":
-        return spec.get("ingress") == [{}] and spec.get("egress") == [{}]
-    types = set(spec.get("policyTypes") or [])
-    return {"Ingress", "Egress"} <= types and not spec.get("ingress") and not spec.get("egress")
+    if any(set(r) & {"fromEndpoints", "fromEntities", "fromCIDR", "fromCIDRSet"} for r in rule.get("ingress") or []):
+        return False
+    egress = rule.get("egress") or []
+    if not egress:
+        return False
+    for r in egress:
+        if set(r) - {"toEndpoints", "toPorts"}:
+            return False
+        for pe in r.get("toEndpoints") or [{}]:
+            if {cp.norm(k): v for k, v in (pe.get("matchLabels") or {}).items()}.get("k8s-app") != "kube-dns":
+                return False
+        ports = [pp.get("port") for tp in r.get("toPorts") or [] for pp in tp.get("ports") or []]
+        if not ports or set(ports) != {"53"}:
+            return False
+    return "ingress" in rule or dd.get("ingress") is True
 
 
-def limits_egress(p: dict) -> bool:
-    spec = p.get("spec") or {}
-    if p["kind"] == "CiliumNetworkPolicy":
-        return "egress" in spec or "egressDeny" in spec
-    return "Egress" in (spec.get("policyTypes") or [])
-
-
-def open_egress(p: dict) -> bool:
-    """True when an egress rule of the policy reaches each host."""
-    spec = p.get("spec") or {}
-    for rule in spec.get("egress") or []:
-        if p["kind"] == "CiliumNetworkPolicy":
-            if {"world", "all"} & set(rule.get("toEntities") or []):
-                return True
-            cidrs = list(rule.get("toCIDR") or []) + [c.get("cidr") for c in rule.get("toCIDRSet") or []]
-            if OPEN_CIDRS & set(cidrs):
-                return True
-            if any(f.get("matchPattern") in ("*", "**") for f in rule.get("toFQDNs") or []):
-                return True
-            continue
-        if not rule.get("to"):
-            return True
-        if any((peer.get("ipBlock") or {}).get("cidr") in OPEN_CIDRS for peer in rule["to"]):
-            return True
-    return False
-
-
-def rule_network(ns: str, labels: dict, spec: dict, policies: list[dict]) -> list[str]:
-    if spec.get("hostNetwork"):
-        # A policy does not apply to a pod on the host network. Rule 1 reports the pod.
-        return []
-    mine = [p for p in policies if ns_of(p) == ns]
-    bad = []
-    if not any(denies_all(p) for p in mine):
-        bad.append(f"namespace {ns} has no policy that denies all traffic by default")
-    chosen = [p for p in mine if not denies_all(p) and selects(policy_selector(p), labels)]
-    if not chosen:
-        bad.append("no policy selects the pod")
-    elif not any(limits_egress(p) for p in chosen) and not any(denies_all(p) for p in mine):
-        bad.append("no policy limits the egress of the pod")
-    for p in chosen:
-        if open_egress(p):
-            bad.append(f"{p['kind']}/{p['metadata']['name']} has an egress rule that is open to each host")
-    return bad
+def network_findings(docs: list[dict]) -> dict[str, list[str]]:
+    """'<Kind>/<namespace>/<name>' -> the rule 4 findings of one render."""
+    pods = []
+    for d in docs:
+        if d.get("kind") in WORKLOADS:
+            labels, spec = pod_of(d)
+            if spec.get("hostNetwork"):
+                # A policy does not apply to a pod on the host network. Rule 1 reports the pod.
+                continue
+            pods.append((f"{d['kind']}/{ns_of(d)}/{d['metadata']['name']}", ns_of(d), labels))
+    kube = [p for p in docs if p.get("kind") == "NetworkPolicy"]
+    rules = cp.rules(docs, NAMESPACE)
+    stores = [(cp.endpoint(ns, labels), labels[NET + "datastore"]) for _, ns, labels in pods if NET + "datastore" in labels]
+    # The CNPG operator creates the Postgres pods at run time, with the labels
+    # of the Cluster's inheritedMetadata.
+    for d in docs:
+        if d.get("kind") == "Cluster" and str(d.get("apiVersion", "")).startswith("postgresql.cnpg.io/"):
+            labels = (((d.get("spec") or {}).get("inheritedMetadata") or {}).get("labels")) or {}
+            if NET + "datastore" in labels:
+                stores.append((cp.endpoint(ns_of(d), labels), labels[NET + "datastore"]))
+    out: dict[str, list[str]] = {}
+    for key, ns, labels in pods:
+        ep = cp.endpoint(ns, labels)
+        bad = []
+        covered = any(is_default_deny(r) and cp.rule_selects(r, rns, ep) for _, r, rns in rules)
+        if not covered:
+            bad.append(f"no CiliumClusterwideNetworkPolicy denies all traffic of the namespace {ns} by default")
+        else:
+            # A namespace under the default deny uses the label policy only.
+            for p in kube:
+                if ns_of(p) == ns and cp.selects((p.get("spec") or {}).get("podSelector") or {}, labels):
+                    bad.append(f"NetworkPolicy/{p['metadata']['name']} selects the pod; the release uses Cilium policies only")
+            role = labels.get(NET + "net-role")
+            if role not in NET_ROLES:
+                bad.append(f"the pod has no {NET}net-role label ({', '.join(sorted(NET_ROLES))})")
+            if role == "datastore" and NET + "datastore" not in labels:
+                bad.append(f"a data store pod has no {NET}datastore label")
+        mine = [(p, r, rns) for p, r, rns in rules if cp.rule_selects(r, rns, ep)]
+        for p, r, rns in mine:
+            if cp.egress_internet(r) and labels.get(NET + "egress-internet") != "true":
+                bad.append(f"{p['kind']}/{p['metadata']['name']} opens egress to the internet, and the pod has no {NET}egress-internet label")
+        for sep, store in stores:
+            if labels.get(NET + "datastore") == store or labels.get(f"{NET}client-{store}") == "true":
+                continue
+            for p, r, rns in mine:
+                if cp.egress_reaches(r, rns, sep):
+                    bad.append(f"{p['kind']}/{p['metadata']['name']} lets the pod reach the {store} data store, and the pod has no {NET}client-{store} label")
+            for p, r, rns in rules:
+                if cp.rule_selects(r, rns, sep) and cp.ingress_admits(r, rns, ep):
+                    bad.append(f"{p['kind']}/{p['metadata']['name']} admits the pod to the {store} data store, and the pod has no {NET}client-{store} label")
+        if bad:
+            out[key] = sorted(set(bad))
+    return out
 
 
 def rule_image(spec: dict) -> list[str]:
@@ -291,10 +297,10 @@ def findings(renders: list[list[dict]], granted: set[str], release_label: str | 
 
     for docs in renders:
         accounts = {(ns_of(d), d["metadata"]["name"]): d for d in docs if d.get("kind") == "ServiceAccount"}
-        policies = [d for d in docs if d.get("kind") in POLICIES]
         labels_of_ns = {d["metadata"]["name"]: (d["metadata"].get("labels") or {})
                         for d in docs if d.get("kind") == "Namespace"}
         used = set()
+        network = network_findings(docs)
         for d in docs:
             if d.get("kind") not in WORKLOADS:
                 continue
@@ -305,7 +311,7 @@ def findings(renders: list[list[dict]], granted: set[str], release_label: str | 
             add(key, "restricted", rule_restricted(spec))
             add(key, "read-only", rule_read_only(spec))
             add(key, "token", rule_token(ns, spec, accounts, granted))
-            add(key, "network", rule_network(ns, labels, spec, policies))
+            add(key, "network", network.get(key, []))
             add(key, "image", rule_image(spec))
         for ns in sorted(used):
             if ns in labels_of_ns:
@@ -367,36 +373,7 @@ def audit(renders: list[list[dict]], exceptions: dict, granted: set[str], releas
 
 # ---------------------------------------------------------------- self-test
 
-SECURE = """
-apiVersion: v1
-kind: Namespace
-metadata: {name: fixture, labels: {pod-security.kubernetes.io/enforce: restricted}}
----
-apiVersion: v1
-kind: ServiceAccount
-metadata: {name: app, namespace: fixture}
-automountServiceAccountToken: false
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata: {name: default-deny, namespace: fixture}
-spec: {podSelector: {}, policyTypes: [Ingress, Egress]}
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata: {name: app, namespace: fixture}
-spec:
-  podSelector: {matchLabels: {app: app}}
-  policyTypes: [Ingress, Egress]
-  egress:
-    - to: [{podSelector: {matchLabels: {app: db}}}]
----
-apiVersion: apps/v1
-kind: Deployment
-metadata: {name: app, namespace: fixture}
-spec:
-  template:
-    metadata: {labels: {app: app}}
+POD = """
     spec:
       serviceAccountName: app
       securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
@@ -409,9 +386,87 @@ spec:
             capabilities: {drop: [ALL]}
 """
 
+SECURE = """
+apiVersion: v1
+kind: Namespace
+metadata: {name: fixture, labels: {pod-security.kubernetes.io/enforce: restricted}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: app, namespace: fixture}
+automountServiceAccountToken: false
+---
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata: {name: fixture-default-deny}
+spec:
+  endpointSelector: {matchLabels: {k8s:io.kubernetes.pod.namespace: fixture}}
+  enableDefaultDeny: {ingress: true, egress: true}
+  ingress: [{}]
+  egress:
+    - toEndpoints: [{matchLabels: {k8s:io.kubernetes.pod.namespace: kube-system, k8s:k8s-app: kube-dns}}]
+      toPorts: [{ports: [{port: "53", protocol: UDP}, {port: "53", protocol: TCP}], rules: {dns: [{matchPattern: "*"}]}}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: {name: platform, namespace: fixture}
+spec:
+  endpointSelector: {matchLabels: {gibson.zeroroot.ai/net-role: platform}}
+  ingress: [{fromEndpoints: [{matchLabels: {gibson.zeroroot.ai/net-role: platform}}]}]
+  egress: [{toEndpoints: [{matchLabels: {gibson.zeroroot.ai/net-role: platform}}]}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: {name: datastore-redis, namespace: fixture}
+specs:
+  - endpointSelector: {matchLabels: {gibson.zeroroot.ai/datastore: redis}}
+    ingress: [{fromEndpoints: [{matchLabels: {gibson.zeroroot.ai/client-redis: "true"}}]}]
+  - endpointSelector: {matchLabels: {gibson.zeroroot.ai/client-redis: "true"}}
+    egress: [{toEndpoints: [{matchLabels: {gibson.zeroroot.ai/datastore: redis}}]}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: {name: egress-internet, namespace: fixture}
+spec:
+  endpointSelector: {matchLabels: {gibson.zeroroot.ai/egress-internet: "true"}}
+  egress: [{toEntities: [world]}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: app, namespace: fixture}
+spec:
+  template:
+    metadata: {labels: {app: app, gibson.zeroroot.ai/net-role: platform, gibson.zeroroot.ai/client-redis: "true"}}
+""" + POD + """
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: web, namespace: fixture}
+spec:
+  template:
+    metadata: {labels: {app: web, gibson.zeroroot.ai/net-role: platform}}
+""" + POD + """
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: redis, namespace: fixture}
+spec:
+  template:
+    metadata: {labels: {app: redis, gibson.zeroroot.ai/net-role: datastore, gibson.zeroroot.ai/datastore: redis}}
+""" + POD
+
 
 def _workload(docs: list[dict]) -> dict:
-    return next(d for d in docs if d["kind"] == "Deployment")
+    return next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "app")
+
+
+def _web_labels(docs: list[dict]) -> dict:
+    web = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "web")
+    return web["spec"]["template"]["metadata"]["labels"]
+
+
+def _cilium(docs: list[dict], name: str) -> dict:
+    return next(d for d in docs if d["kind"].startswith("Cilium") and d["metadata"]["name"] == name)
 
 
 def _container(docs: list[dict]) -> dict:
@@ -444,22 +499,39 @@ def _projected_token(docs):
 
 
 def _no_default_deny(docs):
-    docs[:] = [d for d in docs if d["metadata"]["name"] != "default-deny"]
+    docs[:] = [d for d in docs if d["metadata"]["name"] != "fixture-default-deny"]
 
 
-def _no_policy(docs):
-    docs[:] = [d for d in docs if not (d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == "app")]
+def _open_default_deny(docs):
+    _cilium(docs, "fixture-default-deny")["spec"]["egress"].append({"toEntities": ["world"]})
 
 
-def _open_egress(docs):
-    next(d for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == "app")["spec"]["egress"] = [
-        {"to": [{"ipBlock": {"cidr": "0.0.0.0/0"}}]}]
+def _no_role(docs):
+    _web_labels(docs).pop("gibson.zeroroot.ai/net-role")
 
 
-def _open_cilium_egress(docs):
-    docs.append({"apiVersion": "cilium.io/v2", "kind": "CiliumNetworkPolicy",
-                 "metadata": {"name": "world", "namespace": "fixture"},
-                 "spec": {"endpointSelector": {"matchLabels": {"app": "app"}}, "egress": [{"toEntities": ["world"]}]}})
+def _kubernetes_policy(docs):
+    docs.append({"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+                 "metadata": {"name": "web", "namespace": "fixture"},
+                 "spec": {"podSelector": {"matchLabels": {"app": "web"}}, "policyTypes": ["Ingress", "Egress"],
+                          "egress": [{}]}})
+
+
+def _store_admits_each_pod(docs):
+    _cilium(docs, "datastore-redis")["specs"][0]["ingress"] = [{"fromEndpoints": [{}]}]
+
+
+def _egress_to_store(docs):
+    _cilium(docs, "platform")["spec"]["egress"].append(
+        {"toEndpoints": [{"matchLabels": {"gibson.zeroroot.ai/datastore": "redis"}}]})
+
+
+def _internet_with_no_label(docs):
+    _cilium(docs, "platform")["spec"]["egress"].append({"toEntities": ["world"]})
+
+
+def _fqdn_with_no_label(docs):
+    _cilium(docs, "platform")["spec"]["egress"].append({"toFQDNs": [{"matchName": "api.example.com"}]})
 
 
 def _tag_only(docs):
@@ -482,9 +554,13 @@ FIXTURES_THAT_MUST_FAIL = {
     "rule 3: a token mount with no grant": ("token", _token),
     "rule 3: a projected token with no grant": ("token", _projected_token),
     "rule 4: no default-deny policy": ("network", _no_default_deny),
-    "rule 4: no policy selects the pod": ("network", _no_policy),
-    "rule 4: an egress rule to 0.0.0.0/0": ("network", _open_egress),
-    "rule 4: a CiliumNetworkPolicy to the world entity": ("network", _open_cilium_egress),
+    "rule 4: the default-deny policy opens egress": ("network", _open_default_deny),
+    "rule 4: a pod with no network role": ("network", _no_role),
+    "rule 4: a Kubernetes NetworkPolicy selects a pod": ("network", _kubernetes_policy),
+    "rule 4: a data store admits each pod": ("network", _store_admits_each_pod),
+    "rule 4: a pod with no client label reaches a data store": ("network", _egress_to_store),
+    "rule 4: a pod with no egress label reaches the world": ("network", _internet_with_no_label),
+    "rule 4: a pod with no egress label reaches a host name": ("network", _fqdn_with_no_label),
     "rule 5: an image with a tag and no digest": ("image", _tag_only),
     "rule 5: an image from a different registry": ("image", _other_registry),
     "the namespace has no restricted label": ("namespace-label", _no_label),

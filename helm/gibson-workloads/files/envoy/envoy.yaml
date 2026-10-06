@@ -636,10 +636,9 @@ static_resources:
                         #
                         # Its ONE consumer is the ext-authz sidecar, and
                         # ext-authz never uses the edge: it dials the daemon
-                        # directly on the pod network, which the daemon
-                        # NetworkPolicy opens for exactly that (see
-                        # templates/gibson/networkpolicy.yaml, "ext-authz →
-                        # daemon listeners reached directly (not via Envoy)").
+                        # directly on the pod network, which the platform
+                        # network policy allows (umbrella
+                        # templates/network-policies.yaml).
                         # No SDK, sdk-ts, ADK CLI, gibson-executor or dashboard
                         # path reads it — the discovery document advertises
                         # only `register` and `jwks_uri`, and a registering

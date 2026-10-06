@@ -47,6 +47,7 @@ spec:
         app.kubernetes.io/name: docs-svc
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: docs-svc
+        {{- include "gibson.netLabels" (dict "role" "platform") | nindent 8 }}
     spec:
       {{- /* docs-site is a first-party image. The previous
              `.Values.imagePullSecrets` knob read a chart-top-level value no

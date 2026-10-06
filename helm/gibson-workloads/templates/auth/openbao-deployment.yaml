@@ -231,6 +231,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: openbao
+        {{- include "gibson.netLabels" (dict "role" "datastore" "datastore" "openbao" "kubeApi" true) | nindent 8 }}
       annotations:
         checksum/config: {{ .Values.openbao.config | toYaml | sha256sum }}
     spec:

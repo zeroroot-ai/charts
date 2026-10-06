@@ -40,9 +40,9 @@ else" or "I set componentIngress.enabled with no Envoy in front of it."
 Rules (Envoy is required infrastructure — deploy#200; the gates that used
 to inspect envoy.enabled are unconditional now):
   1. .Values.gibson.service.type MUST be ClusterIP (or unset).
-  2. .Values.gibson.networkPolicy.enabled MUST be true when the daemon is
-     deployed. (Without the policy, anyone in the cluster could reach
-     :50051 directly even though Envoy IS the supported path.)
+  2. .Values.gibson.networkPolicy MUST NOT be set. The toggle was deleted
+     (D76): the umbrella renders the Cilium network policy on each profile,
+     so only the edge and the platform pods reach :50051.
   3. .Values.ingress (the unified platform ingress) MUST NOT have
      gateway-bypassing routes. We can't fully introspect the rendered
      Ingress object from another template, so we approximate: the unified
@@ -68,16 +68,12 @@ Spec Reqs: 3.4, 3.5.
 {{- fail (printf "validateAllPathsViaEnvoy: gibson.service.type=%q exposes daemon gRPC ports outside the Envoy mesh. Set gibson.service.type=ClusterIP and route external traffic through Envoy. Spec unified-identity-and-authorization Req 3.4." $svcType) -}}
 {{- end -}}
 
-{{- /* Rule 2 — NetworkPolicy (Envoy is unconditionally enabled per deploy#200). */ -}}
-{{- $npEnabled := false -}}
-{{- with .Values.gibson.networkPolicy -}}
-{{- $npEnabled = .enabled -}}
-{{- end -}}
-{{- /* No escape hatch: each cluster runs Cilium, which enforces NetworkPolicy
-       (hosted#436). The dev.networkPolicy.disabled bypass was deleted
-       (charts#399). */ -}}
-{{- if not $npEnabled -}}
-{{- fail "validateAllPathsViaEnvoy: gibson.networkPolicy.enabled=true is required so non-Envoy pods cannot reach the daemon's gRPC ports directly. Set gibson.networkPolicy.enabled=true. Spec unified-identity-and-authorization Req 3.5." -}}
+{{- /* Rule 2 — the network policy. It is no longer a value: the umbrella
+       renders the Cilium policies on each profile, and only the edge and
+       the platform pods reach the daemon (ADR-0165 rule 4, D76). A values
+       file that still sets the deleted toggle fails here. */ -}}
+{{- if hasKey .Values.gibson "networkPolicy" -}}
+{{- fail "gibson.networkPolicy was deleted (D76). The umbrella renders the Cilium network policy of the release on each profile, with no toggle. Remove gibson.networkPolicy from your values." -}}
 {{- end -}}
 
 {{- /* Rule 3 — unified ingress gRPC route incompatible with Envoy. (Previous

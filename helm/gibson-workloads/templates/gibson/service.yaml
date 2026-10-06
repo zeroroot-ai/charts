@@ -8,8 +8,9 @@ template ignores anything other than ClusterIP. NodePort/LoadBalancer
 fallbacks and per-port nodePort overrides were removed in task 12; if you
 need to reach the daemon from outside the cluster, route through Envoy.
 
-Ingress to the four published ports is further restricted to Envoy and
-Prometheus pods by templates/gibson/networkpolicy.yaml (task 11).
+Ingress to the four published ports is further restricted to the platform
+pods and the metrics scrapers by the network policy of the release (umbrella
+templates/network-policies.yaml, D76).
 
 gibson daemon is structural infrastructure (one-code-path /
 deploy#188). The previous outer `.Values.gibson.enabled` gate has
