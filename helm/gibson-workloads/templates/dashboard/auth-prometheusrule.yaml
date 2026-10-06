@@ -52,12 +52,13 @@ spec:
             severity: page
             component: dashboard-auth
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/dashboard-auth.md#dashboardsigninerrorratehigh"
             summary: "Dashboard sign-in error rate >1% over 5m"
             description: |
               More than 1% of dashboard sign-in attempts have failed over
               the last 5 minutes. Check
-              dashboard_login_error_total{reason} and the auth Grafana
-              dashboard for the dominant reason.
+              dashboard_login_error_total{reason} for the dominant
+              reason.
         - alert: DashboardFGAUnreachable
           expr: |
             increase(dashboard_membership_resolution_total{outcome="fga_error"}[1m]) > 0
@@ -66,6 +67,7 @@ spec:
             severity: page
             component: dashboard-auth
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/dashboard-auth.md#dashboardfgaunreachable"
             summary: "Dashboard cannot reach FGA — membership resolution failing"
             description: |
               The dashboard's getMyMemberships() RPC is failing with FGA
@@ -84,6 +86,7 @@ spec:
             severity: page
             component: dashboard-auth
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/dashboard-auth.md#dashboardsigninlatencybudgetburn"
             summary: "Dashboard sign-in p95 latency budget burning at >2x"
             description: |
               p95 sign-in latency has been above the 1.5s SLO objective
@@ -114,6 +117,7 @@ spec:
             severity: warning
             component: dashboard-auth
           annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/dashboard-auth.md#dashboardworkloadsvidfallback"
             summary: "Dashboard falling back to a workload SVID for user RPCs"
             description: |
               The dashboard is making daemon RPCs via the SPIFFE
