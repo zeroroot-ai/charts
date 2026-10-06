@@ -17103,10 +17103,13 @@ spec:
               #   input:<file>   the bringup keyring input mounted at /etc/openbao/inputs/<file>
               #   inputjson:<f>  the property of the same name in the JSON object mounted at
               #                  /etc/openbao/inputs/<f>
+              #   inputor:<f>:<v> the keyring input <f> when the bringup supplied one, else
+              #                  the literal <v> (charts#486). A test-mode placeholder stays
+              #                  only while the keyring member is empty.
               #   svctoken       the platform service token the sidecar minted
               #
               # A property that is PRESENT is never overwritten, with two exceptions:
-              # `input` and `inputjson` follow the keyring (a non-empty keyring value that
+              # `input`, `inputjson` and `inputor` follow the keyring (a non-empty keyring value that
               # differs from the stored one is written, at sidecar start and on every
               # five-minute pass after it, so a member set after the bringup lands without
               # a pod restart), and `svctoken` follows the token in the
@@ -17129,7 +17132,7 @@ spec:
               gibson-zitadel-system-bot-key private_key:rsapem:zitadel-system-bot public_key:rsapub:zitadel-system-bot
               ghcr-pull-secret pat:input:ghcr-pull-token
               gibson-dashboard-auth-hardening captcha_secret_key:empty email_resend_api_key:empty
-              gibson-stripe-credentials publishable_key:literal:pk_test_placeholder secret_key:literal:sk_test_placeholder webhook_secret:literal:whsec_placeholder
+              gibson-stripe-credentials publishable_key:inputor:stripe-publishable-key:pk_test_placeholder secret_key:inputor:stripe-secret-key:sk_test_placeholder webhook_secret:inputor:stripe-webhook-secret:whsec_placeholder
               ses-smtp-credentials username:input:smtp-username password:input:smtp-password
               gibson-vault-admin-token token:svctoken
               
@@ -17729,6 +17732,18 @@ spec:
                       elif [ "$present" != "true" ]; then
                         val=""; write=1
                       fi ;;
+                    inputor)
+                      # inputor:<file>:<literal> (charts#486): the keyring
+                      # input when the bringup supplied one, else the literal.
+                      # A non-empty input replaces the stored value, as
+                      # `input` does; an empty one leaves it, and an absent
+                      # property gets the literal.
+                      val=$(seed_input input "${arg%%:*}" "$prop")
+                      if [ -n "$val" ] && [ "$val" != "$curval" ]; then
+                        write=1
+                      elif [ -z "$val" ] && [ "$present" != "true" ]; then
+                        val="${arg#*:}"; write=1
+                      fi ;;
                     svctoken)
                       val=$(kube_read_token "$PLATFORM_TOKEN_SECRET")
                       if [ -n "$val" ] && [ "$val" != "$curval" ]; then write=1; fi ;;
@@ -17920,7 +17935,8 @@ spec:
                 return 1
               }
 
-              # The keyring inputs (ghcr-pull-token, smtp-username,
+              # The keyring inputs (ghcr-pull-token, smtp-username, the three
+              # stripe-* members,
               # smtp-password) follow the keyring: a member set AFTER the
               # bringup reaches the Secret through keyring-to-cluster.sh and the
               # kubelet, and this pass writes it into OpenBao without a pod
@@ -18161,6 +18177,15 @@ spec:
                 path: smtp-username
               - key: smtp-password
                 path: smtp-password
+              # The Stripe account (charts#486): written by the bringup from
+              # the keyring members STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY
+              # and STRIPE_WEBHOOK_SECRET, the empty string when not supplied.
+              - key: stripe-secret-key
+                path: stripe-secret-key
+              - key: stripe-publishable-key
+                path: stripe-publishable-key
+              - key: stripe-webhook-secret
+                path: stripe-webhook-secret
   volumeClaimTemplates:
     - metadata:
         name: data
