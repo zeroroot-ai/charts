@@ -8037,10 +8037,12 @@ rules:
       - patch
 ---
 # Source: gibson/charts/gibson-workloads/templates/auth/openbao-deployment.yaml
-# openbao-auto-init RBAC. The sidecar manages TWO Secrets, the renewable
-# service tokens of the two operators (deploy#454):
-#   gibson-platform-operator-vault — policy platform-admin
+# openbao-auto-init RBAC. The sidecar manages one Secret for each consumer,
+# the renewable service token of that consumer (deploy#454):
+#   gibson-platform-operator-vault — policy platform-operator
 #   gibson-tenant-operator-vault   — policy tenant-operator
+#   gibson-openbao-iam-admin-escrow, gibson-openbao-jwt-auth-init,
+#   gibson-openbao-approle-init, gibson-openbao-approle-reader — the Jobs
 # A non-renewable root token in either would cause VaultTransitReady=False,
 # because vaulttoken.Renewer calls renew-self and OpenBao rejects it with
 # 400 "lease is not renewable".
@@ -8090,6 +8092,8 @@ rules:
     resourceNames:
       - gibson-platform-operator-vault
       - gibson-tenant-operator-vault
+      - gibson-openbao-iam-admin-escrow
+      - gibson-openbao-jwt-auth-init
 ---
 # Source: gibson/charts/gibson-workloads/templates/dashboard/init-secrets-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -11997,7 +12001,7 @@ spec:
             # policy reaches tenant-<id> namespaces, sys/namespaces/tenant-*,
             # transit/hmac and the root jwt mount's config, and nothing in
             # the root kv store, where the escrowed Zitadel owner
-            # credentials live. The platform-admin token stays with the
+            # credentials live. The platform-operator token stays with the
             # platform-operator.
             # GIBSON_VAULT_TRANSIT_KEY names the transit key the
             # operator uses for HMAC-SHA256 KEK derivation.
@@ -15296,11 +15300,18 @@ spec:
               # the ClusterSecretStore against AUTH_MOUNT and ESO_ROLE.
               AUTH_MOUNT="kubernetes"
               SEEDER_ROLE="openbao-seeder"
-              ADMIN_POLICY="platform-admin"
+              SEEDER_POLICY="openbao-seeder"
+              PLATFORM_POLICY="platform-operator"
+              # The policy every token carried before each consumer got its
+              # own. The reconcile pass deletes it after the re-mint.
+              LEGACY_POLICY="platform-admin"
               # The two operator tokens, each in its own Secret (vault_mint_token).
               PLATFORM_TOKEN_SECRET="gibson-platform-operator-vault"
               TENANT_OP_TOKEN_SECRET="gibson-tenant-operator-vault"
               TENANT_OP_POLICY="tenant-operator"
+              # The token of each Job that configures the store, as
+              # <Secret>:<policy>. Each Job mounts its own Secret and nothing else.
+              JOB_TOKENS="gibson-openbao-iam-admin-escrow:iam-admin-escrow gibson-openbao-jwt-auth-init:jwt-auth-init"
               ESO_ROLE="eso-reader"
               ESO_POLICY="eso-reader"
               ESO_SA_NAME="external-secrets"
@@ -15573,7 +15584,7 @@ spec:
                 # Log in with THIS pod's ServiceAccount through the kubernetes
                 # auth mount, role openbao-seeder. The projected token is
                 # short-lived and re-read at every call; the OpenBao token it
-                # buys carries the platform-admin policy and a short TTL, and
+                # buys carries the openbao-seeder policy and a short TTL, and
                 # every pass revokes it when done. This is the standing path
                 # back into the store on every profile: no stored credential,
                 # no root token, no recovery key (closes the deploy#1731 gap).
@@ -15607,7 +15618,7 @@ spec:
                   return 1
                 fi
                 vault_revoke_self "$t"
-                echo "[openbao-auto-init] seeder role login OK: ServiceAccount ${OWN_SA} -> auth/${AUTH_MOUNT} role ${SEEDER_ROLE} (policy ${ADMIN_POLICY})"
+                echo "[openbao-auto-init] seeder role login OK: ServiceAccount ${OWN_SA} -> auth/${AUTH_MOUNT} role ${SEEDER_ROLE} (policy ${SEEDER_POLICY})"
               }
 
               vault_mint_token() {
@@ -15627,8 +15638,8 @@ spec:
                 # revocation of whatever minted it (the initial root at init,
                 # a seeder login token on a re-mint).
                 #
-                # Two tokens, one per operator:
-                #   gibson-platform-operator-vault  policy platform-admin, the
+                # One token for each consumer, each in its own Secret:
+                #   gibson-platform-operator-vault  policy platform-operator, the
                 #     platform-operator's (through the ESO copy
                 #     gibson-openbao-keys, see seed key gibson-vault-admin-token)
                 #   gibson-tenant-operator-vault    policy tenant-operator, the
@@ -15636,6 +15647,8 @@ spec:
                 # The tenant-operator's token reaches tenant namespaces, the
                 # KEK HMAC and nothing in the root namespace's kv store, where
                 # the escrowed Zitadel owner credentials live.
+                #   JOB_TOKENS                      one token for each Job that
+                #     configures the store, with the paths of its script only
                 #
                 # Nothing here restarts a workload. Reloader rolls each
                 # operator when the Secret it reads changes (the
@@ -15797,11 +15810,27 @@ spec:
               }
 
               vault_ensure_tokens() {
-                # Both operator tokens. $1 (optional) a held seeder token.
+                # Every consumer token. $1 (optional) a held seeder token.
                 trc=0
-                vault_ensure_token "$PLATFORM_TOKEN_SECRET" "$ADMIN_POLICY" "${1:-}" || trc=1
+                vault_ensure_token "$PLATFORM_TOKEN_SECRET" "$PLATFORM_POLICY" "${1:-}" || trc=1
                 vault_ensure_token "$TENANT_OP_TOKEN_SECRET" "$TENANT_OP_POLICY" "${1:-}" || trc=1
+                for pair in $JOB_TOKENS; do
+                  vault_ensure_token "${pair%%:*}" "${pair#*:}" "${1:-}" || trc=1
+                done
                 return $trc
+              }
+
+              vault_delete_legacy_policy() {
+                # $1 token. Each token that carried the legacy policy was
+                # re-minted with its own policy before this call (vault_ensure_token
+                # replaces a token that lacks its policy). 204 and 404 are done.
+                c=$(curl -sS -o ${TMPD}/delpol.json -w '%{http_code}' \
+                  -X DELETE -H "X-Vault-Token: $1" \
+                  "${BAO_ADDR_LOCAL}/v1/sys/policies/acl/${LEGACY_POLICY}")
+                case "$c" in 200|204|404) return 0 ;; *)
+                  echo "[openbao-auto-init] WARN: delete policy ${LEGACY_POLICY} returned HTTP $c: $(cat ${TMPD}/delpol.json)" >&2
+                  return 1 ;;
+                esac
               }
 
               # ---------------------------------------------------------------
@@ -16082,14 +16111,60 @@ spec:
                   return 1 ;;
                 esac
 
-                # platform-admin: what the operators and this sidecar hold.
-                # Every capability on every path, including sudo, because the
-                # operators create tenant namespaces, policies, transit keys
-                # and auth mounts. It is not root: no token carrying it is a
-                # root token, and a token carrying it can mint another.
-                vault_write_policy "$tok" "$ADMIN_POLICY" \
-                  'path "*" { capabilities = ["create", "read", "update", "delete", "list", "sudo", "patch"] }
-              ' || return 1
+                # One policy for each consumer, each with the paths its code
+                # calls and nothing else. No policy grants path "*".
+                # scripts/check-openbao-policies.py reads each policy of the
+                # render and fails on path "*" and on sudo outside a named list.
+                #
+                # openbao-seeder: this sidecar, on every pass after the
+                # bootstrap. It mounts kv and transit, enables the kubernetes
+                # auth, writes these policies and roles, mints each consumer
+                # token (a no_parent token with a policy the caller does not
+                # hold needs sudo), seeds the platform KV keys and the transit
+                # keypairs, and deletes the legacy policy. The seeder can still
+                # write any policy, so it keeps the reach of the store by
+                # design. Its token lives 15 minutes and only this pod logs in
+                # with the role.
+                vault_write_policy "$tok" "$SEEDER_POLICY" \
+                  '
+              path "sys/mounts/secret" { capabilities = ["create", "update"] }
+              path "sys/mounts/transit" { capabilities = ["create", "update"] }
+              path "sys/auth/kubernetes" { capabilities = ["create", "update", "read", "sudo"] }
+              path "auth/kubernetes/config" { capabilities = ["create", "update", "read"] }
+              path "auth/kubernetes/role/*" { capabilities = ["create", "update", "read"] }
+              path "sys/policies/acl/*" { capabilities = ["create", "update", "read"] }
+              path "sys/policies/acl/platform-admin" { capabilities = ["delete"] }
+              path "auth/token/create" { capabilities = ["create", "update", "sudo"] }
+              path "secret/data/*" { capabilities = ["create", "read", "update"] }
+              path "transit/keys/*" { capabilities = ["create", "read", "update"] }
+              path "transit/export/signing-key/*" { capabilities = ["read"] }' || return 1
+
+                # platform-operator: gibson operators/platform/internal/clients/vault.
+                #   sys/mounts               mountExists reads the mount table
+                #   sys/mounts/transit       EnsureTransitMounted
+                #   transit/keys/<key>       EnsureTransitKey, the one key of
+                #                            platformBootstrap.vaultTransit.keyName
+                #   secret/data/gibson-zitadel-iam-admin-pat
+                #                            the admin token it mints (gibson#794)
+                # lookup-self and renew-self come with the default policy.
+                vault_write_policy "$tok" "$PLATFORM_POLICY" \
+                  '
+              path "sys/mounts" { capabilities = ["read"] }
+              path "sys/mounts/transit" { capabilities = ["create", "update"] }
+              path "transit/keys/master-kek" { capabilities = ["create", "read", "update"] }
+              path "secret/data/gibson-zitadel-iam-admin-pat" { capabilities = ["create", "read", "update"] }' || return 1
+
+                # The Jobs that configure the store, each with the paths of its
+                # own script (helpers in _openbao-policies.tpl).
+                vault_write_policy "$tok" iam-admin-escrow \
+                  '
+              path "secret/data/gibson-zitadel-iam-admin-pat" { capabilities = ["create", "read", "update"] }
+              path "secret/data/gibson-zitadel-iam-admin-machinekey" { capabilities = ["create", "read", "update"] }
+              path "secret/data/gibson-zitadel-login-client-pat" { capabilities = ["create", "read", "update"] }' || return 1
+                vault_write_policy "$tok" jwt-auth-init \
+                  '
+              path "sys/auth/jwt" { capabilities = ["create", "update", "read", "sudo"] }
+              path "auth/jwt/config" { capabilities = ["create", "update", "read"] }' || return 1
 
                 # tenant-operator: what the tenant-operator's code calls, and
                 # nothing in the root namespace's kv store, where the escrowed
@@ -16132,8 +16207,8 @@ spec:
               ' || return 1
 
                 vault_write_k8s_role "$tok" "$ESO_ROLE" "$ESO_SA_NAME" "$ESO_SA_NS" "$ESO_POLICY" "1h" || return 1
-                vault_write_k8s_role "$tok" "$SEEDER_ROLE" "$OWN_SA" "$NAMESPACE" "$ADMIN_POLICY" "15m" || return 1
-                echo "[openbao-auto-init] access configured: auth/${AUTH_MOUNT} roles ${ESO_ROLE} (${ESO_SA_NS}/${ESO_SA_NAME}, policy ${ESO_POLICY}) and ${SEEDER_ROLE} (${NAMESPACE}/${OWN_SA}, policy ${ADMIN_POLICY})"
+                vault_write_k8s_role "$tok" "$SEEDER_ROLE" "$OWN_SA" "$NAMESPACE" "$SEEDER_POLICY" "15m" || return 1
+                echo "[openbao-auto-init] access configured: auth/${AUTH_MOUNT} roles ${ESO_ROLE} (${ESO_SA_NS}/${ESO_SA_NAME}, policy ${ESO_POLICY}) and ${SEEDER_ROLE} (${NAMESPACE}/${OWN_SA}, policy ${SEEDER_POLICY})"
               }
 
               vault_ensure_kv_v2_secret_mount() {
@@ -16214,6 +16289,7 @@ spec:
                 vault_configure_access "$seeder" || rc=1
                 vault_ensure_tokens "$seeder" || rc=1
                 vault_seed_platform_secrets "$seeder" || rc=1
+                [ "$rc" -eq 0 ] && { vault_delete_legacy_policy "$seeder" || rc=1; }
                 vault_revoke_self "$seeder"
                 seeder=""
                 return $rc
@@ -16289,8 +16365,13 @@ spec:
                     continue
                   fi
                   retry_n 5 5 vault_mint_token "$initial_root" "$TENANT_OP_POLICY" "$TENANT_OP_TOKEN_SECRET" || { sleep 5; continue; }
+                  jobs_ok=1
+                  for pair in $JOB_TOKENS; do
+                    retry_n 5 5 vault_mint_token "$initial_root" "${pair#*:}" "${pair%%:*}" || jobs_ok=0
+                  done
+                  [ "$jobs_ok" = 1 ] || { sleep 5; continue; }
                   # The platform token last: svc_token holds it for the check below.
-                  retry_n 5 5 vault_mint_token "$initial_root" "$ADMIN_POLICY" "$PLATFORM_TOKEN_SECRET" || { sleep 5; continue; }
+                  retry_n 5 5 vault_mint_token "$initial_root" "$PLATFORM_POLICY" "$PLATFORM_TOKEN_SECRET" || { sleep 5; continue; }
                   retry_n 5 5 vault_seed_platform_secrets "$initial_root" || { sleep 5; continue; }
                   # The replacement credential must authenticate BEFORE the
                   # initial root is destroyed.
@@ -18087,9 +18168,9 @@ spec:
             # read-only root filesystem).
             - name: tmp
               mountPath: /tmp
-            # gibson-openbao-keys is ESO-managed (templates/secrets/vault-keys.yaml).
-            # kubelet projects each key in the Secret as a file under
-            # mountPath; the script reads VAULT_ADMIN_TOKEN with cat above.
+            # gibson-openbao-jwt-auth-init holds the token of this Job alone,
+            # policy jwt-auth-init (_openbao-policies.tpl), minted by
+            # openbao-auto-init. The script reads VAULT_ADMIN_TOKEN with cat above.
             - name: openbao-admin-token
               mountPath: /etc/vault-init
               readOnly: true
@@ -18117,7 +18198,7 @@ spec:
           emptyDir: {}
         - name: openbao-admin-token
           secret:
-            secretName: gibson-openbao-keys
+            secretName: gibson-openbao-jwt-auth-init
             defaultMode: 0o400
         - name: spire-bundle
           configMap:
@@ -23730,7 +23811,7 @@ spec:
           secret_has_key "$NS" "gibson-dashboard-oidc" "client_secret"
 
           # The Zitadel owner credentials (iam-admin-pat, iam-admin, the System
-          # API key) and the OpenBao platform-admin token (gibson-openbao-keys,
+          # API key) and the OpenBao platform-operator token (gibson-openbao-keys,
           # which can read the escrowed copies) are not checked here. Only
           # bootstrap may read them (scripts/check-owner-credential-readers.py),
           # and a test that reads them would be one more reader. The
@@ -25854,10 +25935,12 @@ spec:
           value: /tmp
         - name: BAO_ADDR
           value: "http://gibson-openbao:8200"
+        # The token of this Job alone, policy iam-admin-escrow: the three KV
+        # keys below and nothing else. openbao-auto-init mints it.
         - name: VAULT_ADMIN_TOKEN
           valueFrom:
             secretKeyRef:
-              name: gibson-openbao-keys
+              name: gibson-openbao-iam-admin-escrow
               key: VAULT_ADMIN_TOKEN
         command: [bash, -ec]
         args:

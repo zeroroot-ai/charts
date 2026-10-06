@@ -141,10 +141,12 @@ spec:
           value: /tmp
         - name: BAO_ADDR
           value: {{ $baoAddr | quote }}
+        # The token of this Job alone, policy iam-admin-escrow: the three KV
+        # keys below and nothing else. openbao-auto-init mints it.
         - name: VAULT_ADMIN_TOKEN
           valueFrom:
             secretKeyRef:
-              name: gibson-openbao-keys
+              name: gibson-openbao-iam-admin-escrow
               key: VAULT_ADMIN_TOKEN
         command: [bash, -ec]
         args:
