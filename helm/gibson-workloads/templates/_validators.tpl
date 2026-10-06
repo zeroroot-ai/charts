@@ -60,7 +60,6 @@ Spec Reqs: 3.4, 3.5.
 {{- if hasKey .Values "dev" -}}
 {{- fail "dev was deleted (charts#399). The dev escape hatches turned off a NetworkPolicy, a data-plane check, SPIFFE and the pull-secret check. Each cluster runs Cilium and the full platform, so none of them has a use. Remove dev from your values." -}}
 {{- end -}}
-{{- if .Values.gibson.enabled -}}
 
 {{- /* Rule 1 — daemon Service type. */ -}}
 {{- $svcType := .Values.gibson.service.type | default "ClusterIP" -}}
@@ -100,7 +99,6 @@ Spec Reqs: 3.4, 3.5.
        namespace" instead. */ -}}
 
 {{- end -}}
-{{- end -}}
 
 {{/* =========================================================================
 gibson.validateRegistryFromSDK
@@ -133,7 +131,6 @@ exact failure mode this guard catches.
 Spec Reqs: 4.7, 14.2.
 ========================================================================= */}}
 {{- define "gibson.validateRegistryFromSDK" -}}
-{{- if .Values.gibson.enabled -}}
 {{- $sdk := .Values.sdk | default dict -}}
 {{- if not $sdk.bypassRegistryValidation -}}
 
@@ -141,7 +138,6 @@ Spec Reqs: 4.7, 14.2.
 {{- fail "validateRegistryFromSDK: sdk.version is empty — the ext-authz registry ConfigMap (Phase H/8.6) downloads the (rpc → authz) registry from the gibson release artifact pinned by sdk.version. Set sdk.version to a published zeroroot-ai/gibson version (e.g. v0.124.3) or set sdk.bypassRegistryValidation=true for an air-gapped install with a baked-in registry. Spec unified-identity-and-authorization Req 4.7." -}}
 {{- end -}}
 
-{{- end -}}
 {{- end -}}
 {{- end -}}
 
@@ -164,7 +160,6 @@ failure here.
 Spec Reqs: 5.1, 13.3, 14.2.
 ========================================================================= */}}
 {{- define "gibson.validateKMSConfigured" -}}
-{{- if .Values.gibson.enabled -}}
 
 {{- $sec := ((.Values.gibson).config).security | default dict -}}
 {{- $kp := $sec.key_provider | default dict -}}
@@ -193,7 +188,6 @@ Spec Reqs: 5.1, 13.3, 14.2.
 {{- end -}}
 
 {{- end -}}
-{{- end -}}
 
 {{/* =========================================================================
 gibson.validateCertManagerCRDs
@@ -213,7 +207,6 @@ Operators MUST install the cert-manager CRDs before installing this chart:
   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
 ========================================================================= */}}
 {{- define "gibson.validateCertManagerCRDs" -}}
-{{- if .Values.gibson.enabled -}}
 {{- $cm := .Values.certManager | default dict -}}
 {{- $issuers := $cm.issuers | default dict -}}
 {{- $le := $issuers.letsencrypt | default dict -}}
@@ -222,7 +215,6 @@ Operators MUST install the cert-manager CRDs before installing this chart:
 {{- $vault := $issuers.vault | default dict -}}
 {{- if not (or $le.enabled $ss.enabled $awspca.enabled $vault.enabled) -}}
 {{- fail "validateCertManagerCRDs: at least one cert-manager issuer must be enabled (certManager.issuers.{letsencrypt,selfsigned,awspca,vault}.enabled). cert-manager is REQUIRED infrastructure (deploy#201) — install cert-manager (kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml) and enable an issuer for your environment (vault for kind, awspca for prod, letsencrypt for ingress-only setups). Spec first-deploy-unblock-and-ha R7.18 + epic one-code-path." -}}
-{{- end -}}
 {{- end -}}
 {{- end -}}
 
@@ -254,7 +246,6 @@ itself called from the daemon StatefulSet template so any chart render that
 includes the daemon hits the check.
 ========================================================================= */}}
 {{- define "gibson.validateTenantStoresConfigured" -}}
-{{- if .Values.gibson.enabled -}}
 
 
 {{- $dp := .Values.dataPlane | default dict -}}
@@ -264,21 +255,15 @@ includes the daemon hits the check.
        platformPostgres.host MUST resolve to a non-empty value — directly or via
        platformPostgres.external.host when external.enabled=true. The
        gibson.platformPostgres.host helper fails render LOUD when neither is
-       set. This validator additionally accepts the legacy data-plane host
-       and the legacy tenant-postgresql alias to keep upgrade paths green for
-       one release cycle. The in-chart-StatefulSet toggle arm is GONE
-       (one-code-path epic deploy#186). */ -}}
+       set. This validator additionally accepts the data-plane host. The
+       in-chart Postgres arm is GONE (one-code-path epic deploy#186, D78). */ -}}
 {{- $pg := $dp.postgres | default dict -}}
-{{- $pgInChart := false -}}
-{{- with (index .Values "tenant-postgresql") -}}
-{{- $pgInChart = .enabled -}}
-{{- end -}}
 {{- $pgHost := and $pg.host (ne $pg.host "") -}}
 {{- $pp := .Values.platformPostgres | default dict -}}
 {{- $ppHost := and (hasKey $pp "host") (ne (toString ($pp.host | default "")) "") -}}
 {{- $ppExternal := and ($pp.external | default dict).enabled (($pp.external).host) -}}
-{{- if not (or $pgInChart $pgHost $ppHost $ppExternal) -}}
-{{- fail (printf "validateTenantStoresConfigured: gibson.enabled=true requires a Postgres data-plane store. Provide one of:\n  a) Consolidated tier (in-cluster):  set platformPostgres.host=\"<cluster-pg-endpoint>\" (preferred — kind: kind-bootstrap CNPG)\n  b) Consolidated tier (external):    set platformPostgres.external.enabled=true + platformPostgres.external.host=\"<rds-endpoint>\"\n  c) Legacy in-chart Postgres:        set tenant-postgresql.enabled=true\n  d) Legacy external Postgres:        set dataPlane.postgres.host=\"<rds-endpoint>\" (port/admin_database/admin_username/admin_password_secret_ref filled in)\nSpec: per-tenant-data-plane-completion Requirements 6.1, 7.1; one-code-path epic deploy#186.") -}}
+{{- if not (or $pgHost $ppHost $ppExternal) -}}
+{{- fail (printf "validateTenantStoresConfigured: the daemon requires a Postgres data-plane store. Provide one of:\n  a) Consolidated tier (in-cluster):  set platformPostgres.host=\"<cluster-pg-endpoint>\" (preferred — kind: kind-bootstrap CNPG)\n  b) Consolidated tier (external):    set platformPostgres.external.enabled=true + platformPostgres.external.host=\"<rds-endpoint>\"\n  c) External data-plane Postgres:    set dataPlane.postgres.host=\"<rds-endpoint>\" (port/admin_database/admin_username/admin_password_secret_ref filled in)\nSpec: per-tenant-data-plane-completion Requirements 6.1, 7.1; one-code-path epic deploy#186.") -}}
 {{- end -}}
 
 {{- /* ---- Neo4j ----------------------------------------------------------- */ -}}
@@ -292,7 +277,7 @@ includes the daemon hits the check.
 {{- $tenantMode = .tenant_mode | default "" -}}
 {{- end -}}
 {{- if not (or (eq $tenantMode "instance") (eq $tenantMode "multi-db")) -}}
-{{- fail (printf "validateTenantStoresConfigured: gibson.enabled=true requires neo4j.tenant_mode to be either \"instance\" or \"multi-db\" (got %q).\n  - instance:  per-tenant Neo4j Community StatefulSets, provisioned by tenant-operator (default for kind/dev)\n  - multi-db:  shared Neo4j Enterprise cluster with tenant_<id> databases (prod-Enterprise migration path)\nSpec: per-tenant-data-plane-completion Requirement 5." $tenantMode) -}}
+{{- fail (printf "validateTenantStoresConfigured: the daemon requires neo4j.tenant_mode to be either \"instance\" or \"multi-db\" (got %q).\n  - instance:  per-tenant Neo4j Community StatefulSets, provisioned by tenant-operator (default for kind/dev)\n  - multi-db:  shared Neo4j Enterprise cluster with tenant_<id> databases (prod-Enterprise migration path)\nSpec: per-tenant-data-plane-completion Requirement 5." $tenantMode) -}}
 {{- end -}}
 {{- if eq $tenantMode "instance" -}}
 {{- $tenantNeo4jTag := "" -}}
@@ -325,7 +310,6 @@ includes the daemon hits the check.
        gibson.redis.host helper hard-fails render via `| required` on an
        empty redis.addr, which covers the only remaining knob. */ -}}
 
-{{- end -}}{{/* end if gibson.enabled */}}
 {{- end -}}{{/* end define */}}
 
 {{/* =========================================================================
@@ -344,33 +328,6 @@ Spec: tenant-operator-saga-capabilities Requirements 2.1 + NFR Security.
 {{- $env := default "" (.Values.global).environment -}}
 {{- if and $kindRoot (eq $env "prod") -}}
 {{- fail (printf "validateKindRootTokenSafety: refusing to render — dataPlane.openbao.kindRootToken=true (which writes the Vault dev-mode root token \"root\" into the cluster) is incompatible with global.environment=%q. Production overlays MUST create the openbao admin Secret out-of-band with a periodic token before `helm install` and leave kindRootToken=false. Spec tenant-operator-saga-capabilities Requirement 2.1." $env) -}}
-{{- end -}}
-{{- end -}}
-
-{{/* =========================================================================
-gibson.validateNoLatestTags
-
-Spec 2 R13 — fails the render when any image string in the chart's well-known
-image-tag values resolves to :latest. This render-side guard is the only one:
-no CI job greps the rendered output for the same regression.
-========================================================================= */}}
-
-{{- define "gibson.validateNoLatestTags" -}}
-{{- $offenders := list -}}
-{{- /* The four Bitnami Postgres aliases this loop used to walk
-       (dashboard-postgresql, tenant-postgresql, fga-postgresql,
-       zitadel-postgresql) are not dependencies of any chart, so the loop could
-       never find an image tag and never report an offender. Deleted with their
-       values blocks in charts#292. SPIRE's in-pod Postgres is a real subchart
-       and is still checked. */ -}}
-{{- /* SPIRE in-pod Postgres */ -}}
-{{- $spirePg := ((.Values.spire).postgresql) | default dict -}}
-{{- $spirePgImg := $spirePg.image | default dict -}}
-{{- if eq ($spirePgImg.tag | default "") "latest" -}}
-{{- $offenders = append $offenders "spire.postgresql.image.tag=latest" -}}
-{{- end -}}
-{{- if $offenders -}}
-{{- fail (printf "validateNoLatestTags: refusing to render — image tags resolved to ':latest' for: %s. Pin to a concrete tag (Spec first-deploy-unblock-and-ha R13)." (join ", " $offenders)) -}}
 {{- end -}}
 {{- end -}}
 

@@ -1561,9 +1561,6 @@ spec:
       port: {{ $openbaoPort }}
       targetPort: http
       protocol: TCP
-      {{- if and (eq .Values.openbao.service.type "NodePort") .Values.openbao.service.nodePort }}
-      nodePort: {{ .Values.openbao.service.nodePort }}
-      {{- end }}
     - name: cluster
       port: 8201
       targetPort: cluster

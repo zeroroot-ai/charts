@@ -422,7 +422,7 @@ spec:
             # terminates TLS, validates the SPIFFE JWT-SVID the dashboard
             # mints, and forwards to the daemon. Spec: dashboard-admin-via-envoy.
             - name: ADMIN_ENVOY_BASE_URL
-              value: {{ .Values.dashboard.adminEnvoyBaseUrl | default (printf "https://api.%s:%v" (.Values.global.domain | default "zeroroot.ai") (.Values.envoy.service.httpsPort | default 443)) | quote }}
+              value: {{ printf "https://api.%s:%v" (.Values.global.domain | default "zeroroot.ai") (.Values.envoy.service.httpsPort | default 443) | quote }}
             # SPIFFE Workload API socket (deploy#1532). The dashboard IS a
             # SPIFFE consumer: src/lib/gibson-client/transport.ts calls
             # spiffeNodeOptions() on every outbound admin RPC to Envoy and

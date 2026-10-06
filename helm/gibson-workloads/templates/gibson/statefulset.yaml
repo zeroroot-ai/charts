@@ -47,8 +47,6 @@ mTLS stays ON in every overlay, with no debugging shortcuts permitted.
 {{- include "gibson.validateObservabilityRetiredToggles" . }}
 {{- /* Spec first-deploy-unblock-and-ha R7.18, OD-6 (templates/_validators.tpl) */ -}}
 {{- include "gibson.validateCertManagerCRDs" . }}
-{{- /* Spec first-deploy-unblock-and-ha R13 — fail render if any pinned image tag is :latest. */ -}}
-{{- include "gibson.validateNoLatestTags" . }}
 {{- /* Spec setec-sandbox-prod-default Task 34 (revised deploy#1080) — reject
        setec.tier=demo and reject a non-empty setec.nodeSelector/tolerations
        (cost-guard: those pin the operator, not Sandbox Pods). */ -}}
@@ -353,23 +351,6 @@ spec:
             # same global.domain default). deploy#662.
             - name: GIBSON_PUBLIC_URL
               value: {{ .Values.dashboard.gibsonPlatformPublicUrl | default (include "gibson.apiOrigin" .) | quote }}
-            # GIBSON_LOKI_URL — the daemon's LogsService queries Loki
-            # server-side and serves mission/daemon logs to the dashboard over
-            # Envoy + ext-authz (dashboard#811). The dashboard no longer dials
-            # Loki itself, so this is the ONLY consumer that matters.
-            #
-            # Unset means logs_service.go reports the backend unavailable and
-            # every mission's Logs tab renders empty — silently, which reads as
-            # "the mission produced no output" rather than "the log backend was
-            # never wired" (deploy#1223). Only set when there is a Loki to
-            # query; an overlay pointing elsewhere sets gibson.lokiUrl.
-            {{- /* The chart ships no Loki. Set gibson.lokiUrl to the address of the
-                   one the cluster already runs; empty disables log query. */ -}}
-            {{- $lokiUrl := (((.Values.gibson).lokiUrl)) | default "" }}
-            {{- if $lokiUrl }}
-            - name: GIBSON_LOKI_URL
-              value: {{ $lokiUrl | quote }}
-            {{- end }}
             # GIBSON_APP_URL — the PRODUCT-surface origin (app.<domain>) used to
             # build user-facing links, above all the self-serve signup email
             # verification link (gibson#1228 companion, deploy
@@ -914,9 +895,6 @@ spec:
               mountPath: /etc/gibson-providers/provider-catalogue.yaml
               subPath: provider-catalogue.yaml
               readOnly: true
-            {{- with .Values.gibson.extraVolumeMounts }}
-            {{- toYaml . | nindent 12 }}
-            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -1074,9 +1052,6 @@ spec:
               - key: ca.crt
                 path: ca.crt
             defaultMode: 0444
-        {{- with .Values.gibson.extraVolumes }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
   volumeClaimTemplates:
     {{- if .Values.gibson.persistence.enabled }}
     - metadata:

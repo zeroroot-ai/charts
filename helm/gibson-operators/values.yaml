@@ -82,16 +82,11 @@ tenantOperator:
   # (gibson#137). Must equal gibson-workloads gibson.serviceAccount.name;
   # scripts/check-daemon-sa-binding.py enforces that on the render.
   daemonServiceAccountName: gibson
-  rbac:
-    create: true
   webhook:
     enabled: true
-    port: 9443
   podDisruptionBudget:
     enabled: true
     minAvailable: 1
-  prometheusRule:
-    enabled: true
   metrics:
     enabled: true
   leaderElection:
@@ -100,7 +95,6 @@ tenantOperator:
     retryPeriod: "2s"
   plans:
     configMapName: gibson-tenant-operator-plans
-    mountPath: /etc/gibson/plans
     sourcePath: files/plans.yaml
   releaseNamespaceRBAC:
     enabled: true
@@ -253,7 +247,6 @@ platformOperator:
       cpu: 500m
       memory: 512Mi
   serviceAccount:
-    create: true
     name: gibson-platform-operator
     annotations: {}
   rbac:
@@ -510,10 +503,6 @@ aws:
 kms:
   keyARN: ""
 
-# Dashboard sub-block needed by tenant-operator deployment for ZITADEL_ISSUER.
-dashboard:
-  zitadel:
-    issuer: ""
 
 # -----------------------------------------------------------------------------
 # PlatformBootstrap CR (Phase 7.8 + masterKey/postgresBundle extension).
@@ -535,12 +524,6 @@ platformBootstrap:
     # uses `https://app.zeroroot.ai:30443` (Envoy NodePort) — the retired
     # `auth.` subdomain is not used.
     issuer: ""
-    # externalDomain — public hostname forged onto the Host header on
-    # every operator → Zitadel API request. Required when the operator
-    # dials Zitadel by in-cluster Service name (Zitadel's vhost router
-    # matches by Host, not SNI). Same value as the Zitadel chart's
-    # configmapConfig.ExternalDomain.
-    externalDomain: ""
     adminTokenRef:
       name: "iam-admin-pat"
       namespace: ""

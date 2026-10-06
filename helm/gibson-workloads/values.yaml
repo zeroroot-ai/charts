@@ -136,8 +136,6 @@ secrets:
   # Spec: D1-A of polyrepo zero-dot-x reset (deploy#244).
   vaultKeys:
     existingSecret: ""
-    externalSecret:
-      enabled: true
 
 
 
@@ -342,8 +340,8 @@ gibson:
     # OCI reference that kubelet pulls by digest. Re-resolve on every bump:
     #   gh api /orgs/zeroroot-ai/packages/container/gibson/versions
     # dev/kind keeps a moving :main tag (values-kind.yaml) — digest-pin-check
-    # exempts the kind overlay. The digest pin is what the validateNoLatestTags
-    # render guard + chart-audit class are about.
+    # exempts the kind overlay. make mirror-digests and the secure-pod image
+    # rule check each digest pin.
     #
     # Pinned to commit 3af964a — the v0.128.2 release commit, which contains
     # gibson#1401. That pairing is REQUIRED, not incidental: #1401 makes
@@ -481,13 +479,8 @@ gibson:
       port: 8086
 
   config:
-    core:
-      parallelLimit: 10
-      timeout: "5m"
-      debug: false
     logging:
       level: info
-      format: json
 
     # Secrets / KEK provider — required (one-code-path) and
     # (daemon-no-K8s-API). The previous `type: kubernetes` was
@@ -611,12 +604,6 @@ gibson:
       #     roles: ["viewer"]
       #     tenant: "dev"
 
-  # Authorization enforcement configuration
-  authz:
-    # enforcementSource is fixed to "fga" after authz-07.
-    # This field is retained for config-file backwards compatibility only;
-    # the daemon ignores any value other than "fga".
-    enforcementSource: "fga"
 
   resources:
     requests:
@@ -805,9 +792,6 @@ idp:
     # Zitadel service (sibling ArgoCD Application installs Zitadel before
     # gibson). EKS overlays override with the public hostname.
     issuer: "http://gibson-zitadel.gibson.svc.cluster.local:8080"
-    # Numeric Zitadel project ID inside which agent service accounts are
-    # created. REQUIRED.
-    projectId: ""
 
 # -----------------------------------------------------------------------------
 # SPIFFE identity inputs the daemon needs at runtime
@@ -922,7 +906,6 @@ dashboard:
   # provisioning routes (/api/admin/provisioning/*). Spec: service-acting-auth.
   zitadel:
     issuer: ""
-    authUrl: ""
     # audience — the JWT audience claim the dashboard verifier asserts.
     # Must match additionalAudiences set on the Zitadel project by the
     # post-install bootstrap Job. Override in env overlays only if the
@@ -959,8 +942,6 @@ dashboard:
   service:
     type: ClusterIP
     port: 3000
-    # nodePort: 30000  # Only used if type is NodePort
-    # sessionAffinity: ClientIP  # Optional: enable session affinity
 
   # Dashboard auth-hardening controls.
   #
@@ -1141,9 +1122,6 @@ dashboard:
       cpu: 1000m
       memory: 1Gi
 
-  # Environment variable overrides for the dashboard container
-  env: {}
-    # GIBSON_API_URL: "http://gibson:50051"
 
   # Extra environment variables (optional)
   extraConfig: {}
@@ -1215,18 +1193,6 @@ dashboard:
 ingress:
   # Master switch -- disabled by default (opt-in for production).
   enabled: false
-  # The shared domain for both HTTP and gRPC traffic.
-  host: "platform.gibson.local"
-  # IngressClass name -- must match the installed ingress controller.
-  className: "nginx"
-  # Annotations applied to the HTTP ingress only.
-  # (gRPC-specific annotations are under ingress.grpc.annotations)
-  annotations: {}
-  tls:
-    enabled: false
-    # Secret containing the TLS cert/key pair for the host.
-    # A cert-manager Certificate writes it.
-    secretName: "gibson-tls"
   grpc:
     # Enable gRPC routing alongside HTTP on the same host.
     # When false, only the HTTP (dashboard) ingress is created.
@@ -1286,15 +1252,6 @@ docs:
 # Using custom redis-stack deployment because Bitnami doesn't properly load
 # Redis modules (RediSearch, RedisJSON, etc.) that Gibson requires.
 redis:
-  # Redis is structural infrastructure (deploy#224 deleted
-  # the `redis.provider` enum and `redis.external` substitution). The
-  # chart always renders the in-cluster redis-stack StatefulSet + Service
-  # + auth Secret from templates/databases/redis-stack.yaml. There is no
-  # "external Redis" mode. `redis.enabled` + `redis.auth.enabled` are
-  # also deleted; Redis is on and authenticated everywhere.
-  # Disable Bitnami subchart - using custom redis-stack deployment
-  bitnami:
-    enabled: false
 
   image:
     # deploy#1170 — mirrored to ghcr; Docker Hub is rate-limited per NAT IP.
@@ -1304,18 +1261,6 @@ redis:
     pullPolicy: IfNotPresent
 
   auth:
-    # Spec 3 R11 — literal password REMOVED. The chart generates a random
-    # password persisted via the lookup-then-keep pattern in
-    # templates/databases/redis-stack.yaml, OR (when set) consumes an
-    # external Secret named by passwordSecret. ESO-managed prod overlays
-    # set passwordSecret + passwordSecretKey; in-chart kind/dev leaves
-    # both empty and the chart auto-generates.
-    #
-    # `redis.auth.enabled` was deleted (one-code-path epic / deploy#199)
-    # — Redis auth is always on. The redis-stack StatefulSet
-    # unconditionally consumes the password Secret named by the
-    # gibson.redisPasswordSecretName helper.
-    password: ""
     passwordSecret: ""
     passwordSecretKey: "redis-password"
 
@@ -1451,69 +1396,7 @@ platformPostgres:
     passwordSecretName: ""
     passwordSecretKey: "password"
 
-# -----------------------------------------------------------------------------
-# PostgreSQL for the per-tenant data-plane admin pool (Bitnami Subchart,
-# alias: tenant-postgresql).
-# Spec: per-tenant-data-plane-completion Task 24 / Req 7.1.
-#
-# Distinct instance from dashboard-postgresql by design (D1 — separation of
-# control plane vs. data plane). The daemon connects here as gibson_admin
-# (CREATEDB privilege) and creates per-tenant databases on demand.
-#
-# Password is sourced from the chart-managed gibson-db-secrets Secret under
-# the TENANT_POSTGRES_ADMIN_PASSWORD key, populated by
-# templates/secrets/db-secrets.yaml. The dataPlane.postgres.host wiring in
-# templates/gibson/configmap.yaml points the daemon at this instance's
-# Service (Task 25).
-# -----------------------------------------------------------------------------
-tenant-postgresql:
-  enabled: true
-
-  image:
-    registry: ghcr.io
-    repository: zeroroot-ai/mirror/bitnami-postgresql
-    # Spec 2 R13 — pin every Bitnami Postgres alias to a concrete tag.
-    # Bumped together; CI's chart-audit gate fails if any tag resolves to :latest.
-    tag: "16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
-
-  auth:
-    # gibson_admin must hold CREATEDB; granted via the Bitnami init-script
-    # mechanism (overrideUserDatabase=false leaves admin role provisioning
-    # to the bootstrap migration in the daemon, which runs ALTER ROLE
-    # gibson_admin CREATEDB once on startup).
-    username: gibson_admin
-    database: postgres
-    existingSecret: "gibson-db-secrets"
-    secretKeys:
-      adminPasswordKey: "postgres-password"
-      userPasswordKey: "TENANT_POSTGRES_ADMIN_PASSWORD"
-
-  primary:
-    persistence:
-      enabled: true
-      # 50Gi is the prod-tier default; tenant DBs are typically small (~100MB
-      # each) but the admin instance hosts up to ~500 tenants, plus WAL.
-      size: 50Gi
-    resources:
-      # Medium-tier — handles ~500 small tenants without saturating I/O.
-      requests:
-        cpu: 500m
-        memory: 1Gi
-      limits:
-        cpu: "2"
-        memory: 4Gi
-    service:
-      ports:
-        postgresql: 5432
-
-  service:
-    type: ClusterIP
-    port: 5432
-
 openfga:
-  # Spec 3 §3 — HA primitives (PDB, NetworkPolicy).
-  podDisruptionBudget:
-    enabled: ~        # auto-on when replicas > 1
 
   # NOTE (deploy#1170): there is deliberately NO `image:` block here. The
   # OpenFGA Deployment is rendered by the UMBRELLA's `openfga` subchart
@@ -1523,32 +1406,15 @@ openfga:
   # v1.15.1, so it read as the image pin and was not one. Override the real
   # image at helm/gibson/values.yaml `openfga.image`.
 
-  replicas: 1
 
   service:
-    type: ClusterIP
     # HTTP API (used by go-sdk and the fga-init job)
     httpPort: 8080
     # gRPC API
     grpcPort: 8081
 
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 256Mi
 
-  # playground: expose the built-in OpenFGA Playground UI at /playground
-  playground:
-    enabled: false
 
-  # datastore: which backend OpenFGA stores tuples in.
-  # "postgres" requires fga-postgresql to be enabled (handled automatically).
-  # "memory" is useful for single-node dev/test — data is lost on pod restart.
-  datastore:
-    engine: postgres  # postgres | memory
 
 
 # -----------------------------------------------------------------------------
@@ -1563,6 +1429,9 @@ openfga:
 # (autoscaling, podDisruptionBudget) remain.
 # -----------------------------------------------------------------------------
 extAuthz:
+  # logLevel is the ext-authz log level (EXT_AUTHZ_LOG_LEVEL). The hosted
+  # identity exit test sets debug, so each allow decision is in the log.
+  logLevel: info
   # Capability-Grant JWT validation (deploy#1155). ext-authz validates the
   # agent+jwt credentials off-cluster components present. Key resolution is
   # per-kid: the template always points EXT_AUTHZ_CGJWT_KEYS_URL at the
@@ -1992,9 +1861,6 @@ envoy:
     # apex routing (apex serves dashboard; www 301-redirects to apex).
     api: ""
     app: ""
-    # `auth` is currently unused — configmap.yaml has no auth. fallback (the
-    # auth.<domain> host was retired). Kept for backward-compat override hatch.
-    auth: ""
     apex: ""
     docs: ""
   # Zitadel JWT issuer the jwt_authn filter validates against. When empty,
@@ -2527,25 +2393,6 @@ openbao:
   # Schedule in the gibson-velero chart copies the data directory as files to
   # the durable bucket. A Raft snapshot is not possible on `storage "file"`.
 
-  # Transit secrets engine for capability-grant JWT signing.
-  # The init Job enables the engine and creates the EdDSA key on first install.
-  # Idempotent — re-running against an already-initialized OpenBao is a no-op.
-  transit:
-    enabled: true
-    # Mount path of the Transit engine inside OpenBao. The daemon's KeyProvider
-    # interface (gibson/internal/crypto) reads from this path.
-    mountPath: "transit"
-    # Key name used for CG-JWT signing operations. EdDSA / ed25519 per spec
-    # Req 5.1.
-    keyName: "gibson-cg-jwt-signing"
-    keyType: "ed25519"
-    # Init container image used by the post-install hook. Must include
-    # vault, jq, and curl. The official openbao/openbao image satisfies
-    # all three.
-    initImage:
-      repository: ghcr.io/zeroroot-ai/mirror/openbao
-      tag: "2.5.3@sha256:fdc6da21ca6963560c32336fd7feb9cf2d5e52668f1a1647205a4b41171f0806"
-      pullPolicy: IfNotPresent
 
   persistence:
     enabled: true
@@ -2732,18 +2579,6 @@ spire:
   # release name.
   controllerManager:
     className: "gibson-gibson-spire"
-    enabled: true
-    image:
-      repository: ghcr.io/spiffe/spire-controller-manager
-      tag: "0.6.0"
-      pullPolicy: IfNotPresent
-    resources:
-      requests:
-        cpu: 50m
-        memory: 64Mi
-      limits:
-        cpu: 200m
-        memory: 128Mi
 
   # The SPIRE server is rendered by the umbrella chart's own `spire`
   # sub-chart dependency (helm/gibson/Chart.yaml). This chart's in-chart
@@ -2752,11 +2587,6 @@ spire:
   # both read (ADR-0164).
 
   agent:
-    # When false, suppresses the upstream SPIRE chart's built-in agent
-    # DaemonSet — used in kind dev where the gibson-spire sibling release
-    # owns the agent. Sub-feature toggle, not a service disable.
-    enabled: true
-    logLevel: "INFO"
     # Workload API socket path (the SPIFFE_ENDPOINT_SOCKET env var the SDK +
     # dashboard expect). Spec unified-identity-and-authorization Phase H/8.1
     # standardizes the new path under /run/spire/agent-sockets/api.sock; the
@@ -2764,17 +2594,6 @@ spire:
     # so existing overlays don't break on chart upgrade. Override per-overlay
     # to migrate.
     workloadApiSocket: "/run/spire/sockets/api.sock"
-    image:
-      repository: ghcr.io/spiffe/spire-agent
-      tag: "1.10.4"
-      pullPolicy: IfNotPresent
-    resources:
-      requests:
-        cpu: 50m
-        memory: 64Mi
-      limits:
-        cpu: 200m
-        memory: 128Mi
 
   # Platform identity admission — the ValidatingAdmissionPolicy at
   # templates/spire-server/platform-identity-admission.yaml.
@@ -2879,11 +2698,6 @@ spire:
   # hardening spec wants a SPIFFE-aware sidecar, it is authored fresh against
   # a current spiffe-helper release, not revived from here.
 
-  # SPIFFE CSI driver. When enabled=false, suppresses the upstream SPIRE
-  # chart's built-in CSI driver — used in kind dev where the gibson-spire
-  # sibling release owns it. Sub-feature toggle, not a service disable.
-  spiffeCSIDriver:
-    enabled: true
 
 # Tenant Operator (spec: tenant-control-plane-foundation)
 # Standalone kubebuilder operator that reconciles Gibson Tenant CRDs and
@@ -2906,57 +2720,10 @@ connectorOperator:
     name: gibson-connector-operator
 
 tenantOperator:
-  namespace: gibson
-  replicas: 2
 
-  # Spec 3 §3 — HA primitives (PDB, NetworkPolicy).
-  podDisruptionBudget:
-    enabled: ~        # auto-on when replicas > 1
 
-  # Release-namespace Role+RoleBinding (templates/tenant-operator/
-  # release-namespace-rbac.yaml). Default true — disable only if an
-  # overlay manages the operator's release-namespace RBAC externally.
-  # Spec: secrets-blast-radius-reduction Phase 1.1.
-  releaseNamespaceRBAC:
-    enabled: true
 
-  # Pre-upgrade Helm hook that ensures every existing Tenant namespace
-  # has the per-tenant Role+RoleBinding before the chart upgrade
-  # narrows the operator's ClusterRole. Default true for one release
-  # cycle so upgrades from older charts work without manual steps;
-  # safe to flip false on subsequent upgrades. Spec:
-  # secrets-blast-radius-reduction Phase 1.3.
-  rbacBackfill:
-    enabled: true
-    timeout: "5m"
 
-  image:
-    # Consolidated monorepo publishes this as
-    # ghcr.io/zeroroot-ai/tenant-operator; the old `gibson-tenant-operator`
-    # package froze on 2026-06-22. Workload/SA name stays gibson-tenant-operator.
-    repository: ghcr.io/zeroroot-ai/tenant-operator
-    # Pinned to v0.3.1 — adds list;watch RBAC for roles/rolebindings so the
-    # controller-runtime cache initialises and the cleanup finalizer runs.
-    # See spec .spec-workflow/specs/tenant-operator-rbac-fix/. Skips operator
-    # versions v0.2.0–v0.3.0 (chart pin was stale; bumping to operator
-    # current). Earlier intervening releases between v0.1.0 and v0.3.0 are
-    # documented in the operator's CHANGELOG.
-    #
-    # deploy#789: digest-pinned for staging/prod immutability.
-    # The tenant-operator package publishes main/latest/sha-* only (no
-    # vX.Y.Z), so the digest below is the current `main` (staging/prod deploy
-    # reality) — identical to the gibson-operators chart's tenant-operator pin.
-    # kind keeps :main, exempt. Re-resolve:
-    #   gh api /orgs/zeroroot-ai/packages/container/tenant-operator/versions
-    # sha-ee35187 is gibson#1736 on main: the per-tenant Neo4j pins its heap
-    # and page cache to the tier limit. Before it, the tenant data plane's
-    # Neo4j sized itself from detected memory, which lies inside a kind node
-    # on a GitHub runner, so tenant-primary-neo4j never became ready and the
-    # Tenant CR never reached Ready (deploy#1766, run 33600876035). The
-    # package publishes main/latest/sha-* only, so the commit sha tag is the
-    # honest provenance.
-    tag: "v0.153.2@sha256:96e4d0d4b083b6bfa3eacc820f0a0ea2f5b5bc9f29dbcdefa7c2a0f5633686f7"
-    pullPolicy: IfNotPresent
   # ServiceAccount — IRSA annotations injected via serviceAccount.annotations
   # in the prod overlay. The SA name is fixed to "gibson-tenant-operator"
   # (referenced by the ClusterRoleBinding, webhook Deployment, and the
@@ -2968,40 +2735,6 @@ tenantOperator:
   serviceAccount:
     name: "gibson-tenant-operator"
     annotations: {}
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
-  leaderElection:
-    leaseDuration: 15s
-    renewDeadline: 10s
-    retryPeriod: 2s
-  metrics:
-    enabled: true
-    port: 8080
-  # Orphan-reaper: safety net for Terminating tenant-* namespaces that have
-  # orphan child CRs left over when the teardown saga is bypassed or the
-  # operator restarts mid-saga. After gracePeriodSeconds from the namespace's
-  # deletionTimestamp, the reaper strips allowlisted finalizers
-  # (gibson.zeroroot.ai/{enrollment,grant,tenantmember}-cleanup) so the namespace can
-  # finalize. Metrics: gibson_tenant_operator_orphan_finalizers_stripped_total
-  # and gibson_tenant_operator_stuck_terminating_namespaces. See the
-  # tenant-teardown-orphan-gc spec.
-  orphanReaper:
-    enabled: true
-    gracePeriodSeconds: 300
-  # Mutating admission webhook that stamps ownerReferences on CREATE for
-  # AgentEnrollment/TenantMember so Kubernetes GC cascades
-  # cleanup when a parent Tenant is deleted (even if the saga is bypassed).
-  # failurePolicy is Ignore — the reconciler-side backfill remains the
-  # durable convergence path, so a webhook outage cannot wedge tenant
-  # creation. Cert is self-signed via Helm's genCA/genSignedCert and
-  # preserved across upgrades via `lookup` — cert-manager is NOT required.
-  webhook:
-    enabled: true
 
 # =============================================================================
 # activeSessionBackfill — one-shot repair Job (SECURITY, deploy#1186)

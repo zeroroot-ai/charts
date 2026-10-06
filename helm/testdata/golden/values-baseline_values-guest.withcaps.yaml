@@ -3202,11 +3202,6 @@ data:
     core:
       # Spec 3 R3 — daemon runs as nonroot uid 65532; HOME is /var/lib/gibson.
       home_dir: /var/lib/gibson/.gibson
-      # Nil-safe access: .Values.gibson.config.core may be unset when an
-      # overlay only contributes other gibson.config.* subkeys (e.g.,
-      # values-kind.yaml only sets gibson.config.identity). Parenthesized
-      # paths return nil instead of erroring on missing intermediates.
-      timeout: 5m
 
     security:
       key_provider:
@@ -3238,7 +3233,6 @@ data:
 
     logging:
       level: info
-      format: json
 
     registry:
       type: platform
@@ -3297,9 +3291,7 @@ data:
     # the bootstrap credential reaches the tenant-operator instead.
     # Spec: per-tenant-data-plane-completion Req 1, D1, D5; Tasks 6, 25.
     #
-    # Host resolution order (gibson.tenant.dbHost):
-    #   1. dataPlane.postgres.host (explicit override — RDS, Aurora, etc.)
-    #   2. gibson-tenant-postgresql Service (in-chart subchart)
+    # Host: dataPlane.postgres.host (gibson.tenant.dbHost).
     tenant_postgres:
       host: "platform-postgres-rw.gibson.svc.cluster.local"
       port: 5432
@@ -3319,11 +3311,6 @@ data:
       enabled: false
       metrics:
         enabled: false
-
-    tracing:
-      enabled: false
-      sample_rate: 1
-      service_name: gibson
 
     # Prometheus metrics listener (Spec security-hardening R20).
     # Daemon-owned :9090 mTLS endpoint; cert material mounted from the
@@ -13110,7 +13097,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "tmp,spire-agent-socket"
-        checksum/config: 388f29ebfe62f9ca80a044fbdc8abcb28c11f784bd34ac06afd6fc4047ec087d
+        checksum/config: ae1130af84fe7916caa6ea728ec2c2d7a626315d008df9cc94c967c22da80256
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). Consumer envFrom
         # resolution is frozen for the pod's lifetime; Reloader watches the
         # named Secrets and triggers a rolling restart when any changes.
@@ -13410,16 +13397,6 @@ spec:
             # same global.domain default). deploy#662.
             - name: GIBSON_PUBLIC_URL
               value: "https://api.localhost.zeroroot.ai"
-            # GIBSON_LOKI_URL — the daemon's LogsService queries Loki
-            # server-side and serves mission/daemon logs to the dashboard over
-            # Envoy + ext-authz (dashboard#811). The dashboard no longer dials
-            # Loki itself, so this is the ONLY consumer that matters.
-            #
-            # Unset means logs_service.go reports the backend unavailable and
-            # every mission's Logs tab renders empty — silently, which reads as
-            # "the mission produced no output" rather than "the log backend was
-            # never wired" (deploy#1223). Only set when there is a Loki to
-            # query; an overlay pointing elsewhere sets gibson.lokiUrl.
             # GIBSON_APP_URL — the PRODUCT-surface origin (app.<domain>) used to
             # build user-facing links, above all the self-serve signup email
             # verification link (gibson#1228 companion, deploy
