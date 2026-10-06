@@ -1328,8 +1328,8 @@ here. The render fails on any other name.
 {{- end -}}
 
 {{/*
-gibson.assertKeysDeleted: the render fails when a deleted values key is set to
-a value. A silent ignore would keep an old setting in an overlay that nobody
+gibson.assertKeysDeleted: the render fails when a deleted values key is set,
+even to false or an empty string. A silent ignore would keep an old setting in an overlay that nobody
 reads. `use` names what replaces the keys. charts#392 (the trust domain keys)
 and charts#374 (the signup keys) both call it.
   {{ include "gibson.assertKeysDeleted" (dict "ctx" $ "keys" (list "a.b") "use" "registration") }}
@@ -1345,7 +1345,7 @@ and charts#374 (the signup keys) both call it.
 {{- $found = false -}}
 {{- end -}}
 {{- end -}}
-{{- if and $found (not (empty $node)) -}}
+{{- if $found -}}
 {{- fail (printf "%s was deleted. Use %s." $k $.use) -}}
 {{- end -}}
 {{- end -}}
