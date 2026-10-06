@@ -109,13 +109,6 @@ tenantOperator:
   orphanReaper:
     enabled: true
     gracePeriodSeconds: 300
-  # The daemon's K8s Service is gibson.fullname of the WORKLOADS release:
-  # "gibson-workloads" when that chart is its own release (gitops/kind — this
-  # default), "gibson-gibson-workloads" under the umbrella chart's single
-  # release `gibson` (overridden in helm/gibson/values.yaml — deploy#879).
-  # tenant-operator#70 documented the older legacy-release default
-  # ("gibson:50051").
-  daemonGrpcAddress: "gibson-workloads:50051"
 
   # smtp — the tenant-operator's own mail transport, for the welcome email a
   # new tenant receives. UNDECLARED UNTIL charts#308: the template read

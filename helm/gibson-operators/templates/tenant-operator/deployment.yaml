@@ -237,11 +237,9 @@ spec:
             # were wrongly built from: a human's browser cannot reach it.
             - name: GIBSON_APP_URL
               value: {{ .Values.gibson.appUrl | default (include "gibson.externalOrigin" .) | quote }}
-            # Phase 5.1 of spec tenant-provisioning-unification-phase2:
-            # when GIBSON_DAEMON_GRPC_ADDRESS is set, the operator uses
-            # Connect-RPC against the daemon's PlatformOperatorService
-            # directly instead of fanning out through the dashboard. The
-            # HTTP path remains in place for staged rollback.
+            # Phase 5.1 of spec tenant-provisioning-unification-phase2: the
+            # operator calls the daemon's PlatformOperatorService over
+            # Connect-RPC at this address.
             - name: GIBSON_DAEMON_GRPC_ADDRESS
               # gibson-common library helper (deploy#179): single source
               # of truth for the daemon dialing address. The default
