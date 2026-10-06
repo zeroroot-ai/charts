@@ -41,8 +41,8 @@ WHAT MAKES THE MATCH
     fails with `unable to fetch SVID` — that is the selector working.
 
   - The SVID it receives is `spiffe://<td>/platform/helm-test`, which
-    appears in no `spiffe.callbackPeerSVIDs` and no
-    `spiffe.allowedPeerIDs`. It authorises nothing. That is deliberate:
+    appears in no `spiffe.callbackPeers` and no
+    `spiffe.allowedPeers`. It authorises nothing. That is deliberate:
     the test proves the issuance path works, and a probe should not need
     privilege to do that.
 
@@ -91,7 +91,7 @@ spec:
           set -eu
           ERR='{{ include "gibson-workloads.tests.errorPrefix" . }}'
           SOCK='{{ .Values.spire.agent.workloadApiSocket | default "/run/spire/sockets/api.sock" }}'
-          EXPECT_TD='{{ .Values.spire.server.trustDomain | default "zeroroot.ai" }}'
+          EXPECT_TD='{{ include "gibson.trustDomain" . }}'
 
           if [ ! -S "$SOCK" ]; then
             echo "$ERR spire-attestation: workload-api socket missing at $SOCK"

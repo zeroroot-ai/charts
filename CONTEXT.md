@@ -51,9 +51,10 @@ A cluster is both `production` and `eks`.
 _Avoid_: env values, cloud profile, substrate rung
 
 **Trust domain**:
-The SPIFFE trust domain, `zeroroot.ai`. It appears in every SPIFFE ID and every
-component JWT audience. It is a product invariant and ships in the public chart.
-A customer does NOT change it.
+The SPIFFE trust domain of one install, set by `global.spire.trustDomain`
+(ADR-0164). It appears in every SPIFFE ID. Each install sets its own: the SaaS
+uses `zeroroot.ai`, and a second cluster or an on-prem install uses a different
+name. It cannot change on a running install.
 _Avoid_: domain, the trust root
 
 **Serving domain**:
@@ -122,8 +123,8 @@ _Avoid_: pull secret setup, image auth
 
 - `zeroroot.ai` was used to mean both the SPIFFE **trust domain** and the SaaS
   **serving domain**. Resolved: these are distinct concepts. The trust domain
-  ships in the public chart and is fixed. The serving domain is `global.domain`
-  and every customer replaces it. `scripts/check-hostnames.py`
+  is `global.spire.trustDomain`, and each install sets its own. The serving
+  domain is `global.domain`, and each install sets it too. `scripts/check-hostnames.py`
   polices the serving-domain plane only, which is what its "SECOND addressing
   plane" comment means.
 - `observability.provider` read as a choice between two working shapes. It was

@@ -83,7 +83,7 @@ spec:
           env:
             - {name: EXT_AUTHZ_GRPC_ADDR, value: ":9001"}
             - {name: EXT_AUTHZ_ZITADEL_ISSUER, value: "https://app.example.test"}
-            - {name: EXT_AUTHZ_DAEMON_SVID, value: "spiffe://zeroroot.ai/platform/daemon"}
+            - {name: EXT_AUTHZ_DAEMON_SVID, value: "spiffe://example.test/platform/daemon"}
             - {name: EXT_AUTHZ_CGJWT_KEYS_URL, value: "http://gibson:8086/capabilitygrant/v1/keys"}
             - {name: EXT_AUTHZ_REDIS_URL, value: "redis://gibson-redis-master:6379/0"}
 """

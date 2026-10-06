@@ -600,12 +600,9 @@ gibson:
 
     # SPIFFE/SPIRE workload identity configuration
     # Used for in-cluster workload authentication via mTLS
+    # The trust domain is the one value global.spire.trustDomain (ADR-0164).
     spiffe:
-      trustDomain: "zeroroot.ai"
       workloadAPISocket: "/run/spire/sockets/api.sock"
-      infrastructureIDs:
-        - "spiffe://zeroroot.ai/platform/dashboard"
-        - "spiffe://zeroroot.ai/platform/daemon"
 
     # Role bindings map group claims to Gibson roles.
     # Values must be Gibson role names: owner, admin, operator, viewer.
@@ -866,52 +863,39 @@ idp:
 # SPIFFE identity inputs the daemon needs at runtime
 # -----------------------------------------------------------------------------
 # The daemon trusts identity headers ONLY when the upstream peer cert is
-# the Envoy SPIFFE SVID. The expected Envoy SPIFFE ID is supplied here so
-# the daemon's identity interceptor can validate the peer cert URI SAN
-# instead of relying on a hard-coded constant.
-#
-# REQUIRED — chart fails to render when empty. Each overlay supplies its
-# own trust-domain-correct value.
+# the Envoy SPIFFE SVID. The chart renders the expected Envoy SPIFFE ID from
+# the trust domain of the install, so the daemon's identity interceptor
+# validates the peer cert URI SAN against it.
 # -----------------------------------------------------------------------------
 spiffe:
-  # SPIFFE ID Envoy presents to the daemon, e.g.
-  # `"spiffe://zeroroot.ai/platform/envoy"`. Must match the workload
-  # registration entry the SPIRE controller-manager creates for the
-  # Envoy ServiceAccount.
-  envoyID: ""
-  # Trust domain for SPIFFE IDs in this cluster, e.g. "zeroroot.ai".
-  # Used to construct SPIFFE URIs in templates; overlays set per-env.
-  trustDomain: ""
-  # Additional peer SPIFFE IDs allowed by the daemon's SPIFFE mTLS listener.
-  # Overlays append environment-specific IDs here.
-  allowedPeerIDs: []
-  # Peer SPIFFE IDs that the daemon's harness callback listener accepts.
-  # After spec critical-tls-no-fallbacks, the harness callback listener at
-  # :50001 is wrapped in SPIFFE mTLS with AuthorizeOneOf(callbackPeerSVIDs...).
-  # MUST be non-empty when SPIFFE is configured (the daemon fails to start
-  # otherwise — fail-closed per Requirement 1.5). Each entry is a SPIFFE ID
-  # under spiffe.trustDomain. Rendered into GIBSON_CALLBACK_PEER_SVIDS
-  # (comma-separated) on the daemon StatefulSet env.
+  # Each SPIFFE ID of the platform is the trust domain of the install
+  # (global.spire.trustDomain, ADR-0164) and a path. The lists below hold
+  # paths only. The chart builds each full ID with gibson.spiffeID, so no
+  # values file holds a domain. The IDs of Envoy and of the daemon are fixed:
+  # platform/envoy and platform/daemon.
   #
-  # Examples for an in-cluster deployment:
-  #   - spiffe://zeroroot.ai/platform/dashboard
-  #   - spiffe://zeroroot.ai/platform/agent
-  #   - spiffe://zeroroot.ai/platform/tool
-  callbackPeerSVIDs: []
-
-  # deploy#852 — the daemon's SPIFFE ID (ext-authz pins this when fetching the
-  # authz registry over mTLS, so it can never trust a forged/impersonated
-  # source). Rendered into EXT_AUTHZ_DAEMON_SVID.
-  daemonID: "spiffe://zeroroot.ai/platform/daemon"
-
-  # deploy#852 — the closed set of SVIDs allowed to READ the daemon's
-  # authz-registry mTLS endpoint (today: ext-authz). MUST be non-empty when
-  # SPIFFE is configured — the daemon fails closed on an empty list rather
-  # than serve the enforcement policy openly. Rendered into
-  # GIBSON_AUTHZ_REGISTRY_READER_SVIDS (comma-separated) on the daemon
-  # StatefulSet. The kind/base default below covers the in-cluster ext-authz.
-  authzRegistryReaderSVIDs:
-    - "spiffe://zeroroot.ai/platform/ext-authz"
+  # Direct control-plane callers of the daemon's main gRPC listener, beside
+  # Envoy. Rendered into GIBSON_SPIFFE_ALLOWED_PEER_IDS. The connector-operator's
+  # ConnectorInstance finalizer revokes the connector grant through the daemon
+  # (gibson#1566); the daemon's method policy limits that peer to
+  # RevokeConnectorGrant.
+  allowedPeers:
+    - platform/tenant-operator
+    - platform/connector-operator
+  # Peers that the daemon's harness callback listener (:50001, SPIFFE mTLS with
+  # AuthorizeOneOf) accepts. MUST be non-empty when SPIFFE is configured: the
+  # daemon fails to start otherwise (critical-tls-no-fallbacks Requirement 1.5).
+  # Rendered into GIBSON_CALLBACK_PEER_SVIDS.
+  callbackPeers:
+    - platform/dashboard
+    - platform/envoy
+    - platform/daemon
+  # The closed set of SVIDs allowed to READ the daemon's authz-registry mTLS
+  # endpoint (deploy#852). MUST be non-empty when SPIFFE is configured: the
+  # daemon fails closed on an empty list rather than serve the enforcement
+  # policy openly. Rendered into GIBSON_AUTHZ_REGISTRY_READER_SVIDS.
+  authzRegistryReaders:
+    - platform/ext-authz
 
   # gRPC reflection on the daemon's harness callback listener. OFF by
   # default — production images do not register reflection. Set to "1"
@@ -2222,7 +2206,6 @@ envoy:
     # SPIFFE mTLS validation. Trust-domain SAN matching is enforced by the
     # Envoy filter — never URI prefix matching.
     enabled: true
-    trustDomain: "zeroroot.ai"
     workloadApiSocket: "/run/spire/sockets/api.sock"
   tls:
     # The Envoy edge TLS material is owned exclusively by cert-manager via
@@ -2996,25 +2979,17 @@ spire:
         cpu: 200m
         memory: 128Mi
 
-  server:
-    # The SPIRE server is now rendered by the umbrella chart's own `spire`
-    # sub-chart dependency (helm/gibson/Chart.yaml) — the standalone gitops
-    # Argo Application (apps/prod/spire.yaml) that briefly owned it was
-    # itself retired with the single-main collapse. This chart's in-chart
-    # server, removed in deploy#751 (PRD deploy#750), stays gone either way.
-    #
-    # trustDomain is the one server key the chart still reads: SPIFFE-
-    # consuming templates (envoy, dashboard, ClusterSPIFFEIDs) compose
-    # SPIFFE IDs from it. It MUST match the standalone server's configured
-    # trust domain (global.spire.trustDomain: zeroroot.ai).
-    trustDomain: "zeroroot.ai"
+  # The SPIRE server is rendered by the umbrella chart's own `spire`
+  # sub-chart dependency (helm/gibson/Chart.yaml). This chart's in-chart
+  # server, removed in deploy#751 (PRD deploy#750), stays gone. The trust
+  # domain is global.spire.trustDomain, which the SPIRE chart and this chart
+  # both read (ADR-0164).
 
   agent:
     # When false, suppresses the upstream SPIRE chart's built-in agent
     # DaemonSet — used in kind dev where the gibson-spire sibling release
     # owns the agent. Sub-feature toggle, not a service disable.
     enabled: true
-    trustDomain: "zeroroot.ai"
     skipKubeletVerification: false
     logLevel: "INFO"
     # Workload API socket path (the SPIFFE_ENDPOINT_SOCKET env var the SDK +

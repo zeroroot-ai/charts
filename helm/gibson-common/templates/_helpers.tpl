@@ -718,7 +718,7 @@ The daemon's own SA is `gibson.serviceAccountName` above — release-derived
 
        This SA and its ClusterSPIFFEID are deliberately NOT in
        PROTECTED_COMPONENTS / PROTECTED_SAS: `platform/helm-test` appears in
-       no callbackPeerSVIDs and no allowedPeerIDs, so it authorises nothing.
+       no spiffe.callbackPeers and no spiffe.allowedPeers, so it authorises nothing.
        Do not add anything to it. */ -}}
 {{- printf "%s-helm-test" (include "gibson.fullname" .) -}}
 {{- end }}
@@ -903,7 +903,7 @@ dependency.
   guard's purpose.
 */ -}}
 {{- $spiffe := (.Values.gibson.auth).spiffe -}}
-{{- $daemonMtls := and $spiffe (kindIs "map" $spiffe) $spiffe.workloadAPISocket $spiffe.trustDomain -}}
+{{- $daemonMtls := and $spiffe (kindIs "map" $spiffe) $spiffe.workloadAPISocket -}}
 {{- if $daemonMtls -}}
 {{- $envoyCfg := .Files.Get "files/envoy/envoy.yaml" -}}
 {{- /*
@@ -1055,7 +1055,8 @@ memory feedback_spiffe_mtls_required.md as a structural chart guard.
 Spec: in-cluster-mtls-restoration, Component 2 / Requirement 1.
 
 ACTIVE (Task 18 landed). The body calls `fail` when gibson.auth.spiffe is
-absent or missing workloadAPISocket/trustDomain, and the daemon statefulset
+absent or missing workloadAPISocket, or when global.spire.trustDomain is
+empty, and the daemon statefulset
 invokes it. The `dev.disableSPIFFE` escape hatch is kind-only and is rejected in
 production overlays by CI lint.
 */}}
@@ -1065,15 +1066,15 @@ production overlays by CI lint.
   or missing the required keys. Memorialises memory feedback_spiffe_mtls_required.md
   as a structural chart guard.
 
-  Note: the actual values use camelCase (workloadAPISocket / trustDomain) per
+  Note: the actual values use camelCase (workloadAPISocket) per
   values.yaml gibson.auth.spiffe block; the daemon configmap renders the
   snake_case form for the daemon binary's config.
 */ -}}
 {{- $spiffe := (.Values.gibson.auth).spiffe -}}
 {{- /* dev.disableSPIFFE escape hatch — kind-only; rejected in prod overlays via CI lint */ -}}
 {{- if (.Values.dev).disableSPIFFE -}}
-{{- else if not (and $spiffe (kindIs "map" $spiffe) $spiffe.workloadAPISocket $spiffe.trustDomain) -}}
-{{- fail "gibson.auth.spiffe must be populated in every overlay (gibson.auth.spiffe.workloadAPISocket + gibson.auth.spiffe.trustDomain). See spec in-cluster-mtls-restoration and memory feedback_spiffe_mtls_required.md. Disabling daemon SPIFFE mTLS is not permitted as a debugging shortcut." -}}
+{{- else if not (and $spiffe (kindIs "map" $spiffe) $spiffe.workloadAPISocket (include "gibson.trustDomain" .)) -}}
+{{- fail "gibson.auth.spiffe must be populated in every overlay (gibson.auth.spiffe.workloadAPISocket, and global.spire.trustDomain). See spec in-cluster-mtls-restoration and memory feedback_spiffe_mtls_required.md. Disabling daemon SPIFFE mTLS is not permitted as a debugging shortcut." -}}
 {{- end -}}
 {{- end }}
 
@@ -1264,4 +1265,67 @@ literal again.
 {{- define "gibson.toolImage" -}}
 {{- $t := required "global.toolImage is required: the alpine-k8s tool image every first-party Job runs" ((.Values.global).toolImage) -}}
 {{- printf "%s:%s" (required "global.toolImage.repository is required" $t.repository) (required "global.toolImage.tag is required" ($t.tag | toString)) -}}
+{{- end -}}
+
+{{/*
+gibson.trustDomain: the SPIFFE trust domain of this install (ADR-0164).
+
+One value names it: `global.spire.trustDomain`. The vendored SPIRE chart reads
+the same key, so the server, the agents and every ID the chart renders share
+one domain. Each install sets its own. The SaaS uses `zeroroot.ai`. The render
+fails when the value is empty, or when it is not a valid trust domain name.
+*/}}
+{{- define "gibson.trustDomain" -}}
+{{- $td := (((.Values.global).spire).trustDomain) | default "" | toString -}}
+{{- if not $td -}}
+{{- fail "global.spire.trustDomain is required: the SPIFFE trust domain of this install (ADR-0164). Each install sets its own." -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$" $td) -}}
+{{- fail (printf "global.spire.trustDomain %q is not a SPIFFE trust domain name: use lower-case letters, digits, dots, dashes and underscores" $td) -}}
+{{- end -}}
+{{- $td -}}
+{{- end -}}
+
+{{/*
+gibson.spiffeID: the SPIFFE ID of a path in this install.
+  {{ include "gibson.spiffeID" (dict "ctx" $ "path" "platform/daemon") }}
+*/}}
+{{- define "gibson.spiffeID" -}}
+spiffe://{{ include "gibson.trustDomain" .ctx }}/{{ .path | trimPrefix "/" }}
+{{- end -}}
+
+{{/*
+gibson.spiffeIDs: the SPIFFE IDs of a list of paths, joined with commas.
+  {{ include "gibson.spiffeIDs" (dict "ctx" $ "paths" .Values.spiffe.callbackPeers) }}
+*/}}
+{{- define "gibson.spiffeIDs" -}}
+{{- $out := list -}}
+{{- range $p := .paths -}}
+{{- $out = append $out (include "gibson.spiffeID" (dict "ctx" $.ctx "path" $p)) -}}
+{{- end -}}
+{{- join "," $out -}}
+{{- end -}}
+
+{{/*
+gibson.assertTrustDomainKnobsDeleted: the render fails when a values key that
+held the trust domain or a full SPIFFE ID is set (ADR-0164, charts#392). Each
+one is now `global.spire.trustDomain` plus a path. A silent ignore would keep
+the old domain in an overlay that nobody reads.
+  {{ include "gibson.assertTrustDomainKnobsDeleted" (dict "ctx" $ "keys" (list "spiffe.envoyID")) }}
+*/}}
+{{- define "gibson.assertTrustDomainKnobsDeleted" -}}
+{{- range $k := .keys -}}
+{{- $node := $.ctx.Values -}}
+{{- $found := true -}}
+{{- range $part := splitList "." $k -}}
+{{- if and $found (kindIs "map" $node) (hasKey $node $part) -}}
+{{- $node = index $node $part -}}
+{{- else -}}
+{{- $found = false -}}
+{{- end -}}
+{{- end -}}
+{{- if and $found (not (empty $node)) -}}
+{{- fail (printf "%s was deleted (ADR-0164, charts#392). Set the one value global.spire.trustDomain; each SPIFFE ID is built from it and a path." $k) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}

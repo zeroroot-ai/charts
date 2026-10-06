@@ -12,7 +12,7 @@ SVIDs over the Workload API socket at .Values.spire.agent.workloadApiSocket
 overlays still resolve to /run/spire/sockets/agent.sock through the older
 agent.workloadApiSocket key — both are accepted).
 
-Trust domain comes from .Values.spire.server.trustDomain (default zeroroot.ai).
+The trust domain comes from global.spire.trustDomain (gibson.trustDomain).
 
 deploy#201: SPIRE is REQUIRED infrastructure — the `.Values.spire.enabled`
 toggle is gone. ClusterSPIFFEID CRs are always rendered (the controller-
@@ -73,7 +73,7 @@ matching component label.
        registrations are umbrella-owned and render unconditionally now that
        SPIRE is a hard requirement; without them the external SPIRE server
        would have no workload registrations. */}}
-{{- $trustDomain := .Values.spire.server.trustDomain | default "zeroroot.ai" -}}
+{{- $trustDomain := include "gibson.trustDomain" . -}}
 {{- $ns := .Release.Namespace -}}
 {{- $className := .Values.spire.controllerManager.className | default "gibson-gibson-spire" -}}
 {{/*
@@ -236,7 +236,7 @@ spec:
     - "k8s:sa:{{ include "gibson.connectorOperatorServiceAccountName" . }}"
 ---
 {{- /* Envoy holds the highest-trust SVID in the platform: it is in
-       spiffe.callbackPeerSVIDs, so the daemon accepts identity headers from
+       spiffe.callbackPeers, so the daemon accepts identity headers from
        any peer presenting it. Until templates/envoy/serviceaccount.yaml
        existed, the Envoy pod ran under the namespace `default`
        ServiceAccount and this selector would have degraded to
@@ -299,8 +299,8 @@ DELETED in the workload-attestation hardening change:
       exists in any chart; untrusted execution moved into setec microVMs
       (gibson-executor).
 
-Neither SVID is consumed anywhere in this repo, in spiffe.callbackPeerSVIDs
-or in spiffe.allowedPeerIDs. Rendering them meant two unclaimed platform
+Neither SVID is consumed anywhere in this repo, in spiffe.callbackPeers
+or in spiffe.allowedPeers. Rendering them meant two unclaimed platform
 identities sat in the trust domain that any pod wearing the right component
 label could have claimed. Do NOT re-add a ClusterSPIFFEID before the
 workload it names actually exists — an entry with no workload is a free
@@ -322,7 +322,7 @@ umbrella carries zero closed/SaaS component registrations.
        could then mint a daemon identity.
 
        It has its own identity now. `platform/helm-test` appears in no
-       `spiffe.callbackPeerSVIDs` and no `spiffe.allowedPeerIDs`, so it
+       `spiffe.callbackPeers` and no `spiffe.allowedPeers`, so it
        authorises nothing — which is exactly what makes it a valid probe:
        it proves the SPIRE agent issues SVIDs to correctly-attested pods
        without conferring any privilege. Do not add it to either list, and

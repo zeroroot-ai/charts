@@ -84,6 +84,15 @@ externalDns:
 
 
 global:
+  spire:
+    # The SPIFFE trust domain of this install (ADR-0164). It is the one value
+    # that names the domain. The vendored SPIRE chart reads this key, and the
+    # chart builds each SPIFFE ID from it and a path (gibson.spiffeID). Each
+    # install sets its own: the SaaS uses zeroroot.ai, and a second cluster or
+    # an on-prem install uses a different name. The render fails when it is
+    # empty. A trust domain cannot change on a running install: every SVID and
+    # every agent belongs to it.
+    trustDomain: ""
   # Host every first-party image resolves against, unless its own
   # `repository` names one. The pull credential follows this by default.
   registry: ghcr.io
@@ -477,23 +486,6 @@ gibson-workloads:
         # huggingface.co is available on EKS).
         enabled: true
         initMode: download
-  spiffe:
-    # Platform peer contracts (same set as values-kind.yaml — they are
-    # trust-domain-level, not env-specific). callbackPeerSVIDs feeds
-    # GIBSON_CALLBACK_PEER_SVIDS; the daemon FAIL-LOUDS at boot when SPIFFE
-    # mTLS is on and the list is empty (critical-tls-no-fallbacks Component 4
-    # — hit live on staging 2026-06-11). allowedPeerIDs is the daemon main
-    # gRPC listener's direct control-plane allow-list.
-    callbackPeerSVIDs:
-      - "spiffe://zeroroot.ai/platform/dashboard"
-      - "spiffe://zeroroot.ai/platform/envoy"
-      - "spiffe://zeroroot.ai/platform/daemon"
-    allowedPeerIDs:
-      - "spiffe://zeroroot.ai/platform/tenant-operator"
-      # The connector-operator's ConnectorInstance finalizer revokes the
-      # connector grant through the daemon (§5, gibson#1566); the
-      # daemon's method policy limits this peer to RevokeConnectorGrant.
-      - "spiffe://zeroroot.ai/platform/connector-operator"
   spire:
     controllerManager:
       # MUST equal the className the umbrella's spire sub-chart computes for
@@ -1193,7 +1185,8 @@ zitadel:
 spire:
   global:
     spire:
-      trustDomain: zeroroot.ai
+      # No trustDomain here: Helm gives the SPIRE chart the top-level
+      # global.spire.trustDomain, the one value (ADR-0164).
       # Override upstream chart's default jwtIssuer
       # (https://oidc-discovery.$trustDomain) with the cluster-internal
       # OIDC discovery provider Service hostname. This is the value

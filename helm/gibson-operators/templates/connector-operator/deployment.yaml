@@ -83,7 +83,7 @@ spec:
               value: {{ include "gibson.daemonAddress" . | quote }}
             # the daemon SVID pinned at the mTLS handshake.
             - name: GIBSON_DAEMON_SPIFFE_ID
-              value: {{ .Values.connectorOperator.daemonSpiffeID | default "spiffe://zeroroot.ai/platform/daemon" | quote }}
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/daemon") | quote }}
             # SPIRE Workload API socket the X509Source streams SVIDs from.
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"

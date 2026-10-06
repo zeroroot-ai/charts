@@ -33,6 +33,7 @@ gibson.validateSpiffeRequired in templates/_helpers.tpl. Daemon SPIFFE
 mTLS stays ON in every overlay, with no debugging shortcuts permitted.
 */}}
 {{- include "gibson.validateSpiffeRequired" . }}
+{{- include "gibson.assertTrustDomainKnobsDeleted" (dict "ctx" . "keys" (list "spiffe.envoyID" "spiffe.daemonID" "spiffe.trustDomain" "spiffe.callbackPeerSVIDs" "spiffe.allowedPeerIDs" "spiffe.authzRegistryReaderSVIDs" "envoy.spiffe.trustDomain" "spire.server.trustDomain" "spire.agent.trustDomain" "gibson.auth.spiffe.trustDomain" "gibson.auth.spiffe.infrastructureIDs")) }}
 {{- include "gibson.validateEnvoySdsWired" . }}
 {{- /* Phase H/8.4 validators (templates/_validators.tpl) */ -}}
 {{- include "gibson.validateAllPathsViaEnvoy" . }}
@@ -627,25 +628,25 @@ spec:
                   # secret is provisioned); revisit under one-code-path.
                   optional: true
             # Envoy SPIFFE ID the daemon's identity interceptor pins peer
-            # cert URI SAN against. REQUIRED — chart fails to render if
-            # .Values.spiffe.envoyID is empty.
+            # cert URI SAN against: the trust domain of the install and the
+            # fixed path platform/envoy.
             - name: GIBSON_SPIFFE_ENVOY_ID
-              value: {{ required "spiffe.envoyID is required (no default — set in your environment overlay)" .Values.spiffe.envoyID | quote }}
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/envoy") | quote }}
             # Peer SPIFFE IDs for the harness callback listener allowlist.
             # REQUIRED when SPIFFE is configured — the daemon fails to start
             # otherwise (fail-closed per critical-tls-no-fallbacks Req 1.5).
-            # Comma-separated list rendered from .Values.spiffe.callbackPeerSVIDs.
-            {{- if .Values.spiffe.callbackPeerSVIDs }}
+            # Comma-separated list built from the paths in .Values.spiffe.callbackPeers.
+            {{- if .Values.spiffe.callbackPeers }}
             - name: GIBSON_CALLBACK_PEER_SVIDS
-              value: {{ join "," .Values.spiffe.callbackPeerSVIDs | quote }}
+              value: {{ include "gibson.spiffeIDs" (dict "ctx" . "paths" .Values.spiffe.callbackPeers) | quote }}
             {{- end }}
             # Additional inbound mTLS allow-list for the daemon's main gRPC
             # listener. Envoy is always accepted via
             # GIBSON_SPIFFE_ENVOY_ID; the entries here are direct control-
             # plane callers (today: the tenant-operator). Comma-separated.
-            {{- if .Values.spiffe.allowedPeerIDs }}
+            {{- if .Values.spiffe.allowedPeers }}
             - name: GIBSON_SPIFFE_ALLOWED_PEER_IDS
-              value: {{ join "," .Values.spiffe.allowedPeerIDs | quote }}
+              value: {{ include "gibson.spiffeIDs" (dict "ctx" . "paths" .Values.spiffe.allowedPeers) | quote }}
             {{- end }}
             # deploy#852: the daemon serves its compiled-in authz registry to
             # ext-authz over mTLS (single source of truth — no version-pinned
@@ -653,11 +654,11 @@ spec:
             # allow-list (the SVIDs permitted to fetch it — the ext-authz SVID).
             # REQUIRED when SPIFFE is configured: the daemon fails closed on an
             # empty reader list (never serves the enforcement policy openly).
-            {{- if .Values.spiffe.authzRegistryReaderSVIDs }}
+            {{- if .Values.spiffe.authzRegistryReaders }}
             - name: GIBSON_AUTHZ_REGISTRY_PORT
               value: {{ .Values.gibson.service.authzRegistry.port | default 8086 | quote }}
             - name: GIBSON_AUTHZ_REGISTRY_READER_SVIDS
-              value: {{ join "," .Values.spiffe.authzRegistryReaderSVIDs | quote }}
+              value: {{ include "gibson.spiffeIDs" (dict "ctx" . "paths" .Values.spiffe.authzRegistryReaders) | quote }}
             {{- end }}
             # gRPC reflection on the daemon listeners. OFF by default;
             # set .Values.spiffe.grpcReflection to "1" in dev overlays only.

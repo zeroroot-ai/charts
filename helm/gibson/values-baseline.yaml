@@ -129,9 +129,6 @@ gibson-workloads:
     zitadel: {}
     spiffe:
       enabled: true
-      trustDomain: "zeroroot.ai"
-  spiffe:
-    envoyID: "spiffe://zeroroot.ai/platform/envoy"
   # deploy#1631: the first-admin Job creates the owner user + credential for
   # the tenant the operator seeds (global.firstTenant above). The Job gates on
   # global.firstTenant.enabled and reads its identity from there — the
@@ -674,6 +671,11 @@ gibson-operators:
       tag: "0.1.0"
       digest: ""
 global:
+  spire:
+    # The SPIFFE trust domain of this install (ADR-0164). Set your own, as you
+    # set global.domain. scripts/baseline-up.sh keeps the trust domain of an
+    # install that already runs, because a trust domain cannot change in place.
+    trustDomain: localhost.zeroroot.ai
   # No backend selector and no key prefix (deploy#1733). The
   # platform's own OpenBao is the one External Secrets backend, so an install
   # stands up nothing extra. The earlier `kubernetes` backend pointed ESO at a
