@@ -1328,3 +1328,78 @@ the old domain in an overlay that nobody reads.
 {{- end -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+gibson.ciliumEgressPolicy: one CiliumNetworkPolicy that permits a pod to
+reach a list of hosts by name (ADR-0165 rule 4, ADR-0087, charts#395).
+
+A Kubernetes NetworkPolicy matches addresses and labels and cannot name a
+host. Cilium can, and every cluster runs it (hosted#436). So this is the one
+policy type the chart renders for egress by host name. scripts/
+check-egress-policy-type.py fails on a second type, and on a pod that also
+gets an allow-all egress rule from a NetworkPolicy, because Cilium unions
+allow rules and the allow-all one would win.
+
+The policy also permits DNS to kube-dns with a DNS rule: Cilium learns the
+address of a host name only from a lookup it sees.
+
+  {{ include "gibson.ciliumEgressPolicy" (dict
+       "ctx" $
+       "name" "gibson-dashboard-egress"
+       "selector" (dict "app.kubernetes.io/component" "dashboard")
+       "hosts" (list (dict "host" "api.stripe.com" "ports" (list 443))
+                     (dict "pattern" "*.amazonaws.com" "ports" (list 443)))) }}
+
+Each host entry names `host` (an exact name) or `pattern` (a Cilium
+matchPattern), and a list of TCP `ports`. The render fails on an empty host
+list, on an entry with neither key, and on an entry with no port.
+*/}}
+{{- define "gibson.ciliumEgressPolicy" -}}
+{{- $hosts := .hosts | default list -}}
+{{- if not $hosts -}}
+{{- fail (printf "gibson.ciliumEgressPolicy %s: the host list is empty; a pod with no host to reach needs no host policy" .name) -}}
+{{- end -}}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ .name }}
+  namespace: {{ .ctx.Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" .ctx | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- toYaml .selector | nindent 6 }}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchPattern: "*"
+    {{- range $h := $hosts }}
+    {{- if not (or $h.host $h.pattern) }}
+    {{- fail (printf "gibson.ciliumEgressPolicy %s: a host entry names neither host nor pattern" $.name) }}
+    {{- end }}
+    {{- if not $h.ports }}
+    {{- fail (printf "gibson.ciliumEgressPolicy %s: the host %s names no port" $.name ($h.host | default $h.pattern)) }}
+    {{- end }}
+    - toFQDNs:
+        {{- if $h.host }}
+        - matchName: {{ $h.host | quote }}
+        {{- else }}
+        - matchPattern: {{ $h.pattern | quote }}
+        {{- end }}
+      toPorts:
+        - ports:
+            {{- range $port := $h.ports }}
+            - port: {{ $port | toString | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- end }}
+{{- end -}}
