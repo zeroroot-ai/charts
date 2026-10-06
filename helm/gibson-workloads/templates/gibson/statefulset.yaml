@@ -711,6 +711,10 @@ spec:
             {{- if .Values.gibson.entitlementsEndpoint }}
             - name: ENTITLEMENTS_ENDPOINT
               value: {{ .Values.gibson.entitlementsEndpoint | quote }}
+            # The one SPIFFE ID the daemon accepts as the entitlements server.
+            # validateEntitlementsCoherence fails the render without it.
+            - name: ENTITLEMENTS_BILLING_SVID
+              value: {{ .Values.gibson.entitlementsBillingSVID | quote }}
             # The grpcProvider opens a SPIRE X509Source for daemon→entitlements
             # mTLS. Its WorkloadAPISocket option is empty, so go-spiffe reads
             # the socket from SPIFFE_ENDPOINT_SOCKET (the daemon's other mTLS
