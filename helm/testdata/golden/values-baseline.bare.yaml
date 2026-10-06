@@ -10211,7 +10211,7 @@ spec:
       containers:
         # This is the container which runs the SPIFFE CSI driver.
         - name: spiffe-csi-driver
-          image: "ghcr.io/spiffe/spiffe-csi-driver:0.2.7"
+          image: "ghcr.io/zeroroot-ai/mirror/spiffe-csi-driver:0.2.7@sha256:9dfe4f0caff096164fd921aa7f15319804df2fc0325f1d90bc793ef3256ab1cd"
           imagePullPolicy: IfNotPresent
           args: [
             "-workload-api-socket-dir", "/spire-agent-socket",
@@ -10251,7 +10251,7 @@ spec:
         # of all the little details required to register a CSI driver with
         # the kubelet.
         - name: node-driver-registrar
-          image: "registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.9.4"
+          image: "ghcr.io/zeroroot-ai/mirror/csi-node-driver-registrar:v2.9.4@sha256:ab6c4603d8da43d9f33361a5716552080e3f72badfad099d76fcf4b59e547d80"
           imagePullPolicy: IfNotPresent
           args: [
             "-csi-address", "/spiffe-csi/csi.sock",
@@ -10344,7 +10344,7 @@ spec:
       
       initContainers:
         - name: ensure-alternate-names
-          image: "cgr.dev/chainguard/bash:latest@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
+          image: "ghcr.io/zeroroot-ai/mirror/chainguard-bash@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
           imagePullPolicy: "IfNotPresent"
           command: ["bash", "-xc"]
           args:
@@ -10368,7 +10368,7 @@ spec:
             runAsGroup: 0
       containers:
         - name: "spire-agent"
-          image: "ghcr.io/spiffe/spire-agent:1.14.5"
+          image: "ghcr.io/zeroroot-ai/mirror/spire-agent:1.14.5@sha256:efb8d29ace803852c8f3d0001c3d183102bfda2c6ff52e4a93a067269a2caa5e"
           imagePullPolicy: "IfNotPresent"
           args: ["-config", "/opt/spire/conf/agent/agent.conf"]
           securityContext:
@@ -10478,7 +10478,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: cert-manager-cainjector
-          image: "quay.io/jetstack/cert-manager-cainjector:v1.21.1"
+          image: "ghcr.io/zeroroot-ai/mirror/cert-manager-cainjector:v1.21.1@sha256:ccf6b919ec0500745a47a910118f834f9636d0aac1ff221245cd2557ed8c7c98"
           imagePullPolicy: IfNotPresent
           args:
           - --v=2
@@ -10550,7 +10550,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: cert-manager-controller
-          image: "quay.io/jetstack/cert-manager-controller:v1.21.1"
+          image: "ghcr.io/zeroroot-ai/mirror/cert-manager-controller:v1.21.1@sha256:416a2d76870d996460e62bd7f521bf14fa017be9e3e904aab92163a331fcb61a"
           imagePullPolicy: IfNotPresent
           args:
           - --v=2
@@ -10641,7 +10641,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: cert-manager-webhook
-          image: "quay.io/jetstack/cert-manager-webhook:v1.21.1"
+          image: "ghcr.io/zeroroot-ai/mirror/cert-manager-webhook:v1.21.1@sha256:d8b3961b51c8c7320633f8208dc46bf88aa13804d0f7cbe48a096b2c523cee42"
           imagePullPolicy: IfNotPresent
           args:
           - --v=2
@@ -10741,14 +10741,14 @@ spec:
         - /manager
         env:
         - name: OPERATOR_IMAGE_NAME
-          value: "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0"
+          value: "ghcr.io/zeroroot-ai/mirror/cloudnative-pg:1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb"
         - name: OPERATOR_NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
         - name: MONITORING_QUERIES_CONFIGMAP
           value: "cnpg-default-monitoring"
-        image: "ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0"
+        image: "ghcr.io/zeroroot-ai/mirror/cloudnative-pg:1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb"
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
@@ -10857,7 +10857,7 @@ spec:
             runAsGroup: 65532
             runAsNonRoot: true
             runAsUser: 65532
-          image: registry.k8s.io/external-dns/external-dns:v0.21.0
+          image: ghcr.io/zeroroot-ai/mirror/external-dns:v0.21.0@sha256:f53faaf71cb270d1ca9dce6ea0c94bfebf1a18696263487f0fbc74b9bf2bd7ff
           imagePullPolicy: IfNotPresent
           args:
             - --log-level=info
@@ -10942,7 +10942,7 @@ spec:
             runAsUser: 1000
             seccompProfile:
               type: RuntimeDefault
-          image: ghcr.io/external-secrets/external-secrets:v2.10.0
+          image: ghcr.io/zeroroot-ai/mirror/external-secrets:v2.10.0@sha256:814117b0fd6d121b03e8ba3b6db1cecbe7449a354fc0fc9c4faf73a37aa221b1
           imagePullPolicy: IfNotPresent
           args:
           - certcontroller
@@ -11021,7 +11021,7 @@ spec:
             runAsUser: 1000
             seccompProfile:
               type: RuntimeDefault
-          image: ghcr.io/external-secrets/external-secrets:v2.10.0
+          image: ghcr.io/zeroroot-ai/mirror/external-secrets:v2.10.0@sha256:814117b0fd6d121b03e8ba3b6db1cecbe7449a354fc0fc9c4faf73a37aa221b1
           imagePullPolicy: IfNotPresent
           args:
           - --concurrent=1
@@ -11084,7 +11084,7 @@ spec:
             runAsUser: 1000
             seccompProfile:
               type: RuntimeDefault
-          image: ghcr.io/external-secrets/external-secrets:v2.10.0
+          image: ghcr.io/zeroroot-ai/mirror/external-secrets:v2.10.0@sha256:814117b0fd6d121b03e8ba3b6db1cecbe7449a354fc0fc9c4faf73a37aa221b1
           imagePullPolicy: IfNotPresent
           args:
           - webhook
@@ -11527,7 +11527,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: reloader
-          image: "ghcr.io/stakater/reloader:v1.4.6"
+          image: "ghcr.io/zeroroot-ai/mirror/reloader:v1.4.6@sha256:fa2d03a1b36738e7c7420fd0fbfe601339875a38d24e8a27f5f1883139055c2b"
           imagePullPolicy: IfNotPresent
           env:
             # Scopes every informer to this namespace. Unset, Reloader
@@ -14809,7 +14809,7 @@ spec:
               type: RuntimeDefault
           resources:
             {}
-          image: "ghcr.io/spiffe/spiffe-helper:0.11.0"
+          image: "ghcr.io/zeroroot-ai/mirror/spiffe-helper:0.11.0@sha256:1c92e5998ad3621e3323f25aabe40f5a88ba730ee0edb248aa8c943ca504e8a2"
           imagePullPolicy: IfNotPresent
           args:
             - -config
@@ -14836,7 +14836,7 @@ spec:
             runAsNonRoot: true
             seccompProfile:
               type: RuntimeDefault
-          image: "ghcr.io/spiffe/oidc-discovery-provider:1.14.5"
+          image: "ghcr.io/zeroroot-ai/mirror/oidc-discovery-provider:1.14.5@sha256:553704280654f49ba58bf52d5e84d8deca8daf5d91ff8b34dbd47dd3cc325eca"
           imagePullPolicy: IfNotPresent
           args:
             - -config
@@ -14886,7 +14886,7 @@ spec:
             runAsNonRoot: true
             seccompProfile:
               type: RuntimeDefault
-          image: "ghcr.io/spiffe/spiffe-helper:0.11.0"
+          image: "ghcr.io/zeroroot-ai/mirror/spiffe-helper:0.11.0@sha256:1c92e5998ad3621e3323f25aabe40f5a88ba730ee0edb248aa8c943ca504e8a2"
           imagePullPolicy: IfNotPresent
           args:
             - -config
@@ -15126,7 +15126,7 @@ spec:
               runAsUser: 1000
               seccompProfile:
                 type: RuntimeDefault
-          image: "ghcr.io/zitadel/zitadel:v4.19.4"
+          image: "ghcr.io/zeroroot-ai/mirror/zitadel:v4.19.4@sha256:90a3045b80a2b5b395e1e770302076906af3a5911225af7c464b4f3bd00d0a1b"
           imagePullPolicy: IfNotPresent
           args:
             - start
@@ -17905,7 +17905,7 @@ spec:
             runAsNonRoot: true
             seccompProfile:
               type: RuntimeDefault
-          image: "ghcr.io/spiffe/spire-server:1.14.5"
+          image: "ghcr.io/zeroroot-ai/mirror/spire-server:1.14.5@sha256:295af37293ffef6530ba0cafce055c41fd4d26dbabaca24944c029bbc8291214"
           imagePullPolicy: IfNotPresent
           args:
             - -expandEnv
@@ -17965,7 +17965,7 @@ spec:
             runAsNonRoot: true
             seccompProfile:
               type: RuntimeDefault
-          image: "ghcr.io/spiffe/spire-controller-manager:0.6.4"
+          image: "ghcr.io/zeroroot-ai/mirror/spire-controller-manager:0.6.4@sha256:f8fd8e6637f4d4fa21a46fb6a285a5166f5adc812dbe1f9f6ebe48c09dfda9bf"
           imagePullPolicy: IfNotPresent
           args:
             - --config=controller-manager-config.yaml
@@ -24056,7 +24056,7 @@ spec:
   serviceAccountName: gibson-gibson-workloads-helm-test
   containers:
     - name: svid-fetch
-      image: ghcr.io/spiffe/spire-agent:1.10.4
+      image: ghcr.io/zeroroot-ai/mirror/spire-agent:1.10.4@sha256:ecb3e00fa38d38e0166a678e4c4c1e1b3517b63a37e2a57154e7f5d5d0ee1f98
       imagePullPolicy: IfNotPresent
       command: ["/bin/sh", "-c"]
       args:
@@ -24832,7 +24832,7 @@ spec:
     runAsUser: 1000
   containers:
     - name: curl-service-name
-      image: "cgr.dev/chainguard/bash:latest@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
+      image: "ghcr.io/zeroroot-ai/mirror/chainguard-bash@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
       command: ['curl']
       args: ['-s', '-f', '-k', 'https://gibson-spiffe-oidc-discovery-provider:443/.well-known/openid-configuration']
       securityContext:
@@ -24845,7 +24845,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
     - name: curl-service-name-namespace
-      image: "cgr.dev/chainguard/bash:latest@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
+      image: "ghcr.io/zeroroot-ai/mirror/chainguard-bash@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
       command: ['curl']
       args: ['-s', '-f', '-k', 'https://gibson-spiffe-oidc-discovery-provider.gibson:443/.well-known/openid-configuration']
       securityContext:
@@ -24858,7 +24858,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
     - name: curl-service-name-namespace-svc-cluster-local
-      image: "cgr.dev/chainguard/bash:latest@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
+      image: "ghcr.io/zeroroot-ai/mirror/chainguard-bash@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
       command: ['curl']
       args: ['-s', '-f', '-k', 'https://gibson-spiffe-oidc-discovery-provider.gibson.svc.cluster.local:443/.well-known/openid-configuration']
       securityContext:
@@ -24898,7 +24898,7 @@ spec:
   serviceAccountName: gibson-spiffe-oidc-discovery-provider
   initContainers:
     - name: static-busybox
-      image: "busybox:1.37.0-uclibc"
+      image: "ghcr.io/zeroroot-ai/mirror/busybox:1.37.0-uclibc@sha256:31b72538c3019a20336b04c4cebcd47c36511d0b45aa76666804c2845055bbd3"
       command:
         - sh
         - -c
@@ -24918,7 +24918,7 @@ spec:
         - name: data-volume
           mountPath: /data
     - name: install-step
-      image: "docker.io/smallstep/step-cli:0.30.2"
+      image: "ghcr.io/zeroroot-ai/mirror/step-cli:0.30.2@sha256:c75414251d4d8234945fb01e1374707dcc6a7adced88679bae4f0fd526331e74"
       workingDir: /data
       command:
         - sh
@@ -24938,7 +24938,7 @@ spec:
         - name: data-volume
           mountPath: /data
     - name: gettoken
-      image: "ghcr.io/spiffe/spire-agent:1.14.5"
+      image: "ghcr.io/zeroroot-ai/mirror/spire-agent:1.14.5@sha256:efb8d29ace803852c8f3d0001c3d183102bfda2c6ff52e4a93a067269a2caa5e"
       command:
         - /data/busybox
         - sh
@@ -24966,7 +24966,7 @@ spec:
           readOnly: true
   containers:
     - name: verify-keys
-      image: "cgr.dev/chainguard/min-toolkit-debug:latest@sha256:6ba4fb1b19bb35fa0b7e6bf08b308379a5b865727e50b7b3068efb824b39ebba"
+      image: "ghcr.io/zeroroot-ai/mirror/chainguard-min-toolkit-debug@sha256:6ba4fb1b19bb35fa0b7e6bf08b308379a5b865727e50b7b3068efb824b39ebba"
       command:
         - bash
       workingDir: /data
@@ -25029,7 +25029,7 @@ spec:
     runAsUser: 1000
   containers:
     - name: curl
-      image: "cgr.dev/chainguard/bash:latest@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
+      image: "ghcr.io/zeroroot-ai/mirror/chainguard-bash@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
       command: ['bash']
       args:
         - -c
@@ -25341,7 +25341,7 @@ spec:
               runAsUser: 1000
               seccompProfile:
                 type: RuntimeDefault
-          image: "ghcr.io/zitadel/zitadel:v4.19.4"
+          image: "ghcr.io/zeroroot-ai/mirror/zitadel:v4.19.4@sha256:90a3045b80a2b5b395e1e770302076906af3a5911225af7c464b4f3bd00d0a1b"
           imagePullPolicy: IfNotPresent
           args:
             - init
@@ -25445,7 +25445,7 @@ spec:
               runAsUser: 1000
               seccompProfile:
                 type: RuntimeDefault
-          image: "ghcr.io/zitadel/zitadel:v4.19.4"
+          image: "ghcr.io/zeroroot-ai/mirror/zitadel:v4.19.4@sha256:90a3045b80a2b5b395e1e770302076906af3a5911225af7c464b4f3bd00d0a1b"
           imagePullPolicy: IfNotPresent
           args:
             - setup

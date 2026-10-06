@@ -10,9 +10,10 @@ stayed on v4.14.0 with the login pinned at a main-build ref
 (zeroroot-ai/charts#13, zeroroot-ai/.github#20).
 
 WHAT IT CHECKS, on helm/gibson/values.yaml
-  zitadel.image.tag        must be  v<major>.<minor>.<patch>
+  zitadel.image.tag        must be  v<major>.<minor>.<patch>@sha256:<64 hex>
   zitadel.login.image.tag  must be  v<major>.<minor>.<patch>@sha256:<64 hex>
-  and the login tag before `@` must equal the server tag.
+  and the two tags before `@` must be equal. The server image is the install
+  registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
 
 The pin keeps the tag next to the digest on purpose: the digest is what runs
 (deploy#789 digest-pin-check), the tag is what this guard and the org drift
@@ -34,8 +35,7 @@ import tempfile
 
 import yaml
 
-SERVER = re.compile(r"^v\d+\.\d+\.\d+$")
-LOGIN = re.compile(r"^(v\d+\.\d+\.\d+)@sha256:[0-9a-f]{64}$")
+PINNED = re.compile(r"^(v\d+\.\d+\.\d+)@sha256:[0-9a-f]{64}$")
 
 
 def check(path: str) -> list[str]:
@@ -45,17 +45,18 @@ def check(path: str) -> list[str]:
     server = str(((z.get("image") or {}).get("tag")) or "")
     login = str((((z.get("login") or {}).get("image") or {}).get("tag")) or "")
     problems: list[str] = []
-    if not SERVER.match(server):
-        problems.append(f"zitadel.image.tag is {server!r}; expected v<major>.<minor>.<patch>")
-    m = LOGIN.match(login)
+    s = PINNED.match(server)
+    if not s:
+        problems.append(f"zitadel.image.tag is {server!r}; expected v<major>.<minor>.<patch>@sha256:<digest>")
+    m = PINNED.match(login)
     if not m:
         problems.append(
             f"zitadel.login.image.tag is {login!r}; expected v<major>.<minor>.<patch>@sha256:<digest> "
             "(the fork publishes v<upstream> on every main build)"
         )
-    elif SERVER.match(server) and m.group(1) != server:
+    elif s and m.group(1) != s.group(1):
         problems.append(
-            f"zitadel.login.image.tag names {m.group(1)} but zitadel.image.tag is {server}; "
+            f"zitadel.login.image.tag names {m.group(1)} but zitadel.image.tag names {s.group(1)}; "
             "the login fork and the server move together (rebase the fork first, see its README)"
         )
     return problems
@@ -64,11 +65,12 @@ def check(path: str) -> list[str]:
 def selftest() -> int:
     digest = "@sha256:" + "0" * 64
     cases = {
-        "ok": ("v4.17.3", "v4.17.3" + digest, True),
-        "server_moved_alone": ("v4.18.0", "v4.17.3" + digest, False),
-        "login_moved_alone": ("v4.17.3", "v4.18.0" + digest, False),
-        "login_without_digest": ("v4.17.3", "v4.17.3", False),
-        "login_main_build_ref": ("v4.17.3", "sha-f41ce75" + digest, False),
+        "ok": ("v4.17.3" + digest, "v4.17.3" + digest, True),
+        "server_moved_alone": ("v4.18.0" + digest, "v4.17.3" + digest, False),
+        "login_moved_alone": ("v4.17.3" + digest, "v4.18.0" + digest, False),
+        "login_without_digest": ("v4.17.3" + digest, "v4.17.3", False),
+        "server_without_digest": ("v4.17.3", "v4.17.3" + digest, False),
+        "login_main_build_ref": ("v4.17.3" + digest, "sha-f41ce75" + digest, False),
     }
     with tempfile.TemporaryDirectory() as d:
         for name, (server, login, want_ok) in cases.items():

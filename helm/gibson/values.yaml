@@ -1092,7 +1092,8 @@ zitadel:
   # client's PAT auth with X.509 cert auth (breaking, needs migration).
   # Both core and the Login-V2 container must move together.
   image:
-    tag: "v4.19.4"
+    repository: "ghcr.io/zeroroot-ai/mirror/zitadel"
+    tag: "v4.19.4@sha256:90a3045b80a2b5b395e1e770302076906af3a5911225af7c464b4f3bd00d0a1b"
 
   # ---- Hook-lifecycle correction (deploy#820, observed live 2026-06-11) ----
   # The zitadel chart defaults its ConfigMaps / ServiceAccounts (+ the RBAC
@@ -1257,9 +1258,20 @@ zitadel:
 
 spire:
   spiffe-csi-driver:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      registry: "ghcr.io"
+      repository: "zeroroot-ai/mirror/spiffe-csi-driver"
+      tag: "0.2.7@sha256:9dfe4f0caff096164fd921aa7f15319804df2fc0325f1d90bc793ef3256ab1cd"
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
     podLabels:
       gibson.zeroroot.ai/net-role: system
+    nodeDriverRegistrar:
+      # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+      image:
+        registry: "ghcr.io"
+        repository: "zeroroot-ai/mirror/csi-node-driver-registrar"
+        tag: "v2.9.4@sha256:ab6c4603d8da43d9f33361a5716552080e3f72badfad099d76fcf4b59e547d80"
   global:
     spire:
       # No trustDomain here: Helm gives the SPIRE chart the top-level
@@ -1297,6 +1309,11 @@ spire:
     deleteHooks:
       enabled: false
   spire-server:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      registry: "ghcr.io"
+      repository: "zeroroot-ai/mirror/spire-server"
+      tag: "1.14.5@sha256:295af37293ffef6530ba0cafce055c41fd4d26dbabaca24944c029bbc8291214"
     # The restricted Pod Security Standard and a read-only root (ADR-0165,
     # charts#394). These are the values of the SPIRE chart recommendations,
     # set here for this chart only: the SPIRE agent and the CSI driver are
@@ -1342,6 +1359,11 @@ spire:
           name: spire-postgres-credentials
           key: password
     controllerManager:
+      # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+      image:
+        registry: "ghcr.io"
+        repository: "zeroroot-ai/mirror/spire-controller-manager"
+        tag: "0.6.4@sha256:f8fd8e6637f4d4fa21a46fb6a285a5166f5adc812dbe1f9f6ebe48c09dfda9bf"
       securityContext:
         runAsNonRoot: true
         allowPrivilegeEscalation: false
@@ -1369,6 +1391,13 @@ spire:
     telemetry:
       prometheus:
         enabled: false
+    tests:
+      bash:
+        # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+        image:
+          registry: "ghcr.io"
+          repository: "zeroroot-ai/mirror/chainguard-bash"
+          tag: "sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
 
 # =============================================================================
 # The cluster operators (deploy#1728). The umbrella owns
@@ -1402,6 +1431,11 @@ spire:
 # and are never refused by a webhook whose pod is not up yet.
 # =============================================================================
   spire-agent:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      registry: "ghcr.io"
+      repository: "zeroroot-ai/mirror/spire-agent"
+      tag: "1.14.5@sha256:efb8d29ace803852c8f3d0001c3d183102bfda2c6ff52e4a93a067269a2caa5e"
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
     podLabels:
       gibson.zeroroot.ai/net-role: system
@@ -1409,7 +1443,30 @@ spire:
     # stale. Velero fs-backup skips it.
     podAnnotations:
       backup.velero.io/backup-volumes-excludes: "spire-agent-admin-socket-dir,spire-agent-persistence"
+    socketAlternate:
+      # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+      image:
+        registry: "ghcr.io"
+        repository: "zeroroot-ai/mirror/chainguard-bash"
+        tag: "sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
+    fsGroupFix:
+      # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+      image:
+        registry: "ghcr.io"
+        repository: "zeroroot-ai/mirror/chainguard-bash"
+        tag: "sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
+    hostCert:
+      # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+      image:
+        registry: "ghcr.io"
+        repository: "zeroroot-ai/mirror/chainguard-min-toolkit-debug"
+        tag: "sha256:6ba4fb1b19bb35fa0b7e6bf08b308379a5b865727e50b7b3068efb824b39ebba"
   spiffe-oidc-discovery-provider:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      registry: "ghcr.io"
+      repository: "zeroroot-ai/mirror/oidc-discovery-provider"
+      tag: "1.14.5@sha256:553704280654f49ba58bf52d5e84d8deca8daf5d91ff8b34dbd47dd3cc325eca"
     # The restricted Pod Security Standard and a read-only root (ADR-0165,
     # charts#394). These are the values of the SPIRE chart recommendations,
     # set here for this chart only: the SPIRE agent and the CSI driver are
@@ -1433,8 +1490,50 @@ spire:
     # Sockets and a cert scratch dir. Velero fs-backup skips them.
     podAnnotations:
       backup.velero.io/backup-volumes-excludes: "certdir,nginx-tmp,spiffe-workload-api,spire-oidc-sockets"
+    spiffeHelper:
+      # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+      image:
+        registry: "ghcr.io"
+        repository: "zeroroot-ai/mirror/spiffe-helper"
+        tag: "0.11.0@sha256:1c92e5998ad3621e3323f25aabe40f5a88ba730ee0edb248aa8c943ca504e8a2"
+    tests:
+      step:
+        # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+        image:
+          registry: "ghcr.io"
+          repository: "zeroroot-ai/mirror/step-cli"
+          tag: "0.30.2@sha256:c75414251d4d8234945fb01e1374707dcc6a7adced88679bae4f0fd526331e74"
+      busybox:
+        # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+        image:
+          registry: "ghcr.io"
+          repository: "zeroroot-ai/mirror/busybox"
+          tag: "1.37.0-uclibc@sha256:31b72538c3019a20336b04c4cebcd47c36511d0b45aa76666804c2845055bbd3"
+      agent:
+        # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+        image:
+          registry: "ghcr.io"
+          repository: "zeroroot-ai/mirror/spire-agent"
+          tag: "1.14.5@sha256:efb8d29ace803852c8f3d0001c3d183102bfda2c6ff52e4a93a067269a2caa5e"
+      bash:
+        # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+        image:
+          registry: "ghcr.io"
+          repository: "zeroroot-ai/mirror/chainguard-bash"
+          tag: "sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
+      toolkit:
+        # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+        image:
+          registry: "ghcr.io"
+          repository: "zeroroot-ai/mirror/chainguard-min-toolkit-debug"
+          tag: "sha256:6ba4fb1b19bb35fa0b7e6bf08b308379a5b865727e50b7b3068efb824b39ebba"
 
 cert-manager:
+  # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+  image:
+    repository: "ghcr.io/zeroroot-ai/mirror/cert-manager-controller"
+    tag: "v1.21.1"
+    digest: "sha256:416a2d76870d996460e62bd7f521bf14fa017be9e3e904aab92163a331fcb61a"
   # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
   # egress-fqdn cert-manager: the ACME directory of Let's Encrypt, and the
   # hosts of the solver (the self-check, or Route53 and its name servers).
@@ -1470,6 +1569,11 @@ cert-manager:
     annotations:
       argocd.argoproj.io/sync-wave: "-20"
   webhook:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      repository: "ghcr.io/zeroroot-ai/mirror/cert-manager-webhook"
+      tag: "v1.21.1"
+      digest: "sha256:d8b3961b51c8c7320633f8208dc46bf88aa13804d0f7cbe48a096b2c523cee42"
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
     podLabels:
       gibson.zeroroot.ai/net-role: system
@@ -1487,6 +1591,11 @@ cert-manager:
     validatingWebhookConfigurationAnnotations:
       argocd.argoproj.io/sync-wave: "-20"
   cainjector:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      repository: "ghcr.io/zeroroot-ai/mirror/cert-manager-cainjector"
+      tag: "v1.21.1"
+      digest: "sha256:ccf6b919ec0500745a47a910118f834f9636d0aac1ff221245cd2557ed8c7c98"
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
     podLabels:
       gibson.zeroroot.ai/net-role: system
@@ -1500,6 +1609,10 @@ cert-manager:
         argocd.argoproj.io/sync-wave: "-20"
 
 external-secrets:
+  # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+  image:
+    repository: "ghcr.io/zeroroot-ai/mirror/external-secrets"
+    tag: "v2.10.0@sha256:814117b0fd6d121b03e8ba3b6db1cecbe7449a354fc0fc9c4faf73a37aa221b1"
   # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
   podLabels:
     gibson.zeroroot.ai/net-role: system
@@ -1520,6 +1633,10 @@ external-secrets:
     annotations:
       argocd.argoproj.io/sync-wave: "-20"
   webhook:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      repository: "ghcr.io/zeroroot-ai/mirror/external-secrets"
+      tag: "v2.10.0@sha256:814117b0fd6d121b03e8ba3b6db1cecbe7449a354fc0fc9c4faf73a37aa221b1"
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
     podLabels:
       gibson.zeroroot.ai/net-role: system
@@ -1540,6 +1657,10 @@ external-secrets:
       annotations:
         argocd.argoproj.io/sync-wave: "-20"
   certController:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      repository: "ghcr.io/zeroroot-ai/mirror/external-secrets"
+      tag: "v2.10.0@sha256:814117b0fd6d121b03e8ba3b6db1cecbe7449a354fc0fc9c4faf73a37aa221b1"
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
     podLabels:
       gibson.zeroroot.ai/net-role: system
@@ -1553,6 +1674,10 @@ external-secrets:
         argocd.argoproj.io/sync-wave: "-20"
 
 external-dns:
+  # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+  image:
+    repository: "ghcr.io/zeroroot-ai/mirror/external-dns"
+    tag: "v0.21.0@sha256:f53faaf71cb270d1ca9dce6ea0c94bfebf1a18696263487f0fbc74b9bf2bd7ff"
   # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
   # egress-fqdn external-dns: the API of the DNS provider (Route53 for aws).
   podLabels:
@@ -1576,6 +1701,10 @@ external-dns:
     - ingress
 
 cnpg:
+  # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+  image:
+    repository: "ghcr.io/zeroroot-ai/mirror/cloudnative-pg"
+    tag: "1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb"
   # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
   podLabels:
     gibson.zeroroot.ai/net-role: system
