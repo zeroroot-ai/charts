@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
-"""check-daemon-sa-binding.py — the operator binds the daemon's real ServiceAccount.
+"""check-connector-creds-binding.py — the Secret grant goes to the connector operator, and the daemon holds none.
 
-The tenant-operator gives the daemon its Secret access one tenant namespace
-at a time: a RoleBinding from ClusterRole gibson-connector-creds to the
-daemon's ServiceAccount (gibson#137). The operator learns that ServiceAccount
-name from DAEMON_SERVICE_ACCOUNT_NAME. The daemon's StatefulSet runs as
-gibson-workloads' gibson.serviceAccount.name. The two live in different
-subcharts and nothing in Helm ties them together. A mismatch is silent at
-install time and a 403 on every connector credential write at run time.
+The tenant-operator gives the connector operator its Secret access one tenant
+namespace at a time: a RoleBinding from ClusterRole gibson-connector-creds to
+the ServiceAccount that CONNECTOR_OPERATOR_SERVICE_ACCOUNT_NAME names
+(gibson#664). The daemon holds no Kubernetes client (ADR-0023), so no binding
+may give its ServiceAccount Tenant, ConnectorInstance or Secret rules.
 
-This guard renders the umbrella for every profile and fails when the env
-value on the tenant-operator Deployment differs from the serviceAccountName
-on the daemon StatefulSet, or when either is missing, or when the ClusterRole
-the operator may bind is not the one the workloads chart renders.
+This guard renders the umbrella for every profile and fails when the env value
+on the tenant-operator Deployment differs from the serviceAccountName of the
+connector-operator Deployment, when the ClusterRole is missing or bound
+cluster-wide, when the tenant operator may not bind it, and when a binding
+gives the daemon one of those rules.
 
-  check-daemon-sa-binding.py             exit 1 on a mismatch, 0 when every profile agrees
-  check-daemon-sa-binding.py --selftest  prove a renamed ServiceAccount fails
+  check-connector-creds-binding.py             exit 1 on a finding
+  check-connector-creds-binding.py --selftest  prove each finding fails
 """
 import copy
 import os
@@ -45,6 +44,9 @@ def find(docs, kind, name):
     return None
 
 
+DAEMON_KINDS = {"tenants", "connectorinstances", "secrets"}
+
+
 def judge(docs: list[dict]) -> list[str]:
     out = []
     ss = None
@@ -54,18 +56,22 @@ def judge(docs: list[dict]) -> list[str]:
     if ss is None:
         return ["no StatefulSet with app.kubernetes.io/component=daemon in the render"]
     daemon_sa = ss["spec"]["template"]["spec"].get("serviceAccountName")
+    co = find(docs, "Deployment", "gibson-connector-operator")
+    if co is None:
+        return ["no Deployment gibson-connector-operator in the render"]
+    co_sa = co["spec"]["template"]["spec"].get("serviceAccountName")
     dep = find(docs, "Deployment", "gibson-tenant-operator")
     if dep is None:
         return ["no Deployment gibson-tenant-operator in the render"]
     env_val = None
     for c in dep["spec"]["template"]["spec"]["containers"]:
         for e in c.get("env", []):
-            if e.get("name") == "DAEMON_SERVICE_ACCOUNT_NAME":
+            if e.get("name") == "CONNECTOR_OPERATOR_SERVICE_ACCOUNT_NAME":
                 env_val = e.get("value")
     if env_val is None:
-        out.append("tenant-operator Deployment has no DAEMON_SERVICE_ACCOUNT_NAME env")
-    elif env_val != daemon_sa:
-        out.append(f"DAEMON_SERVICE_ACCOUNT_NAME={env_val!r} but the daemon StatefulSet runs as {daemon_sa!r}")
+        out.append("tenant-operator Deployment has no CONNECTOR_OPERATOR_SERVICE_ACCOUNT_NAME env")
+    elif env_val != co_sa:
+        out.append(f"CONNECTOR_OPERATOR_SERVICE_ACCOUNT_NAME={env_val!r} but the connector operator runs as {co_sa!r}")
     if find(docs, "ClusterRole", CLUSTER_ROLE) is None:
         out.append(f"ClusterRole {CLUSTER_ROLE} is not rendered; the operator's per-tenant RoleBinding would dangle")
     for d in docs:
@@ -78,6 +84,20 @@ def judge(docs: list[dict]) -> list[str]:
             can_bind = True
     if not can_bind:
         out.append(f"ClusterRole gibson-tenant-operator may not bind {CLUSTER_ROLE} (clusterroles/bind resourceNames)")
+    # The daemon holds no Kubernetes client (ADR-0023, gibson#664): no binding
+    # may give its ServiceAccount Tenant, ConnectorInstance or Secret rules.
+    roles = {(d["kind"], d["metadata"]["name"]): d for d in docs if d.get("kind") in ("Role", "ClusterRole")}
+    for b in docs:
+        if b.get("kind") not in ("RoleBinding", "ClusterRoleBinding"):
+            continue
+        if not any(s.get("kind") == "ServiceAccount" and s.get("name") == daemon_sa for s in b.get("subjects") or []):
+            continue
+        role = roles.get((b.get("roleRef", {}).get("kind"), b.get("roleRef", {}).get("name")))
+        for r in (role or {}).get("rules", []):
+            hit = DAEMON_KINDS & set(r.get("resources") or [])
+            if hit:
+                out.append(f"{b['kind']} {b['metadata']['name']} gives the daemon ServiceAccount {daemon_sa!r} "
+                           f"rules on {sorted(hit)}; the daemon holds no Kubernetes client (gibson#664)")
     return out
 
 
@@ -86,14 +106,24 @@ def selftest() -> int:
     if judge(docs):
         print("SELFTEST FAIL: the baseline render must pass:\n  " + "\n  ".join(judge(docs)))
         return 1
-    # THE FIXTURE THIS EXISTS FOR: the daemon runs as another ServiceAccount.
+    # The connector operator runs as another ServiceAccount.
     renamed = copy.deepcopy(docs)
     for d in renamed:
-        if d.get("kind") == "StatefulSet" and d["metadata"].get("labels", {}).get("app.kubernetes.io/component") == "daemon":
+        if d.get("kind") == "Deployment" and d["metadata"]["name"] == "gibson-connector-operator":
             d["spec"]["template"]["spec"]["serviceAccountName"] = "gibson-renamed"
     got = judge(renamed)
     if len(got) != 1 or "runs as 'gibson-renamed'" not in got[0]:
-        print(f"SELFTEST FAIL: a renamed daemon ServiceAccount must fail, got {got}")
+        print(f"SELFTEST FAIL: a renamed connector operator ServiceAccount must fail, got {got}")
+        return 1
+    # A grant to the daemon comes back (gibson#664).
+    daemon_sa = next(d for d in docs if d.get("kind") == "StatefulSet" and d["metadata"].get("labels", {}).get("app.kubernetes.io/component") == "daemon")["spec"]["template"]["spec"]["serviceAccountName"]
+    back = copy.deepcopy(docs) + [
+        {"kind": "ClusterRole", "metadata": {"name": "tenants-read"}, "rules": [{"apiGroups": ["gibson.zeroroot.ai"], "resources": ["tenants"], "verbs": ["list"]}]},
+        {"kind": "ClusterRoleBinding", "metadata": {"name": "tenants-read"}, "roleRef": {"kind": "ClusterRole", "name": "tenants-read"},
+         "subjects": [{"kind": "ServiceAccount", "name": daemon_sa, "namespace": "gibson"}]}]
+    got = judge(back)
+    if len(got) != 1 or "holds no Kubernetes client" not in got[0]:
+        print(f"SELFTEST FAIL: a Tenant grant to the daemon must fail, got {got}")
         return 1
     # A cluster-wide binding sneaking back fails.
     crb = copy.deepcopy(docs) + [{"kind": "ClusterRoleBinding", "metadata": {"name": "sneak"}, "roleRef": {"name": CLUSTER_ROLE}}]
@@ -112,7 +142,7 @@ def selftest() -> int:
     if len(got) != 1 or "may not bind" not in got[0]:
         print(f"SELFTEST FAIL: losing clusterroles/bind on {CLUSTER_ROLE} must fail, got {got}")
         return 1
-    print("OK: a renamed daemon ServiceAccount, a cluster-wide binding and a lost bind permission fail; the baseline agrees")
+    print("OK: a renamed connector operator ServiceAccount, a grant to the daemon, a cluster-wide binding and a lost bind permission fail; the baseline agrees")
     return 0
 
 
@@ -124,9 +154,9 @@ def main() -> int:
         for m in judge(render(p)):
             bad.append(f"{p}: {m}")
     if bad:
-        print("❌ the tenant-operator would bind the wrong ServiceAccount, or the daemon Secret grant is not per tenant:\n  " + "\n  ".join(bad))
+        print("❌ the tenant-operator would bind the wrong ServiceAccount, the Secret grant is not per tenant, or the daemon holds a grant:\n  " + "\n  ".join(bad))
         return 1
-    print("✓ daemon-sa-binding: every profile binds the daemon's real ServiceAccount, per tenant namespace only")
+    print("✓ connector-creds-binding: every profile binds the connector operator's real ServiceAccount, per tenant namespace only, and grants the daemon nothing")
     return 0
 
 

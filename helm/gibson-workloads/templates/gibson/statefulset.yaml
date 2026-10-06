@@ -143,56 +143,9 @@ spec:
                until the agent socket is reachable. Renders unconditionally
                (the daemon's SPIFFE-mTLS listeners depend on it). */}}
         {{- include "gibson.waitForSpireSocket" . | nindent 8 }}
-        # Wait for ESO to materialise the daemon's IdP-admin Secret.
-        #
-        # ESO is required infrastructure (one-code-path #203). The Secret
-        # is owned by the ExternalSecret at
-        # templates/gibson/idp-admin-externalsecret.yaml, which
-        # materialises asynchronously from the bootstrap-secrets-backend.
-        # The daemon container's `secretKeyRef` lookups would
-        # CreateContainerConfigError if the Secret didn't exist yet, so
-        # we block here until it does.
-        #
-        # Spec: .spec-workflow/specs/deploy-simplification (Phase 3.1).
-        - name: wait-for-idp-admin-secret
-          # kubectl image (bitnamilegacy mirror) ships kubectl + bash —
-          # the only two things this step needs. Pinned to the chart-wide
-          # kubectl version used by other hooks.
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
-          command: ['/bin/bash', '-c']
-          args:
-            - |
-              set -eu
-              name={{ .Values.idp.adminCredentialsSecret | quote }}
-              ns={{ .Release.Namespace | quote }}
-              echo "[wait-for-idp-admin-secret] waiting for Secret ${ns}/${name} (ESO-managed)..."
-              # 5 min budget. Backend mint + ESO refreshInterval (60s) covers
-              # the common case well under this; surface obvious failures fast.
-              for i in $(seq 1 150); do
-                if kubectl get secret -n "${ns}" "${name}" \
-                    -o jsonpath='{.data.client_id}' 2>/dev/null \
-                    | base64 -d 2>/dev/null | grep -q .; then
-                  echo "[wait-for-idp-admin-secret] ok (client_id present)"
-                  exit 0
-                fi
-                sleep 2
-              done
-              echo "[wait-for-idp-admin-secret] timed out after 5 min; the bootstrap-secrets Job may not have completed or ESO may not be syncing — check kubectl get externalsecret -n ${ns}" >&2
-              exit 1
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65532
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
+        # No wait for the IdP-admin Secret (gibson#664, charts#435): the
+        # daemon holds no Secret grant. Its secretKeyRef entries make the
+        # kubelet hold the container until ESO has written the Secret.
         # Setup config directory with correct config file location.
         # Spec 3 R3 — directories are now under /var/lib/gibson because the
         # nonroot user has no $HOME; HOME=/var/lib/gibson is exported in the
