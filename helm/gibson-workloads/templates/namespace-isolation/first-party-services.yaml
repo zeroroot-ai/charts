@@ -60,9 +60,18 @@ spec:
         # namespace (deploy#1728): it logs in to OpenBao with its own
         # ServiceAccount to read every ExternalSecret. Selected by the
         # upstream chart's pod label, no longer by a namespace.
+        {{- /* On a guest cluster the cluster's own External Secrets runs in
+               another namespace; the store values name it, and the same
+               value binds the OpenBao role (charts#369). */}}
+        {{- $esoNs := ((((.Values.externalSecrets).clusterSecretStore | default dict).serviceAccount | default dict).namespace) | default .Release.Namespace }}
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: external-secrets
+          {{- if ne $esoNs .Release.Namespace }}
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $esoNs | quote }}
+          {{- end }}
       ports:
         - protocol: TCP
           port: 8200

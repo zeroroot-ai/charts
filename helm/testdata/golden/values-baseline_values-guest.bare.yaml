@@ -742,6 +742,9 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: external-secrets
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: "external-secrets"
       ports:
         - protocol: TCP
           port: 8200
@@ -8075,7 +8078,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: external-secrets
-    namespace: gibson
+    namespace: external-secrets
 ---
 # Source: gibson/charts/openfga/templates/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -13474,7 +13477,7 @@ spec:
               ESO_ROLE="eso-reader"
               ESO_POLICY="eso-reader"
               ESO_SA_NAME="external-secrets"
-              ESO_SA_NS="gibson"
+              ESO_SA_NS="external-secrets"
               # The two keyring inputs the bringup projects into this container
               # (volume bringup-inputs). Absent files mean "nothing supplied".
               INPUTS_DIR=/etc/openbao/inputs
@@ -18062,7 +18065,7 @@ spec:
           role: "eso-reader"
           serviceAccountRef:
             name: "external-secrets"
-            namespace: "gibson"
+            namespace: "external-secrets"
 ---
 # Source: gibson/charts/gibson-workloads/templates/setec/daemon-client-secret.yaml
 # ESO's kubernetes provider talks to the API server as $readerSA, so the

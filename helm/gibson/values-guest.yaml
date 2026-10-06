@@ -21,3 +21,15 @@ externalDns:
   enabled: false
 cnpg:
   enabled: false
+
+# The cluster's External Secrets runs in its own namespace, with its own
+# ServiceAccount. The store logs in to OpenBao as that ServiceAccount, the
+# OpenBao role binds the same one, and the OpenBao NetworkPolicy admits that
+# namespace (charts#369; the first guest exit test failed on "unable to create
+# client"). Set it to the namespace of your External Secrets install.
+gibson-workloads:
+  externalSecrets:
+    clusterSecretStore:
+      serviceAccount:
+        name: external-secrets
+        namespace: external-secrets
