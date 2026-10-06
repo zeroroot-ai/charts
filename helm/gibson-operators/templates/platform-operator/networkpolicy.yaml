@@ -2,10 +2,10 @@
      tenant-operator, the platform-operator serves NO admission webhook —
      its only listeners are metrics (:8080) and health probes (:8081;
      kubelet probes are always permitted by the CNI's node-local
-     allowance). Ingress is therefore scrapers-only. Egress is allow-all
-     under the namespace default-deny added by deploy#1365 (Zitadel OIDC
-     app provisioning, OpenFGA, OpenBao, kube-apiserver); per-component
-     egress tightening is tracked separately (deploy#1462).
+     allowance). Ingress is therefore scrapers-only. Egress names each peer
+     (charts#396, ADR-0165 rule 4): cluster DNS, the API server, Zitadel on
+     its Service port (ZITADEL_URL, ADR-0092) and OpenBao (VAULT_ADDR). The
+     operator reaches no host outside the cluster.
 
      platform-operator is structural infrastructure (one-code-path /
      deploy#188); the inner `networkPolicy.enabled` sub-feature flag
@@ -29,7 +29,23 @@ spec:
     - Ingress
     - Egress
   egress:
-    - {}
+    {{- include "gibson.netpolEgressDNS" . | nindent 4 }}
+    {{- include "gibson.netpolEgressAPIServer" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: zitadel
+              app.kubernetes.io/component: start
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: openbao
+      ports:
+        - protocol: TCP
+          port: 8200
   ingress:
     - from:
         - namespaceSelector: {}
