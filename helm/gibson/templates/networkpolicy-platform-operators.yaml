@@ -10,7 +10,8 @@ scripts/check-secure-pod.py fails the render on it.
 Every operator is a kube-apiserver client and a network client of the thing
 it manages: cert-manager reaches ACME endpoints and DNS providers,
 external-secrets reaches OpenBao, external-dns reaches the DNS provider, the
-CNPG operator reaches its instance pods. Egress is open for all of them. Only
+CNPG operator reaches its instance pods. Egress is open for all of them but
+external-dns, which names its peers and its provider hosts (charts#396). Only
 the admission webhooks accept connections, and they are dialled by the
 kube-apiserver, which pod labels cannot select (same pattern as the
 tenant-operator policy): the webhook port is open from any source. Metrics
@@ -70,5 +71,26 @@ spec:
         - protocol: TCP
           port: {{ $op.metrics }}
   egress:
+    {{- if eq $op.name "external-dns" }}
+    {{- /* charts#396: external-dns names its peers. It reads the API server
+           and resolves names; the hosts of its DNS provider come from the
+           host policy below (ADR-0165 rule 4). */}}
+    {{- include "gibson.netpolEgressDNS" $ | nindent 4 }}
+    {{- include "gibson.netpolEgressAPIServer" $ | nindent 4 }}
+    {{- else }}
     - {}
+    {{- end }}
+{{- end }}
+{{- /* The DNS provider of external-dns, by host name (charts#396). The
+       inmemory provider of a cluster with no cloud reaches no host, so it
+       gets no host policy. Any other provider reaches the hosts that
+       egressHosts.externalDns lists. */}}
+{{- $edns := index .Values "external-dns" | default dict }}
+{{- if ne ((($edns.provider) | default dict).name | default "inmemory") "inmemory" }}
+---
+{{ include "gibson.ciliumEgressPolicy" (dict
+     "ctx" $
+     "name" (printf "%s-operator-external-dns-hosts" $release)
+     "selector" (dict "app.kubernetes.io/name" "external-dns")
+     "hosts" (required "egressHosts.externalDns is required when external-dns publishes to a real provider (charts#396)" (.Values.egressHosts).externalDns)) }}
 {{- end }}

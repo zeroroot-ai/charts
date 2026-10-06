@@ -1777,7 +1777,18 @@ spec:
         - protocol: TCP
           port: 7979
   egress:
-    - {}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/pdb.yaml
 apiVersion: policy/v1
@@ -6187,6 +6198,13 @@ rules:
   # into a NetworkPolicy per tenant namespace (Spike 1).
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  # The egress policy of each connector, by host name (gibson#758,
+  # ADR-0165 rule 4). The operator writes one CiliumNetworkPolicy for each
+  # connector with a host list, next to its NetworkPolicy, in the tenant
+  # namespace. Without this rule each reconcile fails on EgressPolicy.
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumnetworkpolicies"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
 
   # ToolHive primitives — the operator reconciles each ConnectorInstance into

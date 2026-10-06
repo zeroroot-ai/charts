@@ -1416,6 +1416,17 @@ external-dns:
     - service
     - ingress
 
+# The hosts each platform pod reaches outside the cluster, by name (ADR-0165
+# rule 4, charts#396). The chart renders one CiliumNetworkPolicy for each list
+# (gibson.ciliumEgressPolicy). Add a host here for a private endpoint; never
+# open egress to all. Each entry: host (exact) or pattern, and TCP ports.
+egressHosts:
+  # The DNS provider of external-dns, when it is not inmemory. AWS: Route53
+  # and STS (IRSA) answer on regional and global amazonaws.com names.
+  externalDns:
+    - pattern: "*.amazonaws.com"
+      ports: [443]
+
 cnpg:
   # Operator-substitution seam; see the block at the top of this file.
   enabled: true

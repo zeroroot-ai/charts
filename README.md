@@ -15,6 +15,13 @@ CHART_VERSION=<version> make baseline-up   # the same, from the published charts
 make baseline-verify                   # prove that the install came up
 ```
 
+The cluster must run Cilium as its network plugin (ADR-0087). The chart limits
+the egress of each platform pod by host name with `CiliumNetworkPolicy`, and
+only Cilium enforces that. The script stops before it installs anything when
+the `CiliumNetworkPolicy` CRD is absent. On kind, start the cluster with
+`disableDefaultCNI: true` and install Cilium first, as `helm/kind-config.yaml`
+and the exit tests do. The chart ships no egress proxy and no service mesh.
+
 On one local node (kind or k3d), add the `developer` rung. The baseline asks
 for the honest self-hosted floor, about 2.9 CPU of scheduling reservations,
 which a single local node cannot meet:
