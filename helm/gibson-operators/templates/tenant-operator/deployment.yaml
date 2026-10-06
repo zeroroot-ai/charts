@@ -1,4 +1,5 @@
 {{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "tenantOperator.daemonSpiffeID" "connectorOperator.daemonSpiffeID") "use" "the one value global.spire.trustDomain; each SPIFFE ID is built from it and a path (ADR-0164, charts#392)") }}
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "tenantOperator.smtp") "use" "the one mail value global.email (hosted#223)") }}
 {{- /*
   tenant-operator is structural infrastructure (one-code-path /
   deploy#188). The previous outer `.Values.tenantOperator.enabled`
@@ -376,126 +377,66 @@ spec:
             */}}
             {{- /*
               SMTP env block — REQUIRED at boot per one-code-path
-              (tenant-operator#95). main.go exits 1 if SMTP_HOST is
-              unset. The operator's saga steps DO NOT call SMTP
-              (verified: no `sender.Send` / `mailer` references in
-              internal/saga/flows/), but the boot check still enforces
-              non-empty SMTP_HOST.
+              (tenant-operator#95). main.go exits 1 if SMTP_HOST is unset.
 
-              The kind dev defaults below point at the chart's mailpit
-              Service, which gibson-workloads renders. Its name comes from
-              the shared gibson.mailpit.host helper, so the dialer and the
-              Service cannot drift: this default was the literal
-              "gibson-workloads-mailpit" until charts#114, and no release
-              ever rendered a Service by that name, so every welcome email
-              failed with "server misbehaving" on a kind install.
+              The one mail value global.email (hosted#223, gibson.email in
+              gibson-common) decides it. tenantOperator.smtp was deleted.
 
-              Every cloud overlay MUST set `tenantOperator.smtp.host`, which
-              values.yaml now declares. The umbrella's
-              mail-transport-guard.yaml fails the render when the daemon is
-              configured for smtp and this is empty, because two of three
-              senders being right is how staging sent no welcome email for
-              days (hosted#372).
+              provider smtp: the relay of global.email, its port, its TLS
+              mode, and the one credential Secret (username, password) that
+              the daemon and Zitadel also read. credentials.source none is a
+              relay that takes no credential.
+
+              provider log: the in-cluster mailpit sink, port 1025, no TLS
+              and no credential. Its name comes from the shared
+              gibson.mailpit.host helper, so the dialer and the Service cannot
+              drift (charts#114). mailpit offers no STARTTLS, so the mode is
+              plaintext.
+
+              The transport is NAMED, not a boolean (gibson#561): starttls
+              (587, dial plaintext then upgrade), implicit (465, TLS from the
+              first byte) or plaintext. gibson.email refuses plaintext with a
+              credential, and the operator refuses an unknown mode at startup.
             */}}
+            {{- $mail := include "gibson.email" . | fromJson }}
+            {{- if eq $mail.provider "smtp" }}
             - name: SMTP_HOST
-              value: {{ ((.Values.tenantOperator).smtp).host | default (include "gibson.mailpit.host" .) | quote }}
+              value: {{ $mail.host | quote }}
             - name: SMTP_PORT
-              value: {{ ((.Values.tenantOperator).smtp).port | default "1025" | quote }}
-            {{- /*
-              CREDENTIALS COME FROM A SECRET, and only when a relay is named.
-              These two used to be plain values whose comment said prod
-              overlays "inject a real value from ESO-backed Secret". The
-              template had no secretKeyRef, so that mechanism did not exist
-              and the only way to obey the comment was to commit an SES
-              password to a gitops values file (hosted#372).
-
-              A named host means a real relay, which means authentication.
-              No host means the in-cluster mailpit, which accepts anonymous
-              submission, and a secretKeyRef there would wedge every kind
-              install on a Secret it does not render.
-            */}}
-            {{- $toSmtp := (.Values.tenantOperator).smtp | default dict }}
-            {{- if $toSmtp.host }}
-            {{- /*
-              THREE EXPLICIT STATES. Defaulting the Secret name was wrong:
-              `<release>-email-smtp` exists only when gibson-workloads sets
-              gibson.email.smtp.externalSecret.enabled, which staging does and
-              kind does not. So the default rendered a secretKeyRef for a Secret
-              the kind install never creates, and the tenant-operator would have
-              sat in CreateContainerConfigError. check-2core-overlay caught it on
-              the signup exit test's own values, which name the in-cluster
-              mailpit explicitly.
-
-              And a relay that needs no credential must SAY so rather than be
-              inferred from the absence of a Secret name. Inferring it is how a
-              real relay gets contacted anonymously and rejects the mail at send
-              time, with nothing in the chart saying why — the same silent shape
-              as the bug this whole change exists to fix (hosted#372).
-            */}}
-            {{- if $toSmtp.credentialsSecretName }}
+              value: {{ $mail.port | quote }}
+            {{- with $mail.credentialsSecret }}
             - name: SMTP_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ $toSmtp.credentialsSecretName | quote }}
+                  name: {{ . | quote }}
                   key: username
             - name: SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ $toSmtp.credentialsSecretName | quote }}
+                  name: {{ . | quote }}
                   key: password
-            {{- else if $toSmtp.anonymous }}
-            - name: SMTP_USERNAME
-              value: "" {{/* allowlist-silent-default: anonymous: true — a sink that accepts any sender. */}}
-            - name: SMTP_PASSWORD
-              value: "" {{/* allowlist-silent-default: anonymous: true — a sink that accepts any sender. */}}
-            {{- else }}
-            {{- fail (printf "tenantOperator.smtp.host is %q but neither tenantOperator.smtp.credentialsSecretName nor tenantOperator.smtp.anonymous is set. The welcome email would be submitted with no credential, which a real relay rejects at send time and nothing in the chart explains. Name the Secret holding username/password, or set anonymous: true for a sink that accepts any sender (the in-cluster mailpit)." $toSmtp.host) }}
-            {{- end }}
             {{- else }}
             - name: SMTP_USERNAME
-              value: "" {{/* allowlist-silent-default: no host means mailpit, which takes no auth. */}}
+              value: "" {{/* allowlist-silent-default: credentials.source none — a relay that takes no credential. */}}
             - name: SMTP_PASSWORD
-              value: "" {{/* allowlist-silent-default: no host means mailpit, which takes no auth. */}}
-            {{- end }}
-            - name: SMTP_FROM
-              value: {{ ((.Values.tenantOperator).smtp).from | default "no-reply@zeroroot.ai" | quote }}
-            {{- /*
-              The transport is NAMED, not a boolean (gibson#561). "false" never
-              meant plaintext: it meant STARTTLS, because the operator's
-              UseTLS=false branch went through net/smtp.SendMail, which issues
-              STARTTLS and refuses PlainAuth over an unencrypted link. Both
-              branches encrypted, so the flag's name was the whole defect — it
-              cost a staging outage reading "smtp tls dial: tls: first record
-              does not look like a TLS handshake" against SES on 587, which is
-              STARTTLS and not implicit TLS.
-
-              starttls   dial plaintext, then STARTTLS. Port 587. The default.
-              implicit   TLS from the first byte. Port 465.
-              plaintext  no encryption, ever (gibson#574). For a sink that
-                         offers no STARTTLS at all — the in-cluster mailpit
-                         answers a TLS open with "500 5.5.2 Syntax error", and
-                         `starttls` against it fails by design because an
-                         upgrade that silently does not happen is the trap this
-                         whole type exists to remove.
-
-              plaintext is REFUSED when a username is set, here and again in the
-              operator's NewSMTPSender. net/smtp would refuse PlainAuth over a
-              cleartext non-localhost link anyway, so the pair can never deliver;
-              failing at render says why a deploy earlier.
-
-              An unknown value fails the RENDER here, so a typo never reaches a
-              pod. The operator also refuses it at startup, naming the mode, the
-              host and the port.
-            */}}
-            {{- $mode := ((.Values.tenantOperator).smtp).tlsMode | default "starttls" }}
-            {{- if not (has $mode (list "starttls" "implicit" "plaintext")) }}
-            {{- fail (printf "tenantOperator.smtp.tlsMode is %q — it must be \"starttls\" (port 587, dial plaintext then upgrade), \"implicit\" (port 465, TLS from the first byte) or \"plaintext\" (no encryption, for a sink that offers no STARTTLS). The old boolean tenantOperator.smtp.tls is gone: tls=false was STARTTLS, not plaintext, so set tlsMode: starttls to keep that behaviour." $mode) }}
-            {{- end }}
-            {{- if and (eq $mode "plaintext") ((.Values.tenantOperator).smtp).username }}
-            {{- fail (printf "tenantOperator.smtp.tlsMode is \"plaintext\" and tenantOperator.smtp.username is %q: the credential would cross the network in the clear, and net/smtp refuses PlainAuth over a cleartext link to %q, so this pair can never deliver mail. Use \"starttls\" (port 587) or \"implicit\" (port 465) with that username, or drop the username for an anonymous sink." (((.Values.tenantOperator).smtp).username) (((.Values.tenantOperator).smtp).host | default "the relay")) }}
+              value: "" {{/* allowlist-silent-default: credentials.source none — a relay that takes no credential. */}}
             {{- end }}
             - name: SMTP_TLS_MODE
-              value: {{ $mode | quote }}
+              value: {{ $mail.tlsMode | quote }}
+            {{- else }}
+            - name: SMTP_HOST
+              value: {{ include "gibson.mailpit.host" . | quote }}
+            - name: SMTP_PORT
+              value: "1025"
+            - name: SMTP_USERNAME
+              value: "" {{/* allowlist-silent-default: provider log — mailpit takes no auth. */}}
+            - name: SMTP_PASSWORD
+              value: "" {{/* allowlist-silent-default: provider log — mailpit takes no auth. */}}
+            - name: SMTP_TLS_MODE
+              value: "plaintext"
+            {{- end }}
+            - name: SMTP_FROM
+              value: {{ $mail.from | quote }}
             {{- with (((.Values.tenantOperator).billing).stripeAPIBaseURL) }}
             # DEV ONLY — redirects all Stripe API calls to the in-cluster
             # stripe-mock server (deployed by the gibson-workloads chart when

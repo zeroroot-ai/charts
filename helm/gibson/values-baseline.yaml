@@ -188,41 +188,12 @@ gibson-workloads:
       enabled: true
       storageClassName: ""   # cluster default
       size: 20Gi
-    embedder:
-      cache:
-        enabled: false
-        initMode: skip
     # Self-hosted profile: entitlements seam knob is UNSET (ConfigProvider).
     # The no-closed-refs guard asserts this renders with no billing image ref.
     entitlementsEndpoint: ""
     # Self-hosted profile: entitlements-required guard MUST be absent/false.
     # The OSS fail-open unlimited posture is the correct default here.
     entitlementsRequired: false
-    # Mail transport: "log" — signup emails are written to the daemon log and
-    # nothing is sent. This is the ONLY setting that installs out of the box:
-    # the previous provider:"smtp" block referenced an EXAMPLE Secret
-    # (gibson-signup-smtp-credentials) that no template produces by design,
-    # and the daemon container sat in CreateContainerConfigError forever on a
-    # Secret the operator was never told to create (deploy#1631). A profile
-    # whose defaults cannot start is a broken profile, whatever the comment
-    # beside it says.
-    #
-    # The daemon boots fine on "log" (gibson#1228); self-serve signup is inert
-    # until real mail exists, and the seeded first admin (global.firstTenant above)
-    # is how the operator gets in. To wire real mail, switch to path A:
-    #
-    #   email:
-    #     provider: "smtp"
-    #     from: "no-reply@<your-domain>"
-    #     smtp:
-    #       host: "<your-relay>"
-    #       port: 587
-    #       username: "<user>"           # then CREATE the Secret first:
-    #       passwordSecretName: "gibson-signup-smtp-credentials"
-    #       passwordSecretKey: "password"
-    email:
-      provider: "log"
-      from: "no-reply@localhost.zeroroot.ai"
   dashboard:
     replicas: 1
     resources:
@@ -668,7 +639,7 @@ global:
     tenantId: "primary"
     displayName: "Primary Workspace"
     ownerEmail: "admin@localhost.zeroroot.ai"
-    # This profile ships gibson-workloads.email.provider: "log" below (no
+    # This profile ships global.email.provider: "log" below (no
     # delivering mail transport), so offlineSetup is explicit, the same way
     # global.platformOwner.offlineSetup is below (ADR-0093 decision 8,
     # hosted#202): the first-admin Job writes a one-time setup link to the
@@ -679,7 +650,7 @@ global:
       key: "setup-link"
   # Platform owner (ADR-0093 decision 6/8, hosted#201). A different address
   # from firstTenant.ownerEmail above — the render fails otherwise. This
-  # profile ships gibson-workloads.email.provider: "log" below (no
+  # profile ships global.email.provider: "log" below (no
   # delivering mail transport), so offlineSetup is explicit: the
   # platform-operator writes a one-time setup link to the named Secret
   # instead of emailing it.
@@ -689,6 +660,14 @@ global:
     setupSecretRef:
       name: "gibson-platform-owner-setup"
       key: "setup-link"
+  # Mail: "log". Mail is written to the daemon log and nothing is sent, so
+  # this profile installs with no relay. The daemon boots on "log"
+  # (gibson#1228). Self-serve signup is inert until real mail exists, and the
+  # seeded first admin (global.firstTenant above) is how the operator gets in.
+  # To wire real mail, see global.email in values.yaml (worked example).
+  email:
+    provider: "log"
+    from: "no-reply@localhost.zeroroot.ai"
 # TLS to Postgres, kept on for a customer install (deploy#1197 / deploy#1239).
 # These were inherited from the EKS profile, where RDS force_ssl=1 requires
 # them. They are kept here rather than dropped: CNPG generates its own server

@@ -36,14 +36,6 @@ Disabled in production overlays (stripeMock.enabled: false).
 {{- end }}
 
 {{/*
-gibson.emailSmtpSecret.name — the K8s Secret name the daemon's SMTP
-credentials ExternalSecret materialises (gibson.email.smtp.externalSecret).
-*/}}
-{{- define "gibson.emailSmtpSecret.name" -}}
-{{- printf "%s-email-smtp" .Release.Name }}
-{{- end }}
-
-{{/*
 Capability-Grant JWT signing key Secret name (GHSA-3957, gibson#1288).
 
 Release-prefixed: nothing outside this chart

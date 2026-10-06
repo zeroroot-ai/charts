@@ -13,9 +13,10 @@ symptom is a daemon that will not boot rather than mail that does not arrive.
 
 WHY A GATE AND NOT A GOLDEN
 
-It is gated on TWO conditions — `gibson.email.smtp.externalSecret.enabled`, which
-defaults false because plain values are path A, and `gibson.email.provider`
-being `smtp`. No committed golden sets either, so no golden shows this object.
+It is gated on TWO conditions of the one mail value (hosted#223):
+`global.email.provider` being `smtp`, and `global.email.smtp.credentials.source`
+being `secretStore`. No committed golden sets the provider, so no golden shows
+this object.
 
 That mattered on 2026-10-02. hosted's `secret-contract.yaml` declares
 `ses-smtp-credentials` consumed by `chart:gibson-workloads/email-smtp-secret`,
@@ -45,42 +46,21 @@ except ImportError:  # pragma: no cover
     sys.exit("check-email-smtp-external-secret: PyYAML is required")
 
 ROOT = Path(__file__).resolve().parent.parent
-# Subchart-scoped, because the template reads .Values.gibson.email from INSIDE
-# gibson-workloads and the umbrella nests a subchart's values under its name.
-# hosted's staging overlay sets exactly these paths.
-ENABLED = "gibson-workloads.gibson.email.smtp.externalSecret.enabled"
-PROVIDER = "gibson-workloads.gibson.email.provider"
+# The one mail value of the umbrella (hosted#223). The daemon, the
+# tenant-operator and Zitadel all read it, so the ON render sets it once.
+SOURCE = "global.email.smtp.credentials.source"
+PROVIDER = "global.email.provider"
 BACKEND_KEY = "ses-smtp-credentials"
-# The chart refuses provider=smtp with no host (statefulset.yaml), which is a
-# correct guard, so the ON render supplies the one staging uses. These are inputs
-# to the render, not assertions about them.
-# Two render guards fire before this object is reached and BOTH are correct, so
-# the ON render satisfies them rather than working around them:
-#   statefulset.yaml   provider=smtp requires a host
-#   mail-transport-guard.yaml  a daemon that can send mail requires Zitadel to be
-#                              able to as well, or every Zitadel-sent setup link
-#                              and invitation is silently undeliverable (hosted#189)
-# These are inputs to the render, not assertions about them.
 SMTP_HOST = "email-smtp.us-east-1.amazonaws.com"
 SMTP_ON = (
-    f"{ENABLED}=true",
     f"{PROVIDER}=smtp",
-    f"gibson-workloads.gibson.email.smtp.host={SMTP_HOST}",
-    f"gibson-operators.platformBootstrap.zitadel.smtp.host={SMTP_HOST}",
-    "gibson-operators.platformBootstrap.zitadel.smtp.port=587",
-    "gibson-operators.platformBootstrap.zitadel.smtp.fromAddress=no-reply@example.test",
-    "gibson-operators.platformBootstrap.zitadel.smtp.fromName=Test",
-    # And the third transport: the tenant-operator's welcome mail. Without it the
-    # chart refuses, because it would default to the in-cluster mailpit a cloud
-    # install does not deploy and every welcome email fails "no such host" while
-    # the signup smoke stays green (hosted#372 — staging sent none for days).
-    f"gibson-operators.tenantOperator.smtp.host={SMTP_HOST}",
-    "gibson-operators.tenantOperator.smtp.port=587",
-    "gibson-operators.tenantOperator.smtp.from=no-reply@example.test",
-    # charts#310: a named host must declare a credential Secret or an explicit
-    # anonymous opt-in, or the welcome email goes out with no credential and a
-    # real relay rejects it at send time.
-    "gibson-operators.tenantOperator.smtp.credentialsSecretName=gibson-email-smtp",
+    "global.email.from=no-reply@example.test",
+    "global.email.fromName=Test",
+    f"global.email.smtp.host={SMTP_HOST}",
+    "global.email.smtp.port=587",
+    "global.email.smtp.tlsMode=starttls",
+    f"{SOURCE}=secretStore",
+    f"global.email.smtp.credentials.remoteKey={BACKEND_KEY}",
 )
 
 
@@ -135,7 +115,7 @@ def check_on() -> dict:
     found = smtp_external_secrets(docs)
     if len(found) != 1:
         fail(
-            f"with {ENABLED}=true and {PROVIDER}=smtp, {len(found)} ExternalSecret(s) read "
+            f"with {SOURCE}=secretStore and {PROVIDER}=smtp, {len(found)} ExternalSecret(s) read "
             f"{BACKEND_KEY}, want exactly 1. The daemon's SMTP credentials come from this "
             "one object; mailer.RequireDelivering refuses to start the daemon without a "
             "delivering transport, so an absent one is a daemon that will not boot."
@@ -165,13 +145,12 @@ def check_on() -> dict:
 
 
 def check_provider_alone() -> None:
-    """enabled=true alone must not render it: the provider condition is real."""
-    docs = render(f"{ENABLED}=true")
+    """smtp with source secret must not render it: the source condition is real."""
+    docs = render(*SMTP_ON, f"{SOURCE}=secret", "global.email.smtp.credentials.secretName=operator-smtp")
     if smtp_external_secrets(docs):
         fail(
-            f"{ENABLED}=true alone rendered the ExternalSecret. The template also requires "
-            f"{PROVIDER}=smtp, and an install whose provider is 'log' would be handed SMTP "
-            "credentials it never uses — the shape this repository keeps finding."
+            f"{SOURCE}=secret rendered the ExternalSecret. The operator creates that Secret, "
+            "and a second writer of the credential is the shape this repository keeps finding."
         )
 
 
