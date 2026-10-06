@@ -313,7 +313,7 @@ spec:
             - name: EXT_AUTHZ_DAEMON_SVID
               value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/daemon") | quote }}
             - name: EXT_AUTHZ_REGISTRY_FETCH_TIMEOUT
-              value: {{ .Values.extAuthz.registryFetchTimeout | default "600s" | quote }}
+              value: "600s"
             {{- end }}
             # Per-kid Capability-Grant key descriptor endpoint (ext-authz#103). ext-authz fetches GET {KEYS_URL}/{kid} to verify a
             # component's self-signed agent+jwt and resolve its daemon-asserted

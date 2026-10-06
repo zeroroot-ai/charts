@@ -40,70 +40,33 @@ helpers route the tenant-operator's DATAPLANE_PG_ADMIN_DSN to that
 role/Secret pair, keeping it cleanly separated from the daemon's
 platform-data path.
 
-Host/port default to the platformPostgres host (same physical
-instance), so only username + password Secret differ. SSL mode inherits
-from platformPostgres unless explicitly overridden.
-
-Values block (added to gibson-operators/values.yaml + values-kind.yaml):
-
-    tenantPostgres:
-      # host/port default to platformPostgres if unset.
-      host: ""
-      port: 5432
-      username: tenant_admin
-      passwordSecretName: tenant-admin-postgres-credentials
-      passwordSecretKey: password
-      sslMode: ""    # defaults to platformPostgres.sslMode
+The role uses the same physical instance as platformPostgres, so host,
+port and SSL mode are the platformPostgres values. No values key changes
+them: the `tenantPostgres` block these helpers once read was never
+declared, and no overlay set it.
 ==============================================================================
 */}}
 
 {{- define "gibson.tenantPostgres.host" -}}
-{{- $cfg := .Values.tenantPostgres | default dict -}}
-{{- if $cfg.host -}}
-{{- $cfg.host -}}
-{{- else -}}
-{{- /* Same physical instance as platformPostgres by default. */ -}}
 {{- include "gibson.platformPostgres.host" . -}}
-{{- end -}}
 {{- end }}
 
 {{- define "gibson.tenantPostgres.port" -}}
-{{- $cfg := .Values.tenantPostgres | default dict -}}
-{{- if $cfg.port -}}
-{{- $cfg.port -}}
-{{- else -}}
 {{- include "gibson.platformPostgres.port" . -}}
-{{- end -}}
 {{- end }}
 
 {{- define "gibson.tenantPostgres.username" -}}
-{{- $cfg := .Values.tenantPostgres | default dict -}}
-{{- $u := $cfg.username | default "tenant_admin" -}}
-{{- /* Render-time guard (deploy#159): refuse to render the operator's
-       DSN with `gibson_platform`, the role that lacks CREATEDB and
-       caused 100% of tenant data-plane provisioning to fail before
-       the fix. */ -}}
-{{- if eq $u "gibson_platform" -}}
-{{- fail (printf "tenantPostgres.username=%q is the wrong role — gibson_platform lacks CREATEDB. The tenant-operator must use tenant_admin (default). See deploy#159." $u) -}}
-{{- end -}}
-{{- $u -}}
+tenant_admin
 {{- end }}
 
 {{- define "gibson.tenantPostgres.passwordSecretName" -}}
-{{- $cfg := .Values.tenantPostgres | default dict -}}
-{{- $cfg.passwordSecretName | default "tenant-admin-postgres-credentials" -}}
+tenant-admin-postgres-credentials
 {{- end }}
 
 {{- define "gibson.tenantPostgres.passwordSecretKey" -}}
-{{- $cfg := .Values.tenantPostgres | default dict -}}
-{{- $cfg.passwordSecretKey | default "password" -}}
+password
 {{- end }}
 
 {{- define "gibson.tenantPostgres.sslMode" -}}
-{{- $cfg := .Values.tenantPostgres | default dict -}}
-{{- if $cfg.sslMode -}}
-{{- $cfg.sslMode -}}
-{{- else -}}
 {{- include "gibson.platformPostgres.sslMode" . -}}
-{{- end -}}
 {{- end }}
