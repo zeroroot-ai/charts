@@ -19,9 +19,6 @@ loudly at bringup. Enforcement is real as of deploy#1430
 Caller sets are label-based ORs; entries whose pods are absent in a given
 profile are inert.
 */}}
-{{- $devDisabled := false -}}
-{{- with .Values.dev -}}{{- with .networkPolicy -}}{{- $devDisabled = .disabled -}}{{- end -}}{{- end -}}
-{{- if not $devDisabled -}}
 {{/* ---------------------------------------------------------------------
      OpenFGA (subchart `openfga`, Deployment + migrate hook Job).
      :8080 HTTP + :8081 gRPC — the allow/deny decision surface. Callers:
@@ -409,4 +406,3 @@ spec:
           port: 9187
   egress:
     - {}
-{{- end }}

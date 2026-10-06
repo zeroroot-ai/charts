@@ -22,10 +22,8 @@ those is out of scope for Phase H/8.5 (egress hardening tracked separately).
 
 DEFAULT FLIPPED in Phase H/8.5: gibson.networkPolicy.enabled defaults to
 TRUE so secure-by-default posture is the chart shape, not an opt-in.
-Opt-out path: dev.networkPolicy.disabled=true for Kind clusters whose CNI
-doesn't implement NetworkPolicies — this also bypasses
-validateAllPathsViaEnvoy (templates/_validators.tpl). The dev override
-exists ONLY for that cluster shape; production overlays must keep it false.
+validateAllPathsViaEnvoy (templates/_validators.tpl) refuses a render with
+it off. Each cluster runs Cilium, which enforces the policy (hosted#436).
 
 The componentIngress path (templates/gibson/ingress-grpc.yaml) is no longer
 compatible — validateAllPathsViaEnvoy refuses to render the chart when it
@@ -36,15 +34,10 @@ edge listener.
 gibson daemon is structural infrastructure (one-code-path /
 deploy#188). The previous outer `.Values.gibson.enabled` half of the
 compound gate has been deleted; the inner `networkPolicy.enabled`
-sub-feature flag (and the `dev.networkPolicy.disabled` escape hatch)
-are preserved.
+sub-feature flag is preserved. The `dev.networkPolicy.disabled` escape hatch
+was deleted (charts#399).
 */}}
 {{- if .Values.gibson.networkPolicy.enabled }}
-{{- /* dev.networkPolicy.disabled escape hatch: render NOTHING when set,
-       same as gibson.networkPolicy.enabled=false. */ -}}
-{{- $devDisabled := false -}}
-{{- with .Values.dev -}}{{- with .networkPolicy -}}{{- $devDisabled = .disabled -}}{{- end -}}{{- end -}}
-{{- if not $devDisabled -}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -197,5 +190,4 @@ spec:
     {{- with .Values.gibson.networkPolicy.additionalIngressFrom }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-{{- end }}
 {{- end }}

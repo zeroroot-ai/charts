@@ -11,9 +11,6 @@ NetworkPolicies neither select nor constrain it
 same reason). That is also why the spire-server :8081 rule below cannot
 name the agents as a podSelector and must admit any source.
 */}}
-{{- $devDisabled := false -}}
-{{- with .Values.dev -}}{{- with .networkPolicy -}}{{- $devDisabled = .disabled -}}{{- end -}}{{- end -}}
-{{- if not $devDisabled -}}
 {{/* SPIRE server (+ controller-manager sidecar).
      :8081 gRPC — agents attest here from node IPs (hostNetwork) and the
      OIDC discovery provider fetches the bundle; unselectable sources, so
@@ -150,4 +147,3 @@ spec:
           port: 8008
   egress:
     - {}
-{{- end }}

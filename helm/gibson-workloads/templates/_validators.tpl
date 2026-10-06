@@ -21,7 +21,7 @@ Validators added in Phase H/8.4:
   - gibson.validateKMSConfigured
 
 Validators added in spec zero-trust-hardening (task 5.2):
-  - dev.networkPolicy.disabled bypass gated on dev.allowed=true (Req 7.2)
+  - (the dev.networkPolicy.disabled bypass of Req 7.2 was deleted, charts#399)
   - validateAllPathsViaEnvoy fourth assertion: SaaS multitenancy without
     tenant NetworkPolicy fails (Req 7.3)
 */}}
@@ -57,6 +57,9 @@ toggle was already forbidden when true and therefore dead code.)
 Spec Reqs: 3.4, 3.5.
 ========================================================================= */}}
 {{- define "gibson.validateAllPathsViaEnvoy" -}}
+{{- if hasKey .Values "dev" -}}
+{{- fail "dev was deleted (charts#399). The dev escape hatches turned off a NetworkPolicy, a data-plane check, SPIFFE and the pull-secret check. Each cluster runs Cilium and the full platform, so none of them has a use. Remove dev from your values." -}}
+{{- end -}}
 {{- if .Values.gibson.enabled -}}
 
 {{- /* Rule 1 — daemon Service type. */ -}}
@@ -70,23 +73,11 @@ Spec Reqs: 3.4, 3.5.
 {{- with .Values.gibson.networkPolicy -}}
 {{- $npEnabled = .enabled -}}
 {{- end -}}
-{{- /* dev escape hatch: dev.networkPolicy.disabled overrides the requirement,
-       but ONLY when dev.allowed=true is set in the same overlay. The undocumented
-       dev.allowed flag prevents the bypass from being silently inherited into a
-       production overlay (spec zero-trust-hardening Req 7.2). */ -}}
-{{- $devDisabled := false -}}
-{{- $devAllowed := false -}}
-{{- with .Values.dev -}}
-{{- $devAllowed = .allowed -}}
-{{- with .networkPolicy -}}
-{{- $devDisabled = .disabled -}}
-{{- end -}}
-{{- end -}}
-{{- if and $devDisabled (not $devAllowed) -}}
-{{- fail "validateAllPathsViaEnvoy: dev.networkPolicy.disabled=true requires dev.allowed=true in the same overlay — the NetworkPolicy bypass is dev-only and must not be silently inherited into production overlays. Either set dev.allowed=true (Kind/dev only) or remove dev.networkPolicy.disabled. Spec zero-trust-hardening Req 7.2." -}}
-{{- end -}}
-{{- if and (not $npEnabled) (not $devDisabled) -}}
-{{- fail "validateAllPathsViaEnvoy: gibson.networkPolicy.enabled=true is required so non-Envoy pods cannot reach the daemon's gRPC ports directly. Set gibson.networkPolicy.enabled=true (or, in a Kind cluster without a NetworkPolicy-aware CNI, set dev.networkPolicy.disabled=true alongside dev.allowed=true to bypass this guard). Spec unified-identity-and-authorization Req 3.5." -}}
+{{- /* No escape hatch: each cluster runs Cilium, which enforces NetworkPolicy
+       (hosted#436). The dev.networkPolicy.disabled bypass was deleted
+       (charts#399). */ -}}
+{{- if not $npEnabled -}}
+{{- fail "validateAllPathsViaEnvoy: gibson.networkPolicy.enabled=true is required so non-Envoy pods cannot reach the daemon's gRPC ports directly. Set gibson.networkPolicy.enabled=true. Spec unified-identity-and-authorization Req 3.5." -}}
 {{- end -}}
 
 {{- /* Rule 3 — unified ingress gRPC route incompatible with Envoy. (Previous
@@ -269,18 +260,6 @@ includes the daemon hits the check.
 {{- define "gibson.validateTenantStoresConfigured" -}}
 {{- if .Values.gibson.enabled -}}
 
-{{- /* dev escape hatch: dev.dataPlane.disabled=true bypasses the validator.
-       Use only for Kind dev clusters where in-chart data-plane stores are not
-       deployed yet.  Production and staging overlays MUST NOT set this flag. */ -}}
-{{- $devDisabled := false -}}
-{{- with .Values.dev -}}
-{{- with .dataPlane -}}
-{{- $devDisabled = .disabled -}}
-{{- end -}}
-{{- end -}}
-{{- if $devDisabled -}}
-{{- /* bail out early — validation skipped for dev. */ -}}
-{{- else -}}
 
 {{- $dp := .Values.dataPlane | default dict -}}
 
@@ -350,7 +329,6 @@ includes the daemon hits the check.
        gibson.redis.host helper hard-fails render via `| required` on an
        empty redis.addr, which covers the only remaining knob. */ -}}
 
-{{- end -}}{{/* end else (not devDisabled) */}}
 {{- end -}}{{/* end if gibson.enabled */}}
 {{- end -}}{{/* end define */}}
 

@@ -19,10 +19,9 @@ scripts/check-secure-pod.py).
 This mirrors the setec chart's `sandbox-namespace-baseline-netpol` — the
 same reasoning the issue cites: a containment control that switches
 itself off when unconfigured is not a control. There is therefore NO
-`.enabled` values toggle on this policy (one-code-path, deploy#188). The
-only escape hatch is `dev.networkPolicy.disabled`, which exists ONLY for
-Kind clusters whose CNI does not implement NetworkPolicies and is
-already documented as forbidden in production overlays.
+`.enabled` values toggle on this policy (one-code-path, deploy#188), and no
+escape hatch: each cluster runs Cilium, which enforces it (hosted#436,
+charts#399).
 
 Kubelet probes and node-local health checks are not affected: admission
 webhooks receive ingress via the per-component policies' any-source
@@ -34,9 +33,6 @@ the API CIDRs through gibson.netpolEgressAPIServer
 (global.networkPolicy.apiServerCIDRs); OpenBao's TokenReview logins were
 the first to find out (staging, 2026-09-10).
 */}}
-{{- $devDisabled := false -}}
-{{- with .Values.dev -}}{{- with .networkPolicy -}}{{- $devDisabled = .disabled -}}{{- end -}}{{- end -}}
-{{- if not $devDisabled -}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -52,4 +48,3 @@ spec:
   policyTypes:
     - Ingress
     - Egress
-{{- end }}

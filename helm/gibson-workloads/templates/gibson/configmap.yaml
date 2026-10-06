@@ -123,7 +123,7 @@ data:
         {{- end }}
       {{- end }}
 
-      {{- if and .Values.gibson.auth.spiffe (not (.Values.dev).disableSPIFFE) }}
+      {{- if .Values.gibson.auth.spiffe }}
       # SPIFFE/SPIRE workload identity configuration
       spiffe:
         trust_domain: {{ include "gibson.trustDomain" . | quote }}
