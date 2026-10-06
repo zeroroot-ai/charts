@@ -420,6 +420,40 @@ spec:
             - name: GIBSON_PLATFORM_TENANT
               value: {{ . | quote }}
             {{- end }}
+            {{- /* Audit export to the durable bucket (ADR-0113, charts#446).
+                   The daemon writes each audit record under audit/ with an
+                   object lock, and retention removes only exported rows. The
+                   bucket, the region and the lock come from the durable bucket
+                   of the environment; the credential is the platform bucket
+                   credential (the bringup keyring). An empty endpoint means
+                   AWS S3 in the region. The render fails without a bucket or
+                   a lock mode: a daemon without them exports nothing and
+                   keeps every audit row. */}}
+            {{- $ax := required "gibson.auditExport is required (charts#446)" .Values.gibson.auditExport }}
+            {{- $axRegion := $ax.region | default "us-east-1" }}
+            - name: GIBSON_AUDIT_EXPORT_BUCKET
+              value: {{ required "gibson.auditExport.bucket is REQUIRED: the durable bucket of the environment (charts#446). On prem, the S3-compatible store of the customer." $ax.bucket | quote }}
+            - name: GIBSON_AUDIT_EXPORT_ENDPOINT
+              value: {{ $ax.endpoint | default (printf "https://s3.%s.amazonaws.com" $axRegion) | quote }}
+            - name: GIBSON_AUDIT_EXPORT_REGION
+              value: {{ $axRegion | quote }}
+            {{- if not (has $ax.lockMode (list "GOVERNANCE" "COMPLIANCE")) }}
+            {{- fail (printf "gibson.auditExport.lockMode %q must be GOVERNANCE or COMPLIANCE: the lock mode the durable bucket policy requires under audit/ (charts#446)" ($ax.lockMode | default "")) }}
+            {{- end }}
+            - name: GIBSON_AUDIT_EXPORT_LOCK_MODE
+              value: {{ $ax.lockMode | quote }}
+            - name: GIBSON_AUDIT_EXPORT_LOCK_DAYS
+              value: {{ required "gibson.auditExport.lockDays is required" $ax.lockDays | toString | quote }}
+            - name: GIBSON_AUDIT_EXPORT_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "gibson.auditExport.credentials.accessKeyIdSecret.name is required" $ax.credentials.accessKeyIdSecret.name }}
+                  key: {{ required "gibson.auditExport.credentials.accessKeyIdSecret.key is required" $ax.credentials.accessKeyIdSecret.key }}
+            - name: GIBSON_AUDIT_EXPORT_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "gibson.auditExport.credentials.secretAccessKeySecret.name is required" $ax.credentials.secretAccessKeySecret.name }}
+                  key: {{ required "gibson.auditExport.credentials.secretAccessKeySecret.key is required" $ax.credentials.secretAccessKeySecret.key }}
             {{- /* The exit-test profile is one toggle. gibson.e2eRunner.enabled
                    renders the runner's ServiceAccount and SPIFFE identity, and
                    it turns the daemon's runtime fixture flag on here. The flag

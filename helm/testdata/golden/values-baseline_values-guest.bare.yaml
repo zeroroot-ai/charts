@@ -15181,6 +15181,26 @@ spec:
             # GIBSON_APP_URL respectively, above.
             - name: GIBSON_PLATFORM_TENANT
               value: "primary"
+            - name: GIBSON_AUDIT_EXPORT_BUCKET
+              value: "example-durable-bucket"
+            - name: GIBSON_AUDIT_EXPORT_ENDPOINT
+              value: "https://s3.us-east-1.amazonaws.com"
+            - name: GIBSON_AUDIT_EXPORT_REGION
+              value: "us-east-1"
+            - name: GIBSON_AUDIT_EXPORT_LOCK_MODE
+              value: "GOVERNANCE"
+            - name: GIBSON_AUDIT_EXPORT_LOCK_DAYS
+              value: "2192"
+            - name: GIBSON_AUDIT_EXPORT_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: bringup-keyring
+                  key: bucket-access-key
+            - name: GIBSON_AUDIT_EXPORT_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bringup-keyring
+                  key: bucket-secret-key
             - name: GIBSON_EMAIL_PROVIDER
               value: "log"
             - name: GIBSON_EMAIL_FROM

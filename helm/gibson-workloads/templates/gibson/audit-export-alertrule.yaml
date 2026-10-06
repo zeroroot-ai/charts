@@ -1,0 +1,61 @@
+{{- /*
+Audit export alerts (ADR-0113, charts#446).
+
+The daemon exports each audit record to audit/ in the durable bucket, and
+retention removes only exported rows (gibson#941). Two failures need a page:
+
+  AuditExportLagging   gibson_audit_export_lag_seconds, the age of the oldest
+                       record that is not in the bucket, stays above one
+                       hour. The daemon also measures the lag when no bucket
+                       is set, so a missing config fires this rule too.
+  AuditExportErrors    gibson_audit_export_errors_total grows: a write to the
+                       bucket failed (a bad credential, a lock the bucket
+                       policy refuses, a store that does not answer).
+
+tests/alerts/audit-export.test.yaml proves both with `promtool test rules`
+(make alert-rules-test). Renders only where prometheus-operator CRDs exist.
+*/}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-audit-export-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: daemon
+spec:
+  groups:
+    - name: audit-export
+      rules:
+        - alert: AuditExportLagging
+          expr: |
+            max(gibson_audit_export_lag_seconds) > 3600
+          for: 15m
+          labels:
+            severity: page
+            component: daemon
+          annotations:
+            summary: "Audit records are not reaching the durable bucket"
+            description: |
+              The oldest audit record that is not in the durable bucket is
+              older than one hour. Retention removes no row that is not
+              exported, so the audit table grows. Check the daemon log for
+              "audit export", the GIBSON_AUDIT_EXPORT_* values and the bucket
+              credential.
+        - alert: AuditExportErrors
+          expr: |
+            sum(increase(gibson_audit_export_errors_total[15m])) > 0
+          for: 5m
+          labels:
+            severity: page
+            component: daemon
+          annotations:
+            summary: "The daemon fails to write audit records to the durable bucket"
+            description: |
+              A write of an audit range to audit/ in the durable bucket failed
+              in the last 15 minutes. The daemon writes the range again, and
+              the lag grows until a write succeeds. Common causes: a bucket
+              credential that changed, a lock mode or lock days that the
+              bucket policy refuses, or a store that does not answer.
+{{- end }}

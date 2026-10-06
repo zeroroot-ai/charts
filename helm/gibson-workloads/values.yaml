@@ -184,6 +184,40 @@ gibson:
   # Unset (the default) = SVID enrollment disabled, a safe no-op.
   platformTenant: ""
 
+  # Audit export to the durable bucket (ADR-0113, charts#446). The daemon
+  # writes each audit record to audit/<tenant>/ in this bucket, with an object
+  # lock, and retention removes only rows it exported. On prem, name the
+  # S3-compatible store of the customer.
+  #
+  # THERE IS NO DEFAULT BUCKET and no default lock mode, as for
+  # platformPostgres.backup: the render fails without them. The bucket is
+  # the one in platformPostgres.backup.destinationPath (the umbrella fails
+  # when the two differ). baseline-up.sh fills bucket, endpoint and region
+  # from substrate.env; an environment overlay sets the lock to the values
+  # of its bucket policy (audit_lock_mode and audit_retention_days in
+  # hosted substrate/gibson-bootstrap).
+  auditExport:
+    bucket: ""
+    # The S3 API endpoint. Empty means AWS S3 in the region below.
+    endpoint: ""
+    region: "us-east-1"
+    # GOVERNANCE or COMPLIANCE. It must be the mode the bucket policy
+    # requires under audit/, or each write is refused.
+    lockMode: ""
+    # At least the retention of the bucket policy. 2192 days is six years.
+    lockDays: 2192
+    # The platform bucket credential: the BUCKET_ACCESS_KEY and
+    # BUCKET_SECRET_KEY members of the bringup keyring, which the bringup
+    # writes as the bringup-keyring Secret before the chart syncs. The same
+    # credential archives the platform Postgres WAL.
+    credentials:
+      accessKeyIdSecret:
+        name: "bringup-keyring"
+        key: "bucket-access-key"
+      secretAccessKeySecret:
+        name: "bringup-keyring"
+        key: "bucket-secret-key"
+
   # Dispatch policy gate defaults.
   # Spec setec-sandbox-prod-default Task 35 / R3.1.
   #

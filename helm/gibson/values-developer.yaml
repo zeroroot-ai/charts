@@ -62,6 +62,13 @@ gibson-workloads:
       requests:
         cpu: 20m
         memory: 512Mi
+    # kind's durable bucket for the audit export (charts#446), the same
+    # gibson-kind bucket as the WAL archive. `make recreate ENV=kind`
+    # overrides bucket and endpoint from substrate.env.
+    auditExport:
+      bucket: "gibson-kind"
+      endpoint: "http://172.18.255.250:9000"
+      lockMode: "GOVERNANCE"
   dashboard:
     resources:
       requests:
