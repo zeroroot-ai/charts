@@ -38,6 +38,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: mailpit
+        {{- include "gibson.netLabels" (dict "role" "platform") | nindent 8 }}
     spec:
       containers:
         - name: mailpit

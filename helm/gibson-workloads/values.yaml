@@ -154,8 +154,8 @@ secrets:
 # tenant-operator Entitlements check, callback agent, and tool runner
 # routes through. The previous `enabled: true|false` substitution
 # toggle has been deleted — the platform cannot run without it.
-# Sub-feature toggles on this block (`networkPolicy.enabled`,
-# `podDisruptionBudget.enabled`, `serviceAccount.create`,
+# Sub-feature toggles on this block
+# (`podDisruptionBudget.enabled`, `serviceAccount.create`,
 # `config.metrics.enabled`, etc.) remain legitimate.
 # -----------------------------------------------------------------------------
 # Registration rung (ADR-0074, charts#374). One value, one of three names:
@@ -479,22 +479,6 @@ gibson:
     # truth; replaces the version-pinned OCI artifact + sdk.version pin).
     authzRegistry:
       port: 8086
-
-  # NetworkPolicy isolating the daemon Service. When enabled, ingress to the
-  # daemon is restricted to Envoy pods (gateway path) and Prometheus (metrics
-  # scrape).
-  #
-  # Default flipped from false → true in spec
-  # unified-identity-and-authorization Phase H/8.5: secure-by-default
-  # posture, the chart's gateway path is the only supported one, and
-  # validateAllPathsViaEnvoy hard-requires this in every overlay (Envoy is
-  # required infrastructure — deploy#200). Each cluster runs Cilium, which
-  # enforces it (hosted#436). Spec Req 3.5.
-  networkPolicy:
-    enabled: true
-    # Additional ingress rules appended to the daemon NetworkPolicy.
-    # Overlays add entries for monitoring, debug tooling, etc.
-    additionalIngressFrom: []
 
   config:
     core:
@@ -879,7 +863,7 @@ spiffe:
 # to reach the daemon. The previous `enabled: true|false` substitution
 # toggle has been deleted; the platform cannot run without it. Sub-feature
 # toggles (`serviceAccount.create`, `autoscaling.enabled`,
-# `podDisruptionBudget.enabled`, `networkPolicy.enabled`, `ingress.enabled`,
+# `podDisruptionBudget.enabled`, `ingress.enabled`,
 # etc.) remain legitimate.
 dashboard:
 
@@ -898,8 +882,6 @@ dashboard:
     targetCPUUtilization: 70
   podDisruptionBudget:
     enabled: ~        # auto-on when replicas > 1
-  networkPolicy:
-    enabled: true
 
   # ServiceAccount for the dashboard pod. For IRSA, set `annotations`
   # with `eks.amazonaws.com/role-arn`. The prod overlay populates this
@@ -1402,9 +1384,6 @@ redis:
   podDisruptionBudget:
     enabled: false
 
-  # Spec 3 §3 R17 — NetworkPolicy gate.
-  networkPolicy:
-    enabled: true
 
   service:
     type: ClusterIP
@@ -1535,8 +1514,6 @@ openfga:
   # Spec 3 §3 — HA primitives (PDB, NetworkPolicy).
   podDisruptionBudget:
     enabled: ~        # auto-on when replicas > 1
-  networkPolicy:
-    enabled: true
 
   # NOTE (deploy#1170): there is deliberately NO `image:` block here. The
   # OpenFGA Deployment is rendered by the UMBRELLA's `openfga` subchart
@@ -1583,7 +1560,7 @@ openfga:
 # component of the platform — every authenticated RPC is authorized by it
 # before reaching the daemon. The `extAuthz.enabled` toggle was deleted; all
 # ext-authz resources now render unconditionally. Sub-feature toggles
-# (autoscaling, podDisruptionBudget, networkPolicy) remain.
+# (autoscaling, podDisruptionBudget) remain.
 # -----------------------------------------------------------------------------
 extAuthz:
   # Capability-Grant JWT validation (deploy#1155). ext-authz validates the
@@ -1608,8 +1585,6 @@ extAuthz:
     targetCPUUtilization: 70
   podDisruptionBudget:
     enabled: ~        # auto-on when replicas > 1
-  networkPolicy:
-    enabled: true
 
   image:
     repository: ghcr.io/zeroroot-ai/ext-authz
@@ -1708,8 +1683,6 @@ envoy:
     targetCPUUtilization: 70
   podDisruptionBudget:
     enabled: ~        # auto-on when replicas > 1
-  networkPolicy:
-    enabled: true
 
   image:
     repository: ghcr.io/zeroroot-ai/mirror/envoy
@@ -2732,8 +2705,6 @@ ratelimit:
     # and a ValidatingAdmissionPolicy key. Never talks to the API server.
     name: gibson-ratelimit
     annotations: {}
-  networkPolicy:
-    enabled: true
 
 spire:
   # SPIRE is REQUIRED infrastructure — every workload identity (daemon,
@@ -2923,7 +2894,7 @@ spire:
 # closed by #303): every tenant CR reconcile depends on it. The previous
 # `enabled: true|false` substitution toggle has been deleted; the platform
 # cannot run without it. Sub-feature toggles
-# (`podDisruptionBudget.enabled`, `networkPolicy.enabled`,
+# (`podDisruptionBudget.enabled`,
 # `releaseNamespaceRBAC.enabled`, `rbacBackfill.enabled`,
 # `orphanReaper.enabled`, `webhook.enabled`) remain legitimate.
 # The connector-operator workload lives in the gibson-operators sub-chart; its
@@ -2941,8 +2912,6 @@ tenantOperator:
   # Spec 3 §3 — HA primitives (PDB, NetworkPolicy).
   podDisruptionBudget:
     enabled: ~        # auto-on when replicas > 1
-  networkPolicy:
-    enabled: true
 
   # Release-namespace Role+RoleBinding (templates/tenant-operator/
   # release-namespace-rbac.yaml). Default true — disable only if an
@@ -3873,9 +3842,10 @@ setec:
 
   # spotEvictionFallback controls the cluster-autoscaler 1:5 on-demand
   # fallback ratio per design §"EKS sandbox-host node-group spec".
-  # AWS sends a 2-minute spot-interruption notice; the eviction handler
-  # at core/gibson/internal/sandbox/eviction (Task 48) cordons the node
-  # and cancels in-flight detonations within a 90-second grace window.
+  # AWS sends a 2-minute spot-interruption notice. The
+  # aws-node-termination-handler on the node reads it from the instance
+  # metadata and cordons and drains the node. The chart runs no handler of
+  # its own (charts#394).
   spotEvictionFallback:
     # enabled toggles the aws-node-termination-handler DaemonSet (Task 47)
     # and the cluster-autoscaler priority-expander config (Task 50).
@@ -4215,8 +4185,6 @@ tests:
 #       pullPolicy: IfNotPresent
 #     replicas: 1
 #     resources: { requests: {cpu, memory}, limits: {cpu, memory} }
-#     networkPolicy:
-#       enabled: true         # pod runtime only; required under default-deny
 #     sandboxClassName: ""    # REQUIRED when runtime: setec
 #
 # Every enabled pod-runtime plugin ships its own NetworkPolicy so it is not

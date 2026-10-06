@@ -69,7 +69,7 @@ seed-passwords: ## Every password the OpenBao seeder mints is argument-safe (let
 set-secret-env: ## baseline-set-secret.sh hands the operator's value to the pod as environment, never as script text
 	@./scripts/baseline-set-secret.sh --selftest
 
-cnpg-netpol-covers-jobs: ## Every pod CNPG creates, bootstrap Jobs included, has an egress-allowing NetworkPolicy
+cnpg-netpol-covers-jobs: ## Every pod CNPG creates, bootstrap Jobs included, reaches the bucket and the primary under the network policy (D76)
 	@./scripts/check-cnpg-netpol-covers-jobs.sh
 
 .PHONY: values-no-duplicate-keys
@@ -140,7 +140,7 @@ signin-policy: ## The first Zitadel instance starts with MFA forced, no external
 	@python3 scripts/check-signin-policy.py --selftest
 	@python3 scripts/check-signin-policy.py
 
-netpol-before-hooks: ## Every hook Job's NetworkPolicy applies in an earlier Argo wave than the Job
+netpol-before-hooks: ## Every network policy that selects a hook Job applies in an earlier Argo wave than the Job
 	@python3 scripts/check-netpol-before-hooks.py --selftest
 	@python3 scripts/check-netpol-before-hooks.py
 
@@ -234,7 +234,7 @@ secure-pod: ## Each rendered pod meets the six rules of a secure pod, or has an 
 	@python3 scripts/check-secure-pod.py --selftest
 	@python3 scripts/check-secure-pod.py
 
-daemon-netpol-admits-callers: ## Every in-cluster caller of the daemon is admitted by its NetworkPolicy (charts#153)
+daemon-netpol-admits-callers: ## The network policy lets every in-cluster caller reach the daemon (charts#153, D76)
 	@python3 scripts/check-daemon-netpol-admits-callers.py --selftest
 	@python3 scripts/check-daemon-netpol-admits-callers.py
 
@@ -304,7 +304,7 @@ secret-contract: ## Every secret has a producer AND a consumer, both directions 
 	@python3 scripts/check-secret-contract.py
 
 .PHONY: egress-policy-type
-egress-policy-type: ## One policy type for egress by host name, CiliumNetworkPolicy, with no disagreeing allow-all rule (ADR-0165, charts#395)
+egress-policy-type: ## One policy type, Cilium, and each policy rule selects a pod (ADR-0165 rule 4, D76, charts#395)
 	@python3 scripts/check-egress-policy-type.py --selftest
 	@python3 scripts/check-egress-policy-type.py
 

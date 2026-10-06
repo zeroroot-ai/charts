@@ -133,6 +133,10 @@ data:
       path = "/etc/openbao/data"
     }
 
+    # The server runs with no capability (ADR-0165, charts#394), so it cannot
+    # lock memory. The nodes run with no swap, so a page never leaves RAM.
+    disable_mlock = true
+
     {{- if (.Values.openbao.config).audit }}{{- if .Values.openbao.config.audit.enabled }}
     # deploy#1195: OpenBao audit device. `bao audit enable` was never called in
     # any environment, so every secret read — every per-tenant KEK derivation,
@@ -233,14 +237,23 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: openbao
+        {{- include "gibson.netLabels" (dict "role" "datastore" "datastore" "openbao" "kubeApi" true) | nindent 8 }}
       annotations:
         checksum/config: {{ .Values.openbao.config | toYaml | sha256sum }}
+        # Velero fs-backup skips the scratch volumes. scripts/check-velero-volume-excludes.sh.
+        backup.velero.io/backup-volumes-excludes: "tmp,auto-init-tmp"
     spec:
       serviceAccountName: {{ .Release.Name }}-openbao
+      # The restricted Pod Security Standard (ADR-0165, charts#394). The
+      # image runs as the openbao user (uid 100). SKIP_CHOWN and SKIP_SETCAP
+      # keep the entrypoint from the root-only steps.
       securityContext:
         fsGroup: 1000
         runAsUser: 100
         runAsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: openbao
           image: "{{ $openbaoRepo }}:{{ $openbaoTag }}"
@@ -278,6 +291,9 @@ spec:
             - name: seal-key
               mountPath: /etc/openbao/seal
               readOnly: true
+            # The root filesystem is read-only. The server writes scratch here.
+            - name: tmp
+              mountPath: /tmp
           # LIVENESS keeps sealedcode=204 deliberately. Restarting a sealed
           # OpenBao does not unseal it — it destroys the sidecar's in-progress
           # recovery and, in a CrashLoopBackOff, prevents recovery entirely.
@@ -342,9 +358,9 @@ spec:
             failureThreshold: 6
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
-              add:
-                - IPC_LOCK
+              drop: ["ALL"]
         # openbao-auto-init — sidecar that drives OpenBao from a fresh PVC to
         # initialized, seeded and root-free, and stays running so the platform
         # service token is kept renewed (deploy#1732).
@@ -1412,6 +1428,9 @@ spec:
             # seeded empty.
             - name: bringup-inputs
               mountPath: /etc/openbao/inputs
+            # The ready marker and mktemp write here. The root filesystem is read-only.
+            - name: auto-init-tmp
+              mountPath: /tmp
               readOnly: true
           # Ready = the store serves its consumers (see the marker above).
           # A readiness probe never restarts the container; until the marker
@@ -1428,6 +1447,10 @@ spec:
           env:
             - name: BAO_ADDR
               value: "http://127.0.0.1:8200"
+            # The root filesystem is read-only. A tool that writes to HOME
+            # writes to the scratch volume.
+            - name: HOME
+              value: /tmp
           resources:
             requests:
               cpu: 10m
@@ -1437,10 +1460,14 @@ spec:
               memory: 64Mi
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
       volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: auto-init-tmp
+          emptyDir: {}
         - name: config
           configMap:
             name: {{ .Release.Name }}-openbao-config

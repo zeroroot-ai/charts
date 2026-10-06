@@ -4,7 +4,8 @@
   Ranges over `.Values.plugins` (keyed by vendor) and, for each ENABLED entry,
   renders a plugin as one of two runtime tiers:
 
-    runtime: pod    (default) — a Deployment + ServiceAccount + NetworkPolicy.
+    runtime: pod    (default) — a Deployment + ServiceAccount. The network policy
+                    of the release selects it by its labels (gibson.netLabels).
     runtime: setec  (hardened) — a setec Sandbox microVM + ServiceAccount.
 
   The plugin body is the vendor's SDK wrapped in the plugin `Serve` loop. Its
@@ -43,6 +44,10 @@
 {{- $saName := $name }}
 {{- $image := include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" $p.image.repository "tag" (($p.image).tag) "digest" (($p.image).digest) "appVersion" $root.Chart.AppVersion) }}
 {{- $podLabels := dict "app.kubernetes.io/name" $name "app.kubernetes.io/part-of" "gibson" "app.kubernetes.io/component" "plugin" "gibson.zeroroot.ai/plugin" $vendor }}
+{{- /* The network labels (ADR-0165 rule 4, D76): a plugin is in no shared
+       group. It reaches its vendor API outside the cluster and the edge,
+       and nothing dials it but the kubelet probes. */}}
+{{- $podLabels = merge $podLabels (include "gibson.netLabels" (dict "role" "system" "internet" true) | fromYaml) }}
 {{- /* SSL_CERT_DIR unions the Envoy edge CA (/etc/ssl/envoy-ca — the trust
        anchor for the capability-grant enrol POST to the public issuer URL
        through Envoy) with the public roots (/etc/ssl/certs) the plugin needs
@@ -219,47 +224,6 @@ spec:
             driver: csi.spiffe.io
             readOnly: true
       terminationGracePeriodSeconds: 30
-{{- if ne (include "gibson.trueUnlessSet" (($p.networkPolicy).enabled)) "false" }}
----
-{{- /*
-  Plugin NetworkPolicy. Under the namespace default-deny
-  (namespace-isolation/default-deny.yaml, deploy#1365) a pod matched by no
-  allow policy is severed both ways, and the miss fails at RUNTIME. The
-  podSelector names the exact labels the Deployment's pod template stamps
-  (deploy#1365 lesson). Egress is allow-all: a plugin's job is to reach an
-  arbitrary vendor API (api.github.com, gitlab.com, …) whose address is not
-  known at render time, and the plugin's declared egress policy is enforced
-  IN-PROCESS by the SDK egress enforcer (GIBSON_PLUGIN_RUNTIME), not by this
-  CNI policy — the same allow-all posture the connector-operator keeps. Ingress
-  admits only kubelet health probes on :8080.
-*/}}
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: {{ $name }}
-  namespace: {{ $ns }}
-  labels:
-    {{- include "gibson.labels" $root | nindent 4 }}
-    app.kubernetes.io/component: plugin
-    gibson.zeroroot.ai/plugin: {{ $vendor }}
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: {{ $name }}
-      app.kubernetes.io/component: plugin
-  policyTypes:
-    - Ingress
-    - Egress
-  egress:
-    - {}
-  ingress:
-    # Health/readiness/liveness probes: kubelet dials :8080 from the node IP.
-    - ports:
-        - protocol: TCP
-          port: 8080
-{{- end }}
 {{- else if eq $runtime "setec" }}
 {{- if not $p.sandboxClassName }}
 {{- fail (printf "plugins.%s.runtime=setec requires plugins.%s.sandboxClassName — the cluster-scoped SandboxClass the setec operator runs the microVM under." $vendor $vendor) }}

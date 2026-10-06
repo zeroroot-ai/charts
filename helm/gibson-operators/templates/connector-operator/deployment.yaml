@@ -38,6 +38,7 @@ spec:
         app.kubernetes.io/name: gibson-connector-operator
         app.kubernetes.io/part-of: gibson
         app.kubernetes.io/component: connector-operator
+        {{- include "gibson.netLabels" (dict "role" "platform" "kubeApi" true "internet" true "namespaces" true "controlPlane" true) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a

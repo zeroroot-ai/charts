@@ -4063,6 +4063,9 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/version: 1.18.1
         helm.sh/chart: velero-12.1.0
+        gibson.zeroroot.ai/egress-internet: "true"
+        gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/net-role: system
       annotations:
         prometheus.io/path: /metrics
         prometheus.io/port: "8085"
@@ -4165,6 +4168,9 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/version: 1.18.1
         helm.sh/chart: velero-12.1.0
+        gibson.zeroroot.ai/egress-internet: "true"
+        gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/net-role: system
       annotations:
         prometheus.io/path: /metrics
         prometheus.io/port: "8085"
@@ -4220,6 +4226,12 @@ spec:
             periodSeconds: 30
             successThreshold: 1
             timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
           volumeMounts:
             - name: plugins
               mountPath: /plugins
@@ -4227,6 +4239,8 @@ spec:
               mountPath: /credentials
             - name: scratch
               mountPath: /scratch
+            - name: tmpdir
+              mountPath: /tmp
           env:
             - name: VELERO_SCRATCH_DIR
               value: /scratch
@@ -4250,6 +4264,12 @@ spec:
         - image: ghcr.io/zeroroot-ai/mirror/velero-plugin-for-aws:v1.14.2@sha256:0751144c1c8e52d52c48717fbd13ad5a3061e612ae4d7ad744a946cd5b139d1a
           imagePullPolicy: IfNotPresent
           name: velero-plugin-for-aws
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
           volumeMounts:
           - mountPath: /target
             name: plugins
@@ -4261,6 +4281,15 @@ spec:
           emptyDir: {}
         - name: scratch
           emptyDir: {}
+        - name: tmpdir
+          emptyDir: {}
+      securityContext:
+        fsGroup: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
 ---
 # Source: gibson-velero/templates/backupstoragelocation.yaml
 apiVersion: velero.io/v1

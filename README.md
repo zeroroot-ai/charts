@@ -15,10 +15,12 @@ CHART_VERSION=<version> make baseline-up   # the same, from the published charts
 make baseline-verify                   # prove that the install came up
 ```
 
-The cluster must run Cilium as its network plugin (ADR-0087). The chart limits
-the egress of each platform pod by host name with `CiliumNetworkPolicy`, and
-only Cilium enforces that. The script stops before it installs anything when
-the `CiliumNetworkPolicy` CRD is absent. On kind, start the cluster with
+The cluster must run Cilium as its network plugin (ADR-0087). The network
+policy of the chart is Cilium-native and selects pods by label (ADR-0165 rule
+4): a `CiliumClusterwideNetworkPolicy` denies all traffic of the release
+namespace by default, and a few `CiliumNetworkPolicy` objects allow the rest.
+Only Cilium enforces that. The script stops before it installs anything when
+a Cilium policy CRD is absent. On kind, start the cluster with
 `disableDefaultCNI: true` and install Cilium first, as `helm/kind-config.yaml`
 and the exit tests do. The chart ships no egress proxy and no service mesh.
 

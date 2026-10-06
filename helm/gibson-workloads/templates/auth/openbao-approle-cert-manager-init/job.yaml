@@ -108,6 +108,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: openbao-approle-cert-manager-init
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "openbao") "kubeApi" true) | nindent 8 }}
     spec:
       restartPolicy: OnFailure
       # deploy#944: runs on the namespace default ServiceAccount — the Job

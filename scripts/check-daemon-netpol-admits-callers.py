@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""check-daemon-netpol-admits-callers.py — every in-cluster caller of the daemon is admitted by its NetworkPolicy.
+"""check-daemon-netpol-admits-callers.py — the network policy lets every in-cluster caller reach the daemon.
 
-The daemon's NetworkPolicy lists the only allowed ingress sources. A workload
-that dials the daemon but appears in no rule is rejected at the CNI layer,
+The Cilium policies of the release select pods by label (D76,
+helm/gibson/templates/network-policies.yaml). A workload that dials the
+daemon but has no label that the policies allow is rejected at the CNI layer,
 and the failure surfaces far from its cause: the caller reports a transport
 error against a Service IP, while the daemon looks healthy and its Service
 has endpoints.
@@ -15,8 +16,9 @@ no admin login. kind's kindnet implements no NetworkPolicy, so the whole
 policy set is inert there and the exit tests could not see it.
 
 A caller declares itself in the render: a container env value of the form
-`<daemon-service>:<port>`. This guard reads those, then proves the daemon's
-policy admits that workload's pod labels on that port.
+`<daemon-service>:<port>`. This guard reads those, then proves that the
+egress rules of the caller and the ingress rules of the daemon both allow the
+flow on that port (scripts/lib/cilium_policy.py).
 
   check-daemon-netpol-admits-callers.py             exit 1 on an unadmitted caller, 0 when clean
   check-daemon-netpol-admits-callers.py --selftest  prove an unadmitted caller fails and an admitted one passes
@@ -29,6 +31,8 @@ import sys
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "scripts", "lib"))
+import cilium_policy as cp  # noqa: E402
 WORKLOADS = ("Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob")
 NAMESPACE = "gibson"
 DAEMON_COMPONENT = "daemon"
@@ -52,11 +56,6 @@ def pod_labels(d: dict) -> dict:
     return (pod_template(d).get("metadata") or {}).get("labels") or {}
 
 
-def subset(sel: dict, labels: dict) -> bool:
-    """A podSelector with no matchLabels selects everything in its scope."""
-    return all(labels.get(k) == v for k, v in (sel.get("matchLabels") or {}).items())
-
-
 def daemon_service_names(docs: list[dict]) -> set[str]:
     names = set()
     for d in docs:
@@ -68,15 +67,11 @@ def daemon_service_names(docs: list[dict]) -> set[str]:
     return names
 
 
-def daemon_policies(docs: list[dict]) -> list[dict]:
-    out = []
+def daemon_pod(docs: list[dict]) -> dict | None:
     for d in docs:
-        if d.get("kind") != "NetworkPolicy":
-            continue
-        sel = (d["spec"].get("podSelector") or {}).get("matchLabels") or {}
-        if sel.get("app.kubernetes.io/component") == DAEMON_COMPONENT:
-            out.append(d)
-    return out
+        if d.get("kind") in WORKLOADS and pod_labels(d).get("app.kubernetes.io/component") == DAEMON_COMPONENT:
+            return cp.endpoint(d["metadata"].get("namespace") or NAMESPACE, pod_labels(d))
+    return None
 
 
 def callers(docs: list[dict], svc_names: set[str]) -> list[tuple[str, dict, int]]:
@@ -103,85 +98,55 @@ def callers(docs: list[dict], svc_names: set[str]) -> list[tuple[str, dict, int]
     return found
 
 
-def admits(policies: list[dict], labels: dict, port: int) -> bool:
-    for np in policies:
-        for rule in np["spec"].get("ingress") or []:
-            froms = rule.get("from")
-            if froms is None:
-                peer_ok = True  # no `from` means every source
-            else:
-                peer_ok = False
-                for f in froms:
-                    if "ipBlock" in f:
-                        continue
-                    if f.get("namespaceSelector") not in (None, {}):
-                        continue  # a cross-namespace peer is not this workload
-                    if subset(f.get("podSelector") or {}, labels):
-                        peer_ok = True
-                        break
-            if not peer_ok:
-                continue
-            ports = rule.get("ports")
-            if ports is None or any(p.get("port") == port for p in ports):
-                return True
-    return False
-
-
 def audit(docs: list[dict]) -> list[str]:
     svc = daemon_service_names(docs)
     if not svc:
         return ["no daemon Service in the render: this guard cannot see its callers"]
-    policies = daemon_policies(docs)
-    if not policies:
-        return ["no NetworkPolicy selects the daemon: it is unprotected, or this guard is blind"]
+    daemon = daemon_pod(docs)
+    if daemon is None:
+        return ["no daemon pod in the render: this guard is blind"]
+    rules = cp.rules(docs, NAMESPACE)
+    if not any(cp.rule_selects(r, ns, daemon) for _, r, ns in rules):
+        return ["no Cilium policy selects the daemon: it is unprotected, or this guard is blind"]
     bad = []
     for name, labels, port in callers(docs, svc):
-        if not admits(policies, labels, port):
-            shown = {k: v for k, v in labels.items() if k.startswith("app.kubernetes.io/")}
-            bad.append(f"{name} dials the daemon on :{port} but no ingress rule admits {shown}")
+        if not cp.reaches(rules, cp.endpoint(NAMESPACE, labels), daemon, port):
+            shown = {k: v for k, v in labels.items() if k.startswith(("app.kubernetes.io/component", "gibson.zeroroot.ai/"))}
+            bad.append(f"{name} dials the daemon on :{port} but the network policy does not allow {shown}")
     return bad
 
 
 def selftest() -> int:
-    policy = {
-        "kind": "NetworkPolicy",
-        "metadata": {"name": "daemon"},
-        "spec": {
-            "podSelector": {"matchLabels": {"app.kubernetes.io/component": "daemon"}},
-            "ingress": [{
-                "from": [{"podSelector": {"matchLabels": {"app.kubernetes.io/component": "envoy"}}}],
-                "ports": [{"protocol": "TCP", "port": 50051}],
-            }],
-        },
-    }
-    service = {
-        "kind": "Service",
-        "metadata": {"name": "gibson-daemon"},
-        "spec": {"selector": {"app.kubernetes.io/component": "daemon"}},
-    }
+    platform = {"apiVersion": "cilium.io/v2", "kind": "CiliumNetworkPolicy",
+                "metadata": {"name": "platform", "namespace": NAMESPACE},
+                "spec": {"endpointSelector": {"matchLabels": {"gibson.zeroroot.ai/net-role": "platform"}},
+                         "ingress": [{"fromEndpoints": [{"matchLabels": {"gibson.zeroroot.ai/net-role": "platform"}}]}],
+                         "egress": [{"toEndpoints": [{"matchLabels": {"gibson.zeroroot.ai/net-role": "platform"}}]}]}}
+    service = {"kind": "Service", "metadata": {"name": "gibson-daemon"},
+               "spec": {"selector": {"app.kubernetes.io/component": "daemon"}}}
 
-    def caller(component):
-        return {
-            "kind": "Deployment",
-            "metadata": {"name": f"gibson-{component}"},
-            "spec": {"template": {
-                "metadata": {"labels": {"app.kubernetes.io/component": component}},
-                "spec": {"containers": [{
-                    "name": "manager",
-                    "env": [{"name": "GIBSON_DAEMON_GRPC_ADDRESS", "value": "gibson-daemon:50051"}],
-                }]},
-            }},
-        }
+    def workload(component, role, env=True):
+        labels = {"app.kubernetes.io/component": component}
+        if role:
+            labels["gibson.zeroroot.ai/net-role"] = role
+        container = {"name": "manager"}
+        if env:
+            container["env"] = [{"name": "GIBSON_DAEMON_GRPC_ADDRESS", "value": "gibson-daemon:50051"}]
+        return {"kind": "Deployment", "metadata": {"name": f"gibson-{component}", "namespace": NAMESPACE},
+                "spec": {"template": {"metadata": {"labels": labels}, "spec": {"containers": [container]}}}}
 
-    unadmitted = audit([service, policy, caller("tenant-operator")])
-    if not unadmitted:
-        print("SELFTEST FAIL: an unadmitted caller was not reported", file=sys.stderr)
+    daemon = workload("daemon", "platform", env=False)
+    if not audit([service, platform, daemon, workload("tenant-operator", "system")]):
+        print("SELFTEST FAIL: a caller with no platform label was not reported", file=sys.stderr)
         return 1
-    admitted = audit([service, policy, caller("envoy")])
+    if not audit([service, daemon, workload("tenant-operator", "platform")]):
+        print("SELFTEST FAIL: a daemon that no policy selects was not reported", file=sys.stderr)
+        return 1
+    admitted = audit([service, platform, daemon, workload("tenant-operator", "platform")])
     if admitted:
         print(f"SELFTEST FAIL: an admitted caller was reported: {admitted}", file=sys.stderr)
         return 1
-    print("  ✓ selftest: an unadmitted caller fails, an admitted one passes")
+    print("  ✓ selftest: a caller with no platform label fails, an unselected daemon fails, a platform caller passes")
     return 0
 
 
@@ -190,13 +155,12 @@ def main() -> int:
         return selftest()
     bad = audit(render())
     if bad:
-        print("daemon NetworkPolicy does not admit every in-cluster caller:", file=sys.stderr)
+        print("the network policy does not let every in-cluster caller reach the daemon:", file=sys.stderr)
         for b in bad:
             print(f"  {b}", file=sys.stderr)
-        print("\nAdd an ingress rule to helm/gibson-workloads/templates/gibson/networkpolicy.yaml", file=sys.stderr)
-        print("selecting the labels the caller's pods carry.", file=sys.stderr)
+        print("\nGive the caller the platform role with gibson.netLabels (gibson-common).", file=sys.stderr)
         return 1
-    print("  ✓ daemon-netpol-admits-callers: every in-cluster caller is admitted")
+    print("  ✓ daemon-netpol-admits-callers: the network policy lets every in-cluster caller reach the daemon")
     return 0
 
 

@@ -35,6 +35,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: stripe-mock
+        {{- include "gibson.netLabels" (dict "role" "platform") | nindent 8 }}
     spec:
       containers:
         - name: stripe-mock
@@ -90,34 +91,4 @@ spec:
   selector:
     {{- include "gibson.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: stripe-mock
----
-{{- /* deploy#1365: allow policy under the namespace default-deny. Lives
-       HERE (inside the stripeMock.enabled gate) rather than in
-       templates/namespace-isolation/ because kind-profile-coherence.bats
-       asserts the literal name is absent from the saas render. Same shape
-       as the dev-observability policy: any same-namespace pod may dial
-       the mock; egress allow-all (deploy#1462 tracks tightening). */}}
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: {{ .Release.Name }}-stripe-mock
-  namespace: {{ .Release.Namespace }}
-  labels:
-    {{- include "gibson.labels" . | nindent 4 }}
-    app.kubernetes.io/component: stripe-mock
-spec:
-  podSelector:
-    matchLabels:
-      {{- include "gibson.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: stripe-mock
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - podSelector: {}
-  egress:
-    - {}
 {{- end }}

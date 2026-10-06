@@ -221,12 +221,10 @@ spec:
   template:
     metadata:
       labels:
-        # Pod-template labels: the gibson-openfga + gibson-bringup-jobs
-        # NetworkPolicies admit first-admin by app.kubernetes.io/component,
-        # so this label is load-bearing under the namespace default-deny.
         app.kubernetes.io/name: gibson-workloads
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: first-admin
+        {{- include "gibson.netLabels" (dict "role" "platform" "kubeApi" true) | nindent 8 }}
     spec:
       restartPolicy: OnFailure
       serviceAccountName: gibson-gibson-workloads-first-admin

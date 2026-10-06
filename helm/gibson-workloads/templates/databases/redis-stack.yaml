@@ -69,6 +69,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: redis
+        {{- include "gibson.netLabels" (dict "role" "datastore" "datastore" "redis") | nindent 8 }}
       annotations:
         # Velero fs-backup skips the ACL file an init container renders; the
         # data claim stays in the backup. scripts/check-velero-volume-excludes.sh.

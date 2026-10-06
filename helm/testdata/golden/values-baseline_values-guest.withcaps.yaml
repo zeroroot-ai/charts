@@ -100,166 +100,6 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-10"
 ---
-# Source: gibson/charts/gibson-operators/templates/connector-operator/networkpolicy.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-connector-operator
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-operators-0.3.0
-    app.kubernetes.io/name: gibson-operators
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: connector-operator
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: gibson-connector-operator
-      app.kubernetes.io/component: connector-operator
-  policyTypes:
-    - Ingress
-    - Egress
-  egress:
-    - {}
-  ingress:
-    # Health/readiness probes: kubelet dials the probe port from the node IP.
-    - ports:
-        - protocol: TCP
-          port: 8081
-    # Metrics scrape from Prometheus.
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-      ports:
-        - protocol: TCP
-          port: 8080
----
-# Source: gibson/charts/gibson-operators/templates/platform-operator/networkpolicy.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-platform-operator
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-operators-0.3.0
-    app.kubernetes.io/name: gibson-operators
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: platform-operator
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/component: platform-operator
-  policyTypes:
-    - Ingress
-    - Egress
-  egress:
-    - {}
-  ingress:
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 8080
----
-# Source: gibson/charts/gibson-operators/templates/reloader/networkpolicy.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-reloader
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-operators-0.3.0
-    app.kubernetes.io/name: gibson-operators
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: reloader
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: reloader
-      app.kubernetes.io/component: reloader
-  policyTypes:
-    - Ingress
-    - Egress
-  egress:
-    - {}
-  ingress:
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 9090
----
-# Source: gibson/charts/gibson-operators/templates/tenant-operator/networkpolicy.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-tenant-operator
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-operators-0.3.0
-    app.kubernetes.io/name: gibson-operators
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: tenant-operator
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: gibson-tenant-operator
-      app.kubernetes.io/component: tenant-operator
-  policyTypes:
-    - Ingress
-    - Egress
-  egress:
-    - {}
-  ingress:
-    # Webhook + metrics endpoints (kube-apiserver dials webhook from any IP)
-    - ports:
-        - protocol: TCP
-          port: 9443
-        - protocol: TCP
-          port: 8080
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-      ports:
-        - protocol: TCP
-          port: 8080
----
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/sandbox-namespace-baseline-netpol.yaml
 # Namespace-wide default-deny for setec-sandboxes.
 #
@@ -316,1482 +156,6 @@ spec:
   policyTypes:
     - Ingress
     - Egress
----
-# Source: gibson/charts/gibson-workloads/templates/dashboard/networkpolicy.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-dashboard
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: dashboard
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: gibson-workloads
-      app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: dashboard
-  policyTypes:
-    - Ingress
-    - Egress
-  egress:
-    - {}
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: gibson-workloads
-              app.kubernetes.io/instance: gibson
-              app.kubernetes.io/component: envoy
-      ports:
-        - protocol: TCP
-          port: 3000
-    # Allow scrapers, on the port they scrape. /api/metrics is served by the
-    # app on 3000; a rule with no ports block admits every port.
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 3000
----
-# Source: gibson/charts/gibson-workloads/templates/databases/redis-networkpolicy.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-redis-stack
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: redis
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: gibson-workloads
-      app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: redis
-  policyTypes:
-    - Ingress
-    - Egress
-  egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: daemon
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: ext-authz
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: dashboard
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: tenant-operator
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: redis-index-migration
-        # deploy#1657: the per-client quota counters (rl:* keys).
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: ratelimit
-        # deploy#1365: rotation + backup CronJobs dial redis directly;
-        # under the namespace default-deny they must be named here.
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: redis-rotation
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: redis-backup
-      ports:
-        - protocol: TCP
-          port: 6379
----
-# Source: gibson/charts/gibson-workloads/templates/envoy/networkpolicy.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-envoy
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: envoy
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: gibson-workloads
-      app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: envoy
-  policyTypes:
-    - Ingress
-    - Egress
-  egress:
-    - {}
-  ingress:
-    # Public listener — open to the cluster (LB target) and any-namespace browser traffic.
-    # NetworkPolicy ports filter on the POD-side port (containerPort), not the Service /
-    # NodePort. NodePort and Service traffic both DNAT to the pod's containerPort 10000
-    # ("https") before the NP is evaluated, so we must allow 10000 here. The Service can
-    # still be defined with httpsPort=443 or 30443; that only affects the Service object.
-    - ports:
-        - protocol: TCP
-          port: 10000
-    # Admin/health from prometheus scrapers
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 9901
----
-# Source: gibson/charts/gibson-workloads/templates/ext-authz/networkpolicy.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-ext-authz
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: ext-authz
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: gibson-workloads
-      app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: ext-authz
-  policyTypes:
-    - Ingress
-    - Egress
-  egress:
-    - {}
-  ingress:
-    # Envoy → ext-authz gRPC :9001 (Check/CheckV3)
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: gibson-workloads
-              app.kubernetes.io/instance: gibson
-              app.kubernetes.io/component: envoy
-      ports:
-        - protocol: TCP
-          port: 9001
-    # Prometheus / scrapers → ext-authz :9002 (health + metrics)
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 9002
----
-# Source: gibson/charts/gibson-workloads/templates/gibson/networkpolicy.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-gibson-workloads-daemon
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: daemon
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: gibson-workloads
-      app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: daemon
-  policyTypes:
-    - Ingress
-    - Egress
-  egress:
-    - {}
-  ingress:
-    # Envoy gateway → daemon gRPC (the only authenticated external path).
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: gibson-workloads
-              app.kubernetes.io/instance: gibson
-              app.kubernetes.io/component: envoy
-      ports:
-        - protocol: TCP
-          port: 50051
-        - protocol: TCP
-          port: 50001
-        - protocol: TCP
-          port: 50100
-        # gibson#623 — unauthenticated native-login bootstrap listener
-        # (GET /.well-known/gibson-login). Envoy publishes it on a public route;
-        # the hop Envoy→daemon:8085 must be allowed here.
-        - protocol: TCP
-          port: 8085
-    # ext-authz → daemon listeners reached directly (not via Envoy):
-    #   :8085 — per-kid Capability-Grant key descriptor (ext-authz#103); serves only public keys.
-    #   :8086 — mTLS authz-registry endpoint (deploy#852); ext-authz fetches
-    #           the daemon's compiled-in authz policy here at startup.
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: gibson-workloads
-              app.kubernetes.io/instance: gibson
-              app.kubernetes.io/component: ext-authz
-      ports:
-        - protocol: TCP
-          port: 8085
-        - protocol: TCP
-          port: 8086
-    # The operators → daemon gRPC (in-cluster control-plane callers).
-    #
-    # The tenant-operator drains three daemon queues over this port: the
-    # pending tenant-provisioning queue, the admin tenant-op queue, and the
-    # first-tenant seed enqueue. The connector-operator's finalizer dials the
-    # same port to revoke a connector grant on delete. Neither goes through
-    # Envoy, so "Envoy is the sole ingress" holds for EXTERNAL traffic only
-    # and both need their own rule here.
-    #
-    # These two rules used to live in helm/gibson/values-baseline.yaml, passed
-    # through the networkPolicy.additionalIngressFrom escape hatch. That made
-    # them a property of one profile rather than of the chart, so every profile
-    # that did not copy them shipped a daemon no operator could reach. Staging
-    # was such a profile. They belong in the template, which is the promotion
-    # tenant-operator#76 Module 6 called for. The escape hatch stays a seam for
-    # genuine operator-specific additions; it is no longer load-bearing.
-    #
-    # Measured on staging 2026-09-23: without this rule every pass failed with
-    #   subsystem unreachable: entitlements: enqueue-tenant-provisioning:
-    #   dial tcp <daemon>:50051: connect: connection refused
-    # so the `primary` tenant was never created and the first-admin Job waited
-    # out its activeDeadlineSeconds. k3s enforces NetworkPolicy through
-    # kube-router, whose KUBE-POD-FW chain ends in
-    # `REJECT --reject-with icmp-port-unreachable` — that is why this reads as
-    # "connection refused" rather than the i/o timeout a dropping CNI gives.
-    # It stayed hidden until staging because kind's kindnet implements no
-    # NetworkPolicy at all, so the whole chart's policy set is inert there.
-    #
-    # The pods carry `app.kubernetes.io/name: gibson-tenant-operator`, NOT
-    # gibson.selectorLabels — the deploy#1365 lesson: a selector naming labels
-    # the pods do not carry never matches. These are the labels the sibling
-    # policy (gibson-operators/templates/tenant-operator) selects on.
-    #
-    # mTLS is unaffected: the gRPC listener still requires an attested SVID.
-    # This only stops the packets being rejected before the handshake.
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: gibson-tenant-operator
-              app.kubernetes.io/component: tenant-operator
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: gibson-connector-operator
-              app.kubernetes.io/component: connector-operator
-      ports:
-        - protocol: TCP
-          port: 50051
-    # Prometheus → daemon metrics (read-only scrape).
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: gibson-workloads
-              app.kubernetes.io/instance: gibson
-              app.kubernetes.io/component: prometheus
-      ports:
-        - protocol: TCP
-          port: 9090
-    # NOTE: first-party plugins do NOT appear here. A plugin reaches the daemon
-    # ONLY through the Envoy edge (GIBSON_URL = api host; capability-grant enrol
-    # AND the ComponentService gRPC both flow through Envoy + ext-authz), never a
-    # direct daemon channel — the same invariant as the dashboard. So the daemon
-    # ingress needs no plugin-selector rule; Envoy is already admitted above.
-    # NOTE: the dashboard does NOT appear here. Spec dashboard-admin-via-envoy
-    # moved the dashboard's admin RPC path (previously a direct pod-to-pod
-    # call) through the Envoy gateway. Envoy remains the sole ingress to the
-    # daemon, matching the original trust-boundary invariant from
-    # zitadel-envoy-gateway-migration task 11.
----
-# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/default-deny.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-namespace-default-deny
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: namespace-default-deny
-spec:
-  podSelector: {}
-  policyTypes:
-    - Ingress
-    - Egress
----
-# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/first-party-services.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-openbao
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: openbao-isolation
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: gibson-workloads
-      app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: openbao
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: daemon
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: ext-authz
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: tenant-operator
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: platform-operator
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: openbao-jwt-auth-init
-        # The Zitadel IAM_OWNER PAT escrow (umbrella, templates/jobs/): writes
-        # secret/gibson-zitadel-iam-admin-pat with the vault admin token so a
-        # restore can bring the PAT back. Measured 2026-09-08 (blocker 3 loop
-        # #7): without this line the Job sat on "Could not connect to server"
-        # for 130 s per try and the sync waited on it for an hour.
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: iam-admin-pat-escrow
-        # The external-secrets controller is an umbrella subchart in this
-        # namespace (deploy#1728): it logs in to OpenBao with its own
-        # ServiceAccount to read every ExternalSecret. Selected by the
-        # upstream chart's pod label, no longer by a namespace.
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: external-secrets
-          namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: "external-secrets"
-      ports:
-        - protocol: TCP
-          port: 8200
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: openbao
-      ports:
-        - protocol: TCP
-          port: 8201
-  egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
-    
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: spiffe-oidc-discovery-provider
-      ports:
-        - protocol: TCP
-          port: 8443
-        - protocol: TCP
-          port: 443
----
-# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/first-party-services.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-docs-svc
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: docs-svc-isolation
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/component: docs-svc
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: envoy
-      ports:
-        - protocol: TCP
-          port: 8080
-  egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
----
-# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/first-party-services.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-client-workloads
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: client-workloads-isolation
-spec:
-  podSelector:
-    matchExpressions:
-      - key: app.kubernetes.io/component
-        operator: In
-        values:
-          - sandbox-eviction-handler
-          - redis-rotation
-          - redis-backup
-          - redis-index-migration
-          - fga-init
-          - openbao-jwt-auth-init
-          - active-session-backfill
-  policyTypes:
-    - Ingress
-    - Egress
-  egress:
-    - {}
----
-# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/first-party-services.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-dev-observability
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: dev-observability-isolation
-spec:
-  podSelector:
-    matchExpressions:
-      - key: app.kubernetes.io/component
-        operator: In
-        values:
-          - mailpit
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - podSelector: {}
-  egress:
-    - {}
----
-# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/spiffe.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-spire-server
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: spire-server-isolation
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: server
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    # Agent attestation (node IPs) + OIDC discovery provider bundle fetch.
-    - ports:
-        - protocol: TCP
-          port: 8081
-    # spire-controller-manager admission webhook (kube-apiserver).
-    - ports:
-        - protocol: TCP
-          port: 9443
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 8080
-  egress:
-    - {}
----
-# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/spiffe.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-spiffe-csi-driver
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: spiffe-csi-driver-isolation
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: spiffe-csi-driver
-  policyTypes:
-    - Ingress
-    - Egress
-  egress:
-    - {}
----
-# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/spiffe.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-spiffe-oidc-discovery-provider
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: spiffe-oidc-discovery-provider-isolation
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: spiffe-oidc-discovery-provider
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: envoy
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: ext-authz
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: daemon
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: openbao
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: openbao-jwt-auth-init
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: tenant-operator
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: platform-operator
-      ports:
-        - protocol: TCP
-          port: 8443
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 8008
-  egress:
-    - {}
----
-# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/subchart-workloads.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-openfga
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: openfga-isolation
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: openfga
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: ext-authz
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: daemon
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: tenant-operator
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: platform-operator
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: fga-init
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: active-session-backfill
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: first-admin
-      ports:
-        - protocol: TCP
-          port: 8080
-        - protocol: TCP
-          port: 8081
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 2112
-  egress:
-    - {}
----
-# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/subchart-workloads.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-zitadel
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: zitadel-isolation
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: zitadel
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: envoy
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: zitadel-login
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: ext-authz
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: daemon
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: dashboard
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: tenant-operator
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: platform-operator
-        # The first-admin Job creates the founding owner through the
-        # Management API, dialing Zitadel by Service name (ADR-0092).
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: first-admin
-      ports:
-        - protocol: TCP
-          port: 8080
-  egress:
-    - {}
----
-# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/subchart-workloads.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-zitadel-login
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: zitadel-login-isolation
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: zitadel-login
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: envoy
-      ports:
-        - protocol: TCP
-          port: 3000
-  egress:
-    - {}
----
-# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/subchart-workloads.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-platform-neo4j
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: platform-neo4j-isolation
-spec:
-  podSelector:
-    matchLabels:
-      helm.neo4j.com/pod_category: neo4j-instance
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: daemon
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: tenant-operator
-      ports:
-        - protocol: TCP
-          port: 7687
-        - protocol: TCP
-          port: 7474
-  egress:
-    - {}
----
-# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/subchart-workloads.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-cnpg-jobs
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: cnpg-jobs-isolation
-spec:
-  podSelector:
-    matchExpressions:
-      - key: cnpg.io/jobRole
-        operator: Exists
-  policyTypes:
-    - Ingress
-    - Egress
-  egress:
-    - {}
----
-# Source: gibson/charts/gibson-workloads/templates/namespace-isolation/subchart-workloads.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-cnpg-instances
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: cnpg-instances-isolation
-spec:
-  podSelector:
-    matchLabels:
-      cnpg.io/podRole: instance
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        # The opt-in seam: see THE SEAM above. Any pod, in this namespace,
-        # that declares itself a platform-postgres client.
-        - podSelector:
-            matchLabels:
-              gibson.zeroroot.ai/platform-postgres-client: "true"
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: daemon
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: dashboard
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: ext-authz
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: tenant-operator
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: platform-operator
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: active-session-backfill
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: zitadel
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: openfga
-        # SPIRE server datastore.
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: server
-        # CNPG operator + instance-to-instance replication.
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: cloudnative-pg
-        - podSelector:
-            matchLabels:
-              cnpg.io/podRole: instance
-        # The operator's OWN Jobs, which are not instances and never carry
-        # cnpg.io/podRole. A `join` Job is how every replica after the first
-        # is built: it connects to platform-postgres-rw as streaming_replica
-        # and runs pg_basebackup. Without this the Job's packets are dropped
-        # and it retries for ever on "dial error: timeout", the Cluster sits
-        # in "Creating a new replica" at N-1 of N, and NOTHING reports it —
-        # CNPG calls the Cluster healthy enough and Argo calls the
-        # Application Healthy, so the bringup declares success over a
-        # database that is one replica short and will stay that way.
-        # Measured on staging 2026-09-14: instance 2 joined in 79 seconds
-        # because its Job ran before this policy was programmed; instance 3
-        # started after and was still retrying 28 minutes later.
-        #
-        # `Exists` covers every jobRole the operator has — join, initdb,
-        # pgbasebackup, import — so a future one is not a fourth outage.
-        - podSelector:
-            matchExpressions:
-              - key: cnpg.io/jobRole
-                operator: Exists
-      ports:
-        - protocol: TCP
-          port: 5432
-    # Operator status probe.
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: cloudnative-pg
-      ports:
-        - protocol: TCP
-          port: 8000
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 9187
-  egress:
-    - {}
----
-# Source: gibson/charts/gibson-workloads/templates/ratelimit/networkpolicy.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"  # every NetworkPolicy applies before any hook Job (check-netpol-before-hooks.py)
-  name: gibson-ratelimit
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: ratelimit
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: gibson-workloads
-      app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: ratelimit
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    # Envoy → ratelimit sidecar (SPIFFE mTLS gRPC)
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: gibson-workloads
-              app.kubernetes.io/instance: gibson
-              app.kubernetes.io/component: envoy
-      ports:
-        - protocol: TCP
-          port: 8081
-    # Prometheus / scrapers → /healthcheck and /metrics
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 8080
-        - protocol: TCP
-          port: 9090
-  egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: redis
-      ports:
-        - protocol: TCP
-          port: 6379
----
-# Source: gibson/templates/networkpolicy-bringup-jobs.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: gibson-bringup-jobs
-  namespace: gibson
-  annotations:
-    # Argo runs the bringup Jobs as Sync hooks in early waves (postgres-setup
-    # at -6). A resource with no wave is wave 0, so on an upgrade the Jobs
-    # ran under the OLD version of this policy and could not reach Postgres
-    # (staging, 2026-09-27: the postgres-setup rename waited forever). This
-    # policy applies first. scripts/check-netpol-before-hooks.py enforces it.
-    argocd.argoproj.io/sync-wave: "-20"
-  labels:
-    app.kubernetes.io/component: bringup-jobs-isolation
-spec:
-  podSelector:
-    matchExpressions:
-      - key: app.kubernetes.io/component
-        operator: In
-        values:
-          - postgres-setup
-          # deploy#1631: the first-admin Job. Under the namespace default-deny,
-          # a component label absent from THIS list means the pod cannot even
-          # reach CoreDNS — seed-first-admin then fails with an i/o timeout to
-          # :53 that reads like a DNS bug, not a policy one. The Job lives in
-          # templates/operations/ rather than templates/jobs/, which is why
-          # check-secure-pod.py did not force it into this list.
-          - first-admin
-          # deploy#1761: the admission-webhook readiness gate. It posts an
-          # AdmissionReview to every webhook endpoint the umbrella installs,
-          # including setec-webhook in setec-system, so it needs egress and
-          # CoreDNS like the rest of this list.
-          - webhook-gate
-          # The Zitadel IAM_OWNER PAT escrow (templates/jobs/): reads the minted
-          # Secret through the API server and writes it to OpenBao, so a
-          # restore can bring the PAT back (2026-09-07, blocker 3 loop).
-          - iam-admin-pat-escrow
-  policyTypes:
-    - Ingress
-    - Egress
-  egress:
-    - {}
----
-# Source: gibson/templates/networkpolicy-platform-operators.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: gibson-operator-cloudnative-pg
-  namespace: gibson
-  labels:
-    app.kubernetes.io/component: platform-operator-isolation
-  annotations:
-    # Same wave as the operators: a policy that lands after the pod it
-    # selects leaves that pod severed until it does.
-    argocd.argoproj.io/sync-wave: "-20"
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: cloudnative-pg
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    # Admission webhook: the kube-apiserver dials from unselectable IPs.
-    - ports:
-        - protocol: TCP
-          port: 9443
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 8080
-  egress:
-    - {}
----
-# Source: gibson/templates/networkpolicy-platform-operators.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: gibson-operator-cert-manager
-  namespace: gibson
-  labels:
-    app.kubernetes.io/component: platform-operator-isolation
-  annotations:
-    # Same wave as the operators: a policy that lands after the pod it
-    # selects leaves that pod severed until it does.
-    argocd.argoproj.io/sync-wave: "-20"
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: cert-manager
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 9402
-  egress:
-    - {}
----
-# Source: gibson/templates/networkpolicy-platform-operators.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: gibson-operator-cainjector
-  namespace: gibson
-  labels:
-    app.kubernetes.io/component: platform-operator-isolation
-  annotations:
-    # Same wave as the operators: a policy that lands after the pod it
-    # selects leaves that pod severed until it does.
-    argocd.argoproj.io/sync-wave: "-20"
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: cainjector
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 9402
-  egress:
-    - {}
----
-# Source: gibson/templates/networkpolicy-platform-operators.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: gibson-operator-webhook
-  namespace: gibson
-  labels:
-    app.kubernetes.io/component: platform-operator-isolation
-  annotations:
-    # Same wave as the operators: a policy that lands after the pod it
-    # selects leaves that pod severed until it does.
-    argocd.argoproj.io/sync-wave: "-20"
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: webhook
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    # Admission webhook: the kube-apiserver dials from unselectable IPs.
-    - ports:
-        - protocol: TCP
-          port: 10250
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 9402
-  egress:
-    - {}
----
-# Source: gibson/templates/networkpolicy-platform-operators.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: gibson-operator-external-secrets
-  namespace: gibson
-  labels:
-    app.kubernetes.io/component: platform-operator-isolation
-  annotations:
-    # Same wave as the operators: a policy that lands after the pod it
-    # selects leaves that pod severed until it does.
-    argocd.argoproj.io/sync-wave: "-20"
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: external-secrets
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 8080
-  egress:
-    - {}
----
-# Source: gibson/templates/networkpolicy-platform-operators.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: gibson-operator-external-secrets-webhook
-  namespace: gibson
-  labels:
-    app.kubernetes.io/component: platform-operator-isolation
-  annotations:
-    # Same wave as the operators: a policy that lands after the pod it
-    # selects leaves that pod severed until it does.
-    argocd.argoproj.io/sync-wave: "-20"
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: external-secrets-webhook
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    # Admission webhook: the kube-apiserver dials from unselectable IPs.
-    - ports:
-        - protocol: TCP
-          port: 10250
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 8080
-  egress:
-    - {}
----
-# Source: gibson/templates/networkpolicy-platform-operators.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: gibson-operator-external-secrets-cert-controller
-  namespace: gibson
-  labels:
-    app.kubernetes.io/component: platform-operator-isolation
-  annotations:
-    # Same wave as the operators: a policy that lands after the pod it
-    # selects leaves that pod severed until it does.
-    argocd.argoproj.io/sync-wave: "-20"
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: external-secrets-cert-controller
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 8080
-  egress:
-    - {}
----
-# Source: gibson/templates/networkpolicy-platform-operators.yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: gibson-operator-external-dns
-  namespace: gibson
-  labels:
-    app.kubernetes.io/component: platform-operator-isolation
-  annotations:
-    # Same wave as the operators: a policy that lands after the pod it
-    # selects leaves that pod severed until it does.
-    argocd.argoproj.io/sync-wave: "-20"
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: external-dns
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector: {}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: prometheus
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/component: prometheus
-        - podSelector:
-            matchLabels:
-              app: grafana-agent
-      ports:
-        - protocol: TCP
-          port: 7979
-  egress:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
-      ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/pdb.yaml
 apiVersion: policy/v1
@@ -2093,20 +457,6 @@ metadata:
     app.kubernetes.io/component: ratelimit
 automountServiceAccountToken: false
 ---
-# Source: gibson/charts/gibson-workloads/templates/sandbox-host/serviceaccount.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: gibson-gibson-workloads-sandbox-eviction-handler
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: sandbox-eviction-handler
----
 # Source: gibson/charts/gibson-workloads/templates/setec/daemon-client-secret.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -2145,6 +495,9 @@ metadata:
     helm.sh/chart: openfga-0.3.4
     app.kubernetes.io/name: openfga
     app.kubernetes.io/instance: gibson
+    gibson.zeroroot.ai/client-postgres: "true"
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/net-role: platform
     app.kubernetes.io/component: authorization-controller
     app.kubernetes.io/version: "v1.15.1"
     app.kubernetes.io/managed-by: Helm
@@ -2242,6 +595,9 @@ metadata:
     helm.sh/chart: openfga-0.3.4
     app.kubernetes.io/name: openfga
     app.kubernetes.io/instance: gibson
+    gibson.zeroroot.ai/client-postgres: "true"
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/net-role: platform
     app.kubernetes.io/component: authorization-controller
     app.kubernetes.io/version: "v1.15.1"
     app.kubernetes.io/managed-by: Helm
@@ -2430,6 +786,10 @@ data:
     storage "file" {
       path = "/etc/openbao/data"
     }
+
+    # The server runs with no capability (ADR-0165, charts#394), so it cannot
+    # lock memory. The nodes run with no swap, so a page never leaves RAM.
+    disable_mlock = true
 
     # deploy#1731: the static seal. The 32-byte key is one member
     # of the bringup keyring, mounted read-only from the Secret named by
@@ -3207,10 +1567,9 @@ data:
                             #
                             # Its ONE consumer is the ext-authz sidecar, and
                             # ext-authz never uses the edge: it dials the daemon
-                            # directly on the pod network, which the daemon
-                            # NetworkPolicy opens for exactly that (see
-                            # templates/gibson/networkpolicy.yaml, "ext-authz →
-                            # daemon listeners reached directly (not via Envoy)").
+                            # directly on the pod network, which the platform
+                            # network policy allows (umbrella
+                            # templates/network-policies.yaml).
                             # No SDK, sdk-ts, ADK CLI, gibson-executor or dashboard
                             # path reads it — the discovery document advertises
                             # only `register` and `jwks_uri`, and a registering
@@ -5363,6 +3722,8 @@ metadata:
   namespace: "gibson"
   labels:
     app: "gibson-neo4j"    
+    "gibson.zeroroot.ai/datastore": "neo4j"
+    "gibson.zeroroot.ai/net-role": "datastore"
 data:
   server.default_listen_address: "0.0.0.0"
 ---
@@ -5375,6 +3736,8 @@ metadata:
   namespace: "gibson"
   labels:
     app: "gibson-neo4j"    
+    "gibson.zeroroot.ai/datastore": "neo4j"
+    "gibson.zeroroot.ai/net-role": "datastore"
 data:
   dbms.security.procedures.allowlist: apoc.merge.node,apoc.merge.relationship
   dbms.security.tls_reload_enabled: "true"
@@ -5411,6 +3774,8 @@ metadata:
   namespace: "gibson"
   labels:
     app: "gibson-neo4j"    
+    "gibson.zeroroot.ai/datastore": "neo4j"
+    "gibson.zeroroot.ai/net-role": "datastore"
 data:
 
   # Neo4j defaults
@@ -5454,6 +3819,8 @@ metadata:
   namespace: "gibson"
   labels:
     app: "gibson-neo4j"    
+    "gibson.zeroroot.ai/datastore": "neo4j"
+    "gibson.zeroroot.ai/net-role": "datastore"
 data:
   apoc.conf: |-
       apoc.export.file.enabled=false
@@ -5468,6 +3835,8 @@ metadata:
   namespace: "gibson"
   labels:
     app: "gibson-neo4j"    
+    "gibson.zeroroot.ai/datastore": "neo4j"
+    "gibson.zeroroot.ai/net-role": "datastore"
 data:
   server-logs.xml: |-
     <?xml version="1.0" encoding="UTF-8"?>
@@ -5564,6 +3933,8 @@ metadata:
   namespace: "gibson"
   labels:
     app: "gibson-neo4j"    
+    "gibson.zeroroot.ai/datastore": "neo4j"
+    "gibson.zeroroot.ai/net-role": "datastore"
 data:
   user-logs.xml: |-
     <?xml version="1.0" encoding="UTF-8"?>
@@ -5619,6 +3990,8 @@ metadata:
   namespace: "gibson"
   labels:
     app: "gibson-neo4j"    
+    "gibson.zeroroot.ai/datastore": "neo4j"
+    "gibson.zeroroot.ai/net-role": "datastore"
 data:
   # It should not be necessary for neo4j users/administrators to modify this configMap
   # Neo4j configuration is set in the gibson-user-config ConfigMap
@@ -6698,23 +5071,6 @@ rules:
     resources: ["tenants", "tenantmembers"]
     verbs: ["get", "list"]
 ---
-# Source: gibson/charts/gibson-workloads/templates/sandbox-host/clusterrole.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: gibson-gibson-workloads-sandbox-eviction-handler
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: sandbox-eviction-handler
-rules:
-  - apiGroups: [""]
-    resources: ["nodes"]
-    verbs: ["get", "patch"]
----
 # Source: gibson/charts/spire/charts/spire-agent/templates/roles.yaml
 # Required cluster role to allow spire-agent to query k8s API server
 kind: ClusterRole
@@ -7015,27 +5371,6 @@ roleRef:
   kind: ClusterRole
   apiGroup: rbac.authorization.k8s.io
   name: gibson-gibson-workloads-active-session-backfill
----
-# Source: gibson/charts/gibson-workloads/templates/sandbox-host/clusterrolebinding.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: gibson-gibson-workloads-sandbox-eviction-handler
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: sandbox-eviction-handler
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: gibson-gibson-workloads-sandbox-eviction-handler
-subjects:
-  - kind: ServiceAccount
-    name: gibson-gibson-workloads-sandbox-eviction-handler
-    namespace: gibson
 ---
 # Source: gibson/charts/spire/charts/spire-agent/templates/roles.yaml
 # Binds above cluster role to spire-agent service account
@@ -7543,6 +5878,9 @@ metadata:
     helm.sh/chart: openfga-0.3.4
     app.kubernetes.io/name: openfga
     app.kubernetes.io/instance: gibson
+    gibson.zeroroot.ai/client-postgres: "true"
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/net-role: platform
     app.kubernetes.io/component: authorization-controller
     app.kubernetes.io/version: "v1.15.1"
     app.kubernetes.io/managed-by: Helm
@@ -7967,6 +6305,9 @@ metadata:
     helm.sh/chart: openfga-0.3.4
     app.kubernetes.io/name: openfga
     app.kubernetes.io/instance: gibson
+    gibson.zeroroot.ai/client-postgres: "true"
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/net-role: platform
     app.kubernetes.io/component: authorization-controller
     app.kubernetes.io/version: "v1.15.1"
     app.kubernetes.io/managed-by: Helm
@@ -8420,6 +6761,8 @@ metadata:
     helm.neo4j.com/neo4j.name: "gibson-neo4j"
     app: "gibson-neo4j"
     helm.neo4j.com/service: "neo4j"    
+    "gibson.zeroroot.ai/datastore": "neo4j"
+    "gibson.zeroroot.ai/net-role": "datastore"
   annotations:
 spec:
   type: "ClusterIP"
@@ -8457,6 +6800,8 @@ metadata:
     app: "gibson-neo4j"
     helm.neo4j.com/instance: "gibson"
     helm.neo4j.com/service: "default"    
+    "gibson.zeroroot.ai/datastore": "neo4j"
+    "gibson.zeroroot.ai/net-role": "datastore"
 spec:
   publishNotReadyAddresses: false
   type: ClusterIP
@@ -8482,6 +6827,9 @@ metadata:
     helm.sh/chart: openfga-0.3.4
     app.kubernetes.io/name: openfga
     app.kubernetes.io/instance: gibson
+    gibson.zeroroot.ai/client-postgres: "true"
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/net-role: platform
     app.kubernetes.io/component: authorization-controller
     app.kubernetes.io/version: "v1.15.1"
     app.kubernetes.io/managed-by: Helm
@@ -8784,99 +7132,6 @@ spec:
             type: DirectoryOrCreate
       terminationGracePeriodSeconds: 10
 ---
-# Source: gibson/charts/gibson-workloads/templates/sandbox-host/daemonset.yaml
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: gibson-gibson-workloads-sandbox-eviction-handler
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: sandbox-eviction-handler
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: gibson-workloads
-      app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: sandbox-eviction-handler
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: gibson-workloads
-        app.kubernetes.io/instance: gibson
-        app.kubernetes.io/component: sandbox-eviction-handler
-    spec:
-      serviceAccountName: gibson-gibson-workloads-sandbox-eviction-handler
-      # Pin to sandbox-host nodes provisioned by the production-eks-deploy
-      # spec — same selector setec uses (see values.yaml setec.nodeSelector).
-      nodeSelector:
-        setec.zeroroot.ai/sandbox-host: "true"
-      # Tolerate the matching NoSchedule taint on sandbox-host nodes.
-      tolerations:
-        - key: setec.zeroroot.ai/sandbox-host
-          operator: Equal
-          value: "true"
-          effect: NoSchedule
-      # No host network / no host PID — the handler only needs to stat
-      # one hostPath file and call the K8s API.
-      hostNetwork: false
-      hostPID: false
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 65532
-        runAsGroup: 65532
-        seccompProfile:
-          type: RuntimeDefault
-      containers:
-        - name: sandbox-eviction-handler
-          image: "ghcr.io/zeroroot-ai/gibson:v0.153.2@sha256:b57acca62d5acf01aea285cb1933310febfb29a32e4bf07f7ccc1bfa662edd5c"
-          imagePullPolicy: Always
-          command: ["/usr/local/bin/sandbox-eviction-handler"]
-          args:
-            - --node-name=$(NODE_NAME)
-            - --notice-file=/var/run/aws/spot-interruption-notice
-          env:
-            - name: NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
-          # No ports, no probes — the handler is a polling loop that
-          # exits the loop only on context cancel (SIGTERM). Kubelet
-          # restarts it via the DaemonSet's restartPolicy=Always (the
-          # implicit default for DaemonSet pods).
-          volumeMounts:
-            - name: aws-notice
-              mountPath: /var/run/aws
-              readOnly: true
-          resources:
-            requests:
-              cpu: 10m
-              memory: 16Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
-          securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-      volumes:
-        - name: aws-notice
-          hostPath:
-            # Populated by aws-node-termination-handler (setec.spotEvictionFallback
-            # gates that DaemonSet on EKS sandbox-host nodes). Absent on kind dev;
-            # the handler polls a non-existent file forever, which is the desired
-            # behaviour there.
-            path: /var/run/aws
-            type: DirectoryOrCreate
-      
-      imagePullSecrets:
-        - name: ghcr-credentials
----
 # Source: gibson/charts/spire/charts/spiffe-csi-driver/templates/daemonset.yaml
 apiVersion: apps/v1
 kind: DaemonSet
@@ -8903,6 +7158,7 @@ spec:
       labels:
         app.kubernetes.io/name: spiffe-csi-driver
         app.kubernetes.io/instance: gibson
+        gibson.zeroroot.ai/net-role: system
     spec:
       serviceAccountName: gibson-spiffe-csi-driver
       
@@ -9031,6 +7287,7 @@ spec:
         app.kubernetes.io/name: "agent"
         app.kubernetes.io/instance: "gibson"
         app.kubernetes.io/component: "default"
+        gibson.zeroroot.ai/net-role: system
     spec:
       hostPID: true
       hostNetwork: true
@@ -9148,6 +7405,11 @@ spec:
         app.kubernetes.io/name: gibson-connector-operator
         app.kubernetes.io/part-of: gibson
         app.kubernetes.io/component: connector-operator
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/egress-internet: "true"
+        gibson.zeroroot.ai/egress-namespaces: "true"
+        gibson.zeroroot.ai/ingress-control-plane: "true"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -9308,6 +7570,10 @@ spec:
         app.kubernetes.io/name: gibson-platform-operator
         app.kubernetes.io/part-of: gibson
         app.kubernetes.io/component: platform-operator
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/client-postgres: "true"
+        gibson.zeroroot.ai/client-openbao: "true"
+        gibson.zeroroot.ai/kube-api: "true"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -9508,6 +7774,8 @@ spec:
       labels:
         app.kubernetes.io/name: reloader
         app.kubernetes.io/component: reloader
+        gibson.zeroroot.ai/net-role: system
+        gibson.zeroroot.ai/kube-api: "true"
     spec:
       serviceAccountName: reloader
       
@@ -9602,6 +7870,15 @@ spec:
         app.kubernetes.io/name: gibson-tenant-operator
         app.kubernetes.io/part-of: gibson
         app.kubernetes.io/component: tenant-operator
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/client-postgres: "true"
+        gibson.zeroroot.ai/client-redis: "true"
+        gibson.zeroroot.ai/client-openbao: "true"
+        gibson.zeroroot.ai/client-neo4j: "true"
+        gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/egress-internet: "true"
+        gibson.zeroroot.ai/egress-namespaces: "true"
+        gibson.zeroroot.ai/ingress-control-plane: "true"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -10530,6 +8807,10 @@ spec:
         app.kubernetes.io/name: gibson-workloads
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: dashboard
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/client-postgres: "true"
+        gibson.zeroroot.ai/client-redis: "true"
+        gibson.zeroroot.ai/kube-api: "true"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -11347,6 +9628,7 @@ spec:
         app.kubernetes.io/name: docs-svc
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: docs-svc
+        gibson.zeroroot.ai/net-role: platform
     spec:
       
       imagePullSecrets:
@@ -11463,6 +9745,8 @@ spec:
         app.kubernetes.io/name: gibson-workloads
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: envoy
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/ingress-edge: "true"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -11473,7 +9757,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: aaed02bdfc7f27743036e18c4d0e737fcb9eb6653afc67057a9de112fa305b0b
+        checksum/config: 283407ee02ca8843874ea5454ee61dac0633e1d3505071666be1f07f61bfca6d
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -11832,6 +10116,11 @@ spec:
         app.kubernetes.io/name: gibson-workloads
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: ext-authz
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/client-postgres: "true"
+        gibson.zeroroot.ai/client-redis: "true"
+        gibson.zeroroot.ai/client-openbao: "true"
+        gibson.zeroroot.ai/kube-api: "true"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -12053,8 +10342,8 @@ spec:
             # Per-kid Capability-Grant key descriptor endpoint (ext-authz#103). ext-authz fetches GET {KEYS_URL}/{kid} to verify a
             # component's self-signed agent+jwt and resolve its daemon-asserted
             # principal + tenant. Reached DIRECTLY on the pod network — the
-            # daemon NetworkPolicy opens ext-authz → daemon:8086 for exactly
-            # this — never through the Envoy edge, which no longer publishes the
+            # platform network policy lets ext-authz reach daemon:8086 —
+            # never through the Envoy edge, which no longer publishes the
             # route at all (GHSA-88fg / GHSA-9q4v).
             # Unset ⇒ component CG-JWT auth disabled.
             #
@@ -12310,6 +10599,8 @@ spec:
         app.kubernetes.io/name: gibson-workloads
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: ratelimit
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/client-redis: "true"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -12567,6 +10858,9 @@ metadata:
     helm.sh/chart: openfga-0.3.4
     app.kubernetes.io/name: openfga
     app.kubernetes.io/instance: gibson
+    gibson.zeroroot.ai/client-postgres: "true"
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/net-role: platform
     app.kubernetes.io/component: authorization-controller
     app.kubernetes.io/version: "v1.15.1"
     app.kubernetes.io/managed-by: Helm
@@ -12588,6 +10882,9 @@ spec:
         helm.sh/chart: openfga-0.3.4
         app.kubernetes.io/name: openfga
         app.kubernetes.io/instance: gibson
+        gibson.zeroroot.ai/client-postgres: "true"
+        gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/net-role: platform
         app.kubernetes.io/component: authorization-controller
         app.kubernetes.io/version: "v1.15.1"
         app.kubernetes.io/managed-by: Helm
@@ -12600,7 +10897,15 @@ spec:
       containers:
         - name: openfga
           securityContext:
-            {}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
           image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.21.0@sha256:2113c664a486b5da8d7a2cdab479e0d4e30639c80fd2c000540f645c1dbc1e55"
           imagePullPolicy: Always
           args: ["run"]
@@ -12737,15 +11042,25 @@ spec:
         release: gibson
         release-namespace: gibson
         component: oidc-discovery-provider
+        gibson.zeroroot.ai/net-role: platform
     spec:
       serviceAccountName: gibson-spiffe-oidc-discovery-provider
       securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
         runAsGroup: 1000
         runAsUser: 1000
       initContainers:
         - name: init
           securityContext:
-            {}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             {}
           image: "ghcr.io/spiffe/spiffe-helper:0.11.0"
@@ -12767,7 +11082,14 @@ spec:
       containers:
         - name: spiffe-oidc-discovery-provider
           securityContext:
-            {}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
           image: "ghcr.io/spiffe/oidc-discovery-provider:1.14.5"
           imagePullPolicy: IfNotPresent
           args:
@@ -12810,7 +11132,14 @@ spec:
           resources:
             {}
           securityContext:
-            {}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
           image: "ghcr.io/spiffe/spiffe-helper:0.11.0"
           imagePullPolicy: IfNotPresent
           args:
@@ -12875,6 +11204,10 @@ spec:
         app.kubernetes.io/version: "v4.19.4"
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: login
+        gibson.zeroroot.ai/client-postgres: "true"
+        gibson.zeroroot.ai/egress-internet: "true"
+        gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/net-role: platform
     spec:
       imagePullSecrets:
         - name: ghcr-credentials
@@ -12887,10 +11220,16 @@ spec:
       containers:
         - name: zitadel-login
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: "ghcr.io/zeroroot-ai/zitadel-login:v4.19.4@sha256:56b1d6a039156a4dd486c095d3a6d604780d08890af83388e7425ee654ef80d3"
           imagePullPolicy: IfNotPresent
           env:
@@ -12959,10 +11298,16 @@ spec:
             - --interval
             - "5s"
           securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
             privileged: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
       volumes:
       - name: login-config-dotenv
         configMap:
@@ -13009,6 +11354,10 @@ spec:
         app.kubernetes.io/version: "v4.19.4"
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: start
+        gibson.zeroroot.ai/client-postgres: "true"
+        gibson.zeroroot.ai/egress-internet: "true"
+        gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/net-role: platform
     spec:
       imagePullSecrets:
         - name: ghcr-credentials
@@ -13021,10 +11370,16 @@ spec:
       containers:
         - name: "zitadel"
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: "ghcr.io/zitadel/zitadel:v4.19.4"
           imagePullPolicy: IfNotPresent
           args:
@@ -13151,14 +11506,25 @@ spec:
         app.kubernetes.io/name: gibson-workloads
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: openbao
+        gibson.zeroroot.ai/net-role: datastore
+        gibson.zeroroot.ai/datastore: openbao
+        gibson.zeroroot.ai/kube-api: "true"
       annotations:
         checksum/config: f8be2b221e62422b4f93c4481fd3d5e8f8b5a2230848ea135daca0ccf2d04f95
+        # Velero fs-backup skips the scratch volumes. scripts/check-velero-volume-excludes.sh.
+        backup.velero.io/backup-volumes-excludes: "tmp,auto-init-tmp"
     spec:
       serviceAccountName: gibson-openbao
+      # The restricted Pod Security Standard (ADR-0165, charts#394). The
+      # image runs as the openbao user (uid 100). SKIP_CHOWN and SKIP_SETCAP
+      # keep the entrypoint from the root-only steps.
       securityContext:
         fsGroup: 1000
         runAsUser: 100
         runAsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: openbao
           image: "ghcr.io/zeroroot-ai/mirror/openbao:2.5.3@sha256:fdc6da21ca6963560c32336fd7feb9cf2d5e52668f1a1647205a4b41171f0806"
@@ -13201,6 +11567,9 @@ spec:
             - name: seal-key
               mountPath: /etc/openbao/seal
               readOnly: true
+            # The root filesystem is read-only. The server writes scratch here.
+            - name: tmp
+              mountPath: /tmp
           # LIVENESS keeps sealedcode=204 deliberately. Restarting a sealed
           # OpenBao does not unseal it — it destroys the sidecar's in-progress
           # recovery and, in a CrashLoopBackOff, prevents recovery entirely.
@@ -13265,9 +11634,9 @@ spec:
             failureThreshold: 6
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
-              add:
-                - IPC_LOCK
+              drop: ["ALL"]
         # openbao-auto-init — sidecar that drives OpenBao from a fresh PVC to
         # initialized, seeded and root-free, and stays running so the platform
         # service token is kept renewed (deploy#1732).
@@ -14394,6 +12763,9 @@ spec:
             # seeded empty.
             - name: bringup-inputs
               mountPath: /etc/openbao/inputs
+            # The ready marker and mktemp write here. The root filesystem is read-only.
+            - name: auto-init-tmp
+              mountPath: /tmp
               readOnly: true
           # Ready = the store serves its consumers (see the marker above).
           # A readiness probe never restarts the container; until the marker
@@ -14410,6 +12782,10 @@ spec:
           env:
             - name: BAO_ADDR
               value: "http://127.0.0.1:8200"
+            # The root filesystem is read-only. A tool that writes to HOME
+            # writes to the scratch volume.
+            - name: HOME
+              value: /tmp
           resources:
             requests:
               cpu: 10m
@@ -14419,10 +12795,14 @@ spec:
               memory: 64Mi
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
       volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: auto-init-tmp
+          emptyDir: {}
         - name: config
           configMap:
             name: gibson-openbao-config
@@ -14501,6 +12881,8 @@ spec:
         app.kubernetes.io/name: gibson-workloads
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: redis
+        gibson.zeroroot.ai/net-role: datastore
+        gibson.zeroroot.ai/datastore: redis
       annotations:
         # Velero fs-backup skips the ACL file an init container renders; the
         # data claim stays in the backup. scripts/check-velero-volume-excludes.sh.
@@ -14710,6 +13092,14 @@ spec:
         app.kubernetes.io/name: gibson-workloads
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: daemon
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/client-postgres: "true"
+        gibson.zeroroot.ai/client-redis: "true"
+        gibson.zeroroot.ai/client-openbao: "true"
+        gibson.zeroroot.ai/client-neo4j: "true"
+        gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/egress-internet: "true"
+        gibson.zeroroot.ai/egress-namespaces: "true"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -15527,6 +13917,8 @@ metadata:
     helm.neo4j.com/clustering: "false"
     app: "gibson-neo4j"
     helm.neo4j.com/instance: gibson    
+    "gibson.zeroroot.ai/datastore": "neo4j"
+    "gibson.zeroroot.ai/net-role": "datastore"
   name: gibson
   namespace: "gibson"
 spec:
@@ -15546,9 +13938,11 @@ spec:
         helm.neo4j.com/pod_category: "neo4j-instance" # used for anti affinity rules
         helm.neo4j.com/neo4j.loadbalancer: "include"
         helm.neo4j.com/instance: "gibson"        
+        "gibson.zeroroot.ai/datastore": "neo4j"
+        "gibson.zeroroot.ai/net-role": "datastore"
       annotations:
-        "checksum/gibson-config": 851be89e2cc4ed9cd255750f1f1b0fa1efc0b30267908610b39b2ceb8388a78f
-        "checksum/gibson-env": 932cad2ae59867fdde4e2aa44b726da7c5b1178ca9c1faa67b5a4919155a34cf        
+        "checksum/gibson-config": dcec5328509e05856676b83c7b2d67fe1ba5d3c7468d017ee386cd35d658739d
+        "checksum/gibson-env": 0195f00c71a87b9cc7e7aca6850ee6f76fcb14a72549c7790e4f867890f038d4        
         "backup.velero.io/backup-volumes-excludes": "neo4j-plugins"
     spec:      
       affinity:
@@ -15766,33 +14160,31 @@ spec:
         component: server
         release: gibson
         release-namespace: gibson
+        gibson.zeroroot.ai/client-postgres: "true"
+        gibson.zeroroot.ai/egress-internet: "true"
+        gibson.zeroroot.ai/ingress-control-plane: "true"
+        gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/net-role: platform
     spec:
       serviceAccountName: gibson-server
       shareProcessNamespace: true
       securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
         runAsGroup: 1000
         runAsUser: 1000
       
-      initContainers:
-        - name: chown
-          image: "busybox:1.37.0-uclibc"
-          imagePullPolicy: IfNotPresent
-          command: ["sh", "-c"]
-          args:
-            - |
-              chown -R 1000:1000 /var/lib/spire
-          resources:
-            {}
-          volumeMounts:
-            - name: spire-data
-              mountPath: /var/lib/spire
-          securityContext:
-            runAsUser: 0
-            runAsGroup: 0
       containers:
         - name: spire-server
           securityContext:
-            {}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
           image: "ghcr.io/spiffe/spire-server:1.14.5"
           imagePullPolicy: IfNotPresent
           args:
@@ -15845,7 +14237,14 @@ spec:
         
         - name: spire-controller-manager
           securityContext:
-            {}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
           image: "ghcr.io/spiffe/spire-controller-manager:0.6.4"
           imagePullPolicy: IfNotPresent
           args:
@@ -15948,6 +14347,9 @@ spec:
         app.kubernetes.io/name: gibson-workloads
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: openbao-jwt-auth-init
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/client-openbao: "true"
+        gibson.zeroroot.ai/kube-api: "true"
     spec:
       restartPolicy: OnFailure
       serviceAccountName: gibson-openbao-jwt-auth-init
@@ -16187,6 +14589,8 @@ spec:
         app.kubernetes.io/name: gibson-workloads
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: fga-init
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/kube-api: "true"
     spec:
       restartPolicy: OnFailure
       serviceAccountName: gibson-fga-init
@@ -16668,6 +15072,9 @@ spec:
         app.kubernetes.io/name: gibson-workloads
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: active-session-backfill
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/client-postgres: "true"
+        gibson.zeroroot.ai/kube-api: "true"
     spec:
       restartPolicy: OnFailure
       serviceAccountName: gibson-gibson-workloads-active-session-backfill
@@ -16822,6 +15229,9 @@ spec:
             app.kubernetes.io/name: gibson-workloads
             app.kubernetes.io/instance: gibson
             app.kubernetes.io/component: redis-rotation
+            gibson.zeroroot.ai/net-role: platform
+            gibson.zeroroot.ai/client-redis: "true"
+            gibson.zeroroot.ai/kube-api: "true"
         spec:
           restartPolicy: Never
           serviceAccountName: gibson-redis-rotation
@@ -17439,6 +15849,538 @@ spec:
     kind: "Issuer"
     group: "cert-manager.io"
 ---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: gibson-gibson-default-deny
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-default-deny
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Each pod of the namespace gibson denies all traffic, except DNS (ADR-0165 rule 4)."
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: gibson
+  enableDefaultDeny:
+    ingress: true
+    egress: true
+  ingress:
+    - {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-platform
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Platform pods reach each other."
+  endpointSelector:
+    matchLabels:
+      gibson.zeroroot.ai/net-role: platform
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            gibson.zeroroot.ai/net-role: platform
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            gibson.zeroroot.ai/net-role: platform
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-datastore-postgres
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-datastore
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+specs:
+  - description: "The postgres data store admits only its clients."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/datastore: postgres
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/client-postgres: "true"
+        toPorts:
+          - ports:
+              - port: "5432"
+                protocol: TCP
+              - port: "8000"
+                protocol: TCP
+      - fromEndpoints:
+          - matchLabels:
+              app.kubernetes.io/name: cloudnative-pg
+            matchExpressions:
+              - key: k8s:io.kubernetes.pod.namespace
+                operator: Exists
+        toPorts:
+          - ports:
+              - port: "8000"
+                protocol: TCP
+  - description: "The clients of the postgres data store reach it."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/client-postgres: "true"
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/datastore: postgres
+        toPorts:
+          - ports:
+              - port: "5432"
+                protocol: TCP
+              - port: "8000"
+                protocol: TCP
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-datastore-redis
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-datastore
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+specs:
+  - description: "The redis data store admits only its clients."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/datastore: redis
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/client-redis: "true"
+        toPorts:
+          - ports:
+              - port: "6379"
+                protocol: TCP
+  - description: "The clients of the redis data store reach it."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/client-redis: "true"
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/datastore: redis
+        toPorts:
+          - ports:
+              - port: "6379"
+                protocol: TCP
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-datastore-openbao
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-datastore
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+specs:
+  - description: "The openbao data store admits only its clients."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/datastore: openbao
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/client-openbao: "true"
+        toPorts:
+          - ports:
+              - port: "8200"
+                protocol: TCP
+      - fromEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/datastore: openbao
+        toPorts:
+          - ports:
+              - port: "8201"
+                protocol: TCP
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: external-secrets
+              app.kubernetes.io/name: external-secrets
+        toPorts:
+          - ports:
+              - port: "8200"
+                protocol: TCP
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              app.kubernetes.io/name: spiffe-oidc-discovery-provider
+        toPorts:
+          - ports:
+              - port: "8443"
+                protocol: TCP
+              - port: "443"
+                protocol: TCP
+      - toEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/datastore: openbao
+        toPorts:
+          - ports:
+              - port: "8201"
+                protocol: TCP
+  - description: "The SPIRE OIDC provider serves its public keys to OpenBao."
+    endpointSelector:
+      matchLabels:
+        app.kubernetes.io/name: spiffe-oidc-discovery-provider
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/datastore: openbao
+        toPorts:
+          - ports:
+              - port: "8443"
+                protocol: TCP
+              - port: "443"
+                protocol: TCP
+  - description: "The clients of the openbao data store reach it."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/client-openbao: "true"
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/datastore: openbao
+        toPorts:
+          - ports:
+              - port: "8200"
+                protocol: TCP
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-datastore-neo4j
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-datastore
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+specs:
+  - description: "The neo4j data store admits only its clients."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/datastore: neo4j
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/client-neo4j: "true"
+        toPorts:
+          - ports:
+              - port: "7687"
+                protocol: TCP
+              - port: "7474"
+                protocol: TCP
+  - description: "The clients of the neo4j data store reach it."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/client-neo4j: "true"
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/datastore: neo4j
+        toPorts:
+          - ports:
+              - port: "7687"
+                protocol: TCP
+              - port: "7474"
+                protocol: TCP
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-kube-api
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-kube-api
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Pods with the kube-api label reach the Kubernetes API server."
+  endpointSelector:
+    matchLabels:
+      gibson.zeroroot.ai/kube-api: "true"
+  egress:
+    - toEntities:
+        - kube-apiserver
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-egress-internet
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-egress-internet
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Pods with the egress-internet label reach hosts outside the cluster."
+  endpointSelector:
+    matchLabels:
+      gibson.zeroroot.ai/egress-internet: "true"
+  egress:
+    - toEntities:
+        - world
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-egress-namespaces
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-egress-namespaces
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Pods with the egress-namespaces label reach pods in other namespaces, for example setec and the tenant plugins."
+  endpointSelector:
+    matchLabels:
+      gibson.zeroroot.ai/egress-namespaces: "true"
+  egress:
+    - toEndpoints:
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: NotIn
+              values:
+                - gibson
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-edge
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-edge
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+specs:
+  - description: "The public edge accepts each source on its listener."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/ingress-edge: "true"
+    ingress:
+      - fromEntities:
+          - all
+        toPorts:
+          - ports:
+              # The listener of the edge (gibson-workloads envoy/deployment.yaml).
+              - port: "10000"
+                protocol: TCP
+  - description: "Each pod of the release reaches the edge listener."
+    endpointSelector:
+      matchExpressions:
+        - key: gibson.zeroroot.ai/net-role
+          operator: Exists
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/ingress-edge: "true"
+        toPorts:
+          - ports:
+              - port: "10000"
+                protocol: TCP
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-control-plane
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-control-plane
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+specs:
+  - description: "Admission webhooks and the SPIRE server accept the API server, the nodes and the platform pods."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/ingress-control-plane: "true"
+    ingress:
+      - fromEntities:
+          - kube-apiserver
+          - host
+          - remote-node
+          - world
+        toPorts:
+          - ports:
+              - port: "8081"
+                protocol: TCP
+              - port: "9443"
+                protocol: TCP
+              - port: "10250"
+                protocol: TCP
+      - fromEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/net-role: platform
+        toPorts:
+          - ports:
+              - port: "8081"
+                protocol: TCP
+              - port: "9443"
+                protocol: TCP
+              - port: "10250"
+                protocol: TCP
+  - description: "Platform pods reach the webhook ports."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/net-role: platform
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              gibson.zeroroot.ai/ingress-control-plane: "true"
+        toPorts:
+          - ports:
+              - port: "8081"
+                protocol: TCP
+              - port: "9443"
+                protocol: TCP
+              - port: "10250"
+                protocol: TCP
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-metrics
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-metrics
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "The cluster scrapers reach the metrics ports."
+  endpointSelector:
+    matchExpressions:
+      - key: gibson.zeroroot.ai/net-role
+        operator: Exists
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: prometheus
+          matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
+        - matchLabels:
+            app: grafana-agent
+          matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
+      toPorts:
+        - ports:
+            - port: "2112"
+              protocol: TCP
+            - port: "3000"
+              protocol: TCP
+            - port: "7979"
+              protocol: TCP
+            - port: "8008"
+              protocol: TCP
+            - port: "8080"
+              protocol: TCP
+            - port: "9090"
+              protocol: TCP
+            - port: "9187"
+              protocol: TCP
+            - port: "9402"
+              protocol: TCP
+            - port: "9901"
+              protocol: TCP
+            - port: "9002"
+              protocol: TCP
+---
 # Source: gibson/templates/postgres/platform-postgres-cluster.yaml
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
@@ -17478,6 +16420,14 @@ spec:
   inheritedMetadata:
     labels:
       velero.io/exclude-from-backup: "true"
+      # The network labels of each instance and each CNPG Job (ADR-0165 rule
+      # 4, D76): the Postgres data store, a client of its own replicas, the
+      # API server for the instance manager, and the archive bucket.
+      gibson.zeroroot.ai/net-role: datastore
+      gibson.zeroroot.ai/datastore: postgres
+      gibson.zeroroot.ai/client-postgres: "true"
+      gibson.zeroroot.ai/kube-api: "true"
+      gibson.zeroroot.ai/egress-internet: "true"
   instances: 3
   # A primary roll promotes a replica first, then restarts the old primary as
   # a replica. `restart` would take the primary down before anything else.
@@ -20539,6 +19489,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
     app.kubernetes.io/component: helm-test
   annotations:
     "helm.sh/hook": test
@@ -20558,6 +19510,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
     app.kubernetes.io/component: helm-test
   annotations:
     "helm.sh/hook": test
@@ -20809,6 +19763,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
@@ -20840,6 +19796,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
@@ -20913,6 +19871,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
@@ -20939,6 +19899,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
@@ -21014,6 +19976,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
     app.kubernetes.io/component: helm-test
   annotations:
     "helm.sh/hook": test
@@ -21183,6 +20147,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
@@ -21302,6 +20268,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
     app.kubernetes.io/component: helm-test
   annotations:
     "helm.sh/hook": test
@@ -21405,6 +20373,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
     app.kubernetes.io/component: helm-test
   annotations:
     "helm.sh/hook": test
@@ -21519,6 +20489,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
     # Matches the podSelector of the `gibson-platform-helm-test`
     # ClusterSPIFFEID. This label selects the CR; the serviceAccountName
     # below then has to satisfy its literal `k8s:sa:` workload selector.
@@ -21610,6 +20582,10 @@ spec:
           cpu: 100m
           memory: 128Mi
       securityContext:
+        # The restricted Pod Security Standard (ADR-0165, charts#394). The
+        # Workload API socket accepts each local user, so the probe needs no root.
+        runAsNonRoot: true
+        runAsUser: 1000
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true
         capabilities:
@@ -21656,6 +20632,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
     app.kubernetes.io/component: helm-test
   annotations:
     "helm.sh/hook": test
@@ -21800,6 +20778,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
     app.kubernetes.io/component: helm-test
   annotations:
     "helm.sh/hook": test
@@ -21922,6 +20902,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
     app.kubernetes.io/component: helm-test
   annotations:
     "helm.sh/hook": test
@@ -22107,6 +21089,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
     app.kubernetes.io/component: helm-test
   annotations:
     "helm.sh/hook": test
@@ -22185,6 +21169,8 @@ metadata:
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
     helm-test/keep: "false"
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
     app.kubernetes.io/component: helm-test
   annotations:
     "helm.sh/hook": test
@@ -22258,6 +21244,9 @@ metadata:
     helm.sh/chart: openfga-0.3.4
     app.kubernetes.io/name: openfga
     app.kubernetes.io/instance: gibson
+    gibson.zeroroot.ai/client-postgres: "true"
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/net-role: platform
     app.kubernetes.io/component: authorization-controller
     app.kubernetes.io/version: "v1.15.1"
     app.kubernetes.io/managed-by: Helm
@@ -22288,26 +21277,50 @@ metadata:
     "helm.sh/hook": test
 spec:
   securityContext:
-    {}
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+    runAsGroup: 1000
+    runAsUser: 1000
   containers:
     - name: curl-service-name
       image: "cgr.dev/chainguard/bash:latest@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
       command: ['curl']
       args: ['-s', '-f', '-k', 'https://gibson-spiffe-oidc-discovery-provider:443/.well-known/openid-configuration']
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
     - name: curl-service-name-namespace
       image: "cgr.dev/chainguard/bash:latest@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
       command: ['curl']
       args: ['-s', '-f', '-k', 'https://gibson-spiffe-oidc-discovery-provider.gibson:443/.well-known/openid-configuration']
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
     - name: curl-service-name-namespace-svc-cluster-local
       image: "cgr.dev/chainguard/bash:latest@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
       command: ['curl']
       args: ['-s', '-f', '-k', 'https://gibson-spiffe-oidc-discovery-provider.gibson.svc.cluster.local:443/.well-known/openid-configuration']
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
   restartPolicy: Never
 ---
 # Source: gibson/charts/spire/charts/spiffe-oidc-discovery-provider/templates/tests/test-keys.yaml
@@ -22329,7 +21342,10 @@ metadata:
     "helm.sh/hook": test
 spec:
   securityContext:
-    {}
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+    runAsGroup: 1000
+    runAsUser: 1000
   serviceAccountName: gibson-spiffe-oidc-discovery-provider
   initContainers:
     - name: static-busybox
@@ -22341,7 +21357,14 @@ spec:
           cp /bin/busybox /data/busybox
           chmod +x /data/busybox
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       volumeMounts:
         - name: data-volume
           mountPath: /data
@@ -22354,7 +21377,14 @@ spec:
         - |
           cp /usr/local/bin/step /data/step
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       volumeMounts:
         - name: data-volume
           mountPath: /data
@@ -22371,7 +21401,14 @@ spec:
             sleep 1
           done
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       volumeMounts:
         - name: data-volume
           mountPath: /data
@@ -22400,7 +21437,14 @@ spec:
           # Verify JWT with public pem
           echo $JWT | /data/step crypto jwt verify --key=public.pem --alg=RS256 --subtle
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       volumeMounts:
       - mountPath: /data
         name: data-volume
@@ -22430,7 +21474,10 @@ metadata:
     "helm.sh/hook": test
 spec:
   securityContext:
-    {}
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+    runAsGroup: 1000
+    runAsUser: 1000
   containers:
     - name: curl
       image: "cgr.dev/chainguard/bash:latest@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
@@ -22451,7 +21498,14 @@ spec:
           fi
           exit 1
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
   restartPolicy: Never
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/hooks/pre-upgrade-runtime-check.yaml
@@ -22534,6 +21588,9 @@ metadata:
     helm.sh/chart: openfga-0.3.4
     app.kubernetes.io/name: openfga
     app.kubernetes.io/instance: gibson
+    gibson.zeroroot.ai/client-postgres: "true"
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/net-role: platform
     app.kubernetes.io/component: authorization-controller
     app.kubernetes.io/version: "v1.15.1"
     app.kubernetes.io/managed-by: Helm
@@ -22561,6 +21618,9 @@ spec:
         helm.sh/chart: openfga-0.3.4
         app.kubernetes.io/name: openfga
         app.kubernetes.io/instance: gibson
+        gibson.zeroroot.ai/client-postgres: "true"
+        gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/net-role: platform
         app.kubernetes.io/component: authorization-controller
         app.kubernetes.io/version: "v1.15.1"
         app.kubernetes.io/managed-by: Helm
@@ -22570,7 +21630,15 @@ spec:
       containers:
         - name: migrate-database
           securityContext:
-            {}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
           image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.21.0@sha256:2113c664a486b5da8d7a2cdab479e0d4e30639c80fd2c000540f645c1dbc1e55"
           args: ["migrate"]
           env:
@@ -22626,6 +21694,9 @@ spec:
         app.kubernetes.io/version: "v4.19.4"
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: cleanup
+        gibson.zeroroot.ai/client-postgres: "true"
+        gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/net-role: platform
     spec:
       imagePullSecrets:
         - name: ghcr-credentials
@@ -22639,10 +21710,16 @@ spec:
       containers:
         - name: zitadel-cleanup
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
           imagePullPolicy: 'IfNotPresent'
           command:
@@ -22689,6 +21766,9 @@ spec:
         app.kubernetes.io/version: "v4.19.4"
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: init
+        gibson.zeroroot.ai/client-postgres: "true"
+        gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/net-role: platform
     spec:
       imagePullSecrets:
         - name: ghcr-credentials
@@ -22702,10 +21782,16 @@ spec:
       containers:
         - name: zitadel-init
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: "ghcr.io/zitadel/zitadel:v4.19.4"
           imagePullPolicy: IfNotPresent
           args:
@@ -22784,6 +21870,9 @@ spec:
         app.kubernetes.io/version: "v4.19.4"
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: setup
+        gibson.zeroroot.ai/client-postgres: "true"
+        gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/net-role: platform
     spec:
       imagePullSecrets:
         - name: ghcr-credentials
@@ -22797,10 +21886,16 @@ spec:
       containers:
         - name: zitadel-setup
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: "ghcr.io/zitadel/zitadel:v4.19.4"
           imagePullPolicy: IfNotPresent
           args:
@@ -22856,10 +21951,16 @@ spec:
             {}
         - name: zitadel-machinekey
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
           imagePullPolicy: 'IfNotPresent'
           command:
@@ -22898,10 +21999,16 @@ spec:
             {}
         - name: zitadel-machine-pat
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
           imagePullPolicy: 'IfNotPresent'
           command:
@@ -22940,10 +22047,16 @@ spec:
             {}
         - name: zitadel-login-client-pat
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
           imagePullPolicy: 'IfNotPresent'
           command:
@@ -23020,12 +22133,11 @@ spec:
   template:
     metadata:
       labels:
-        # Pod-template labels: the gibson-openfga + gibson-bringup-jobs
-        # NetworkPolicies admit first-admin by app.kubernetes.io/component,
-        # so this label is load-bearing under the namespace default-deny.
         app.kubernetes.io/name: gibson-workloads
         app.kubernetes.io/instance: gibson
         app.kubernetes.io/component: first-admin
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/kube-api: "true"
     spec:
       restartPolicy: OnFailure
       serviceAccountName: gibson-gibson-workloads-first-admin
@@ -23183,9 +22295,10 @@ spec:
   template:
     metadata:
       labels:
-        # networkpolicy-bringup-jobs.yaml selects this label; without it the
-        # namespace default-deny severs the pod from CoreDNS and OpenBao.
         app.kubernetes.io/component: iam-admin-pat-escrow
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/client-openbao: "true"
+        gibson.zeroroot.ai/kube-api: "true"
     spec:
       restartPolicy: OnFailure
       serviceAccountName: iam-admin-pat-escrow
@@ -23328,11 +22441,10 @@ spec:
   template:
     metadata:
       labels:
-        # networkpolicy-bringup-jobs.yaml selects this label for egress.
         app.kubernetes.io/component: postgres-setup
-        # The opt-in the platform-postgres instances policy admits on :5432
-        # (gibson-workloads namespace-isolation/subchart-workloads.yaml).
-        gibson.zeroroot.ai/platform-postgres-client: "true"
+        # The Postgres data store admits its clients on :5432 (templates/network-policies.yaml).
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/client-postgres: "true"
     spec:
       restartPolicy: OnFailure
       serviceAccountName: postgres-setup
@@ -23515,11 +22627,10 @@ spec:
   template:
     metadata:
       labels:
-        # networkpolicy-bringup-jobs.yaml selects this label for egress.
         app.kubernetes.io/component: postgres-setup
-        # The opt-in the platform-postgres instances policy admits on :5432
-        # (gibson-workloads namespace-isolation/subchart-workloads.yaml).
-        gibson.zeroroot.ai/platform-postgres-client: "true"
+        # The Postgres data store admits its clients on :5432 (templates/network-policies.yaml).
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/client-postgres: "true"
     spec:
       restartPolicy: OnFailure
       serviceAccountName: postgres-setup
@@ -23655,11 +22766,10 @@ spec:
   template:
     metadata:
       labels:
-        # networkpolicy-bringup-jobs.yaml selects this label for egress.
         app.kubernetes.io/component: postgres-setup
-        # The opt-in the platform-postgres instances policy admits on :5432
-        # (gibson-workloads namespace-isolation/subchart-workloads.yaml).
-        gibson.zeroroot.ai/platform-postgres-client: "true"
+        # The Postgres data store admits its clients on :5432 (templates/network-policies.yaml).
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/client-postgres: "true"
     spec:
       restartPolicy: OnFailure
       serviceAccountName: postgres-setup
@@ -23795,11 +22905,10 @@ spec:
   template:
     metadata:
       labels:
-        # networkpolicy-bringup-jobs.yaml selects this label for egress.
         app.kubernetes.io/component: postgres-setup
-        # The opt-in the platform-postgres instances policy admits on :5432
-        # (gibson-workloads namespace-isolation/subchart-workloads.yaml).
-        gibson.zeroroot.ai/platform-postgres-client: "true"
+        # The Postgres data store admits its clients on :5432 (templates/network-policies.yaml).
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/client-postgres: "true"
     spec:
       restartPolicy: OnFailure
       serviceAccountName: postgres-setup
@@ -23915,11 +23024,11 @@ spec:
   template:
     metadata:
       labels:
-        # The gibson namespace is default-deny. This label is what
-        # templates/networkpolicy-bringup-jobs.yaml selects; without it the
-        # pod cannot even reach CoreDNS and every probe reads as a dead
-        # webhook (deploy#1631 taught this the hard way).
         app.kubernetes.io/component: webhook-gate
+        # The gibson namespace is default-deny. A platform pod reaches the
+        # webhook ports (templates/network-policies.yaml). Without the label
+        # each probe reads as a dead webhook (deploy#1631).
+        gibson.zeroroot.ai/net-role: platform
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false

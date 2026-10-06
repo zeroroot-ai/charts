@@ -17,8 +17,10 @@ set -euo pipefail
 CHART_DIR="${CHART_DIR:-helm/gibson}"
 RENDER="$(mktemp)"; trap 'rm -f "$RENDER"' EXIT
 helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" -f "$CHART_DIR/../testdata/render-inputs/gibson.yaml" --namespace gibson > "$RENDER"
-python3 - "$RENDER" <<'PY'
+python3 - "$RENDER" "$(dirname "$0")/lib" <<'PY'
 import sys, yaml, copy
+sys.path.insert(0, sys.argv[2])
+import cilium_policy as cp
 KEY = "gibson-zitadel-iam-admin-pat"
 # Every Secret the Zitadel setup Job mints, and the store key each rides in.
 MINTED = {
@@ -87,24 +89,17 @@ def check(docs):
                 bad.append(f"the Role {sa!r} does not let the escrow Job get Secret {secret}: it would wait its whole window on a Secret that is there")
         if "restore path" not in script:
             bad.append("the escrow Job must consult the store BEFORE waiting for the Secret: on a restore the Secret is materialised at wave 1, after this hook, and waiting for it deadlocks the sync")
-    pols = [d for d in docs if d.get("kind") == "NetworkPolicy"]
-    covered = any("iam-admin-pat-escrow" in (e.get("values") or []) for p in pols for e in (p["spec"].get("podSelector", {}).get("matchExpressions") or []))
-    if not covered:
-        bad.append("no NetworkPolicy selects app.kubernetes.io/component=iam-admin-pat-escrow: the namespace default-deny severs the escrow Job")
-    # And the other end: the store's own policy must admit the Job on 8200.
-    # Measured 2026-09-08 (loop #7): egress allowed, ingress not, 130 s
-    # connect timeouts, the sync waiting on the hook for an hour.
-    admitted = False
-    for p in pols:
-        if (p["spec"].get("podSelector", {}).get("matchLabels") or {}).get("app.kubernetes.io/component") != "openbao":
-            continue
-        for rule in p["spec"].get("ingress") or []:
-            ports = [x.get("port") for x in (rule.get("ports") or [])]
-            froms = [((f.get("podSelector") or {}).get("matchLabels") or {}).get("app.kubernetes.io/component") for f in (rule.get("from") or [])]
-            if 8200 in ports and "iam-admin-pat-escrow" in froms:
-                admitted = True
-    if not admitted:
-        bad.append("the openbao NetworkPolicy does not admit app.kubernetes.io/component=iam-admin-pat-escrow on 8200: the escrow Job cannot reach the store")
+    # The network half (D76): the Cilium policies select pods by label, so
+    # the escrow Job must reach OpenBao on 8200 through its labels, and the
+    # store must admit it. Measured 2026-09-08 (loop #7): egress allowed,
+    # ingress not, 130 s connect timeouts, the sync waiting on the hook for an hour.
+    if jobs:
+        rules = cp.rules(docs, "gibson")
+        job = cp.endpoint("gibson", jobs[0]["spec"]["template"]["metadata"].get("labels") or {})
+        bao = [cp.endpoint("gibson", d["spec"]["template"]["metadata"].get("labels") or {}) for d in docs
+               if d.get("kind") == "StatefulSet" and (d["spec"]["template"]["metadata"].get("labels") or {}).get("app.kubernetes.io/component") == "openbao"]
+        if not bao or not cp.reaches(rules, job, bao[0], 8200):
+            bad.append("the network policy does not let app.kubernetes.io/component=iam-admin-pat-escrow reach OpenBao on 8200: the escrow Job cannot reach the store")
     return bad
 docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
 for planted in MINTED:
@@ -134,6 +129,13 @@ for d in keys0:
         d["metadata"].setdefault("annotations", {})["argocd.argoproj.io/sync-wave"] = "0"
 if not any("gibson-openbao-keys" in b for b in check(keys0)):
     sys.exit("self-test broken: gibson-openbao-keys at wave 0 (the hook that cannot start) was not detected")
+# The network half, planted: the escrow Job loses its OpenBao client label.
+unlabeled = copy.deepcopy(docs)
+for d in unlabeled:
+    if d.get("kind") == "Job" and d["spec"]["template"]["metadata"].get("labels", {}).get("app.kubernetes.io/component") == "iam-admin-pat-escrow":
+        d["spec"]["template"]["metadata"]["labels"].pop("gibson.zeroroot.ai/client-openbao", None)
+if not any("reach OpenBao on 8200" in b for b in check(unlabeled)):
+    sys.exit("self-test broken: an escrow Job with no OpenBao client label was not detected")
 bad = check(docs)
 if bad:
     print("✗ check-iam-admin-pat-escrow:", file=sys.stderr)
