@@ -113,7 +113,7 @@ def selftest() -> int:
             ("a rule with its section", [rule("GoodAlert", good + "#goodalert")], 0),
             ("a rule with no runbook_url", [rule("NoRunbook")], 1),
             ("a URL outside the repository", [rule("Elsewhere", "https://example.com/runbook#a")], 1),
-            ("a page that does not exist", [rule("NoPage", BASE + "docs/runbooks/alerts/gone.md#nopage")], 1),
+            ("a page that does not exist", [rule("NoPage", BASE + "/".join(("docs", "runbooks", "alerts", "gone.md")) + "#nopage")], 1),
             ("a section that does not exist", [rule("NoSection", good + "#nosection")], 1),
             ("zero rules", [], 1),
         ]

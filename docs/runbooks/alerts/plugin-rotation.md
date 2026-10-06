@@ -1,6 +1,6 @@
 # Plugin secret rotation alerts
 
-The synthetic monitor `tests/plugin/rotation-monitor.sh` in the `hosted` repo rotates a secret and measures how long a plugin takes to see it.
+The synthetic monitor `tests/plugin/rotation-monitor.sh` in `zeroroot-ai/hosted` rotates a secret and measures how long a plugin takes to see it.
 
 ## PluginRotationPropagationP95HighSlo
 
