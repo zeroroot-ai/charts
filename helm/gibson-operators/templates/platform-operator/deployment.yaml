@@ -128,6 +128,15 @@ spec:
             {{- /* deploy#201: SPIRE is REQUIRED — env + mount unconditional. */}}
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"
+            # The daemon that receives the audit record of each change
+            # (DaemonOperatorService.EmitAuditEvent, gibson#583). The operator
+            # does not start without both. It dials on first use, never at
+            # boot, so the daemon is not a start dependency: the records wait
+            # in the status of each resource until the daemon answers.
+            - name: GIBSON_DAEMON_GRPC_ADDRESS
+              value: {{ include "gibson.daemonAddress" . | quote }}
+            - name: GIBSON_DAEMON_SPIFFE_ID
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/daemon") | quote }}
             # Zitadel System API user private key path (platform-operator#28,
             #). The reconcile step that registers the cluster
             # Service name as a Zitadel trusted domain signs JWTs with

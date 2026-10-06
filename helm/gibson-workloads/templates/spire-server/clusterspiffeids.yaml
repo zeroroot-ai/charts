@@ -235,6 +235,31 @@ spec:
     - "k8s:ns:{{ $ns }}"
     - "k8s:sa:{{ include "gibson.connectorOperatorServiceAccountName" . }}"
 ---
+{{- /* The platform-operator (gibson-operators sub-chart) sends only its
+       audit records to the daemon (DaemonOperatorService.EmitAuditEvent,
+       gibson#583). The daemon's method policy admits this SVID for exactly
+       that RPC. */}}
+# --- platform-operator ---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-platform-operator
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/platform-operator"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: platform-operator
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ include "gibson.platformOperatorServiceAccountName" . }}"
+---
 {{- /* Envoy holds the highest-trust SVID in the platform: it is in
        spiffe.callbackPeers, so the daemon accepts identity headers from
        any peer presenting it. Until templates/envoy/serviceaccount.yaml

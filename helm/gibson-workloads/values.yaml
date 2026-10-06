@@ -848,6 +848,9 @@ spiffe:
   allowedPeers:
     - platform/tenant-operator
     - platform/connector-operator
+    # The platform-operator sends only its audit records (EmitAuditEvent,
+    # gibson#583); the daemon's method policy admits nothing else for it.
+    - platform/platform-operator
   # Peers that the daemon's harness callback listener (:50001, SPIFFE mTLS with
   # AuthorizeOneOf) accepts. MUST be non-empty when SPIFFE is configured: the
   # daemon fails to start otherwise (critical-tls-no-fallbacks Requirement 1.5).
