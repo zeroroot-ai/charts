@@ -11299,6 +11299,15 @@ spec:
               value: "app.localhost.zeroroot.ai"
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"
+            # The daemon that receives the audit record of each change
+            # (DaemonOperatorService.EmitAuditEvent, gibson#583). The operator
+            # does not start without both. It dials on first use, never at
+            # boot, so the daemon is not a start dependency: the records wait
+            # in the status of each resource until the daemon answers.
+            - name: GIBSON_DAEMON_GRPC_ADDRESS
+              value: "gibson-gibson-workloads:50051"
+            - name: GIBSON_DAEMON_SPIFFE_ID
+              value: "spiffe://zeroroot.ai/platform/daemon"
             # Zitadel System API user private key path (platform-operator#28).
             # The AdminTokenReady step signs JWTs with this key to call
             # /system/v1/* and mint the Zitadel admin token (gibson#794).
@@ -17249,7 +17258,7 @@ spec:
             # GIBSON_SPIFFE_ENVOY_ID; the entries here are direct control-
             # plane callers (today: the tenant-operator). Comma-separated.
             - name: GIBSON_SPIFFE_ALLOWED_PEER_IDS
-              value: "spiffe://zeroroot.ai/platform/tenant-operator,spiffe://zeroroot.ai/platform/connector-operator"
+              value: "spiffe://zeroroot.ai/platform/tenant-operator,spiffe://zeroroot.ai/platform/connector-operator,spiffe://zeroroot.ai/platform/platform-operator"
             # deploy#852: the daemon serves its compiled-in authz registry to
             # ext-authz over mTLS (single source of truth — no version-pinned
             # OCI artifact to drift). Pin the listener port + the reader
@@ -20668,6 +20677,32 @@ spec:
     - "k8s:sa:gibson-connector-operator"
 ---
 # Source: gibson/charts/gibson-workloads/templates/spire-server/clusterspiffeids.yaml
+# --- platform-operator ---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-platform-operator
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: "gibson-gibson"
+  spiffeIDTemplate: "spiffe://zeroroot.ai/platform/platform-operator"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: platform-operator
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: gibson
+  workloadSelectorTemplates:
+    - "k8s:ns:gibson"
+    - "k8s:sa:gibson-platform-operator"
+---
+# Source: gibson/charts/gibson-workloads/templates/spire-server/clusterspiffeids.yaml
 # --- envoy edge gateway ---
 apiVersion: spire.spiffe.io/v1alpha1
 kind: ClusterSPIFFEID
@@ -22464,8 +22499,8 @@ spec:
           : 'default'
     - name: claimsPlatformIdentity
       expression: >-
-        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","envoy","openbao","plugin"]
-          || variables.sa in ["gibson","gibson-ext-authz","gibson-dashboard","gibson-tenant-operator","gibson-connector-operator","gibson-envoy","gibson-ratelimit","gibson-openbao"]
+        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","platform-operator","envoy","openbao","plugin"]
+          || variables.sa in ["gibson","gibson-ext-authz","gibson-dashboard","gibson-tenant-operator","gibson-connector-operator","gibson-platform-operator","gibson-envoy","gibson-ratelimit","gibson-openbao"]
   validations:
     - expression: >-
         !variables.claimsPlatformIdentity
@@ -22537,8 +22572,8 @@ spec:
           : 'default'
     - name: claimsPlatformIdentity
       expression: >-
-        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","envoy","openbao","plugin"]
-          || variables.sa in ["gibson","gibson-ext-authz","gibson-dashboard","gibson-tenant-operator","gibson-connector-operator","gibson-envoy","gibson-ratelimit","gibson-openbao"]
+        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","platform-operator","envoy","openbao","plugin"]
+          || variables.sa in ["gibson","gibson-ext-authz","gibson-dashboard","gibson-tenant-operator","gibson-connector-operator","gibson-platform-operator","gibson-envoy","gibson-ratelimit","gibson-openbao"]
     # A restart-only UPDATE by Reloader: the pod template's spec and labels are
     # unchanged, only template annotations moved. Nothing new claims an
     # identity, so the admitted creator's template is simply re-issued.

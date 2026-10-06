@@ -185,13 +185,14 @@ lists.
        lists. Two identities stay out on purpose, and the check names them:
        platform/helm-test and platform/e2e-runner (see clusterspiffeids.yaml
        for the reason each carries no privilege). */ -}}
-{{- $protectedComponents := list "daemon" "ext-authz" "ratelimit" "dashboard" "tenant-operator" "connector-operator" "envoy" "openbao" "plugin" -}}
+{{- $protectedComponents := list "daemon" "ext-authz" "ratelimit" "dashboard" "tenant-operator" "connector-operator" "platform-operator" "envoy" "openbao" "plugin" -}}
 {{- $protectedSAs := list
       (include "gibson.serviceAccountName" .)
       (include "gibson.extAuthzServiceAccountName" .)
       (include "gibson.dashboardServiceAccountName" .)
       (include "gibson.tenantOperatorServiceAccountName" .)
       (include "gibson.connectorOperatorServiceAccountName" .)
+      (include "gibson.platformOperatorServiceAccountName" .)
       (include "gibson.envoyServiceAccountName" .)
       (include "gibson.ratelimitServiceAccountName" .)
       (include "gibson.openbaoServiceAccountName" .) -}}

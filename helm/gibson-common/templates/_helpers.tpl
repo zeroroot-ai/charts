@@ -642,6 +642,15 @@ The daemon's own SA is `gibson.serviceAccountName` above — release-derived
 {{- (((.Values.tenantOperator | default dict).serviceAccount) | default dict).name | default "gibson-tenant-operator" -}}
 {{- end }}
 
+{{- define "gibson.platformOperatorServiceAccountName" -}}
+{{- /* The gibson-operators sub-chart names the platform-operator
+       ServiceAccount from platformOperator.serviceAccount.name with this
+       default. The workloads chart's ClusterSPIFFEID and the identity
+       admission policy read this name (gibson#583). Keep the two charts in
+       agreement. */ -}}
+{{- (((.Values.platformOperator | default dict).serviceAccount) | default dict).name | default "gibson-platform-operator" -}}
+{{- end }}
+
 {{- define "gibson.openbaoServiceAccountName" -}}
 {{- /* CORRECTION: an earlier version of this comment said openbao was a
        sub-chart with "no value in this chart to read". It is in-chart —
