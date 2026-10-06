@@ -68,7 +68,7 @@ def seed_keys(root: Path) -> set[str]:
     return out
 
 
-def _external_secret_refs(docs) -> dict[str, set[str]]:
+def _remote_ref_keys(docs) -> dict[str, set[str]]:
     """remoteRef/extract key -> the ExternalSecret names that consume it."""
     refs: dict[str, set[str]] = {}
     for d in docs:
@@ -92,7 +92,7 @@ def _external_secret_refs(docs) -> dict[str, set[str]]:
     return refs
 
 
-def _secret_names(docs) -> set[str]:
+def _mounted_names(docs) -> set[str]:
     """Every string in a rendered manifest that names a Kubernetes Secret.
 
     An operator_produced entry is a Secret minted at runtime, not sourced from
@@ -170,19 +170,19 @@ def _consumers(e: dict) -> list[str]:
 def violations(root: Path) -> tuple[list[str], list[str]]:
     """(failures, stale exemptions)"""
     contract = yaml.safe_load((root / CONTRACT).read_text()) or {}
-    secrets = {e["name"]: e for e in (contract.get("secrets") or []) if e.get("name")}
+    backend = {e["name"]: e for e in (contract.get("secrets") or []) if e.get("name")}
     opprod = {e["name"]: e for e in (contract.get("operator_produced") or [])
               if isinstance(e, dict) and e.get("name")}
     # `producers` names the runtime-written Secrets (make secret-plumbing).
-    declared = set(secrets) | set(opprod) | set((contract.get("producers") or {}))
+    declared = set(backend) | set(opprod) | set((contract.get("producers") or {}))
 
     docs = list(golden_docs(root))
     seeded = seed_keys(root)
-    consumed = _external_secret_refs(docs)
+    consumed = _remote_ref_keys(docs)
     if not consumed or not seeded:
         return ([f"[blind] the golden renders hold {len(consumed)} ExternalSecret keys and the seed table "
                  f"{len(seeded)} keys: this check read nothing"], [])
-    mounted = _secret_names(docs)
+    mounted = _mounted_names(docs)
     targets = make_targets(root)
     exempt = load_exemptions(root / EXEMPTIONS)
     used: set[str] = set()
@@ -201,7 +201,7 @@ def violations(root: Path) -> tuple[list[str], list[str]]:
             report("forward", key, f"{key}: consumed by ExternalSecret {sorted(holders)} and declared by "
                                    f"nothing in {CONTRACT}, so the install depends on a key no producer owns")
     # 2. PRODUCER REALITY
-    for name, e in sorted(secrets.items()):
+    for name, e in sorted(backend.items()):
         if e.get("producer") == "openbao-seeder" and name not in seeded:
             report("producer", name, f"{name}: says producer: openbao-seeder, but openbao-seed-keys.txt does not mint it")
     # 3. VICE-VERSA
@@ -209,7 +209,7 @@ def violations(root: Path) -> tuple[list[str], list[str]]:
         if key not in declared:
             report("viceversa", key, f"{key}: minted by the OpenBao seed table and declared by nothing in {CONTRACT}")
     # 4. CONSUMER REALITY
-    for name, e in sorted(secrets.items()):
+    for name, e in sorted(backend.items()):
         if name in consumed:
             continue
         cons = _consumers(e)
@@ -332,7 +332,7 @@ def main() -> int:
     docs = list(golden_docs(ROOT))
     print(f"ok: secret-contract is consistent in both directions: {len(contract.get('secrets') or [])} "
           f"backend secrets, {len(contract.get('operator_produced') or [])} runtime Secrets, "
-          f"{len(_external_secret_refs(docs))} keys read by rendered ExternalSecrets, "
+          f"{len(_remote_ref_keys(docs))} keys read by rendered ExternalSecrets, "
           f"{len(seed_keys(ROOT))} seeded keys")
     return 0
 
