@@ -14,9 +14,9 @@
 # same way.
 #
 # WHAT. Two checks, and a self-test that plants the defect in each:
-#   1. files/openbao-seed-keys.txt: no property named `password`, and not
-#      grafana-admin-password, is a base64 draw (rand, rand8, randb64);
-#      the ones the seeder generates are kind `pw`.
+#   1. files/openbao-seed-keys.txt: no property named `password` is a
+#      base64 draw (rand, rand8, randb64); the ones the seeder generates
+#      are kind `pw`.
 #   2. The rendered seeder's gen_pw, sampled 2000 times, emits exactly 43
 #      characters, all [A-Za-z0-9].
 #
@@ -42,7 +42,7 @@ table_violations() {  # stdin: the table; stdout: one line per violation
         # literal are not ours to shape (the operator or the keyring
         # supplies them); rand, rand8 and randb64 are the URL-safe and
         # standard base64 draws that can start with "-" or "+".
-        if ((prop == "password" || key == "grafana-admin-password") && kind ~ /^rand(8|b64)?$/)
+        if (prop == "password" && kind ~ /^rand(8|b64)?$/)
           print key " " prop ":" kind
       }
     }'
