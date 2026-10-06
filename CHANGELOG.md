@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.139.0](https://github.com/zeroroot-ai/charts/compare/v0.138.0...v0.139.0) (2026-10-06)
+
+
+### Features
+
+* **network:** one helper renders the egress policy by host name ([#479](https://github.com/zeroroot-ai/charts/issues/479)) ([2f7e33d](https://github.com/zeroroot-ai/charts/commit/2f7e33d08a0178e0800f2b918f3b10c807503dc5))
+
+
+### Bug Fixes
+
+* **rework:** the baseline trust domain is zeroroot.ai until the daemon follows it ([#482](https://github.com/zeroroot-ai/charts/issues/482)) ([d9b9bfc](https://github.com/zeroroot-ai/charts/commit/d9b9bfc84c3c9b73e393eac5473789eebaf77b14))
+* **rework:** the guest overlay keeps the cluster's monitoring CRDs ([#477](https://github.com/zeroroot-ai/charts/issues/477)) ([74deb82](https://github.com/zeroroot-ai/charts/commit/74deb82326314c55370b82e5c02a798563f8b151))
+* **rework:** the kind exit tests verify Cilium after the node is Ready ([#481](https://github.com/zeroroot-ai/charts/issues/481)) ([f5579df](https://github.com/zeroroot-ai/charts/commit/f5579df5bd4c44487759d0ac5214f5f74aff79f7))
+
 ## [0.138.0](https://github.com/zeroroot-ai/charts/compare/v0.137.0...v0.138.0) (2026-10-06)
 
 
