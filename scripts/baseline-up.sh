@@ -38,6 +38,7 @@
 #   TIMEOUT        per-step helm timeout                (default: 10m)
 #   TRUST_DOMAIN   the SPIFFE trust domain              (default: the profile's
 #                  global.spire.trustDomain). A running install keeps its own.
+#   OVERLAY        a substrate overlay: guest or eks    (default: none)
 set -euo pipefail
 
 NS="${NS:-gibson}"
@@ -75,6 +76,20 @@ for _ov in $EXTRA_VALUES; do EXTRA_VALUES_ARGS+=(-f "$_ov"); done
 # Set here for the source path; published mode re-points it at the artifact.
 RUNG_FILE=""
 if [ -n "$RUNG" ]; then RUNG_FILE="helm/gibson/values-${RUNG}.yaml"; fi
+# OVERLAY: a substrate overlay that layers on the baseline (ADR-0083, ADR-0087).
+#   guest  the cluster already runs cert-manager, External Secrets,
+#          external-dns and CloudNativePG with their CRDs
+#          (scripts/guest-operators-up.sh). values-guest.yaml turns the four
+#          seams off, and the gibson-operator-crds release is skipped, because
+#          those CRDs belong to the operators the cluster runs.
+#   eks    the EKS deltas.
+OVERLAY="${OVERLAY:-}"
+case "$OVERLAY" in
+  ""|guest|eks) : ;;
+  *) echo "FATAL: OVERLAY=$OVERLAY is not a substrate overlay. Use guest, eks, or leave it empty." >&2; exit 2 ;;
+esac
+OVERLAY_FILE=""
+if [ -n "$OVERLAY" ]; then OVERLAY_FILE="helm/gibson/values-${OVERLAY}.yaml"; fi
 TIMEOUT="${TIMEOUT:-10m}"
 CHART_VERSION="${CHART_VERSION:-}"
 REGISTRY="${REGISTRY:-ghcr.io/zeroroot-ai/charts}"
@@ -249,6 +264,12 @@ if [ -n "$CHART_VERSION" ]; then
       [ -r "$RUNG_FILE" ] || { echo "FATAL: ${REGISTRY}/gibson:${CHART_VERSION} carries no values-${RUNG}.yaml, so that rung cannot be installed from the artifact" >&2; exit 1; }
       log "rung from the artifact: gibson/values-${RUNG}.yaml"
     fi
+    # The substrate overlay travels in the artifact too.
+    if [ -n "$OVERLAY" ]; then
+      OVERLAY_FILE="${PROFILE_DIR}/gibson/values-${OVERLAY}.yaml"
+      [ -r "$OVERLAY_FILE" ] || { echo "FATAL: ${REGISTRY}/gibson:${CHART_VERSION} carries no values-${OVERLAY}.yaml, so that overlay cannot be installed from the artifact" >&2; exit 1; }
+      log "overlay from the artifact: gibson/values-${OVERLAY}.yaml"
+    fi
   elif [ -n "$RUNG" ]; then
     echo "FATAL: VALUES was overridden AND RUNG=$RUNG was asked for. Pick one: an explicit VALUES is a full override, a RUNG layers on the shipped baseline." >&2
     exit 2
@@ -308,8 +329,12 @@ kubectl get namespace "$NS" >/dev/null 2>&1 || kubectl create namespace "$NS"
 # 519 KB. A cluster that already runs cert-manager, External Secrets or
 # CloudNativePG skips this release and keeps its own CRDs.
 mapfile -t OPCRDS_CHART < <(chart_args gibson-operator-crds)
+if [ "$OVERLAY" = guest ]; then
+  log "guest overlay: the cluster owns the operator CRDs, so the gibson-operator-crds release is skipped"
+else
 helm upgrade --install gibson-operator-crds "${OPCRDS_CHART[@]}" \
   --namespace "$NS" --wait --timeout 5m
+fi
 mapfile -t CRDS_CHART < <(chart_args gibson-crds)
 helm upgrade --install gibson-crds "${CRDS_CHART[@]}" \
   --namespace "$NS" --wait --timeout 5m
@@ -400,6 +425,7 @@ log "phase 2 — the platform"
 mapfile -t GIBSON_CHART < <(chart_args gibson)
 helm upgrade --install "$RELEASE" "${GIBSON_CHART[@]}" \
   -f "$VALUES" \
+  ${OVERLAY_FILE:+-f "$OVERLAY_FILE"} \
   ${RUNG_FILE:+-f "$RUNG_FILE"} \
   "${EXTRA_VALUES_ARGS[@]}" \
   "${BUCKET_ARGS[@]}" \

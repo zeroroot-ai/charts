@@ -1,0 +1,48 @@
+# exit-test-published-guest-kind — the guest profile installs on a cluster that
+# already runs the platform operators (ADR-0087, charts#369).
+#
+# values-guest.yaml turns off the four operator seams of the umbrella:
+# cert-manager, External Secrets, external-dns and CloudNativePG. Before this
+# test, its only proof was a render. This test makes a kind cluster a guest
+# host first (scripts/guest-operators-up.sh installs the four operators and the
+# Prometheus Operator), then installs the PUBLISHED chart with OVERLAY=guest
+# through scripts/baseline-up.sh, and asserts that each workload is ready and
+# that the release namespace holds no second copy of an operator.
+#
+# CADENCE (ADR-0080): on push to main when the install path changes, daily, and
+# on dispatch. Never on a pull request.
+name: exit-test-published-guest-kind
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/baseline-up.sh'
+      - 'scripts/guest-operators-up.sh'
+      - 'helm/gibson/values-guest.yaml'
+      - '.github/workflows/published-install.yml'
+      - '.github/workflows/exit-test-published-guest-kind.yml'
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      chart_version:
+        description: The published chart version to install (default, the newest)
+        required: false
+        type: string
+
+concurrency:
+  group: exit-test-published-guest-kind-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  guest:
+    uses: ./.github/workflows/published-install.yml
+    with:
+      distro: kind
+      chart_version: ${{ inputs.chart_version }}
+      overlay: guest
+    secrets: inherit

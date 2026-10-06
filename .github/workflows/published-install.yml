@@ -82,6 +82,14 @@ on:
         required: false
         type: boolean
         default: false
+      overlay:
+        description: >-
+          A substrate overlay of the chart, passed to baseline-up.sh as
+          OVERLAY. `guest` first installs the operators that the guest profile
+          expects the cluster to own (scripts/guest-operators-up.sh).
+        required: false
+        type: string
+        default: ""
       upgrade_from_previous:
         description: >-
           Install the PREVIOUS published version first, converge it, then upgrade
@@ -244,6 +252,10 @@ jobs:
       # baseline-up.sh is the same verb both times: every release it drives is
       # `helm upgrade --install`, so running it again at a newer CHART_VERSION
       # IS the upgrade a promotion performs. No second code path to drift.
+      - name: Make the cluster a guest host (the guest overlay only)
+        if: inputs.overlay == 'guest'
+        run: scripts/guest-operators-up.sh
+
       - name: Phase 1 — install the previous published version
         if: inputs.upgrade_from_previous
         env:
@@ -293,7 +305,27 @@ jobs:
           CHART_VERSION: ${{ steps.version.outputs.version }}
           SUBSTRATE_ENV: ${{ runner.temp }}/substrate/kind/substrate.env
           RUNG: developer
+          OVERLAY: ${{ inputs.overlay }}
         run: scripts/baseline-up.sh
+
+      - name: The guest install runs no second copy of the four operators
+        if: inputs.overlay == 'guest'
+        run: |
+          set -euo pipefail
+          # values-guest.yaml turns the four seams off, so the release namespace
+          # holds none of these operators. Each runs once, in its own namespace.
+          extra="$(kubectl -n gibson get deploy -o name \
+                     | grep -E 'cert-manager|external-secrets|external-dns|cloudnative-pg' || true)"
+          if [ -n "$extra" ]; then
+            echo "::error::the guest install rendered a second copy of an operator the cluster owns:"
+            echo "$extra"
+            exit 1
+          fi
+          for d in cert-manager/cert-manager external-secrets/external-secrets \
+                   external-dns/external-dns cnpg-system/cnpg-cloudnative-pg; do
+            kubectl -n "${d%%/*}" rollout status "deploy/${d#*/}" --timeout=120s
+          done
+          echo "  ✓ one copy of each operator, outside the release namespace, and each is ready"
 
       # The assertion charts#155 asked for, and it runs in BOTH modes: on a
       # fresh install it is cheap, and on an upgrade it is the whole point.
