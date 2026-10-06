@@ -158,6 +158,10 @@ spec:
           cpu: 100m
           memory: 128Mi
       securityContext:
+        # The restricted Pod Security Standard (ADR-0165, charts#394). The
+        # Workload API socket accepts each local user, so the probe needs no root.
+        runAsNonRoot: true
+        runAsUser: 1000
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true
         capabilities:

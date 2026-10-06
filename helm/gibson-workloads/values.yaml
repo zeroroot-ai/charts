@@ -3896,9 +3896,10 @@ setec:
 
   # spotEvictionFallback controls the cluster-autoscaler 1:5 on-demand
   # fallback ratio per design §"EKS sandbox-host node-group spec".
-  # AWS sends a 2-minute spot-interruption notice; the eviction handler
-  # at core/gibson/internal/sandbox/eviction (Task 48) cordons the node
-  # and cancels in-flight detonations within a 90-second grace window.
+  # AWS sends a 2-minute spot-interruption notice. The
+  # aws-node-termination-handler on the node reads it from the instance
+  # metadata and cordons and drains the node. The chart runs no handler of
+  # its own (charts#394).
   spotEvictionFallback:
     # enabled toggles the aws-node-termination-handler DaemonSet (Task 47)
     # and the cluster-autoscaler priority-expander config (Task 50).

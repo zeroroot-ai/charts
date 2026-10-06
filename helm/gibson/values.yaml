@@ -731,6 +731,18 @@ openfga:
   # the server without making it world-readable.
   podSecurityContext:
     fsGroup: 65532
+  # The restricted Pod Security Standard and a read-only root (ADR-0165,
+  # charts#394). The server and the migrate Job run the same distroless
+  # image as USER 65532 and write nothing to the root filesystem.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
   extraVolumes:
     - name: http-tls
       secret:
@@ -783,6 +795,17 @@ openfga:
       enabled: false
 
 zitadel:
+  # The restricted Pod Security Standard (ADR-0165, charts#394). Helm merges
+  # these keys into the chart-wide container securityContext, which already
+  # runs as user 1000 with a read-only root. Each ZITADEL container reads it:
+  # the server, the login UI and its wait init, and the init, setup and
+  # cleanup Jobs.
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
   # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
   podAdditionalLabels:
     gibson.zeroroot.ai/net-role: platform
@@ -1271,6 +1294,25 @@ spire:
     deleteHooks:
       enabled: false
   spire-server:
+    # The restricted Pod Security Standard and a read-only root (ADR-0165,
+    # charts#394). These are the values of the SPIRE chart recommendations,
+    # set here for this chart only: the SPIRE agent and the CSI driver are
+    # node components and keep their own settings.
+    # fsGroup 1000 owns the server volume, so the root chown init container
+    # leaves (it renders only when runAsUser is unset).
+    podSecurityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      fsGroupChangePolicy: OnRootMismatch
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+      seccompProfile:
+        type: RuntimeDefault
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
     podLabels:
       gibson.zeroroot.ai/net-role: platform
@@ -1295,6 +1337,14 @@ spire:
           name: spire-postgres-credentials
           key: password
     controllerManager:
+      securityContext:
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
       enabled: true
       # The spire chart registers four identities for SPIKE by default. This
       # chart deploys no SPIKE workload, and a registration with no workload
@@ -1355,6 +1405,23 @@ spire:
     podAnnotations:
       backup.velero.io/backup-volumes-excludes: "spire-agent-admin-socket-dir,spire-agent-persistence"
   spiffe-oidc-discovery-provider:
+    # The restricted Pod Security Standard and a read-only root (ADR-0165,
+    # charts#394). These are the values of the SPIRE chart recommendations,
+    # set here for this chart only: the SPIRE agent and the CSI driver are
+    # node components and keep their own settings.
+    podSecurityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      fsGroupChangePolicy: OnRootMismatch
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+      seccompProfile:
+        type: RuntimeDefault
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
     podLabels:
       gibson.zeroroot.ai/net-role: platform

@@ -457,20 +457,6 @@ metadata:
     app.kubernetes.io/component: ratelimit
 automountServiceAccountToken: false
 ---
-# Source: gibson/charts/gibson-workloads/templates/sandbox-host/serviceaccount.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: gibson-gibson-workloads-sandbox-eviction-handler
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: sandbox-eviction-handler
----
 # Source: gibson/charts/gibson-workloads/templates/setec/daemon-client-secret.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -800,6 +786,10 @@ data:
     storage "file" {
       path = "/etc/openbao/data"
     }
+
+    # The server runs with no capability (ADR-0165, charts#394), so it cannot
+    # lock memory. The nodes run with no swap, so a page never leaves RAM.
+    disable_mlock = true
 
     # deploy#1731: the static seal. The 32-byte key is one member
     # of the bringup keyring, mounted read-only from the Secret named by
@@ -5203,23 +5193,6 @@ rules:
     resources: ["tenants", "tenantmembers"]
     verbs: ["get", "list"]
 ---
-# Source: gibson/charts/gibson-workloads/templates/sandbox-host/clusterrole.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: gibson-gibson-workloads-sandbox-eviction-handler
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: sandbox-eviction-handler
-rules:
-  - apiGroups: [""]
-    resources: ["nodes"]
-    verbs: ["get", "patch"]
----
 # Source: gibson/charts/spire/charts/spire-agent/templates/roles.yaml
 # Required cluster role to allow spire-agent to query k8s API server
 kind: ClusterRole
@@ -5520,27 +5493,6 @@ roleRef:
   kind: ClusterRole
   apiGroup: rbac.authorization.k8s.io
   name: gibson-gibson-workloads-active-session-backfill
----
-# Source: gibson/charts/gibson-workloads/templates/sandbox-host/clusterrolebinding.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: gibson-gibson-workloads-sandbox-eviction-handler
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: sandbox-eviction-handler
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: gibson-gibson-workloads-sandbox-eviction-handler
-subjects:
-  - kind: ServiceAccount
-    name: gibson-gibson-workloads-sandbox-eviction-handler
-    namespace: gibson
 ---
 # Source: gibson/charts/spire/charts/spire-agent/templates/roles.yaml
 # Binds above cluster role to spire-agent service account
@@ -7307,102 +7259,6 @@ spec:
             path: "/opt/kata/containerd"
             type: DirectoryOrCreate
       terminationGracePeriodSeconds: 10
----
-# Source: gibson/charts/gibson-workloads/templates/sandbox-host/daemonset.yaml
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: gibson-gibson-workloads-sandbox-eviction-handler
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: sandbox-eviction-handler
-spec:
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: gibson-workloads
-      app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: sandbox-eviction-handler
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: gibson-workloads
-        app.kubernetes.io/instance: gibson
-        app.kubernetes.io/component: sandbox-eviction-handler
-        gibson.zeroroot.ai/net-role: platform
-        gibson.zeroroot.ai/kube-api: "true"
-        gibson.zeroroot.ai/egress-namespaces: "true"
-    spec:
-      serviceAccountName: gibson-gibson-workloads-sandbox-eviction-handler
-      # Pin to sandbox-host nodes provisioned by the production-eks-deploy
-      # spec — same selector setec uses (see values.yaml setec.nodeSelector).
-      nodeSelector:
-        setec.zeroroot.ai/sandbox-host: "true"
-      # Tolerate the matching NoSchedule taint on sandbox-host nodes.
-      tolerations:
-        - key: setec.zeroroot.ai/sandbox-host
-          operator: Equal
-          value: "true"
-          effect: NoSchedule
-      # No host network / no host PID — the handler only needs to stat
-      # one hostPath file and call the K8s API.
-      hostNetwork: false
-      hostPID: false
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 65532
-        runAsGroup: 65532
-        seccompProfile:
-          type: RuntimeDefault
-      containers:
-        - name: sandbox-eviction-handler
-          image: "ghcr.io/zeroroot-ai/gibson:v0.153.2@sha256:b57acca62d5acf01aea285cb1933310febfb29a32e4bf07f7ccc1bfa662edd5c"
-          imagePullPolicy: Always
-          command: ["/usr/local/bin/sandbox-eviction-handler"]
-          args:
-            - --node-name=$(NODE_NAME)
-            - --notice-file=/var/run/aws/spot-interruption-notice
-          env:
-            - name: NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
-          # No ports, no probes — the handler is a polling loop that
-          # exits the loop only on context cancel (SIGTERM). Kubelet
-          # restarts it via the DaemonSet's restartPolicy=Always (the
-          # implicit default for DaemonSet pods).
-          volumeMounts:
-            - name: aws-notice
-              mountPath: /var/run/aws
-              readOnly: true
-          resources:
-            requests:
-              cpu: 10m
-              memory: 16Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
-          securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-      volumes:
-        - name: aws-notice
-          hostPath:
-            # Populated by aws-node-termination-handler (setec.spotEvictionFallback
-            # gates that DaemonSet on EKS sandbox-host nodes). Absent on kind dev;
-            # the handler polls a non-existent file forever, which is the desired
-            # behaviour there.
-            path: /var/run/aws
-            type: DirectoryOrCreate
-      
-      imagePullSecrets:
-        - name: ghcr-credentials
 ---
 # Source: gibson/charts/spire/charts/spiffe-csi-driver/templates/daemonset.yaml
 apiVersion: apps/v1
@@ -11176,7 +11032,15 @@ spec:
       containers:
         - name: openfga
           securityContext:
-            {}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
           image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.21.0@sha256:2113c664a486b5da8d7a2cdab479e0d4e30639c80fd2c000540f645c1dbc1e55"
           imagePullPolicy: Always
           args: ["run"]
@@ -11317,12 +11181,21 @@ spec:
     spec:
       serviceAccountName: gibson-spiffe-oidc-discovery-provider
       securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
         runAsGroup: 1000
         runAsUser: 1000
       initContainers:
         - name: init
           securityContext:
-            {}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
           resources:
             {}
           image: "ghcr.io/spiffe/spiffe-helper:0.11.0"
@@ -11344,7 +11217,14 @@ spec:
       containers:
         - name: spiffe-oidc-discovery-provider
           securityContext:
-            {}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
           image: "ghcr.io/spiffe/oidc-discovery-provider:1.14.5"
           imagePullPolicy: IfNotPresent
           args:
@@ -11387,7 +11267,14 @@ spec:
           resources:
             {}
           securityContext:
-            {}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
           image: "ghcr.io/spiffe/spiffe-helper:0.11.0"
           imagePullPolicy: IfNotPresent
           args:
@@ -11468,10 +11355,16 @@ spec:
       containers:
         - name: zitadel-login
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: "ghcr.io/zeroroot-ai/zitadel-login:v4.19.4@sha256:3670859a776a8e9be5919b3041a1ed848b113ea996019094ad0c18429e16deaa"
           imagePullPolicy: IfNotPresent
           env:
@@ -11540,10 +11433,16 @@ spec:
             - --interval
             - "5s"
           securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
             privileged: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
             runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
       volumes:
       - name: login-config-dotenv
         configMap:
@@ -11606,10 +11505,16 @@ spec:
       containers:
         - name: "zitadel"
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: "ghcr.io/zitadel/zitadel:v4.19.4"
           imagePullPolicy: IfNotPresent
           args:
@@ -11741,12 +11646,20 @@ spec:
         gibson.zeroroot.ai/kube-api: "true"
       annotations:
         checksum/config: f8be2b221e62422b4f93c4481fd3d5e8f8b5a2230848ea135daca0ccf2d04f95
+        # Velero fs-backup skips the scratch volumes. scripts/check-velero-volume-excludes.sh.
+        backup.velero.io/backup-volumes-excludes: "tmp,auto-init-tmp"
     spec:
       serviceAccountName: gibson-openbao
+      # The restricted Pod Security Standard (ADR-0165, charts#394). The
+      # image runs as the openbao user (uid 100). SKIP_CHOWN and SKIP_SETCAP
+      # keep the entrypoint from the root-only steps.
       securityContext:
         fsGroup: 1000
         runAsUser: 100
         runAsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: openbao
           image: "ghcr.io/zeroroot-ai/mirror/openbao:2.5.3@sha256:fdc6da21ca6963560c32336fd7feb9cf2d5e52668f1a1647205a4b41171f0806"
@@ -11789,6 +11702,9 @@ spec:
             - name: seal-key
               mountPath: /etc/openbao/seal
               readOnly: true
+            # The root filesystem is read-only. The server writes scratch here.
+            - name: tmp
+              mountPath: /tmp
           # LIVENESS keeps sealedcode=204 deliberately. Restarting a sealed
           # OpenBao does not unseal it — it destroys the sidecar's in-progress
           # recovery and, in a CrashLoopBackOff, prevents recovery entirely.
@@ -11853,9 +11769,9 @@ spec:
             failureThreshold: 6
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
-              add:
-                - IPC_LOCK
+              drop: ["ALL"]
         # openbao-auto-init — sidecar that drives OpenBao from a fresh PVC to
         # initialized, seeded and root-free, and stays running so the platform
         # service token is kept renewed (deploy#1732).
@@ -12966,6 +12882,9 @@ spec:
             # seeded empty.
             - name: bringup-inputs
               mountPath: /etc/openbao/inputs
+            # The ready marker and mktemp write here. The root filesystem is read-only.
+            - name: auto-init-tmp
+              mountPath: /tmp
               readOnly: true
           # Ready = the store serves its consumers (see the marker above).
           # A readiness probe never restarts the container; until the marker
@@ -12982,6 +12901,10 @@ spec:
           env:
             - name: BAO_ADDR
               value: "http://127.0.0.1:8200"
+            # The root filesystem is read-only. A tool that writes to HOME
+            # writes to the scratch volume.
+            - name: HOME
+              value: /tmp
           resources:
             requests:
               cpu: 10m
@@ -12991,10 +12914,14 @@ spec:
               memory: 64Mi
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
       volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: auto-init-tmp
+          emptyDir: {}
         - name: config
           configMap:
             name: gibson-openbao-config
@@ -14352,29 +14279,22 @@ spec:
       serviceAccountName: gibson-server
       shareProcessNamespace: true
       securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
         runAsGroup: 1000
         runAsUser: 1000
       
-      initContainers:
-        - name: chown
-          image: "busybox:1.37.0-uclibc"
-          imagePullPolicy: IfNotPresent
-          command: ["sh", "-c"]
-          args:
-            - |
-              chown -R 1000:1000 /var/lib/spire
-          resources:
-            {}
-          volumeMounts:
-            - name: spire-data
-              mountPath: /var/lib/spire
-          securityContext:
-            runAsUser: 0
-            runAsGroup: 0
       containers:
         - name: spire-server
           securityContext:
-            {}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
           image: "ghcr.io/spiffe/spire-server:1.14.5"
           imagePullPolicy: IfNotPresent
           args:
@@ -14427,7 +14347,14 @@ spec:
         
         - name: spire-controller-manager
           securityContext:
-            {}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
           image: "ghcr.io/spiffe/spire-controller-manager:0.6.4"
           imagePullPolicy: IfNotPresent
           args:
@@ -20765,6 +20692,10 @@ spec:
           cpu: 100m
           memory: 128Mi
       securityContext:
+        # The restricted Pod Security Standard (ADR-0165, charts#394). The
+        # Workload API socket accepts each local user, so the probe needs no root.
+        runAsNonRoot: true
+        runAsUser: 1000
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true
         capabilities:
@@ -21456,26 +21387,50 @@ metadata:
     "helm.sh/hook": test
 spec:
   securityContext:
-    {}
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+    runAsGroup: 1000
+    runAsUser: 1000
   containers:
     - name: curl-service-name
       image: "cgr.dev/chainguard/bash:latest@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
       command: ['curl']
       args: ['-s', '-f', '-k', 'https://gibson-spiffe-oidc-discovery-provider:443/.well-known/openid-configuration']
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
     - name: curl-service-name-namespace
       image: "cgr.dev/chainguard/bash:latest@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
       command: ['curl']
       args: ['-s', '-f', '-k', 'https://gibson-spiffe-oidc-discovery-provider.gibson:443/.well-known/openid-configuration']
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
     - name: curl-service-name-namespace-svc-cluster-local
       image: "cgr.dev/chainguard/bash:latest@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
       command: ['curl']
       args: ['-s', '-f', '-k', 'https://gibson-spiffe-oidc-discovery-provider.gibson.svc.cluster.local:443/.well-known/openid-configuration']
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
   restartPolicy: Never
 ---
 # Source: gibson/charts/spire/charts/spiffe-oidc-discovery-provider/templates/tests/test-keys.yaml
@@ -21497,7 +21452,10 @@ metadata:
     "helm.sh/hook": test
 spec:
   securityContext:
-    {}
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+    runAsGroup: 1000
+    runAsUser: 1000
   serviceAccountName: gibson-spiffe-oidc-discovery-provider
   initContainers:
     - name: static-busybox
@@ -21509,7 +21467,14 @@ spec:
           cp /bin/busybox /data/busybox
           chmod +x /data/busybox
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       volumeMounts:
         - name: data-volume
           mountPath: /data
@@ -21522,7 +21487,14 @@ spec:
         - |
           cp /usr/local/bin/step /data/step
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       volumeMounts:
         - name: data-volume
           mountPath: /data
@@ -21539,7 +21511,14 @@ spec:
             sleep 1
           done
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       volumeMounts:
         - name: data-volume
           mountPath: /data
@@ -21568,7 +21547,14 @@ spec:
           # Verify JWT with public pem
           echo $JWT | /data/step crypto jwt verify --key=public.pem --alg=RS256 --subtle
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       volumeMounts:
       - mountPath: /data
         name: data-volume
@@ -21598,7 +21584,10 @@ metadata:
     "helm.sh/hook": test
 spec:
   securityContext:
-    {}
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+    runAsGroup: 1000
+    runAsUser: 1000
   containers:
     - name: curl
       image: "cgr.dev/chainguard/bash:latest@sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
@@ -21619,7 +21608,14 @@ spec:
           fi
           exit 1
       securityContext:
-        {}
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
   restartPolicy: Never
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/hooks/pre-upgrade-runtime-check.yaml
@@ -21744,7 +21740,15 @@ spec:
       containers:
         - name: migrate-database
           securityContext:
-            {}
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
           image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.21.0@sha256:2113c664a486b5da8d7a2cdab479e0d4e30639c80fd2c000540f645c1dbc1e55"
           args: ["migrate"]
           env:
@@ -21816,10 +21820,16 @@ spec:
       containers:
         - name: zitadel-cleanup
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
           imagePullPolicy: 'IfNotPresent'
           command:
@@ -21882,10 +21892,16 @@ spec:
       containers:
         - name: zitadel-init
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: "ghcr.io/zitadel/zitadel:v4.19.4"
           imagePullPolicy: IfNotPresent
           args:
@@ -21980,10 +21996,16 @@ spec:
       containers:
         - name: zitadel-setup
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: "ghcr.io/zitadel/zitadel:v4.19.4"
           imagePullPolicy: IfNotPresent
           args:
@@ -22039,10 +22061,16 @@ spec:
             {}
         - name: zitadel-machinekey
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
           imagePullPolicy: 'IfNotPresent'
           command:
@@ -22081,10 +22109,16 @@ spec:
             {}
         - name: zitadel-machine-pat
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
           imagePullPolicy: 'IfNotPresent'
           command:
@@ -22123,10 +22157,16 @@ spec:
             {}
         - name: zitadel-login-client-pat
           securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
               privileged: false
               readOnlyRootFilesystem: true
               runAsNonRoot: true
               runAsUser: 1000
+              seccompProfile:
+                type: RuntimeDefault
           image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
           imagePullPolicy: 'IfNotPresent'
           command:

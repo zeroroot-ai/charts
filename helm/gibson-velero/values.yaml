@@ -77,6 +77,28 @@ velero:
       volumeMounts:
         - mountPath: /target
           name: plugins
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+
+  # The restricted Pod Security Standard and a read-only root (ADR-0165,
+  # charts#394). The server writes only to its emptyDir volumes (plugins,
+  # scratch). The image names its user by name, so the pod names a numeric
+  # user that the API server can check.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
 
   # THE deploy#1193 SETTING. The upstream default binds this ServiceAccount
   # to cluster-admin AND gives it apiGroups/resources/verbs `*` in its own
