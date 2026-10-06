@@ -90,8 +90,6 @@ INPUTS = "helm/testdata/render-inputs/gibson.yaml"
 PROFILES = [
     ("self-hosted", [BASELINE, INPUTS]),
     ("eks", [BASELINE, INPUTS, "helm/gibson/values-eks.yaml"]),
-    ("gke", [BASELINE, INPUTS, "helm/gibson/values-gke.yaml"]),
-    ("aks", [BASELINE, INPUTS, "helm/gibson/values-aks.yaml"]),
     ("guest", [BASELINE, INPUTS, "helm/gibson/values-guest.yaml"]),
 ]
 

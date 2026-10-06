@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """check-substrate-overlays.py — a substrate overlay sets only what is true because of the substrate.
 
-A plain Kubernetes cluster is the supported self-hosted target; eks, gke and
-aks are specialisations of it. values-eks.yaml, values-gke.yaml and
-values-aks.yaml may therefore set only the keys that exist because the
+A plain Kubernetes cluster is the supported self-hosted target; eks is the one
+cloud specialisation of it (ADR-0083). values-eks.yaml may therefore set only
+the keys that exist because the
 cluster is that substrate: load-balancer annotations on the edge Service,
 storage classes, the provider region, the DNS-01 solver and issuer for the
 edge certificate, the DNS provider external-dns publishes to, and the
 workload-identity annotations on ServiceAccounts. Anything else in an
 overlay is a posture change hiding in a substrate file, which is how a
 resource request, a replica count or a feature flag once diverged between
-clouds. The EKS and AKS overlays have named this guard in their headers
-since the split; it exists now.
+clouds. A cloud overlay that returns comes with its own build and proof, and
+is listed in OVERLAYS.
 
   check-substrate-overlays.py             exit 1 on a key outside the allowlist, 0 when clean
   check-substrate-overlays.py --selftest  prove a resource request in an overlay fails
@@ -22,7 +22,7 @@ import sys
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OVERLAYS = ["values-eks.yaml", "values-gke.yaml", "values-aks.yaml"]
+OVERLAYS = ["values-eks.yaml"]
 
 # Key-path prefixes a substrate overlay may set. Keyed by content: a new
 # substrate need is a new line here with the reason it is substrate-bound.
@@ -37,7 +37,7 @@ ALLOWED = (
     "gibson-workloads.certManager.issuers",
     "external-dns.provider",                                  # the DNS provider external-dns publishes to
     "external-dns.env",
-    "gibson-workloads.gibson.serviceAccount.annotations",   # workload identity (IRSA, GKE WI, AKS WI)
+    "gibson-workloads.gibson.serviceAccount.annotations",   # workload identity (IRSA)
     "gibson-workloads.dashboard.serviceAccount.annotations",
     "gibson-workloads.extAuthz.serviceAccount.annotations",
     "gibson-operators.tenantOperator.serviceAccount.annotations",
@@ -81,7 +81,7 @@ def selftest() -> int:
     if live:
         print("SELFTEST FAIL: a substrate overlay sets a non-substrate key:\n  " + "\n  ".join(live))
         return 1
-    print("OK: a resource request and a domain in an overlay fail, substrate keys pass, the three overlays are clean")
+    print("OK: a resource request and a domain in an overlay fail, substrate keys pass, the overlay is clean")
     return 0
 
 
@@ -92,7 +92,7 @@ def main() -> int:
     if got:
         print("❌ substrate overlays set keys that are not substrate-bound (move them to a profile, or add the key here with its reason):\n  " + "\n  ".join(got))
         return 1
-    print("✓ substrate-overlays: eks, gke and aks set only substrate keys")
+    print("✓ substrate-overlays: eks sets only substrate keys")
     return 0
 
 

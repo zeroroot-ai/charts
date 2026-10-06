@@ -18,7 +18,7 @@
 set -euo pipefail
 
 BASE_REF="${1:-origin/main}"
-PROFILES="${PROFILES:-values-baseline.yaml values-eks.yaml values-gke.yaml values-aks.yaml values-guest.yaml}"
+PROFILES="${PROFILES:-values-baseline.yaml values-eks.yaml values-guest.yaml}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 

@@ -47,7 +47,7 @@ attribution: ## Every verbatim redistribution carries its attribution
 cloud-free: ## The baseline profile assumes no cloud
 	@./scripts/check-baseline-is-cloud-free.sh
 
-substrate-overlays: ## values-eks/gke/aks set only substrate keys: load balancer, storage class, region, DNS-01, DNS provider, workload identity
+substrate-overlays: ## values-eks sets only substrate keys: load balancer, storage class, region, DNS-01, DNS provider, workload identity
 	@python3 scripts/check-substrate-overlays.py --selftest
 	@python3 scripts/check-substrate-overlays.py
 
