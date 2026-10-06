@@ -1,12 +1,6 @@
-{{/* Gibson daemon ServiceMonitor (Week 2 §3 R21).
-     Both observability shapes consume ServiceMonitors:
-       - provider="in-chart"               → in-chart Prometheus scrapes
-       - provider="external-grafana-cloud" → in-cluster grafana-agent scrapes
-                                             and ships to Grafana Cloud
-     So this manifest renders unconditionally (deploy#313 — the
-     prometheus.enabled||grafanaAgent.serviceMonitorsEnabled OR-gate
-     collapsed into the observability.provider enum, which is now
-     mandatory). */}}
+{{/* Gibson daemon ServiceMonitor (Week 2 §3 R21). The chart ships no
+     monitoring stack. It renders only where the cluster serves
+     monitoring.coreos.com/v1 (ADR-0087). */}}
 {{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor

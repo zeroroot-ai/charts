@@ -3119,16 +3119,6 @@ tenantOperator:
   # preserved across upgrades via `lookup` — cert-manager is NOT required.
   webhook:
     enabled: true
-  # Canonical plan registry — sourced from the chart-local
-  # `files/plans.yaml` at chart render time (via `.Files.Get`). Helm can
-  # only read files within the chart directory, so the chart carries its
-  # own copy; it mirrors plans/plans.yaml in zeroroot-ai/billing. Runtime:
-  # the operator mounts this ConfigMap at /etc/gibson/plans and reads
-  # plans.yaml at startup.
-  plans:
-    configMapName: gibson-tenant-operator-plans
-    sourcePath: files/plans.yaml
-    mountPath: /etc/gibson/plans
 
 # =============================================================================
 # activeSessionBackfill — one-shot repair Job (SECURITY, deploy#1186)

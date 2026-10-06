@@ -192,16 +192,12 @@ spec:
     - {}
 ---
 {{/* ---------------------------------------------------------------------
-     Dev + observability surfaces (in-chart prometheus/grafana/loki/
-     promtail/jaeger, mailpit, stripe-mock). These render only on dev-
-     shaped profiles (observability.provider=in-chart, jaeger.enabled,
-     mailpit/stripe-mock enabled) and every platform component may need
-     to reach them (jaeger OTLP ingest from any instrumented pod,
-     prometheus scraped BY grafana, loki written by promtail, SMTP to
-     mailpit). Ingress is therefore any pod in the RELEASE NAMESPACE —
-     still a real boundary: pods outside the namespace and unlabelled
-     rogue pods (no egress allowance) cannot reach them. Inert on
-     profiles where none of these render.
+     The dev mail sink, mailpit. It renders only on the kind profile
+     (mailpit.enabled), and the daemon and the tenant-operator send SMTP to
+     it. Ingress is therefore any pod in the RELEASE NAMESPACE, which is
+     still a real boundary: pods outside the namespace cannot reach it.
+     Inert on profiles where mailpit does not render. The chart ships no
+     Prometheus, Grafana, Loki, Promtail or Jaeger (ADR-0087).
 
      stripe-mock is deliberately NOT in this list: its allow policy lives
      inside templates/stripe-mock/deployment.yaml behind the
@@ -225,11 +221,6 @@ spec:
       - key: app.kubernetes.io/component
         operator: In
         values:
-          - prometheus
-          - grafana
-          - loki
-          - promtail
-          - jaeger
           - mailpit
   policyTypes:
     - Ingress

@@ -18,13 +18,22 @@ nothing. Two render validators shipped that way, `gibson.validateSpire` and
 `gibson.validateEnvoyGateway`, each still invoked once. A guard that cannot
 fail is worse than no guard.
 
-There is no exemption list. A validator staged ahead of activation keeps its
+The third check is the same defect for chart files (charts#371). A file under
+helm/<chart>/files/ that no template of that chart reads ships in the artifact
+and reads as configuration, and does nothing: a PrometheusRule sat there with
+no template to render it. A file is read when a template names its path
+("files/...") or a .Files.Glob pattern matches it. FILES_NOT_RENDERED names
+the few files that ship for a reader, not for a template, each with a reason;
+an entry whose file is gone or is read fails.
+
+There is no exemption list for named templates. A validator staged ahead of activation keeps its
 body and gates on a values flag, so it can still fail; an empty body is never
 the right way to stage one.
 
   check-orphan-templates.py             exit 1 on an orphan or an inert define
   check-orphan-templates.py --selftest  prove each failure mode fails and the tree passes
 """
+import fnmatch
 import os
 import re
 import sys
@@ -111,6 +120,44 @@ def inert_called(root: str) -> list[str]:
     ]
 
 
+# Chart files that ship for a human reader, not for a template. Keyed by
+# path under helm/. An entry whose file is gone, or that a template reads,
+# fails.
+FILES_NOT_RENDERED = {
+    "gibson/files/branding/README.md": "explains the brand files to a maintainer",
+    "gibson-operators/files/plans.schema.json": "the JSON schema of files/plans.yaml, for editors",
+}
+GLOB = re.compile(r'Files\.Glob\s+"([^"]+)"')
+
+
+def unread_files(root: str, allowed: dict) -> list[str]:
+    out, seen = [], set()
+    helm = os.path.join(root, "helm")
+    for chart in sorted(os.listdir(helm)):
+        files_dir = os.path.join(helm, chart, "files")
+        if not os.path.isdir(files_dir):
+            continue
+        text = ""
+        for dirpath, _, names in os.walk(os.path.join(helm, chart, "templates")):
+            for n in names:
+                text += COMMENT.sub("", open(os.path.join(dirpath, n), encoding="utf-8", errors="replace").read()) + "\n"
+        globs = GLOB.findall(text)
+        for dirpath, _, names in os.walk(files_dir):
+            for n in names:
+                rel = os.path.relpath(os.path.join(dirpath, n), os.path.join(helm, chart)).replace(os.sep, "/")
+                key = f"{chart}/{rel}"
+                read = f'"{rel}"' in text or any(fnmatch.fnmatch(rel, g) for g in globs)
+                if key in allowed:
+                    seen.add(key)
+                    if read:
+                        out.append(f"stale entry in FILES_NOT_RENDERED: a template reads {key}")
+                elif not read:
+                    out.append(f"helm/{key}: no template of {chart} reads it")
+    for key in sorted(set(allowed) - seen):
+        out.append(f"stale entry in FILES_NOT_RENDERED: helm/{key} does not exist")
+    return out
+
+
 def selftest() -> int:
     with tempfile.TemporaryDirectory() as d:
         t = os.path.join(d, "helm", "x", "templates")
@@ -156,6 +203,30 @@ def selftest() -> int:
     if live:
         print("SELFTEST FAIL: the tree has an invoked define that renders nothing:\n  " + "\n  ".join(live))
         return 1
+    with tempfile.TemporaryDirectory() as d:
+        # Paths are joined from parts, so that referenced-paths-exist does not
+        # read the fixture paths as repo paths.
+        c = "/".join(["helm", "c"])
+        for path, text in {
+            f"{c}/templates/a.yaml": '{{ .Files.Get "files/read.yaml" }}\n{{ range .Files.Glob "files/g/*.conf" }}{{ end }}\n'
+                                     '{{/* .Files.Get "files/only-in-comment.yaml" */}}\n',
+            f"{c}/files/read.yaml": "x", f"{c}/files/g/a.conf": "x",
+            f"{c}/files/unread.yaml": "x", f"{c}/files/only-in-comment.yaml": "x", f"{c}/files/doc.md": "x",
+        }.items():
+            os.makedirs(os.path.dirname(os.path.join(d, path)), exist_ok=True)
+            open(os.path.join(d, path), "w").write(text)
+        got = unread_files(d, {"c/files/doc.md": "fixture", "c/files/read.yaml": "fixture", "c/files/gone.md": "fixture"})
+        want = {f"{c}/files/unread.yaml: no template of c reads it",
+                f"{c}/files/only-in-comment.yaml: no template of c reads it",
+                "stale entry in FILES_NOT_RENDERED: a template reads c/files/read.yaml",
+                f"stale entry in FILES_NOT_RENDERED: {c}/files/gone.md does not exist"}
+        if set(got) != want:
+            print(f"SELFTEST FAIL: unread files: want {sorted(want)}, got {sorted(got)}")
+            return 1
+    live = unread_files(ROOT, FILES_NOT_RENDERED)
+    if live:
+        print("SELFTEST FAIL: the tree has a chart file that no template reads:\n  " + "\n  ".join(live))
+        return 1
     print(
         "OK: an uncalled define fails, an invoked define with a comment-only body fails, "
         "a commented example and a nested-block validator do not, the tree is clean"
@@ -179,8 +250,13 @@ def main() -> int:
             "   give it a body that can fail):\n  " + "\n  ".join(got)
         )
         rc = 1
+    got = unread_files(ROOT, FILES_NOT_RENDERED)
+    if got:
+        print("❌ chart files that no template reads (render them, or delete them):\n  " + "\n  ".join(got))
+        rc = 1
     if rc == 0:
-        print("✓ orphan-templates: every named template is invoked, and every invoked template does something")
+        print("✓ orphan-templates: every named template is invoked, every invoked template does something, "
+              "and every chart file is read")
     return rc
 
 

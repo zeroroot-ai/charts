@@ -875,11 +875,6 @@ spec:
       - key: app.kubernetes.io/component
         operator: In
         values:
-          - prometheus
-          - grafana
-          - loki
-          - promtail
-          - jaeger
           - mailpit
   policyTypes:
     - Ingress
@@ -18617,16 +18612,6 @@ spec:
             # "the mission produced no output" rather than "the log backend was
             # never wired" (deploy#1223). Only set when there is a Loki to
             # query; an overlay pointing elsewhere sets gibson.lokiUrl.
-            #
-            # deploy#1199(b): this used to key off `.Values.loki.enabled`, a
-            # separate boolean from the enum that actually decides whether an
-            # in-chart Loki exists. The two disagreed on the prod overlay —
-            # `loki.enabled: false` suppressed GIBSON_LOKI_URL while
-            # `observability.provider` (unset, so `in-chart`) still deployed
-            # Loki. Prod therefore ran a log store the daemon was configured
-            # never to query. One condition now decides both: the URL points at
-            # the in-chart Loki exactly when the chart deploys one, and an
-            # external-provider overlay supplies its own gibson.lokiUrl.
             # GIBSON_APP_URL — the PRODUCT-surface origin (app.<domain>) used to
             # build user-facing links, above all the self-serve signup email
             # verification link (gibson#1228 companion, deploy

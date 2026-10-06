@@ -1,7 +1,6 @@
 {{/* ext-authz ServiceMonitor (Week 2 §3 R21).
-     Renders unconditionally: both observability provider shapes consume
-     ServiceMonitors (in-chart Prometheus or external grafana-agent → Grafana
-     Cloud). deploy#313. */}}
+     It renders only where the cluster serves monitoring.coreos.com/v1
+     (ADR-0087). */}}
 {{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
