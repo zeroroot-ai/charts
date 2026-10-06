@@ -59,12 +59,13 @@ spec:
     {{- end }}
     {{- with .Values.platformBootstrap.zitadel.systemClient }}
     {{- /*
-      systemClient activates the TrustedDomainReady reconcile step
-      (platform-operator#29). The operator signs a JWT with
-      the mounted RSA key, exchanges it at /oauth/v2/token for a
-      SYSTEM_OWNER access token, then calls /system/v1/instances/me/
-      domains to register the cluster Service hostname. The default
-      derivation (<cr-name>-zitadel.<ns>.svc.cluster.local) is wrong
+      systemClient is the System API client that mints the Zitadel admin
+      token (AdminTokenReady, gibson#794). The operator signs a JWT with
+      the mounted RSA key and exchanges it at /oauth/v2/token for a
+      SYSTEM_OWNER access token. It registers no trusted domain: the
+      x-zitadel-instance-host header alone selects the instance
+      (gibson#990). trustedClusterDomain names the Service that the
+      operator dials. The default derivation (<cr-name>-zitadel.<ns>.svc.cluster.local) is wrong
       for this chart — the Service is `gibson-zitadel`, not
       `<release>-zitadel` — so kind values explicitly pin
       trustedClusterDomain.

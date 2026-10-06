@@ -2996,7 +2996,7 @@ data:
                             # Zitadel's own JWT-assertion auth was the only gate.
                             #
                             # Its ONE caller is the platform-operator's
-                            # TrustedDomainReady step, which dials Zitadel by
+                            # AdminTokenReady step (gibson#794), which dials Zitadel by
                             # Service DNS inside the cluster
                             # (PlatformBootstrap spec.zitadel.systemClient.apiURL,
                             # emitted by helm/gibson-operators) and forges the
@@ -11285,10 +11285,11 @@ spec:
               value: "app.localhost.zeroroot.ai"
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"
-            # Zitadel System API user private key path (platform-operator#28,
-            #). The reconcile step that registers the cluster
-            # Service name as a Zitadel trusted domain signs JWTs with
-            # this key to call /system/v1/*. The matching public key is
+            # Zitadel System API user private key path (platform-operator#28).
+            # The AdminTokenReady step signs JWTs with this key to call
+            # /system/v1/* and mint the Zitadel admin token (gibson#794).
+            # No trusted domain is registered: the instance header alone
+            # selects the instance (gibson#990). The matching public key is
             # provisioned on Zitadel via the chart's SystemAPIUsers
             # config block (gitops apps/zitadel.yaml).
             - name: ZITADEL_SYSTEM_KEY_PATH
@@ -13350,7 +13351,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 283407ee02ca8843874ea5454ee61dac0633e1d3505071666be1f07f61bfca6d
+        checksum/config: 44239e6dc5d7ea814dc15903687a4683972e2013f25adbf21accc64f4f1f9597
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
