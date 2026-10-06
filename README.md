@@ -51,6 +51,9 @@ environment variable.
 
 ## Profiles
 
+The supported substrates are EKS, k3s, and the CI clusters kind and k3d. Any
+conformant cluster that meets the substrate contract can run the baseline.
+
 | Profile | For |
 |---|---|
 | `values-baseline.yaml` | a Kubernetes cluster with a default StorageClass and nothing else assumed. **This is the supported self-hosted target.** kind is one. |
