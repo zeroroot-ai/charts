@@ -554,12 +554,11 @@ platformBootstrap:
     project:
       name: "gibson"
       ensureExists: true
-    # systemClient — activates the TrustedDomainReady reconcile step
-    # (platform-operator#29). When both fields are empty the
-    # step short-circuits with reason SystemClientDisabled. Overlays set
-    # these to register the cluster Service hostname as an additional
-    # trusted Zitadel domain so every Gibson pod can dial Zitadel by
-    # Service name without the per-pod hostAliases workaround.
+    # systemClient — the System API client that mints the Zitadel admin
+    # token (AdminTokenReady, gibson#794). trustedClusterDomain names the
+    # Zitadel Service that the operator dials. No trusted domain is
+    # registered: the x-zitadel-instance-host header alone selects the
+    # instance (gibson#990).
     # loginBranding.configMap — the ConfigMap that holds the login brand
     # (label-policy.json, logo.svg, icon.svg). The umbrella chart renders it
     # from helm/gibson/files/branding and sets this name. Empty: no brand.

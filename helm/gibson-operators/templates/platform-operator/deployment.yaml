@@ -128,10 +128,11 @@ spec:
             {{- /* deploy#201: SPIRE is REQUIRED — env + mount unconditional. */}}
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"
-            # Zitadel System API user private key path (platform-operator#28,
-            #). The reconcile step that registers the cluster
-            # Service name as a Zitadel trusted domain signs JWTs with
-            # this key to call /system/v1/*. The matching public key is
+            # Zitadel System API user private key path (platform-operator#28).
+            # The AdminTokenReady step signs JWTs with this key to call
+            # /system/v1/* and mint the Zitadel admin token (gibson#794).
+            # No trusted domain is registered: the instance header alone
+            # selects the instance (gibson#990). The matching public key is
             # provisioned on Zitadel via the chart's SystemAPIUsers
             # config block (gitops apps/zitadel.yaml).
             - name: ZITADEL_SYSTEM_KEY_PATH
