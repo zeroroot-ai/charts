@@ -117,8 +117,14 @@ nodes:
 
 # Networking configuration
 networking:
-  # Use Calico or default kindnet
-  disableDefaultCNI: false
+  # Cilium is the network plugin of every cluster (ADR-0087, charts#395). The
+  # chart renders CiliumNetworkPolicy for egress by host name, and kindnet
+  # enforces no policy at all. So kind starts with no CNI and no kube-proxy,
+  # and the caller installs Cilium before the platform: the published install
+  # workflow sources hosted's scripts/lib/cilium.sh (cilium_install kind), as
+  # hosted's recreate-kind.sh does.
+  disableDefaultCNI: true
+  kubeProxyMode: none
   # Pod subnet
   podSubnet: "10.244.0.0/16"
   # Service subnet

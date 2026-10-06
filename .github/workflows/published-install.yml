@@ -224,9 +224,17 @@ jobs:
           set -euo pipefail
           if [ "${{ inputs.distro }}" = kind ]; then
             KIND_PV_DIR="$RUNNER_TEMP/kind-pv"; mkdir -p "$KIND_PV_DIR"
+            # No --wait: the node is not Ready until a CNI runs, and kind
+            # starts with none (helm/kind-config.yaml). Cilium is installed
+            # next, with the one pin and the kind values of hosted (hosted#436).
             sed "s|__KIND_PV_DIR__|$KIND_PV_DIR|" helm/kind-config.yaml \
-              | kind create cluster --name gibson --config - --wait 180s
+              | kind create cluster --name gibson --config -
             echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+            # shellcheck source=/dev/null
+            . ./hosted/scripts/lib/cilium.sh
+            cilium_install kind --set "k8sServiceHost=gibson-control-plane"
+            cilium_verify
+            kubectl wait --for=condition=Ready nodes --all --timeout=300s
           else
             CLUSTER=gibson ./hosted/scripts/cluster-k3d.sh create
             CLUSTER=gibson ./hosted/scripts/cluster-k3d.sh verify
