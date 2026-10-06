@@ -362,9 +362,12 @@ spec:
               STRIPE_EXPECTED_MODE is NOT injected here. The operator reads
               STRIPE_API_KEY and never compares its prefix to a declared mode:
               operators/tenant/cmd/main.go has no such check, so the variable
-              asserted a control that did not exist. The dashboard held the
-              mode guard until dashboard#256 removed its Stripe client; the
-              billing component holds Stripe now (ADR-0060, gibson#713).
+              asserted a control that did not exist. The guard that does exist
+              is the dashboard's, in src/lib/billing/stripe.ts
+              (validateBillingConfig), which reads the SAME one Stripe key out
+              of the same Secret and throws at boot when the key prefix and
+              dashboard.billing.stripeExpectedMode disagree. One key, one
+              assertion, in the process that holds the guard.
             */}}
             {{- /*
               SMTP env block — REQUIRED at boot per one-code-path
