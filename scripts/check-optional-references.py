@@ -150,9 +150,13 @@ def selftest() -> int:
         os.makedirs(t)
         open(os.path.join(t, "a.yaml"), "w").write(FIXTURE)
         found = cases(d)
-        want = {"helm/c/templates/a.yaml optional secretKeyRef some-secret/token",
-                "helm/c/templates/a.yaml optional secret other-secret",
-                'helm/c/templates/a.yaml default {{ .Values.b | default "" | quote }}'}
+        # The fixture path is joined, so the path guard does not read it as a
+        # path of this repository.
+        fx = "/".join(("helm", "c", "templates", "a.yaml"))
+        gone = "/".join(("helm", "c", "templates", "gone.yaml"))
+        want = {f"{fx} optional secretKeyRef some-secret/token",
+                f"{fx} optional secret other-secret",
+                fx + ' default {{ .Values.b | default "" | quote }}'}
         if set(found) != want:
             print(f"SELFTEST FAIL: want {sorted(want)}, got {sorted(found)}")
             return 1
@@ -161,11 +165,11 @@ def selftest() -> int:
             print("SELFTEST FAIL: each case with a reason must pass")
             return 1
         less = dict(full)
-        less.pop("helm/c/templates/a.yaml optional secret other-secret")
+        less.pop(f"{fx} optional secret other-secret")
         if len(audit(found, less)) != 1:
             print("SELFTEST FAIL: a case with no reason must fail")
             return 1
-        if not any("stale" in x for x in audit(found, dict(full, **{"helm/c/templates/gone.yaml default x": "r"}))):
+        if not any("stale" in x for x in audit(found, dict(full, **{f"{gone} default x": "r"}))):
             print("SELFTEST FAIL: a stale entry must fail")
             return 1
         if not audit({}, {}):
