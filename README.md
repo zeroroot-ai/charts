@@ -71,7 +71,7 @@ do not use an `existingSecret` value; neither is a supported path.
 
 A few Secrets have a value that a controller generates inside the cluster, for
 example the OIDC clients that the platform-operator mints.
-`helm/gibson/secret-producers.yaml` names each of them, with its writer and
+The `producers` part of `helm/gibson/secret-contract.yaml` names each of them, with its writer and
 the reason. `scripts/check-secret-plumbing.py` fails on a Secret with two
 writers, and on a writer that the list does not name.
 
