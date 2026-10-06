@@ -15181,6 +15181,26 @@ spec:
             # GIBSON_APP_URL respectively, above.
             - name: GIBSON_PLATFORM_TENANT
               value: "primary"
+            - name: GIBSON_AUDIT_EXPORT_BUCKET
+              value: "example-durable-bucket"
+            - name: GIBSON_AUDIT_EXPORT_ENDPOINT
+              value: "https://s3.us-east-1.amazonaws.com"
+            - name: GIBSON_AUDIT_EXPORT_REGION
+              value: "us-east-1"
+            - name: GIBSON_AUDIT_EXPORT_LOCK_MODE
+              value: "GOVERNANCE"
+            - name: GIBSON_AUDIT_EXPORT_LOCK_DAYS
+              value: "2192"
+            - name: GIBSON_AUDIT_EXPORT_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: bringup-keyring
+                  key: bucket-access-key
+            - name: GIBSON_AUDIT_EXPORT_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: bringup-keyring
+                  key: bucket-secret-key
             - name: GIBSON_EMAIL_PROVIDER
               value: "log"
             - name: GIBSON_EMAIL_FROM
@@ -19468,6 +19488,56 @@ spec:
               with Unavailable. Every component call fails until Redis answers.
               Check gibson-redis-stack, its password Secret and the network
               policy between ext-authz and Redis.
+---
+# Source: gibson/charts/gibson-workloads/templates/gibson/audit-export-alertrule.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gibson-audit-export-alerts
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: daemon
+spec:
+  groups:
+    - name: audit-export
+      rules:
+        - alert: AuditExportLagging
+          expr: |
+            max(gibson_audit_export_lag_seconds) > 3600
+          for: 15m
+          labels:
+            severity: page
+            component: daemon
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/audit-export.md#auditexportlagging"
+            summary: "Audit records are not reaching the durable bucket"
+            description: |
+              The oldest audit record that is not in the durable bucket is
+              older than one hour. Retention removes no row that is not
+              exported, so the audit table grows. Check the daemon log for
+              "audit export", the GIBSON_AUDIT_EXPORT_* values and the bucket
+              credential.
+        - alert: AuditExportErrors
+          expr: |
+            sum(increase(gibson_audit_export_errors_total[15m])) > 0
+          for: 5m
+          labels:
+            severity: page
+            component: daemon
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/audit-export.md#auditexporterrors"
+            summary: "The daemon fails to write audit records to the durable bucket"
+            description: |
+              A write of an audit range to audit/ in the durable bucket failed
+              in the last 15 minutes. The daemon writes the range again, and
+              the lag grows until a write succeeds. Common causes: a bucket
+              credential that changed, a lock mode or lock days that the
+              bucket policy refuses, or a store that does not answer.
 ---
 # Source: gibson/charts/gibson-workloads/templates/observability/plugin-rotation-propagation-rule.yaml
 # PrometheusRule for the plugin rotation-propagation SLO defined in
