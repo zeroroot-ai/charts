@@ -18,6 +18,14 @@ secret-producers.yaml, and the entry must name the workload that writes it.
 The guard resolves a name held in a shell variable from its assignment in the
 same script or from the container env (charts#367).
 
+ONE WRITER (charts#368, ADR-0014). A rendered Secret object, an ExternalSecret
+target, a Certificate secretName and a script writer are each a writer. A
+Secret with two of them fails, and so does an ExternalSecret whose
+creationPolicy is not Owner, because that policy leaves the Secret to a second
+writer. The `sharedWriters` map names the cases that an open issue removes; an
+entry for a Secret that has one writer fails as stale. Each `producers` entry
+must name its writer and a reason.
+
   check-secret-plumbing.py             exit 1 on a dangling or stale entry, 0 when clean
   check-secret-plumbing.py --selftest  prove a dangling reference and a stale entry fail
 """
@@ -111,6 +119,34 @@ def judge_writers(docs: list[dict], producers: dict[str, str]) -> list[str]:
     return out
 
 
+def judge_one_writer(docs: list[dict], shared: dict) -> list[str]:
+    writers: dict[str, list[str]] = {}
+    for d in docs:
+        k, n = d.get("kind"), (d.get("metadata") or {}).get("name")
+        if k == "Secret":
+            writers.setdefault(n, []).append(f"Secret/{n}")
+        elif k == "ExternalSecret":
+            target = (d.get("spec") or {}).get("target") or {}
+            name = target.get("name") or n
+            writers.setdefault(name, []).append(f"ExternalSecret/{n}")
+            policy = target.get("creationPolicy", "Owner")
+            if policy != "Owner":
+                writers[name].append(f"a writer outside ExternalSecret/{n} (creationPolicy {policy})")
+        elif k == "Certificate":
+            writers.setdefault((d.get("spec") or {}).get("secretName"), []).append(f"Certificate/{n}")
+        elif k in WORKLOADS:
+            for name in written_secrets(d)[0]:
+                writers.setdefault(name, []).append(f"{k}/{n}")
+    out = []
+    for name, ws in sorted(writers.items()):
+        if len(ws) > 1 and name not in shared:
+            out.append(f"two writers: Secret {name} is written by {', '.join(ws)}; a Secret has exactly one writer")
+    for name in sorted(shared):
+        if len(writers.get(name, [])) < 2:
+            out.append(f"stale sharedWriters entry: Secret {name} has one writer now; delete the entry")
+    return out
+
+
 def judge(docs: list[dict], producers: dict[str, str]) -> list[str]:
     rendered: dict[str, str] = {}
     for d in docs:
@@ -132,6 +168,9 @@ def judge(docs: list[dict], producers: dict[str, str]) -> list[str]:
     for name in sorted(producers):
         if name in rendered:
             out.append(f"stale producer entry: {name} is rendered by a {rendered[name]}; delete it from secret-producers.yaml")
+    for name, entry in sorted(producers.items()):
+        if not (isinstance(entry, dict) and str(entry.get("writer") or "").strip() and str(entry.get("reason") or "").strip()):
+            out.append(f"producer entry {name} must name its writer and a reason (writer:, reason:)")
     return out + judge_writers(docs, producers)
 
 
@@ -188,31 +227,65 @@ spec:
 
 def selftest() -> int:
     docs = [d for d in yaml.safe_load_all(FIXTURE) if d]
-    got = judge(docs, {"minted-at-runtime": "an operator mints it", "rendered-secret": "stale"})
+    got = judge(docs, {"minted-at-runtime": {"writer": "an operator", "reason": "fixture"}, "rendered-secret": {"writer": "stale", "reason": "fixture"}})
     want_dangling = any(x.startswith("dangling: typo-secret") for x in got)
     want_stale = any(x.startswith("stale producer entry: rendered-secret") for x in got)
     if not (want_dangling and want_stale and len(got) == 2):
         print(f"SELFTEST FAIL: want exactly the typo flagged and the stale entry flagged, got {got}")
         return 1
-    live = judge(render(), load_producers())
+    two = [d for d in yaml.safe_load_all("""
+apiVersion: v1
+kind: Secret
+metadata: {name: both}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: {name: both}
+spec: {target: {name: both}}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: {name: shared}
+spec: {target: {name: shared, creationPolicy: Orphan}}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: {name: single}
+spec: {target: {name: single}}
+""") if d]
+    got = judge_one_writer(two, {})
+    if not (any("Secret both" in x for x in got) and any("Secret shared" in x for x in got) and len(got) == 2):
+        print(f"SELFTEST FAIL: a Secret with a chart object and an ExternalSecret, and an Orphan ExternalSecret, must each fail; got {got}")
+        return 1
+    if judge_one_writer(two, {"both": {}, "shared": {}}):
+        print("SELFTEST FAIL: named sharedWriters entries must pass")
+        return 1
+    if not any("stale sharedWriters" in x for x in judge_one_writer(two, {"both": {}, "shared": {}, "single": {}})):
+        print("SELFTEST FAIL: a sharedWriters entry for a Secret with one writer must fail as stale")
+        return 1
+    if not any("must name its writer" in x for x in judge([], {"x": "a bare string"})):
+        print("SELFTEST FAIL: a producer entry without writer and reason must fail")
+        return 1
+    docs = render()
+    live = judge(docs, load_producers()) + judge_one_writer(docs, load_shared())
     if live:
         print("SELFTEST FAIL: the baseline render has a plumbing gap:\n  " + "\n  ".join(live))
         return 1
     writer = yaml.safe_load(WRITER_FIXTURE)
     cases = [
         ("a script that writes a Secret with no entry", {}, "unrecorded writer"),
-        ("an entry that does not name the writer", {"rotation-state": "some other job writes it"}, "unnamed writer"),
+        ("an entry that does not name the writer", {"rotation-state": {"writer": "some other job", "reason": "fixture"}}, "unnamed writer"),
     ]
     for what, prods, want in cases:
         got = judge_writers([writer], prods)
         if not any(x.startswith(want) for x in got):
             print(f"SELFTEST FAIL: {what}: want '{want}', got {got}")
             return 1
-    if judge_writers([writer], {"rotation-state": "the CronJob rotator writes it"}):
+    if judge_writers([writer], {"rotation-state": {"writer": "the CronJob rotator", "reason": "fixture"}}):
         print("SELFTEST FAIL: an entry that names the writer must pass")
         return 1
     blind = yaml.safe_load(WRITER_FIXTURE.replace('STATE="rotation-state"', 'STATE="$(pick)"'))
-    if not any(x.startswith("unresolved writer") for x in judge_writers([blind], {"rotation-state": "rotator"})):
+    if not any(x.startswith("unresolved writer") for x in judge_writers([blind], {"rotation-state": {"writer": "rotator", "reason": "fixture"}})):
         print("SELFTEST FAIL: a Secret name the guard cannot resolve must fail")
         return 1
     print("OK: a dangling reference, a stale producer entry, an unrecorded writer, an unnamed writer and an "
@@ -224,10 +297,15 @@ def load_producers() -> dict[str, str]:
     return (yaml.safe_load(open(PRODUCERS)) or {}).get("producers") or {}
 
 
+def load_shared() -> dict:
+    return (yaml.safe_load(open(PRODUCERS)) or {}).get("sharedWriters") or {}
+
+
 def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
-    got = judge(render(), load_producers())
+    docs = render()
+    got = judge(docs, load_producers()) + judge_one_writer(docs, load_shared())
     if got:
         print("❌ secret plumbing:\n  " + "\n  ".join(got))
         return 1

@@ -59,6 +59,19 @@ environment variable.
 | `values-developer.yaml` | layered on baseline, sized to fit ONE local node (kind or k3d). The rung a developer installs. |
 | `values-ci.yaml` | layered on baseline, the same content as `developer` under its own name so either may change later |
 
+## Secrets
+
+Each Secret has exactly one writer (ADR-0014). The store is OpenBao on every
+install. To give the platform a value, put it into OpenBao: an ExternalSecret
+of the chart writes the Secret from there. Do not create a Secret by hand, and
+do not use an `existingSecret` value; neither is a supported path.
+
+A few Secrets have a value that a controller generates inside the cluster, for
+example the OIDC clients that the platform-operator mints.
+`helm/gibson/secret-producers.yaml` names each of them, with its writer and
+the reason. `scripts/check-secret-plumbing.py` fails on a Secret with two
+writers, and on a writer that the list does not name.
+
 ## The images are public
 
 The chart is Apache-2.0. Every image it references is a public package on
