@@ -809,51 +809,39 @@ Invoked from templates/gibson/statefulset.yaml, where both values are consumed.
 {{/* =========================================================================
 gibson.validateSetecDispatch
 
-Guards the daemon→setec-frontend leg (deploy#1106).
+Guards the daemon→setec-frontend leg (deploy#1106, D5).
 
-`gibson.sandbox.enabled` is not a preference. When it is true the daemon
-routes every UNTRUSTED tool call through setec and, under the default
-setec-only dispatch shape, DENIES the call rather than running it in-process
-when that route is unavailable (gibson internal/engine/harness/
-dispatchpolicy). So a render that turns it on against a frontend nobody is
-installing does not degrade — it takes untrusted tooling offline, and it does
-so at the first tool call rather than at install.
+The daemon always dials setec (gibson#756). It routes every UNTRUSTED tool
+call through setec and, under the default setec-only dispatch shape, DENIES
+the call rather than running it in-process when that route is unavailable
+(gibson internal/engine/harness/dispatchpolicy). So a render with no frontend
+does not degrade: it takes untrusted tooling offline at the first tool call.
 
-Two ways to get there, both of which render clean YAML:
+`setec.enabled=false`, or the setec subchart on with
+`setec.frontend.enabled=false`, renders clean YAML. Every derived value (the
+address, the TLS serverName, the client cert) then points at a frontend that
+will not exist. The cert-manager Certificate and the ESO mirror in
+templates/setec/daemon-client-secret.yaml cannot resolve, and the daemon Pod
+stays Pending on a missing volume.
 
-  (1) `gibson.sandbox.enabled` with `setec.enabled=false`, or with the setec
-      subchart on but `setec.frontend.enabled=false`. Every derived value —
-      the address, the TLS serverName, the client cert — is computed from a
-      frontend that will not exist. This is also what makes the
-      cert-manager Certificate and the ESO mirror in
-      templates/setec/daemon-client-secret.yaml unresolvable: their source
-      Secret is never minted, the ExternalSecret sits in SecretSyncedError,
-      and the daemon Pod stays Pending on a missing volume.
-
-  (2) `gibson.sandbox.enabled` with no `setec.tenant`. config.SandboxConfig's
-      own Validate() rejects an empty tenant, so the daemon exits at startup.
-      Failing here names the values key instead.
-
-An install pointing at a setec frontend this chart does not provision is a
-real deployment, and it is not this one: it would supply its own
-sandbox.setec.address, mtls paths and client Secret, and it can have a values
-knob when someone actually runs it. Speculating a second codepath for it now
-is what forbids.
+`gibson.sandbox.enabled` and `gibson.sandbox.setec.tenant` were deleted with
+the daemon settings they fed (gibson#756). The daemon sends the tenant in each
+request. A values file that still sets either one fails here.
 ========================================================================= */}}
 {{- define "gibson.validateSetecDispatch" -}}
 {{- $sbx := (.Values.gibson).sandbox | default dict -}}
-{{- if $sbx.enabled -}}
+{{- if hasKey $sbx "enabled" -}}
+{{- fail "validateSetecDispatch: gibson.sandbox.enabled was deleted (gibson#756). The daemon always dials setec. Remove the key from your values." -}}
+{{- end -}}
+{{- if hasKey ($sbx.setec | default dict) "tenant" -}}
+{{- fail "validateSetecDispatch: gibson.sandbox.setec.tenant was deleted (gibson#756). The daemon sends the tenant in each request. Remove the key from your values." -}}
+{{- end -}}
 {{- $setec := .Values.setec | default dict -}}
 {{- if not $setec.enabled -}}
-{{- fail "validateSetecDispatch: gibson.sandbox.enabled=true requires setec.enabled=true. The daemon's whole sandbox config — address, TLS serverName, the client keypair it mounts — is derived from the setec subchart's frontend, and with the subchart off none of it exists. Under the default setec-only dispatch shape an unreachable sandbox backend does not fall back to in-process execution; it denies the call, so this renders cleanly and takes untrusted tooling offline at the first invocation. Install setec, or set gibson.sandbox.enabled=false." -}}
+{{- fail "validateSetecDispatch: the daemon requires setec.enabled=true. Its whole sandbox config — address, TLS serverName, the client keypair it mounts — is derived from the setec subchart's frontend, and with the subchart off none of it exists. An unreachable sandbox backend does not fall back to in-process execution; it denies the call, so this renders cleanly and takes untrusted tooling offline at the first invocation." -}}
 {{- end -}}
 {{- $frontend := $setec.frontend | default dict -}}
 {{- if not $frontend.enabled -}}
-{{- fail "validateSetecDispatch: gibson.sandbox.enabled=true requires setec.frontend.enabled=true. The frontend IS the daemon's gRPC endpoint into setec — the operator alone serves no Launch RPC. With it off the daemon dials a Service that is never created, and templates/setec/daemon-client-secret.yaml has no source Secret to mirror, so the daemon Pod stays Pending on a volume that never appears." -}}
-{{- end -}}
-{{- $tenant := ($sbx.setec | default dict).tenant | default "" -}}
-{{- if not $tenant -}}
-{{- fail "validateSetecDispatch: gibson.sandbox.enabled=true requires gibson.sandbox.setec.tenant. It is the setec tenant every Launch is attributed to and there is no defensible default; the daemon's own config.SandboxConfig.Validate() refuses to start without it, so leaving it empty trades a render error that names the key for a CrashLoopBackOff that does not." -}}
-{{- end -}}
+{{- fail "validateSetecDispatch: the daemon requires setec.frontend.enabled=true. The frontend IS the daemon's gRPC endpoint into setec — the operator alone serves no Launch RPC. With it off the daemon dials a Service that is never created, and templates/setec/daemon-client-secret.yaml has no source Secret to mirror, so the daemon Pod stays Pending on a volume that never appears." -}}
 {{- end -}}
 {{- end -}}

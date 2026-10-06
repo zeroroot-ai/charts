@@ -58,9 +58,8 @@ mTLS stays ON in every overlay, with no debugging shortcuts permitted.
        declare an explicit default network mode. Each of these renders
        fine when wrong, so the guard is the only thing that catches it. */ -}}
 {{- include "gibson.validateSetecContainment" . }}
-{{- /* deploy#1106 — the daemon→frontend dispatch leg. Reject
-       gibson.sandbox.enabled=true when the frontend this chart would point
-       it at is not being installed, or when no setec tenant is named. */ -}}
+{{- /* deploy#1106 — the daemon→frontend dispatch leg. Reject a render
+       when the frontend that the daemon dials is not being installed. */ -}}
 {{- include "gibson.validateSetecDispatch" . }}
 {{- /* Spec tier-2-host-aliases-cluster-dns Req 2 — validate the optional
        in-cluster IdP discovery URL knob (allow-list: *.svc.cluster.local,
@@ -848,7 +847,7 @@ spec:
                    config.SandboxConfig.Validate() os.Stat()s cert_file,
                    key_file and ca_file at daemon startup and refuses to
                    boot when any is missing, so the mount is what makes
-                   `sandbox.enabled: true` bootable at all. Nothing was
+                   the daemon bootable at all. Nothing was
                    mounted before this: the chart carried the config seam
                    (deploy#1175) and the SPIFFE env vars, and neither
                    produced a file on disk.
@@ -856,11 +855,9 @@ spec:
                    The Secret is the release-namespace mirror of the
                    setec-namespace daemon client cert — see
                    templates/setec/daemon-client-secret.yaml. */}}
-            {{- if .Values.gibson.sandbox.enabled }}
             - name: setec-client-tls
               mountPath: {{ include "gibson.setecMtlsMountPath" . | quote }}
               readOnly: true
-            {{- end }}
             {{- /* deploy#201: SPIRE is REQUIRED — agent socket mount is
                    unconditional. */}}
             - name: spire-agent-socket
@@ -1024,12 +1021,10 @@ spec:
                is the correct direction — SANDBOXED dispatch silently
                falling back to in-process execution is the outcome
                exists to prevent. */}}
-        {{- if .Values.gibson.sandbox.enabled }}
         - name: setec-client-tls
           secret:
             secretName: {{ include "gibson.setecClientSecretName" . | quote }}
             defaultMode: 0o400
-        {{- end }}
         {{- /* Spec security-hardening R20 — `gibson-daemon-metrics-tls`
                Secret backs the daemon's :9090 mTLS metrics listener. The
                Certificate is rendered in templates/cert-manager/component-

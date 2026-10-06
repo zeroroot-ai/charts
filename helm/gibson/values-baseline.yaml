@@ -181,14 +181,12 @@ gibson-workloads:
     platformTenant: "primary"
     # Daemon → setec dispatch. Untrusted tools AND the platform agent
     # (zerocool) run as ephemeral setec sandboxes launched through the frontend
-    # under the platform tenant. gibson.validateSetecDispatch rejects enabled=true
-    # without a running in-chart frontend (setec.frontend.enabled above) or without
-    # a tenant. sandbox_class is the tool/catalog class; agent_sandbox_class is the
+    # with the tenant of each request (D5, gibson#756). gibson.validateSetecDispatch
+    # rejects a render without a running in-chart frontend (setec.frontend.enabled
+    # above). sandbox_class is the tool/catalog class; agent_sandbox_class is the
     # ephemeral platform-agent class (: named, never inherited).
     sandbox:
-      enabled: true
       setec:
-        tenant: "primary"
         sandboxClass: "tool"
         agentSandboxClass: "agent"
     resources:

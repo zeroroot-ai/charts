@@ -5812,12 +5812,12 @@ data:
     # the frontend, what SANs its certificate carries, and where the
     # StatefulSet mounts the keypair, and a disagreement produces no render
     # error — just a dial timeout or a handshake failure at the first
-    # sandboxed tool call. An overlay sets enabled + tenant.
+    # sandboxed tool call. The daemon always dials setec (D5, gibson#756):
+    # there is no enabled switch, and the daemon sends the tenant in each
+    # request, so no fixed tenant is configured.
     sandbox:
-      enabled: true
       setec:
         address: "setec-frontend.setec-system.svc.cluster.local:50051"
-        tenant: "primary"
         call_timeout: "5m"
         sandbox_class: "tool"
         # agent_sandbox_class: the class an ephemeral platform-agent launch
@@ -18416,7 +18416,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "tmp,spire-agent-socket"
-        checksum/config: 388f29ebfe62f9ca80a044fbdc8abcb28c11f784bd34ac06afd6fc4047ec087d
+        checksum/config: 00aea9beb1a44818a725d7e042f68244e0b15a78c478c01859f144b03984d2ef
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). Consumer envFrom
         # resolution is frozen for the pod's lifetime; Reloader watches the
         # named Secrets and triggers a rolling restart when any changes.

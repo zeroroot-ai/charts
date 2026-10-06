@@ -709,8 +709,8 @@ gibson:
   # for a leg places no tenancy boundary on — setec is
   # tenancy-unaware; the boundary it owns is untrusted-code execution.
   #
-  # WHAT AN OVERLAY HAS TO SET: `enabled: true` and `setec.tenant`. Nothing
-  # else. The address, the TLS serverName and the three cert paths are all
+  # AN OVERLAY SETS NOTHING HERE. The daemon always dials setec, and it
+  # sends the tenant in each request (D5, gibson#756). The address, the TLS serverName and the three cert paths are all
   # derived from `setec.*` in templates/_helpers.tpl, because restating them
   # is a chance to disagree with the subchart and a disagreement produces no
   # render error — only a dial timeout or a handshake failure at the first
@@ -718,18 +718,13 @@ gibson:
   # fault. Each field below still accepts an explicit override for an
   # out-of-chart frontend.
   #
-  # gibson.validateSetecDispatch rejects enabled=true without a running
-  # in-chart frontend or without a tenant.
+  # gibson.validateSetecDispatch rejects a render without a running
+  # in-chart frontend.
   sandbox:
-    enabled: false
     setec:
       # address is the in-cluster Setec frontend, host:port. Empty derives
       # <frontend>.<setec-namespace>.svc.cluster.local:<port> from setec.*.
       address: ""
-      # tenant is the Setec tenant the daemon dispatches launches under.
-      # REQUIRED when enabled=true — there is no defensible default, and
-      # the daemon's own Validate() refuses to start without it.
-      tenant: ""
       # callTimeout bounds a single sandboxed tool call. Go duration string;
       # the daemon defaults empty to 5m.
       callTimeout: "5m"
