@@ -82,6 +82,10 @@ tenantOperator:
   # (gibson#137). Must equal gibson-workloads gibson.serviceAccount.name;
   # scripts/check-daemon-sa-binding.py enforces that on the render.
   daemonServiceAccountName: gibson
+  # The namespace of the gibson-velero release, where the operator writes the
+  # last Backup of a deleted tenant (ADR-0075, charts#424). It must equal the
+  # --namespace of that release (scripts/baseline-up.sh installs it in velero).
+  veleroNamespace: velero
   rbac:
     create: true
   webhook:

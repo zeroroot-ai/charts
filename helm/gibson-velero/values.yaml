@@ -159,3 +159,12 @@ velero:
       enabled: false
     prometheusRule:
       enabled: false
+
+# ---------------------------------------------------------------------------
+# The platform namespace: the namespace of the gibson release. The Schedule
+# backs it up whole (templates/schedule.yaml), and the tenant-operator runs in
+# it. templates/tenant-operator-rbac.yaml grants that operator get and create
+# on Backups in this release's namespace, for the last Backup of a deleted
+# tenant (ADR-0075, charts#424).
+# ---------------------------------------------------------------------------
+platformNamespace: gibson

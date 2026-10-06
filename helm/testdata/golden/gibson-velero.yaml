@@ -3994,6 +3994,22 @@ rules:
     resources: ["pods/log"]
     verbs: ["get"]
 ---
+# Source: gibson-velero/templates/tenant-operator-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gibson-tenant-operator-final-backup
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: gibson-velero
+    app.kubernetes.io/component: tenant-operator-final-backup
+    app.kubernetes.io/managed-by: Helm
+rules:
+  - apiGroups: ["velero.io"]
+    resources: ["backups"]
+    verbs: ["get", "create"]
+---
 # Source: gibson-velero/templates/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -4012,6 +4028,26 @@ subjects:
 roleRef:
   kind: Role
   name: velero-server
+  apiGroup: rbac.authorization.k8s.io
+---
+# Source: gibson-velero/templates/tenant-operator-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gibson-tenant-operator-final-backup
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: gibson-velero
+    app.kubernetes.io/component: tenant-operator-final-backup
+    app.kubernetes.io/managed-by: Helm
+subjects:
+  - kind: ServiceAccount
+    name: gibson-tenant-operator
+    namespace: gibson
+roleRef:
+  kind: Role
+  name: gibson-tenant-operator-final-backup
   apiGroup: rbac.authorization.k8s.io
 ---
 # Source: gibson-velero/charts/velero/templates/service.yaml
@@ -4357,7 +4393,7 @@ spec:
   skipImmediately: true
   template:
     includedNamespaces:
-      - gibson
+      - "gibson"
       - tenant-*
     includedNamespaceScopedResources:
       - "*"

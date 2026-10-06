@@ -9992,6 +9992,13 @@ spec:
             # credential write.
             - name: DAEMON_SERVICE_ACCOUNT_NAME
               value: "gibson"
+            # The namespace of the gibson-velero release (ADR-0075, charts#424).
+            # A tenant delete first takes a last Velero Backup there, and the
+            # operator exits at start when this is empty. gibson-velero renders
+            # the Role that lets this ServiceAccount get and create Backups in
+            # that namespace (templates/tenant-operator-rbac.yaml).
+            - name: VELERO_NAMESPACE
+              value: "velero"
             # GIBSON_APP_URL — the PRODUCT-surface origin (app.<domain>) the
             # tenant-operator reads to build the two human-facing links it
             # emails: the tenant-member invitation accept-link and the new
