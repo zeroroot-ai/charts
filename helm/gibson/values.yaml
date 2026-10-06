@@ -854,6 +854,15 @@ zitadel:
       # trips the hostname-guard (deploy#630/#938). Per-env overlays
       # (ci/values-staging.yaml) still pin the env-specific host explicitly.
       ExternalDomain: ""
+      # The setup Job mints no IAM admin PAT (charts#407). The upstream
+      # default creates iam-admin-pat next to the machine key; null deletes
+      # that block. The platform-operator mints the PAT with its System API
+      # key and writes it to OpenBao, and the ExternalSecret iam-admin-pat is
+      # the one writer of the Secret (gibson#794, ADR-0014).
+      FirstInstance:
+        Org:
+          Machine:
+            Pat: null
       ExternalPort: 30443
       ExternalSecure: true
       TLS:
@@ -929,6 +938,9 @@ zitadel:
               - MemberType: System
                 Roles:
                   - SYSTEM_OWNER
+                  # The platform-operator mints the first IAM admin PAT with
+                  # this key (charts#407, gibson#794), which needs IAM_OWNER.
+                  - IAM_OWNER
             Path: /etc/zitadel-system-keys/system-bot-pub.pem
 
   # deploy#1631: DO NOT LET ZITADEL BOOT WITHOUT ITS SYSTEM KEY.

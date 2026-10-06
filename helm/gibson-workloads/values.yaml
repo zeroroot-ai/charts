@@ -100,16 +100,13 @@ secrets:
   # `dashboard_stripe_webhook_secret` in the configured ClusterSecretStore.
   # The store is OpenBao on every profile (ADR-0014).
   #
-  # Set `stripe.existingSecret` to skip the template entirely when an
-  # operator-owned `gibson-stripe-credentials` Secret already exists
-  # in-cluster.
-  #
   # Per memory `feedback_no_service_is_optional`, Stripe is structural —
   # no `enabled: false` toggle. ExternalSecret is the one shape; the
   # backing store decides whether the value is a real key (prod) or a
   # loud stub (kind dev). See deploy#272, #288 deploy.
-  stripe:
-    existingSecret: ""
+
+  # (The stripe.existingSecret switch was deleted, charts#407: the
+  # ExternalSecret is the one writer of the Secret.)
 
   # Shared HMAC secret gating TenantProvisioningService.SetTenantBillingActive
   # (gibson#1230 / gibson#1270, deploy#1314). Surfaced as the
@@ -120,24 +117,15 @@ secrets:
   #
   # Structural like Stripe — one shape (ExternalSecret); the backing store
   # decides whether the value is real (prod: AWS SM, terraform-generated) or a
-  # generated stub (kind: kind-bootstrap fixture). Set `existingSecret` to skip
-  # the template when an operator-owned Secret already exists in-cluster.
-  billingWebhook:
-    existingSecret: ""
-
+  # generated stub (kind: kind-bootstrap fixture). A self-hosted operator puts
+  # the value into OpenBao (ADR-0014, charts#407).
   # OpenBao admin token used by tenant-operator for data-plane KEK/transit
   # operations. Surfaced as the `gibson-openbao-keys` Secret by the
   # ExternalSecret that reads `gibson-vault-admin-token`, property `token`,
   # from the platform's OpenBao. The openbao-auto-init sidecar seeds that key
   # with the platform service token it mints (policy platform-admin, never
   # root) and keeps it current (deploy#1732).
-  # Set `vaultKeys.existingSecret` to skip the template entirely when
-  # an operator-owned Secret already exists in-cluster.
   # Spec: D1-A of polyrepo zero-dot-x reset (deploy#244).
-  vaultKeys:
-    existingSecret: ""
-    externalSecret:
-      enabled: true
 
 
 

@@ -6775,8 +6775,6 @@ data:
           MachineKey:
             ExpirationDate: "2029-01-01T00:00:00Z"
             Type: 1
-          Pat:
-            ExpirationDate: "2029-01-01T00:00:00Z"
       Skip: false
     Machine:
       Identification:
@@ -6790,6 +6788,7 @@ data:
         - MemberType: System
           Roles:
           - SYSTEM_OWNER
+          - IAM_OWNER
         Path: /etc/zitadel-system-keys/system-bot-pub.pem
     TLS:
       Enabled: false
@@ -16720,7 +16719,7 @@ spec:
     metadata:
       annotations:
         secret.reloader.stakater.com/reload: gibson-zitadel-system-key
-        checksum/configmap: 5e26b524cfe261983e8710f7126e4fab596a3ea6d47a197a17e637e38f11bc10
+        checksum/configmap: b4e23c9a2bc26df5d0ab18e673c651d16a9eee8218176ad5ba9d7f9e7c957849
         checksum/secret-db-ssl-ca-crt: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         checksum/secret-zitadel-secrets: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
       labels:
@@ -21919,7 +21918,7 @@ spec:
     kind: ClusterSecretStore
   target:
     name: iam-admin-pat
-    creationPolicy: Orphan
+    creationPolicy: Owner
     template:
       engineVersion: v2
       type: Opaque
@@ -24401,7 +24400,7 @@ rules:
   # whole window: hosted run 34271811189 (2026-09-08) sat 20 minutes on
   # "waiting for iam-admin" with the Secret present and this list naming
   # the PAT alone. The Job now refuses to wait on a Secret it may not read.
-  resourceNames: [iam-admin-pat, iam-admin, login-client]
+  resourceNames: [iam-admin, login-client]
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/02-bootstrap-secrets.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -26327,8 +26326,6 @@ spec:
                   key: masterkey
             - name: ZITADEL_FIRSTINSTANCE_MACHINEKEYPATH
               value: "/machinekey/sa.json"
-            - name: ZITADEL_FIRSTINSTANCE_PATPATH
-              value: "/machinekey/pat"
             - name: ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH
               value: "/login-client/pat"
             - name: ZITADEL_DATABASE_POSTGRES_AWAITINITIALCONN
@@ -26377,48 +26374,6 @@ spec:
               if [ -f /machinekey/sa.json ]; then
                 kubectl --namespace=gibson create secret generic iam-admin \
                   --from-file=iam-admin.json=/machinekey/sa.json \
-                  --dry-run=client --output=yaml | \
-                kubectl annotate --local --filename=- \
-                  helm.sh/resource-policy=keep \
-                  --output=yaml | \
-                kubectl label --local --filename=- \
-                  app.kubernetes.io/managed-by=Zitadel \
-                  app.kubernetes.io/name=zitadel \
-                  app.kubernetes.io/instance=gibson \
-                  --output=yaml | \
-                kubectl apply --filename=-;
-              fi;
-          env:
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-          volumeMounts:
-            - name: machinekey
-              mountPath: "/machinekey"
-              readOnly: true
-          resources:
-            {}
-        - name: zitadel-machine-pat
-          securityContext:
-              privileged: false
-              readOnlyRootFilesystem: true
-              runAsNonRoot: true
-              runAsUser: 1000
-          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
-          imagePullPolicy: 'IfNotPresent'
-          command:
-            - sh
-            - -c
-            - |
-              until [ -n "$(kubectl --namespace=gibson get pod "${POD_NAME}" --output=jsonpath="{.status.containerStatuses[?(@.name=='zitadel-setup')].state.terminated}")" ]; do
-                echo 'waiting for zitadel-setup container to terminate';
-                sleep 5;
-              done &&
-              echo 'zitadel-setup container terminated' &&
-              if [ -f /machinekey/pat ]; then
-                kubectl --namespace=gibson create secret generic iam-admin-pat \
-                  --from-file=pat=/machinekey/pat \
                   --dry-run=client --output=yaml | \
                 kubectl annotate --local --filename=- \
                   helm.sh/resource-policy=keep \
@@ -26742,7 +26697,7 @@ spec:
           # #14, 2026-09-08: PlatformBootstrap SAIdentityMapReady=False
           # "Secret gibson/iam-admin not yet written", zitadel-login on
           # "secret login-client not found").
-          ENTRIES="iam-admin-pat:pat:gibson-zitadel-iam-admin-pat:pat iam-admin:iam-admin.json:gibson-zitadel-iam-admin-machinekey:machinekey login-client:pat:gibson-zitadel-login-client-pat:pat"
+          ENTRIES="iam-admin:iam-admin.json:gibson-zitadel-iam-admin-machinekey:machinekey login-client:pat:gibson-zitadel-login-client-pat:pat"
           for entry in $ENTRIES; do
             SECRET=${entry%%:*}; rest=${entry#*:}
             DATAKEY=${rest%%:*}; rest=${rest#*:}
