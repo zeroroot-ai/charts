@@ -5,7 +5,7 @@ Rebuilds a guard lost in the 2026-09-04 split (charts#17, origin deploy#1348).
 Every secretKeyRef, secretRef and secretName a rendered workload names must
 be produced: by a Secret the chart renders, by an ExternalSecret's target,
 by a Certificate's secretName, or by a runtime actor recorded with its
-producer in helm/gibson/secret-producers.yaml. A reference nothing produces
+producer in helm/gibson/secret-contract.yaml. A reference nothing produces
 is a CreateContainerConfigError or an empty mount at runtime, which is how a
 mistyped *SecretName in values used to reach a cluster. A listed producer
 whose Secret the chart does render is a stale entry and fails too, so the
@@ -14,7 +14,7 @@ list stays honest.
 A Secret that a script of a rendered workload WRITES (`kubectl create secret`,
 `kubectl patch secret`, `kubectl replace secret`, `kubectl apply` of a
 `kind: Secret`) is a runtime producer too (ADR-0014). It must have an entry in
-secret-producers.yaml, and the entry must name the workload that writes it.
+secret-contract.yaml (producers), and the entry must name the workload that writes it.
 The guard resolves a name held in a shell variable from its assignment in the
 same script or from the container env (charts#367).
 
@@ -37,7 +37,7 @@ import sys
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PRODUCERS = os.path.join(ROOT, "helm", "gibson", "secret-producers.yaml")
+PRODUCERS = os.path.join(ROOT, "helm", "gibson", "secret-contract.yaml")
 WORKLOADS = ("Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Pod")
 
 
@@ -113,9 +113,9 @@ def judge_writers(docs: list[dict], producers: dict[str, str]) -> list[str]:
         for name in sorted(names):
             entry = producers.get(name)
             if entry is None:
-                out.append(f"unrecorded writer: {owner} writes Secret {name}, which has no entry in secret-producers.yaml")
+                out.append(f"unrecorded writer: {owner} writes Secret {name}, which has no entry in secret-contract.yaml")
             elif d["metadata"]["name"] not in str(entry):
-                out.append(f"unnamed writer: {owner} writes Secret {name}, and its secret-producers.yaml entry does not name it")
+                out.append(f"unnamed writer: {owner} writes Secret {name}, and its secret-contract.yaml entry does not name it")
     return out
 
 
@@ -167,7 +167,7 @@ def judge(docs: list[dict], producers: dict[str, str]) -> list[str]:
             out.append(f"dangling: {name} (referenced by {', '.join(sorted(refs[name]))}) — nothing renders it and no producer is recorded")
     for name in sorted(producers):
         if name in rendered:
-            out.append(f"stale producer entry: {name} is rendered by a {rendered[name]}; delete it from secret-producers.yaml")
+            out.append(f"stale producer entry: {name} is rendered by a {rendered[name]}; delete it from producers in secret-contract.yaml")
     for name, entry in sorted(producers.items()):
         if not (isinstance(entry, dict) and str(entry.get("writer") or "").strip() and str(entry.get("reason") or "").strip()):
             out.append(f"producer entry {name} must name its writer and a reason (writer:, reason:)")

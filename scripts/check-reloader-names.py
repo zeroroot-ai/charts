@@ -18,7 +18,7 @@ This check renders the baseline and every shipped values file. For each
 workload it reads both annotations, on the object and on its pod template, and
 fails on a name that is neither rendered (a Secret, an ExternalSecret target,
 a Certificate secretName, a ConfigMap) nor produced at runtime
-(`producers` and `configMapProducers` in helm/gibson/secret-producers.yaml).
+(`producers` and `configMapProducers` in helm/gibson/secret-contract.yaml).
 
   check-reloader-names.py             exit 1 on a name that matches nothing
   check-reloader-names.py --selftest  prove a misspelt name fails
@@ -34,7 +34,7 @@ import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASELINE = "helm/gibson/values-baseline.yaml"
-PRODUCERS = os.path.join(ROOT, "helm", "gibson", "secret-producers.yaml")
+PRODUCERS = os.path.join(ROOT, "helm", "gibson", "secret-contract.yaml")
 KEYS = {"secret.reloader.stakater.com/reload": "Secret",
         "configmap.reloader.stakater.com/reload": "ConfigMap"}
 
