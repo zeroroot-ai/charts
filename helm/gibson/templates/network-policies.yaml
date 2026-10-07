@@ -17,6 +17,8 @@ a new policy, and no policy lists each internal peer.
                       (_egress-fqdn.tpl).
   6. namespaces       Pods with the egress-namespaces label reach pods in other
                       namespaces. The policies of those namespaces still apply.
+                      The daemon accepts the belief trainer of each tenant
+                      namespace on its gRPC port.
   7. edge             The public edge accepts each source on its listener.
   8. control plane    Admission webhooks and the SPIRE server agent port accept
                       the API server and the nodes.
@@ -327,6 +329,44 @@ spec:
               operator: NotIn
               values:
                 - {{ $ns }}
+---
+{{- /* The belief trainer that the tenant operator starts in a tenant
+       namespace dials the daemon gRPC port (gibson.daemonAddress) directly
+       over SPIFFE mTLS. The operator writes the egress side in the tenant
+       namespace. This rule is the ingress side, on that port only, for the
+       trainer pods only: a tenant namespace also runs third-party MCP
+       server code. The namespace label and both pod labels are the ones
+       the tenant operator writes (charts#505). */}}
+{{- $daemonGrpc := include "gibson.daemonAddress" . | splitList ":" | last }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $rel }}-daemon-tenant-callers
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-daemon-tenant-callers
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "The belief trainer of each tenant namespace reaches the daemon on the gRPC port only."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: daemon
+      {{ $role }}: platform
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.cilium.k8s.namespace.labels.gibson.zeroroot.ai/managed-by: tenant-operator
+            app.kubernetes.io/component: belief-trainer
+            gibson.zeroroot.ai/managed-by: tenant-operator
+          matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
+      toPorts:
+        - ports:
+            - port: {{ $daemonGrpc | quote }}
+              protocol: TCP
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

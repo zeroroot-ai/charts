@@ -15834,6 +15834,41 @@ spec:
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
+  name: gibson-daemon-tenant-callers
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-daemon-tenant-callers
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "The belief trainer of each tenant namespace reaches the daemon on the gRPC port only."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: daemon
+      gibson.zeroroot.ai/net-role: platform
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.cilium.k8s.namespace.labels.gibson.zeroroot.ai/managed-by: tenant-operator
+            app.kubernetes.io/component: belief-trainer
+            gibson.zeroroot.ai/managed-by: tenant-operator
+          matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
   name: gibson-edge
   namespace: gibson
   labels:
