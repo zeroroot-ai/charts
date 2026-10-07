@@ -202,9 +202,13 @@ jobs:
           # renders — platformPostgres.backup.destinationPath is `required`.
           # This step runs only on a release, so it went red on the first
           # release after that change (v0.130.0) rather than on the PR.
+          # --namespace gibson: the umbrella names the release namespace in the
+          # setec namespace policy (setec.systemPolicy.frontendCallers) and
+          # refuses another. Without it the render fails after the push
+          # (v0.140.0, v0.141.0, charts#499).
           helm template gibson "/tmp/pulled/gibson-$ver.tgz" \
             -f helm/gibson/values-baseline.yaml \
-            -f helm/testdata/render-inputs/gibson.yaml >/dev/null
+            -f helm/testdata/render-inputs/gibson.yaml --namespace gibson >/dev/null
           helm template gibson-crds "/tmp/pulled/gibson-crds-$ver.tgz" >/dev/null
           helm template gibson-operator-crds "/tmp/pulled/gibson-operator-crds-$ver.tgz" >/dev/null
           # gibson-velero takes installer inputs for the same reason the umbrella
