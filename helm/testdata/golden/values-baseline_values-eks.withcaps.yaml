@@ -7726,7 +7726,7 @@ rules:
     verbs: ["patch"]
   - apiGroups: ["apps"]
     resources: ["statefulsets"]
-    resourceNames: ["gibson-gibson-workloads","gibson-openbao","gibson-redis-stack"]
+    resourceNames: ["gibson-gibson-workloads","gibson-redis-stack"]
     verbs: ["patch"]
   - apiGroups: ["batch"]
     resources: ["cronjobs"]
@@ -14760,10 +14760,11 @@ metadata:
   # 2026-09-02). Helm ignores these annotations and applies in one phase.
   annotations:
     argocd.argoproj.io/sync-wave: "-12"
-    # OpenBao reads its listener certificate at start. cert-manager renews it
-    # 360 hours before its end, and Reloader restarts the pod on the change.
-    # The static seal unseals the new pod with no step.
-    secret.reloader.stakater.com/reload: "gibson-openbao-tls"
+  # No Reloader annotation: a workload that can patch this StatefulSet can
+  # take it over (scripts/check-owner-credential-readers.py). OpenBao reads
+  # its listener certificate at start, so the certificate lives as long as
+  # its CA and renews a year before its end; any pod restart in that year
+  # loads the new one (templates/auth/openbao-tls.yaml).
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
@@ -19059,8 +19060,11 @@ metadata:
     app.kubernetes.io/component: openbao-tls
 spec:
   secretName: gibson-openbao-tls
-  duration: 2160h
-  renewBefore: 360h
+  # As long as the CA. OpenBao reads the file at start and no workload may
+  # restart it on a change, so the renewal comes a year before the end and
+  # any pod restart in that year loads it.
+  duration: 87600h
+  renewBefore: 8760h
   commonName: "gibson-openbao.gibson.svc"
   dnsNames:
     - "gibson-openbao"

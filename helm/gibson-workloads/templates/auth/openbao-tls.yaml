@@ -103,8 +103,11 @@ metadata:
     app.kubernetes.io/component: openbao-tls
 spec:
   secretName: {{ include "gibson.openbaoTLSSecret" . }}
-  duration: 2160h
-  renewBefore: 360h
+  # As long as the CA. OpenBao reads the file at start and no workload may
+  # restart it on a change, so the renewal comes a year before the end and
+  # any pod restart in that year loads it.
+  duration: 87600h
+  renewBefore: 8760h
   commonName: {{ printf "%s-openbao.%s.svc" $rel $ns | quote }}
   dnsNames:
     - {{ printf "%s-openbao" $rel | quote }}

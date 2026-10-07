@@ -230,14 +230,15 @@ metadata:
   # the wave, and the first cold recreate deadlocks (measured, kind
   # 2026-09-02). Helm ignores these annotations and applies in one phase.
   {{- end }}
+  {{- if (.Values.externalSecrets).preSyncBringup }}
   annotations:
-    {{- if (.Values.externalSecrets).preSyncBringup }}
     argocd.argoproj.io/sync-wave: "-12"
-    {{- end }}
-    # OpenBao reads its listener certificate at start. cert-manager renews it
-    # 360 hours before its end, and Reloader restarts the pod on the change.
-    # The static seal unseals the new pod with no step.
-    secret.reloader.stakater.com/reload: {{ include "gibson.openbaoTLSSecret" . | quote }}
+  {{- end }}
+  # No Reloader annotation: a workload that can patch this StatefulSet can
+  # take it over (scripts/check-owner-credential-readers.py). OpenBao reads
+  # its listener certificate at start, so the certificate lives as long as
+  # its CA and renews a year before its end; any pod restart in that year
+  # loads the new one (templates/auth/openbao-tls.yaml).
   labels:
     {{- include "gibson.labels" . | nindent 4 }}
     app.kubernetes.io/component: openbao
