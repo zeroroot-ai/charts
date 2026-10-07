@@ -91,7 +91,7 @@ run_ensure() {
   run run_ensure 90000 0 ""
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "mint" ]
-  [[ "${lines[1]}" =~ ^annotate\ acc-old\ 1[78][0-9][0-9]$ ]]
+  [[ "${lines[1]}" =~ ^annotate\ acc-old\ (89[0-9]|900)$ ]]
 }
 
 @test "a rotation request newer than the token gets a successor" {
