@@ -119,11 +119,15 @@ spec:
       initContainers:
         - name: wait-for-vault
           image: {{ include "gibson.toolImage" . | quote }}
+          volumeMounts:
+            {{- include "gibson.openbaoCAMount" . | nindent 12 }}
+          env:
+            {{- include "gibson.openbaoCAEnv" . | nindent 12 }}
           command: ['sh', '-c']
           args:
             - |
               set -e
-              BAO_ADDR="http://{{ .Release.Name }}-openbao:{{ $openbaoPort }}"
+              BAO_ADDR="{{ include "gibson.openbaoAddr" . }}"
               echo "Waiting for Vault at ${BAO_ADDR}/v1/sys/health ..."
               i=0
               while [ $i -lt 90 ]; do
@@ -145,11 +149,13 @@ spec:
       containers:
         - name: approle-cert-manager-init
           image: {{ include "gibson.toolImage" . | quote }}
+          env:
+            {{- include "gibson.openbaoCAEnv" . | nindent 12 }}
           command: ['sh', '-c']
           args:
             - |
               set -e
-              BAO_ADDR="http://{{ .Release.Name }}-openbao:{{ $openbaoPort }}"
+              BAO_ADDR="{{ include "gibson.openbaoAddr" . }}"
               APPROLE_PATH="{{ $approlePath }}"
               PKI_MOUNT="{{ $pkiMount }}"
               PKI_ROLE="{{ $pkiRole }}"
@@ -307,6 +313,7 @@ spec:
 
               echo "=== openbao-approle-cert-manager-init: OK ==="
           volumeMounts:
+            {{- include "gibson.openbaoCAMount" . | nindent 12 }}
             - name: openbao-admin-token
               mountPath: /etc/vault-init
               readOnly: true
@@ -323,6 +330,7 @@ spec:
               cpu: 100m
               memory: 128Mi
       volumes:
+        {{- include "gibson.openbaoCAVolume" . | nindent 8 }}
         - name: openbao-admin-token
           secret:
             # The token of this Job alone, policy cert-manager-approle-init

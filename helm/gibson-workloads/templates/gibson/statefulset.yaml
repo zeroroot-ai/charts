@@ -272,6 +272,7 @@ spec:
               containerPort: {{ .Values.gibson.service.authzRegistry.port | default 8086 }}
               protocol: TCP
           env:
+            {{- include "gibson.openbaoCAEnv" . | nindent 12 }}
             # the daemon reads FGA store_id + model_id from env
             # vars instead of calling the Kubernetes API to GET the
             # gibson-fga-config ConfigMap. The gibson-fga-init Job writes
@@ -777,6 +778,7 @@ spec:
           resources:
             {{- toYaml .Values.gibson.resources | nindent 12 }}
           volumeMounts:
+            {{- include "gibson.openbaoCAMount" . | nindent 12 }}
             - name: config
               mountPath: /etc/gibson
               readOnly: true
@@ -896,6 +898,7 @@ spec:
       {{- /* Spec 3 §3 R8 — HA topology spread + anti-affinity. */}}
       {{- include "gibson.spread" (dict "ctx" . "component" "gibson") | nindent 6 }}
       volumes:
+        {{- include "gibson.openbaoCAVolume" . | nindent 8 }}
         - name: config
           configMap:
             name: {{ include "gibson.fullname" . }}-config

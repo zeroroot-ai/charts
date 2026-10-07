@@ -103,11 +103,15 @@ spec:
       initContainers:
         - name: wait-for-vault
           image: {{ include "gibson.toolImage" . | quote }}
+          volumeMounts:
+            {{- include "gibson.openbaoCAMount" . | nindent 12 }}
+          env:
+            {{- include "gibson.openbaoCAEnv" . | nindent 12 }}
           command: ['sh', '-c']
           args:
             - |
               set -e
-              BAO_ADDR="http://{{ .Release.Name }}-openbao:{{ .Values.openbao.service.port }}"
+              BAO_ADDR="{{ include "gibson.openbaoAddr" . }}"
               echo "Waiting for Vault at ${BAO_ADDR}/v1/sys/health ..."
               i=0
               while [ $i -lt 90 ]; do
@@ -132,11 +136,13 @@ spec:
       containers:
         - name: jwt-auth-init
           image: {{ include "gibson.toolImage" . | quote }}
+          env:
+            {{- include "gibson.openbaoCAEnv" . | nindent 12 }}
           command: ['sh', '-c']
           args:
             - |
               set -e
-              BAO_ADDR="http://{{ .Release.Name }}-openbao:{{ .Values.openbao.service.port }}"
+              BAO_ADDR="{{ include "gibson.openbaoAddr" . }}"
               JWKS_URL="{{ $spireOidcJwksURL }}"
               BOUND_ISSUER="{{ $spireOidcIssuer }}"
               # Read the Vault admin token from the projected Secret
@@ -245,6 +251,7 @@ spec:
 
               echo "=== openbao-jwt-auth-init: OK ==="
           volumeMounts:
+            {{- include "gibson.openbaoCAMount" . | nindent 12 }}
             # The script writes its JSON and PEM files here (ADR-0165: a
             # read-only root filesystem).
             - name: tmp
@@ -275,6 +282,7 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        {{- include "gibson.openbaoCAVolume" . | nindent 8 }}
         - name: tmp
           emptyDir: {}
         - name: openbao-admin-token
