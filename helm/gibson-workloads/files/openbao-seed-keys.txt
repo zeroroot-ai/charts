@@ -20,7 +20,6 @@
 #                  set-initial-password -Xyz` reads that as an option (exit
 #                  64, blocker 3 loops #16/#18). scripts/check-seed-passwords.sh
 #                  refuses password:rand.
-#   ecpem:<name>   the private key of transit key <name> (ecdsa-p256), PEM
 #   rsapem:<name>  the private key of transit key <name> (rsa-2048), PEM
 #   rsapub:<name>  the public key of transit key <name> (rsa-2048), PEM
 #   literal:<v>    the literal value <v>
@@ -42,7 +41,6 @@
 # gibson-platform-operator-vault Secret. Everything else is generated once
 # and kept, so an upgrade never rotates a credential under a workload.
 gibson-gibson-platform-postgres-password password:pw
-gibson-dashboard-postgres-password password:pw
 gibson-tenant-admin-postgres-password password:pw
 gibson-zitadel-postgres-password password:pw
 gibson-openfga-postgres-password password:pw
@@ -50,11 +48,8 @@ gibson-spire-postgres-password password:pw
 gibson-neo4j-password password:pw
 gibson-redis-password password:pw
 zitadel-masterkey value:rand
-gibson-billing-webhook-secret secret:rand
 gibson-dashboard-session-secrets auth_secret:rand server_actions_key:randb64
 gibson-cg-signing-key key:rand kid:rand8
-gibson-extauthz-grant-current pem:ecpem:extauthz-grant-current kid:rand8
-gibson-extauthz-grant-previous pem:ecpem:extauthz-grant-previous kid:rand8
 gibson-zitadel-system-bot-key private_key:rsapem:zitadel-system-bot public_key:rsapub:zitadel-system-bot
 ghcr-pull-secret pat:input:ghcr-pull-token
 gibson-dashboard-auth-hardening captcha_secret_key:empty email_resend_api_key:empty
