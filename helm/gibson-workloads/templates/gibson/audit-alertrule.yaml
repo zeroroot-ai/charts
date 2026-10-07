@@ -1,0 +1,44 @@
+{{- /*
+Audit write alert (owner decision of 2026-10-05, charts#405).
+
+The daemon writes each audit record to the audit_log table of Postgres, and
+a write never drops (gibson#838). One failure needs a page:
+
+  AuditWriteErrors   gibson_audit_write_errors_total grows: a write to the
+                     audit_log table failed. The owner decision is "an alert
+                     fires on any audit write error", so the threshold is
+                     one, with no wait.
+
+tests/alerts/audit.test.yaml proves it with `promtool test rules`
+(make alert-rules-test). Renders only where prometheus-operator CRDs exist.
+*/}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-audit-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: daemon
+spec:
+  groups:
+    - name: audit
+      rules:
+        - alert: AuditWriteErrors
+          expr: |
+            sum(increase(gibson_audit_write_errors_total[5m])) > 0
+          for: 0m
+          labels:
+            severity: page
+            component: daemon
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/audit.md#auditwriteerrors"
+            summary: "The daemon failed to write an audit record"
+            description: |
+              A write to the audit_log table failed in the last 5 minutes.
+              An audit write never drops, so the daemon retries and the
+              caller waits. Common causes: the platform Postgres does not
+              answer, the audit_log table is full or locked, or a migration
+              changed the table under the daemon.
+{{- end }}

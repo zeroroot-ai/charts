@@ -17720,6 +17720,32 @@ spec:
               and the namespace's remaining resources. A finalizer the reaper
               does not know is removed by fixing its controller, never by
               editing the namespace.
+    - name: tenant-operator.final-backup
+      rules:
+        - alert: TenantOperatorFinalBackupFailed
+          # Owner decision of 2026-10-05 (charts#405): a tenant delete takes
+          # a last backup first, and the flow fails when the backup fails
+          # (gibson#677). The counter grows once per delete pass that stopped
+          # because the backup did not complete, by reason: read_namespace,
+          # audit, create, read, backup_failed, timeout. One such pass pages:
+          # the tenant is not deleted and nothing else says so.
+          expr: |
+            sum(increase(gibson_tenant_operator_final_backup_failures_total[15m])) > 0
+          for: 0m
+          labels:
+            severity: page
+            component: tenant-operator
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/tenant-operator.md#tenantoperatorfinalbackupfailed"
+            summary: "The last backup of a tenant delete failed"
+            description: |
+              A tenant delete stopped in the last 15 minutes because the last
+              backup of the tenant did not complete. The delete removed
+              nothing and retries on the next pass. Read the reason label of
+              gibson_tenant_operator_final_backup_failures_total: backup_failed
+              and timeout name the Velero Backup, create and read name the
+              Velero API, read_namespace names the tenant namespace, and
+              audit names the daemon.
     - name: tenant-operator.daemon-calls
       rules:
         - alert: TenantOperatorDaemonCallsFailing
@@ -17814,6 +17840,30 @@ spec:
               the last 5 minutes. Check
               dashboard_login_error_total{reason} for the dominant
               reason.
+        - alert: DashboardSignInDaemonUnreachable
+          # Owner decision of 2026-10-05 (charts#405): a sign-in that fails
+          # because the dashboard cannot reach the daemon pages. The jwt
+          # callback of the dashboard records each failed sign-in with the
+          # reason of its membership resolution (auth.ts, membership.ts):
+          # daemon_unavailable is a transport failure, Unavailable or
+          # DeadlineExceeded from ListMyMemberships. One such sign-in
+          # fires the rule.
+          expr: |
+            sum(increase(dashboard_signin_total{outcome="error", error_reason="daemon_unavailable"}[5m])) > 0
+          for: 0m
+          labels:
+            severity: page
+            component: dashboard-auth
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/dashboard-auth.md#dashboardsignindaemonunreachable"
+            summary: "A sign-in failed because the dashboard cannot reach the daemon"
+            description: |
+              A sign-in callback of the dashboard failed in the last 5
+              minutes because ListMyMemberships did not reach the daemon
+              (Unavailable, DeadlineExceeded, or a transport failure). The
+              person saw /login/error?reason=daemon_unavailable. Check the
+              daemon pods, Envoy, and the network policy between the
+              dashboard and the daemon.
         - alert: DashboardFGAUnreachable
           expr: |
             increase(dashboard_membership_resolution_total{outcome="fga_error"}[1m]) > 0
@@ -17961,6 +18011,40 @@ spec:
               with Unavailable. Every component call fails until Redis answers.
               Check gibson-redis-stack, its password Secret and the network
               policy between ext-authz and Redis.
+---
+# Source: gibson/charts/gibson-workloads/templates/gibson/audit-alertrule.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gibson-audit-alerts
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: daemon
+spec:
+  groups:
+    - name: audit
+      rules:
+        - alert: AuditWriteErrors
+          expr: |
+            sum(increase(gibson_audit_write_errors_total[5m])) > 0
+          for: 0m
+          labels:
+            severity: page
+            component: daemon
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/audit.md#auditwriteerrors"
+            summary: "The daemon failed to write an audit record"
+            description: |
+              A write to the audit_log table failed in the last 5 minutes.
+              An audit write never drops, so the daemon retries and the
+              caller waits. Common causes: the platform Postgres does not
+              answer, the audit_log table is full or locked, or a migration
+              changed the table under the daemon.
 ---
 # Source: gibson/charts/gibson-workloads/templates/gibson/audit-export-alertrule.yaml
 apiVersion: monitoring.coreos.com/v1

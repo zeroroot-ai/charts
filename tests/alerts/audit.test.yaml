@@ -1,0 +1,37 @@
+# promtool unit test of the audit write alert (charts#405).
+# scripts/check-alert-rules-test.sh renders the rules to audit.rules.yaml.
+rule_files:
+  - audit.rules.yaml
+evaluation_interval: 1m
+tests:
+  # No write error: the rule stays silent.
+  - interval: 1m
+    input_series:
+      - series: 'gibson_audit_write_errors_total{pod="gibson-0"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: AuditWriteErrors
+        exp_alerts: []
+  # One write error fires the rule at once.
+  - interval: 1m
+    input_series:
+      - series: 'gibson_audit_write_errors_total{pod="gibson-0"}'
+        values: '0x5 1x15'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: AuditWriteErrors
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: AuditWriteErrors
+        exp_alerts:
+          - exp_labels: {severity: page, component: daemon}
+            exp_annotations:
+              summary: "The daemon failed to write an audit record"
+              runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/audit.md#auditwriteerrors"
+              description: |
+                A write to the audit_log table failed in the last 5 minutes.
+                An audit write never drops, so the daemon retries and the
+                caller waits. Common causes: the platform Postgres does not
+                answer, the audit_log table is full or locked, or a migration
+                changed the table under the daemon.

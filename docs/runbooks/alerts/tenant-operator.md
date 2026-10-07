@@ -17,6 +17,17 @@ A `tenant-*` namespace stays in `Terminating` longer than the grace period of th
 3. List what is left in the namespace: `kubectl api-resources --verbs=list --namespaced -o name | xargs -n1 kubectl -n <ns> get --ignore-not-found --show-kind`.
 4. For a finalizer that the reaper does not know, fix the controller that owns it. Do not edit the namespace.
 
+## TenantOperatorFinalBackupFailed
+
+A tenant delete stopped because the last backup of the tenant did not complete. The delete removed nothing, and the operator retries on the next pass.
+
+1. Read the `reason` label of `gibson_tenant_operator_final_backup_failures_total`.
+2. If the reason is `backup_failed` or `timeout`, read the Velero Backup: `kubectl -n velero get backups.velero.io -l gibson.zeroroot.ai/backup-kind=final` and `velero backup describe <name> --details`.
+3. If the reason is `create` or `read`, check the Velero API: `kubectl -n velero get pods` and the operator log for the Velero error.
+4. If the reason is `read_namespace`, check that the tenant namespace exists: `kubectl get ns -l gibson.zeroroot.ai/tenant`.
+5. If the reason is `audit`, check the daemon as in [TenantOperatorDaemonCallsFailing](#tenantoperatordaemoncallsfailing).
+6. Fix the cause in the chart or in the producer. The operator takes the backup again on its next pass.
+
 ## TenantOperatorDaemonCallsFailing
 
 The calls of the tenant-operator to the daemon (`gibson.daemon.operator.v1.DaemonOperatorService`, SPIFFE mTLS) fail repeatedly. Tenant admin work and pending provisioning stall, and a new signup can stay without access to its workspace.

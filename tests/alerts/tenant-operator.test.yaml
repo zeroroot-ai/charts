@@ -1,0 +1,40 @@
+# promtool unit test of the tenant-operator final backup alert (charts#405).
+# rule: gibson-tenant-operator-rules
+# scripts/check-alert-rules-test.sh renders the rules to tenant-operator.rules.yaml.
+rule_files:
+  - tenant-operator.rules.yaml
+evaluation_interval: 1m
+tests:
+  # No failed backup: the rule stays silent.
+  - interval: 1m
+    input_series:
+      - series: 'gibson_tenant_operator_final_backup_failures_total{reason="backup_failed", pod="tenant-operator-0"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: TenantOperatorFinalBackupFailed
+        exp_alerts: []
+  # One delete pass that stopped on its last backup fires the rule at once.
+  - interval: 1m
+    input_series:
+      - series: 'gibson_tenant_operator_final_backup_failures_total{reason="backup_failed", pod="tenant-operator-0"}'
+        values: '0x5 1x15'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TenantOperatorFinalBackupFailed
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: TenantOperatorFinalBackupFailed
+        exp_alerts:
+          - exp_labels: {severity: page, component: tenant-operator}
+            exp_annotations:
+              summary: "The last backup of a tenant delete failed"
+              runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/tenant-operator.md#tenantoperatorfinalbackupfailed"
+              description: |
+                A tenant delete stopped in the last 15 minutes because the last
+                backup of the tenant did not complete. The delete removed
+                nothing and retries on the next pass. Read the reason label of
+                gibson_tenant_operator_final_backup_failures_total: backup_failed
+                and timeout name the Velero Backup, create and read name the
+                Velero API, read_namespace names the tenant namespace, and
+                audit names the daemon.
