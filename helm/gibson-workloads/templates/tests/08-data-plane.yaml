@@ -169,8 +169,8 @@ spec:
         - |
           set -eu
           ERR='{{ include "gibson-workloads.tests.errorPrefix" . }}'
-          NEO4J_HOST='{{ .Values.neo4j.host | default "gibson-neo4j" }}'
-          NEO4J_BOLT_PORT='{{ .Values.neo4j.boltPort | default 7687 }}'
+          NEO4J_HOST='gibson-neo4j'
+          NEO4J_BOLT_PORT='7687'
 
           echo "[neo4j-probe] TCP-probing ${NEO4J_HOST}:${NEO4J_BOLT_PORT}"
           if ! (echo > "/dev/tcp/${NEO4J_HOST}/${NEO4J_BOLT_PORT}") 2>/dev/null ; then

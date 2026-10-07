@@ -57,7 +57,7 @@ def judge(text: str) -> list[str]:
 def templates_use_probe_port() -> list[str]:
     out = []
     tdir = os.path.join(ROOT, "helm", "gibson-workloads", "templates", "envoy")
-    for f in ("deployment.yaml", "networkpolicy.yaml"):
+    for f in ("deployment.yaml",):
         text = open(os.path.join(tdir, f)).read()
         for port in set(re.findall(r"(?:containerPort|port):\s*(99\d\d)\b", text)):
             if int(port) != PROBE_PORT:

@@ -31,10 +31,17 @@ gibson:
 # `enabled: true|false` substitution toggle has been deleted — the
 # platform cannot run without it. Sub-feature toggles (`rbac.create`,
 # `podDisruptionBudget.enabled`, `webhook.enabled`, `metrics.enabled`,
-# `networkPolicy.enabled`, `releaseNamespaceRBAC.enabled`,
+# `releaseNamespaceRBAC.enabled`,
 # `orphanReaper.enabled`) remain legitimate.
 tenantOperator:
   namespace: gibson
+  # Per-tenant plugins (gibson#815). spireClassName MUST equal the className
+  # of the SPIRE controller-manager, the same value as
+  # gibson-workloads.spire.controllerManager.className. The umbrella sets both
+  # from one YAML anchor. A wrong name is silent: SPIRE ignores the
+  # ClusterSPIFFEID, and the plugin pod never gets an SVID.
+  plugins:
+    spireClassName: ""
   image:
     # Consolidated monorepo publishes the tenant-operator image as
     # ghcr.io/zeroroot-ai/tenant-operator. The pre-consolidation
@@ -55,7 +62,7 @@ tenantOperator:
     # Tenant CR never reached Ready (deploy#1766, run 33600876035). The
     # package publishes main/latest/sha-* only, so the commit sha tag is the
     # honest provenance.
-    tag: "v0.153.2@sha256:96e4d0d4b083b6bfa3eacc820f0a0ea2f5b5bc9f29dbcdefa7c2a0f5633686f7"
+    tag: "v0.154.0@sha256:4c56cea8cd6d1c3be746d15f406a85ed11ea97f2961ec98962de8f80ece4943e"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     digest: ""
@@ -77,21 +84,17 @@ tenantOperator:
     create: true
     name: gibson-tenant-operator
     annotations: {}
-  # The daemon's ServiceAccount name. The operator binds it to ClusterRole
-  # gibson-connector-creds inside every tenant namespace it provisions
-  # (gibson#137). Must equal gibson-workloads gibson.serviceAccount.name;
-  # scripts/check-daemon-sa-binding.py enforces that on the render.
-  daemonServiceAccountName: gibson
+  # The namespace of the gibson-velero release, where the operator writes the
+  # last Backup of a deleted tenant (ADR-0075, charts#424). It must equal the
+  # --namespace of that release (scripts/baseline-up.sh installs it in velero).
+  veleroNamespace: velero
   rbac:
     create: true
   webhook:
     enabled: true
-    port: 9443
   podDisruptionBudget:
     enabled: true
     minAvailable: 1
-  prometheusRule:
-    enabled: true
   metrics:
     enabled: true
   leaderElection:
@@ -100,75 +103,17 @@ tenantOperator:
     retryPeriod: "2s"
   plans:
     configMapName: gibson-tenant-operator-plans
-    mountPath: /etc/gibson/plans
     sourcePath: files/plans.yaml
-  networkPolicy:
-    enabled: true
   releaseNamespaceRBAC:
     enabled: true
   orphanReaper:
     enabled: true
     gracePeriodSeconds: 300
 
-  # smtp — the tenant-operator's own mail transport, for the welcome email a
-  # new tenant receives. UNDECLARED UNTIL charts#308: the template read
-  # `((.Values.tenantOperator).smtp).host` through safe navigation and its
-  # comment told operators to "override via tenantOperator.smtp.host", a key
-  # this file never carried. So the setting could not be found by reading the
-  # chart, and omitting it failed silently.
-  #
-  # What omitting it cost: `host` falls back to the in-cluster mailpit, which
-  # only kind deploys. Staging set the daemon's and Zitadel's mail and not
-  # this one, and every welcome email failed with
-  # `dial tcp: lookup gibson-mailpit: no such host` for days, while the signup
-  # smoke stayed green because an undelivered mail is a Warning event and not
-  # a failed reconcile (hosted#372).
-  #
-  # The umbrella's mail-transport-guard.yaml now fails the render when the
-  # daemon is configured for smtp and this host is empty, so the omission
-  # cannot repeat.
-  smtp:
-    host: ""              # e.g. email-smtp.us-east-1.amazonaws.com — no port
-    port: 587
-    from: ""              # defaults to no-reply@zeroroot.ai; set it per env
-    # starttls (port 587, dial plaintext then upgrade) or implicit (port 465,
-    # TLS from the first byte). Both encrypt. This replaced a boolean `tls`
-    # whose false value meant STARTTLS rather than plaintext (gibson#561), which
-    # read as "no TLS" and cost a staging outage against SES on 587. An unknown
-    # value fails the render.
-    tlsMode: starttls
-    # Credentials are READ FROM A SECRET, never from these values. The chart
-    # used to render SMTP_USERNAME and SMTP_PASSWORD as plain values with a
-    # comment saying prod overlays "inject a real value from ESO-backed
-    # Secret" — there was no secretKeyRef in the template, so that mechanism
-    # did not exist and the only way to follow the instruction was to put an
-    # SES password in a gitops values file.
-    #
-    # Empty means `<release>-email-smtp`, the Secret gibson-workloads'
-    # ExternalSecret already materialises with `username` and `password`
-    # keys for the daemon and the dashboard. One Secret, three senders.
-    #
-    # It is NOT defaulted to that name. The Secret exists only when
-    # gibson-workloads sets gibson.email.smtp.externalSecret.enabled, which
-    # staging does and kind does not, so a default would render a secretKeyRef
-    # for a Secret the kind install never creates.
-    credentialsSecretName: ""
-    # anonymous — the relay above accepts any sender with no credential, which
-    # is true of the in-cluster mailpit and of nothing else here. A host with
-    # NEITHER this nor credentialsSecretName fails the render, so a real relay
-    # cannot be contacted anonymously by omission.
-    anonymous: false
+  # The welcome mail of the tenant-operator comes from the one value
+  # global.email of the umbrella (hosted#223). tenantOperator.smtp was
+  # deleted, and setting it fails the render.
   # Billing controls.
-  # stripeAPIBaseURL: when set, routes all Stripe API calls to the given
-  # base URL instead of api.stripe.com. Use with the gibson-workloads
-  # stripe-mock service in kind (stripeMock.enabled: true). Leave empty
-  # in production.
-  billing:
-    # The Stripe mode guard is the dashboard's, not the operator's: both read
-    # the same key out of the same Secret, and only the dashboard compares its
-    # prefix to a declared mode. See dashboard.billing.stripeExpectedMode in
-    # gibson-workloads.
-    stripeAPIBaseURL: ""
   # devMode was deleted in deploy#205 (one-code-path epic): the operator
   # binary boots identically in every environment. Capability misses always
   # fail-fast — there is no longer a per-environment bypass.
@@ -242,7 +187,7 @@ platformOperator:
     # deploy#789: digest-pinned for staging/prod immutability.
     # The digest below is the current `latest`. kind keeps :main, exempt.
     # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/platform-operator/versions
-    tag: "v0.153.2@sha256:ee0c4c3c31ccec3f8ff32cc559268a933a0802c5ea9a31f8aa502a3e9b109ae4"
+    tag: "v0.154.0@sha256:cfae30520dcf12332da47802c5841d618cc2ab28e7d73b6ae845f967e6b09e0c"
     # digest (deploy#1066) — see tenantOperator.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -255,7 +200,6 @@ platformOperator:
       cpu: 500m
       memory: 512Mi
   serviceAccount:
-    create: true
     name: gibson-platform-operator
     annotations: {}
   rbac:
@@ -296,7 +240,7 @@ connectorOperator:
     # name:tag@digest reference kubelet pulls by digest; the `main` tag is
     # cosmetic). kind keeps the floating :main tag (values-kind.yaml), exempt.
     # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/connector-operator/versions
-    tag: "v0.153.2@sha256:843b3044bab4adaf04b5fe347892b2c2a7e80bd6e79f5b68f6a9ab02ba712da4"
+    tag: "v0.154.0@sha256:cdbc2d083e9573ec281a28bed4f90085cf8a28876a34fa834703a45b81b454a8"
     # digest (deploy#1066) — see tenantOperator.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -335,16 +279,12 @@ global:
   environment: ""
 
 
-# Envoy gateway — tenant-operator reads these for hostAliases + TLS mounts.
+# Envoy gateway — tenant-operator reads these for TLS mounts.
 # Envoy is required infrastructure (deploy#200 / one-code-path epic). The
 # chart unconditionally references Envoy; there is no `.enabled` opt-out.
-# clusterIP MUST be set in kind overlays (where pods need a hostAlias pin);
-# in production the value stays empty (public DNS resolves to the ALB).
 # tls.secretName MUST be set on every install — it names the cert-manager-
 # managed Secret consumers mount to trust the Envoy edge CA.
 envoy:
-  service:
-    clusterIP: ""
   tls:
     secretName: "gibson-envoy-tls"
     # CA trust anchor the operators mount to validate Envoy's edge serving
@@ -516,10 +456,6 @@ aws:
 kms:
   keyARN: ""
 
-# Dashboard sub-block needed by tenant-operator deployment for ZITADEL_ISSUER.
-dashboard:
-  zitadel:
-    issuer: ""
 
 # -----------------------------------------------------------------------------
 # PlatformBootstrap CR (Phase 7.8 + masterKey/postgresBundle extension).
@@ -537,16 +473,6 @@ dashboard:
 # -----------------------------------------------------------------------------
 platformBootstrap:
   zitadel:
-    # OIDC issuer URL for both browser and in-cluster traffic. Kind dev
-    # uses `https://app.zeroroot.ai:30443` (Envoy NodePort) — the retired
-    # `auth.` subdomain is not used.
-    issuer: ""
-    # externalDomain — public hostname forged onto the Host header on
-    # every operator → Zitadel API request. Required when the operator
-    # dials Zitadel by in-cluster Service name (Zitadel's vhost router
-    # matches by Host, not SNI). Same value as the Zitadel chart's
-    # configmapConfig.ExternalDomain.
-    externalDomain: ""
     adminTokenRef:
       name: "iam-admin-pat"
       namespace: ""
@@ -554,12 +480,11 @@ platformBootstrap:
     project:
       name: "gibson"
       ensureExists: true
-    # systemClient — activates the TrustedDomainReady reconcile step
-    # (platform-operator#29). When both fields are empty the
-    # step short-circuits with reason SystemClientDisabled. Overlays set
-    # these to register the cluster Service hostname as an additional
-    # trusted Zitadel domain so every Gibson pod can dial Zitadel by
-    # Service name without the per-pod hostAliases workaround.
+    # systemClient — the System API client that mints the Zitadel admin
+    # token (AdminTokenReady, gibson#794). trustedClusterDomain names the
+    # Zitadel Service that the operator dials. No trusted domain is
+    # registered: the x-zitadel-instance-host header alone selects the
+    # instance (gibson#990).
     # loginBranding.configMap — the ConfigMap that holds the login brand
     # (label-policy.json, logo.svg, icon.svg). The umbrella chart renders it
     # from helm/gibson/files/branding and sets this name. Empty: no brand.
@@ -576,39 +501,9 @@ platformBootstrap:
       # Leave empty: the template derives http://<trustedClusterDomain>:8080.
       # Set it only for a non-8080 port or an off-chart Zitadel.
       apiURL: ""
-    # smtp — Zitadel's own SMTP email provider (hosted#189). Nil/absent
-    # (leave `host` empty) means an explicit offline install: Zitadel sends
-    # no mail at all, and both global.platformOwner.offlineSetup and
-    # global.firstTenant.offlineSetup MUST be true, or the umbrella's guards
-    # fail the render. Point this at the SAME credentials
-    # gibson-workloads.gibson.email.smtp uses — one mail transport per
-    # install. The umbrella's mail-transport-guard template fails the render
-    # if gibson-workloads.gibson.email.provider is "smtp" while host here is
-    # empty.
-    smtp:
-      host: ""              # e.g. email-smtp.us-east-1.amazonaws.com — no port
-      port: 587
-      fromAddress: ""       # e.g. no-reply@<domain> — same as gibson.email.from
-      fromName: "Zero Root"
-      tls: true
-      # credentialsSecretName — the common case: gibson-workloads' own
-      # externalSecret path materialises ONE Secret ("<release>-email-smtp")
-      # carrying both a "username" and a "password" key. Name it here and
-      # both userSecretRef and passwordSecretRef below default to it, so an
-      # overlay states this once instead of repeating a name in two blocks.
-      credentialsSecretName: ""
-      # userSecretRef / passwordSecretRef override credentialsSecretName
-      # field-by-field — needed for gibson.email.smtp's OTHER path (a plain
-      # username value + an operator-created Secret holding only the
-      # password: the username is not a Secret key there at all). Leave both
-      # unset (and credentialsSecretName empty) for a relay that accepts
-      # anonymous submission, e.g. an in-cluster kind/k3d Mailpit.
-      userSecretRef:
-        name: ""
-        key: "username"
-      passwordSecretRef:
-        name: ""
-        key: "password"
+    # Zitadel's SMTP provider comes from the one value global.email of the
+    # umbrella (hosted#223). platformBootstrap.zitadel.smtp was deleted, and
+    # setting it fails the render.
 
   # OIDC clients to reconcile as child OIDCClient CRs.
   oidcClients: []
@@ -699,8 +594,8 @@ platformBootstrap:
 # -----------------------------------------------------------------------
 reloader:
   image:
-    repository: ghcr.io/stakater/reloader
-    tag: "v1.4.6"
+    repository: ghcr.io/zeroroot-ai/mirror/reloader
+    tag: "v1.4.6@sha256:fa2d03a1b36738e7c7420fd0fbfe601339875a38d24e8a27f5f1883139055c2b"
     pullPolicy: IfNotPresent
   # The workloads Reloader may roll: every Deployment and StatefulSet in the
   # release namespace that carries a `*.reloader.stakater.com/reload`

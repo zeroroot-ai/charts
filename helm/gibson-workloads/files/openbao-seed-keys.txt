@@ -29,10 +29,13 @@
 #   input:<file>   the bringup keyring input mounted at /etc/openbao/inputs/<file>
 #   inputjson:<f>  the property of the same name in the JSON object mounted at
 #                  /etc/openbao/inputs/<f>
+#   inputor:<f>:<v> the keyring input <f> when the bringup supplied one, else
+#                  the literal <v> (charts#486). A test-mode placeholder stays
+#                  only while the keyring member is empty.
 #   svctoken       the platform service token the sidecar minted
 #
 # A property that is PRESENT is never overwritten, with two exceptions:
-# `input` and `inputjson` follow the keyring (a non-empty keyring value that
+# `input`, `inputjson` and `inputor` follow the keyring (a non-empty keyring value that
 # differs from the stored one is written, at sidecar start and on every
 # five-minute pass after it, so a member set after the bringup lands without
 # a pod restart), and `svctoken` follows the token in the
@@ -55,6 +58,7 @@ gibson-extauthz-grant-previous pem:ecpem:extauthz-grant-previous kid:rand8
 gibson-zitadel-system-bot-key private_key:rsapem:zitadel-system-bot public_key:rsapub:zitadel-system-bot
 ghcr-pull-secret pat:input:ghcr-pull-token
 gibson-dashboard-auth-hardening captcha_secret_key:empty email_resend_api_key:empty
-gibson-stripe-credentials publishable_key:literal:pk_test_placeholder secret_key:literal:sk_test_placeholder webhook_secret:literal:whsec_placeholder
+gibson-stripe-credentials publishable_key:inputor:stripe-publishable-key:pk_test_placeholder secret_key:inputor:stripe-secret-key:sk_test_placeholder webhook_secret:inputor:stripe-webhook-secret:whsec_placeholder
 ses-smtp-credentials username:input:smtp-username password:input:smtp-password
 gibson-vault-admin-token token:svctoken
+setec-disk-signing seed:input:setec-disk-signing-seed

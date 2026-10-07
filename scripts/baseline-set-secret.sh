@@ -33,7 +33,6 @@ if [ "${1:-}" = "--selftest" ]; then
   cat > "$tmp/bin/kubectl" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
-  *"get secret"*) printf '%s' 'dG9rZW4tMTIz' ;;                 # VAULT_ADMIN_TOKEN=token-123
   *" exec "*)     printf '%s\n' "$@" > "$STUB_DIR/argv"; cat > "$STUB_DIR/stdin"; printf '200' ;;
   *"get externalsecrets"*) printf '%s' '{"items":[]}' ;;
 esac
@@ -43,9 +42,12 @@ STUB
   STUB_DIR="$tmp" PATH="$tmp/bin:$PATH" "$0" ghcr-pull-secret pat "$hostile" >/dev/null
   grep -qF -- "SET_VALUE=$hostile" "$tmp/argv" \
     || { echo "SELFTEST FAIL: the value did not reach the pod as an env argument"; exit 1; }
-  grep -qF -- "VAULT_TOKEN=token-123" "$tmp/argv" \
-    || { echo "SELFTEST FAIL: the token did not reach the pod as an env argument"; exit 1; }
-  if grep -qF -- "pwned" "$tmp/stdin" || grep -qF -- "token-123" "$tmp/stdin"; then
+  if grep -qF -- "VAULT_TOKEN=" "$tmp/argv"; then
+    echo "SELFTEST FAIL: a token left the cluster: the pod must log in with its own ServiceAccount"; exit 1
+  fi
+  grep -qF -- "auth/kubernetes/login" "$tmp/stdin" \
+    || { echo "SELFTEST FAIL: the pod script does not log in with the openbao-seeder role"; exit 1; }
+  if grep -qF -- "pwned" "$tmp/stdin"; then
     echo "SELFTEST FAIL: a caller value is part of the script text the pod runs"; exit 1
   fi
   grep -qF -- '$SET_VALUE' "$tmp/stdin" \
@@ -60,14 +62,11 @@ if [ "$#" -ne 3 ]; then
 fi
 KEY="$1"; PROP="$2"; VALUE="$3"
 
-# The admin token the sidecar minted. Never printed, never passed on a command
-# line that lands in a log — handed to the exec'd shell as environment.
-TOKEN="$(kubectl -n "$NS" get secret "${RELEASE}-platform-operator-vault" \
-  -o jsonpath='{.data.VAULT_ADMIN_TOKEN}' | base64 -d)"
-if [ -z "$TOKEN" ]; then
-  echo "FATAL: no VAULT_ADMIN_TOKEN — has OpenBao finished bootstrapping?" >&2
-  exit 1
-fi
+# No token leaves the cluster. The exec'd shell runs in the openbao-auto-init
+# sidecar and logs in there with the openbao-seeder role, from the projected
+# ServiceAccount token of the pod, the same login the sidecar uses for its own
+# seed pass. That token lives 15 minutes, and the script revokes it at the end.
+# No consumer token can write an arbitrary KV key: each holds only its own paths.
 
 # Read-modify-write: a KV v2 write REPLACES the whole object, so writing one
 # property naively would silently drop the others (ses-smtp-credentials holds two).
@@ -80,8 +79,13 @@ fi
 # script must not care what is in them. The quoted heredoc below contains no
 # expansion at all.
 code="$(kubectl -n "$NS" exec -i "$POD" -c openbao-auto-init -- \
-  env "SET_KEY=$KEY" "SET_PROP=$PROP" "SET_VALUE=$VALUE" "VAULT_TOKEN=$TOKEN" sh -s <<'EOF'
+  env "SET_KEY=$KEY" "SET_PROP=$PROP" "SET_VALUE=$VALUE" sh -s <<'EOF'
 set -eu
+VAULT_TOKEN=$(jq -nc --arg j "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" '{role:"openbao-seeder",jwt:$j}' \
+  | curl -sS -X POST -H 'Content-Type: application/json' -d @- \
+    "http://127.0.0.1:8200/v1/auth/kubernetes/login" | jq -r '.auth.client_token // empty')
+[ -n "$VAULT_TOKEN" ] || { echo 000; exit 0; }
+trap 'curl -sS -o /dev/null -X POST -H "X-Vault-Token: $VAULT_TOKEN" http://127.0.0.1:8200/v1/auth/token/revoke-self || true' EXIT
 cur=$(curl -sS -H "X-Vault-Token: $VAULT_TOKEN" \
   "http://127.0.0.1:8200/v1/secret/data/$SET_KEY" | jq -c '.data.data // {}')
 merged=$(printf '%s' "$cur" | jq -c --arg p "$SET_PROP" --arg v "$SET_VALUE" '.[$p]=$v')

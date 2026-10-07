@@ -1,61 +1,27 @@
 {{- /*
-  ConnectorInstance write access for the gibson daemon.
+  The Secret rules of the connector operator in each tenant namespace.
 
-  The ConnectorService (ListCatalog / EnableConnector / ListConnectors /
-  DisableConnector) writes a ConnectorInstance custom resource into the caller's
-  tenant namespace (tenant-<id>). The connector-operator then reconciles it into
-  a ToolHive MCPServer or MCPRemoteProxy. The daemon writes only the declarative
-  ConnectorInstance; it never writes the ToolHive resources or the pods.
-
-  ConnectorInstance is namespaced and lives in every tenant namespace, so the
-  grant is a ClusterRole. It is scoped to exactly one resource — connectorinstances
-  — and nothing else, so the daemon cannot reach other tenant primitives.
+  The daemon holds no Kubernetes client (ADR-0023, gibson#664), so it has no
+  grant here: no Tenant read, no ConnectorInstance write and no Secret. The
+  connector operator writes the credential Secret of each connector
+  (<connector>-connector-cred) and the ConnectorInstances (gibson#662,
+  gibson#663). make connector-creds-binding fails on a grant to the daemon.
 */}}
-{{- if .Values.gibson.serviceAccount.create }}
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: {{ include "gibson.fullname" . }}-connectorinstances
-  labels:
-    {{- include "gibson.labels" . | nindent 4 }}
-rules:
-  - apiGroups: ["gibson.zeroroot.ai"]
-    resources: ["connectorinstances"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["gibson.zeroroot.ai"]
-    resources: ["connectorinstances/status"]
-    verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: {{ include "gibson.fullname" . }}-connectorinstances
-  labels:
-    {{- include "gibson.labels" . | nindent 4 }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: {{ include "gibson.fullname" . }}-connectorinstances
-subjects:
-  - kind: ServiceAccount
-    name: {{ include "gibson.serviceAccountName" . }}
-    namespace: {{ .Release.Namespace }}
-{{- end }}
----
-# #1562: the daemon materializes the connector credential Secret
+# The connector operator materializes the connector credential Secret
 # (<connector>-connector-cred, a "Bearer <token>" the ToolHive proxy forwards)
-# into each tenant namespace from its connector-token loop. The Secret is
-# namespaced and lives in every tenant namespace.
+# into each tenant namespace (gibson#663). The Secret is namespaced and lives
+# in every tenant namespace.
 #
 # This ClusterRole carries the rules only. There is no ClusterRoleBinding:
 # the tenant-operator binds it into each tenant namespace with a RoleBinding
-# when it provisions the namespace (gibson#137, operator v0.137.0), so the
-# daemon reads and writes Secrets in tenant namespaces and nowhere else. The
+# when it provisions the namespace (gibson#137), so the connector operator
+# reads and writes Secrets in tenant namespaces and nowhere else. The
 # name is fixed because the operator binds it by name; its own ClusterRole
 # may `bind` exactly this name (gibson-operators tenant-operator/cluster-role).
-# The operator learns the daemon's ServiceAccount from
-# DAEMON_SERVICE_ACCOUNT_NAME, and scripts/check-daemon-sa-binding.py keeps
-# that value equal to the ServiceAccount the daemon StatefulSet runs as.
+# The tenant operator learns the connector operator's ServiceAccount from
+# CONNECTOR_OPERATOR_SERVICE_ACCOUNT_NAME, and
+# scripts/check-connector-creds-binding.py keeps that value equal to the
+# ServiceAccount the connector operator runs as.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

@@ -1,0 +1,49 @@
+{{- /*
+The tenant-operator takes the last Backup of a deleted tenant (ADR-0075,
+charts#424). Before it deletes a tenant namespace it creates one Velero Backup
+of that namespace in this release's namespace, then reads it until it ends.
+
+The grant is `get` and `create` on backups.velero.io in this namespace only.
+No list, no watch, no delete and no other kind: the operator reads its own
+Backup by name, and the Schedule and the retention rule of the bucket stay the
+only other writers. The operator learns this namespace from VELERO_NAMESPACE
+(gibson-operators tenantOperator.veleroNamespace).
+
+The subject is the ServiceAccount of the tenant-operator in the platform
+namespace (platformNamespace), the namespace that templates/schedule.yaml
+backs up.
+*/ -}}
+{{- $operatorNs := required "platformNamespace is required: the namespace of the gibson release" .Values.platformNamespace }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gibson-tenant-operator-final-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: tenant-operator-final-backup
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+rules:
+  - apiGroups: ["velero.io"]
+    resources: ["backups"]
+    verbs: ["get", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gibson-tenant-operator-final-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: tenant-operator-final-backup
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+subjects:
+  - kind: ServiceAccount
+    name: gibson-tenant-operator
+    namespace: {{ $operatorNs }}
+roleRef:
+  kind: Role
+  name: gibson-tenant-operator-final-backup
+  apiGroup: rbac.authorization.k8s.io

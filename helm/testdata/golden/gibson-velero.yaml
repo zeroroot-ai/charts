@@ -3994,6 +3994,22 @@ rules:
     resources: ["pods/log"]
     verbs: ["get"]
 ---
+# Source: gibson-velero/templates/tenant-operator-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gibson-tenant-operator-final-backup
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: gibson-velero
+    app.kubernetes.io/component: tenant-operator-final-backup
+    app.kubernetes.io/managed-by: Helm
+rules:
+  - apiGroups: ["velero.io"]
+    resources: ["backups"]
+    verbs: ["get", "create"]
+---
 # Source: gibson-velero/templates/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -4012,6 +4028,26 @@ subjects:
 roleRef:
   kind: Role
   name: velero-server
+  apiGroup: rbac.authorization.k8s.io
+---
+# Source: gibson-velero/templates/tenant-operator-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gibson-tenant-operator-final-backup
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: gibson-velero
+    app.kubernetes.io/component: tenant-operator-final-backup
+    app.kubernetes.io/managed-by: Helm
+subjects:
+  - kind: ServiceAccount
+    name: gibson-tenant-operator
+    namespace: gibson
+roleRef:
+  kind: Role
+  name: gibson-tenant-operator-final-backup
   apiGroup: rbac.authorization.k8s.io
 ---
 # Source: gibson-velero/charts/velero/templates/service.yaml
@@ -4063,6 +4099,7 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/version: 1.18.1
         helm.sh/chart: velero-12.1.0
+        gibson.zeroroot.ai/net-role: system
       annotations:
         prometheus.io/path: /metrics
         prometheus.io/port: "8085"
@@ -4165,6 +4202,7 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/version: 1.18.1
         helm.sh/chart: velero-12.1.0
+        gibson.zeroroot.ai/net-role: system
       annotations:
         prometheus.io/path: /metrics
         prometheus.io/port: "8085"
@@ -4220,6 +4258,12 @@ spec:
             periodSeconds: 30
             successThreshold: 1
             timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
           volumeMounts:
             - name: plugins
               mountPath: /plugins
@@ -4227,6 +4271,8 @@ spec:
               mountPath: /credentials
             - name: scratch
               mountPath: /scratch
+            - name: tmpdir
+              mountPath: /tmp
           env:
             - name: VELERO_SCRATCH_DIR
               value: /scratch
@@ -4250,6 +4296,12 @@ spec:
         - image: ghcr.io/zeroroot-ai/mirror/velero-plugin-for-aws:v1.14.2@sha256:0751144c1c8e52d52c48717fbd13ad5a3061e612ae4d7ad744a946cd5b139d1a
           imagePullPolicy: IfNotPresent
           name: velero-plugin-for-aws
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
           volumeMounts:
           - mountPath: /target
             name: plugins
@@ -4261,6 +4313,15 @@ spec:
           emptyDir: {}
         - name: scratch
           emptyDir: {}
+        - name: tmpdir
+          emptyDir: {}
+      securityContext:
+        fsGroup: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
 ---
 # Source: gibson-velero/templates/backupstoragelocation.yaml
 apiVersion: velero.io/v1
@@ -4303,6 +4364,85 @@ spec:
   config:
     region: "us-east-1"
     s3ForcePathStyle: "true"
+---
+# Source: gibson-velero/templates/network-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: gibson-velero-gibson-default-deny
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: gibson-velero
+    app.kubernetes.io/component: network-default-deny
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Each pod of the namespace gibson denies all traffic, except DNS (ADR-0165 rule 4)."
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: gibson
+  enableDefaultDeny:
+    ingress: true
+    egress: true
+  ingress:
+    - {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+---
+# Source: gibson-velero/templates/network-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-velero-velero
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: velero
+    app.kubernetes.io/instance: gibson-velero
+    app.kubernetes.io/component: network-velero
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Velero reaches the API server and the backup bucket only."
+  specs:
+    - endpointSelector:
+        matchLabels:
+          app.kubernetes.io/name: velero
+      egress:
+        - toEntities:
+            - kube-apiserver
+        - toFQDNs:
+            - matchName: "s3.us-east-1.amazonaws.com"
+            - matchName: "example-durable-bucket.s3.us-east-1.amazonaws.com"
+          toPorts:
+            - ports:
+                - port: "443"
+                  protocol: TCP
+    - endpointSelector:
+        matchExpressions:
+        - key: velero.io/repo-name
+          operator: Exists
+      egress:
+        - toEntities:
+            - kube-apiserver
+        - toFQDNs:
+            - matchName: "s3.us-east-1.amazonaws.com"
+            - matchName: "example-durable-bucket.s3.us-east-1.amazonaws.com"
+          toPorts:
+            - ports:
+                - port: "443"
+                  protocol: TCP
 ---
 # Source: gibson-velero/templates/schedule.yaml
 apiVersion: velero.io/v1
@@ -4357,7 +4497,7 @@ spec:
   skipImmediately: true
   template:
     includedNamespaces:
-      - gibson
+      - "gibson"
       - tenant-*
     includedNamespaceScopedResources:
       - "*"

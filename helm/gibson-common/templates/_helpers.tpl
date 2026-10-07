@@ -93,59 +93,6 @@ Values read: none. Derived from .Release.Name.
 {{- end -}}
 
 {{/*
-  gibson.hostAliases
-
-  Emits the hostAliases block (yaml subtree) that pins the public Envoy
-  hostnames (app.<domain>, api.<domain>, www.<domain>, docs.<domain>) to
-  the Envoy Service's ClusterIP. Required for any pod that dials Envoy by its
-  public hostname (dashboard signin callback, daemon OIDC discovery,
-  tenant-operator Zitadel admin client, plugins).
-
-  Emits nothing (just the leading whitespace/comment marker) when:
-    - .Values.envoy.service.clusterIP is unset (production / EKS — no
-      hostAlias pin needed because public DNS resolves to the public
-      ALB; only dev/kind needs the pin).
-
-  Envoy is required infrastructure (deploy#200); there is no `.enabled`
-  toggle. The only knob is whether to pin a hostAlias (kind) or rely on
-  DNS (prod), which the clusterIP value controls.
-
-  Usage in a Deployment / StatefulSet template:
-      spec:
-        template:
-          spec:
-            {{- include "gibson.hostAliases" . | nindent 6 }}
-            securityContext: …
-
-  The helper emits the WHOLE `hostAliases:` key when present, so the
-  caller is responsible only for nindent and for choosing the surrounding
-  insertion point. When disabled, the helper emits no output at all so
-  the surrounding template stays valid.
-
-  Values keys read:
-    - .Values.envoy.service.clusterIP
-    - .Values.global.domain (REQUIRED — see gibson.domain; no fallback)
-
-  Note: `auth.<domain>` is NOT emitted (the platform domain normalization
-  epic, deploy#630, retired the `auth.` subdomain in favor of a single
-  `app.<domain>` host; slice S12 / deploy#642 removed it from here — this
-  note used to describe that removal as pending, it has since landed).
-*/}}
-{{- define "gibson.hostAliases" -}}
-{{- if and (hasKey .Values "envoy") .Values.envoy -}}
-{{- if and (hasKey .Values.envoy "service") .Values.envoy.service.clusterIP -}}
-hostAliases:
-  - ip: {{ .Values.envoy.service.clusterIP | quote }}
-    hostnames:
-      - {{ include "gibson.appHost" . | quote }}
-      - {{ include "gibson.apiHost" . | quote }}
-      - {{ include "gibson.wwwHost" . | quote }}
-      - {{ include "gibson.docsHost" . | quote }}
-{{- end -}}
-{{- end -}}
-{{- end -}}
-
-{{/*
   Identity-provider addressing (ADR-0092). Every in-cluster Zitadel client
   CONNECTS to the Zitadel Service by Kubernetes DNS and CLAIMS the public
   host in the x-zitadel-instance-host header. Zitadel selects its instance
@@ -695,6 +642,15 @@ The daemon's own SA is `gibson.serviceAccountName` above — release-derived
 {{- (((.Values.tenantOperator | default dict).serviceAccount) | default dict).name | default "gibson-tenant-operator" -}}
 {{- end }}
 
+{{- define "gibson.platformOperatorServiceAccountName" -}}
+{{- /* The gibson-operators sub-chart names the platform-operator
+       ServiceAccount from platformOperator.serviceAccount.name with this
+       default. The workloads chart's ClusterSPIFFEID and the identity
+       admission policy read this name (gibson#583). Keep the two charts in
+       agreement. */ -}}
+{{- (((.Values.platformOperator | default dict).serviceAccount) | default dict).name | default "gibson-platform-operator" -}}
+{{- end }}
+
 {{- define "gibson.openbaoServiceAccountName" -}}
 {{- /* CORRECTION: an earlier version of this comment said openbao was a
        sub-chart with "no value in this chart to read". It is in-chart —
@@ -805,15 +761,7 @@ tolerations:
 {{- end }}
 
 {{- define "gibson.tenant.dbHost" -}}
-{{- if .Values.dataPlane.postgres.host }}
-{{- .Values.dataPlane.postgres.host }}
-{{- else if (index .Values "tenant-postgresql" "enabled") }}
-{{- include "gibson.tenant.postgresql.host" . }}
-{{- end }}
-{{- end }}
-
-{{- define "gibson.tenant.postgresql.host" -}}
-{{- printf "%s-tenant-postgresql" .Release.Name }}
+{{- with .Values.dataPlane.postgres.host }}{{ . }}{{ end }}
 {{- end }}
 
 
@@ -1078,6 +1026,17 @@ empty, and the daemon statefulset invokes it. It has no escape hatch:
 {{- end }}
 
 {{/*
+gibson.waitForSpireSocketImage: the image of the wait-for-spire-socket init
+container. Two places run it: the helper below, in each chart pod, and the
+tenant-operator, which gives it to each plugin pod it deploys in a
+tenant-<t>-plugins namespace (PLUGIN_WAIT_FOR_SPIRE_IMAGE, gibson#815). One
+pin keeps the two the same.
+*/}}
+{{- define "gibson.waitForSpireSocketImage" -}}
+ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+{{- end -}}
+
+{{/*
 gibson.waitForSpireSocket — init container that blocks pod start until the
 SPIRE agent's Workload API socket is present on the node. Every SPIFFE-
 consuming pod (daemon, ext-authz, tenant-operator, dashboard) renders this
@@ -1105,7 +1064,7 @@ declare the `spire-agent-socket` volume with the matching mount path.
 */}}
 {{- define "gibson.waitForSpireSocket" -}}
 - name: wait-for-spire-socket
-  image: ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+  image: {{ include "gibson.waitForSpireSocketImage" . }}
   command: ['sh', '-c']
   args:
     - |
@@ -1177,77 +1136,6 @@ declare the `spire-agent-socket` volume with the matching mount path.
 {{- if hasKey $css "kubernetes" -}}
 {{- fail "externalSecrets.clusterSecretStore.kubernetes was deleted (deploy#1733). The in-cluster Kubernetes-provider backend is gone; the store reads OpenBao. Remove the key from the values file." -}}
 {{- end -}}
-{{- end -}}
-
-gibson.netpolEgressAPIServer — one egress rule per CIDR in
-global.networkPolicy.apiServerCIDRs, ports 443 and 6443, and nothing at all
-when the list is empty.
-
-A pod whose policy narrows egress can still reach the kube-apiserver on
-kind, whose policy engine leaves node-bound traffic alone; on EKS the AWS VPC
-CNI network policy agent enforces egress toward the control-plane ENIs like
-any other destination, and the same policy drops it. OpenBao's Kubernetes
-auth does a TokenReview on every login: with that dropped, every login took
-the 30 s API timeout and answered "permission denied", the seeder could not
-renew its own token, and every ExternalSecret went NotReady (staging bringup
-2026-09-10, the first from fresh). An estate names the CIDRs its API server
-answers from; the shipped default is empty. On EKS that is two entries: the
-VPC CIDR for the control-plane ENIs, and the `kubernetes` Service ClusterIP,
-because the VPC CNI agent judges egress against the destination before
-kube-proxy rewrites it (measured 2026-09-10: the ENIs answered, the ClusterIP
-timed out).
-*/}}
-{{- define "gibson.netpolEgressAPIServer" -}}
-{{- $cidrs := list -}}
-{{- with .Values.global -}}{{- with .networkPolicy -}}{{- $cidrs = .apiServerCIDRs | default list -}}{{- end -}}{{- end -}}
-{{- range $cidr := $cidrs }}
-- to:
-    - ipBlock:
-        cidr: {{ $cidr | quote }}
-  ports:
-    - protocol: TCP
-      port: 443
-    - protocol: TCP
-      port: 6443
-{{- end }}
-{{- end -}}
-
-{{/* ---------------------------------------------------------------------
-     gibson.netpolEgressDNS — the DNS egress rule every narrowed policy
-     needs (deploy#1462).
-
-     Under the namespace default-deny (deploy#1365) a pod selected by a
-     policy with policyTypes: [Egress] can reach ONLY what that policy's
-     egress rules allow. Replacing `- {}` with named rules therefore
-     severs name resolution unless DNS is restored explicitly, and a pod
-     that cannot resolve is an outage no render catches.
-
-     kube-dns rather than an ipBlock: the Service ClusterIP is not what
-     NetworkPolicy matches — it matches the BACKING POD, so the selector
-     names the CoreDNS pods. `k8s-app: kube-dns` is CoreDNS's label on
-     both EKS and kind (the Deployment is named coredns; the label is
-     retained for compatibility), and `kubernetes.io/metadata.name` is
-     applied to every namespace by the apiserver since 1.22, so no
-     cluster-specific labelling is assumed.
-
-     UDP *and* TCP :53 — a response larger than the UDP payload limit
-     sets TC and the resolver retries over TCP. Allowing only UDP works
-     until a record grows, which is the worst possible failure mode.
---------------------------------------------------------------------- */}}
-
-{{- define "gibson.netpolEgressDNS" -}}
-- to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: kube-system
-      podSelector:
-        matchLabels:
-          k8s-app: kube-dns
-  ports:
-    - protocol: UDP
-      port: 53
-    - protocol: TCP
-      port: 53
 {{- end -}}
 
 {{/*
@@ -1328,6 +1216,63 @@ here. The render fails on any other name.
 {{- end -}}
 
 {{/*
+gibson.email: the one mail value of the install, global.email (hosted#223,
+ADR-0027), checked and returned as JSON. The daemon, the tenant-operator and
+the PlatformBootstrap (Zitadel) read it; nothing else names a mail transport.
+
+  provider  log   the daemon logs each mail. The tenant-operator sends its
+                  welcome mail to the in-cluster mailpit (no TLS, no
+                  credential). Zitadel gets no SMTP provider.
+            smtp  all three send through smtp.host.
+  from, fromName  the sender. fromName is required with smtp (Zitadel).
+  smtp.tlsMode    starttls (587), implicit (465) or plaintext.
+  smtp.credentials.source
+            secretStore  the ExternalSecret <release>-email-smtp reads
+                         remoteKey (properties username and password)
+            secret       secretName, keys username and password
+            none         a relay that takes no credential
+
+The returned credentialsSecret names the Secret that holds username and
+password, or is empty.
+*/}}
+{{- define "gibson.email" -}}
+{{- $e := required "global.email is required: the one mail value of the install (hosted#223)." ((.Values.global).email) -}}
+{{- $provider := required "global.email.provider is required: log or smtp." $e.provider -}}
+{{- if not (has $provider (list "log" "smtp")) -}}
+{{- fail (printf "global.email.provider is %q: use log or smtp." $provider) -}}
+{{- end -}}
+{{- $from := required "global.email.from is required: the sender address of each mail." $e.from -}}
+{{- $out := dict "provider" $provider "from" $from "fromName" ($e.fromName | default "") "host" "" "port" "" "tlsMode" "" "configurationSet" "" "credentialsSource" "" "credentialsSecret" "" "remoteKey" "" -}}
+{{- if eq $provider "smtp" -}}
+{{- $s := required "global.email.smtp is required when global.email.provider is smtp." $e.smtp -}}
+{{- $_ := set $out "fromName" (required "global.email.fromName is required when global.email.provider is smtp: Zitadel names the sender." $e.fromName) -}}
+{{- $_ := set $out "host" (required "global.email.smtp.host is required when global.email.provider is smtp." $s.host) -}}
+{{- $_ := set $out "port" (toString (required "global.email.smtp.port is required when global.email.provider is smtp." $s.port)) -}}
+{{- $mode := required "global.email.smtp.tlsMode is required: starttls, implicit or plaintext." $s.tlsMode -}}
+{{- if not (has $mode (list "starttls" "implicit" "plaintext")) -}}
+{{- fail (printf "global.email.smtp.tlsMode is %q: use starttls (port 587, dial plaintext then upgrade), implicit (port 465, TLS from the first byte) or plaintext (no encryption, for a sink that offers no STARTTLS)." $mode) -}}
+{{- end -}}
+{{- $_ := set $out "tlsMode" $mode -}}
+{{- $_ := set $out "configurationSet" ($s.configurationSet | default "") -}}
+{{- $c := required "global.email.smtp.credentials is required when global.email.provider is smtp." $s.credentials -}}
+{{- $src := required "global.email.smtp.credentials.source is required: secretStore, secret or none." $c.source -}}
+{{- $_ := set $out "credentialsSource" $src -}}
+{{- if eq $src "secretStore" -}}
+{{- $_ := set $out "remoteKey" (required "global.email.smtp.credentials.remoteKey is required when the source is secretStore." $c.remoteKey) -}}
+{{- $_ := set $out "credentialsSecret" (printf "%s-email-smtp" .Release.Name) -}}
+{{- else if eq $src "secret" -}}
+{{- $_ := set $out "credentialsSecret" (required "global.email.smtp.credentials.secretName is required when the source is secret." $c.secretName) -}}
+{{- else if ne $src "none" -}}
+{{- fail (printf "global.email.smtp.credentials.source is %q: use secretStore, secret or none." $src) -}}
+{{- end -}}
+{{- if and (eq $mode "plaintext") (ne $src "none") -}}
+{{- fail "global.email.smtp.tlsMode is plaintext and the relay takes a credential: the credential would cross the network in the clear, and net/smtp refuses PlainAuth over a cleartext link. Use starttls or implicit, or credentials.source none for a sink." -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
+{{/*
 gibson.assertKeysDeleted: the render fails when a deleted values key is set,
 even to false or an empty string. A silent ignore would keep an old setting in an overlay that nobody
 reads. `use` names what replaces the keys. charts#392 (the trust domain keys)
@@ -1352,76 +1297,75 @@ and charts#374 (the signup keys) both call it.
 {{- end -}}
 
 {{/*
-gibson.ciliumEgressPolicy: one CiliumNetworkPolicy that permits a pod to
-reach a list of hosts by name (ADR-0165 rule 4, ADR-0087, charts#395).
+gibson.netLabels: the network labels of one pod (ADR-0165 rule 4, D76).
 
-A Kubernetes NetworkPolicy matches addresses and labels and cannot name a
-host. Cilium can, and every cluster runs it (hosted#436). So this is the one
-policy type the chart renders for egress by host name. scripts/
-check-egress-policy-type.py fails on a second type, and on a pod that also
-gets an allow-all egress rule from a NetworkPolicy, because Cilium unions
-allow rules and the allow-all one would win.
+The chart renders one set of Cilium policies that select pods by these labels.
+A new pod gets labels, not a new policy. Input is a dict:
 
-The policy also permits DNS to kube-dns with a DNS rule: Cilium learns the
-address of a host name only from a lookup it sees.
+  role          platform | datastore | system. Required.
+                platform:  the pod talks to each other platform pod.
+                datastore: the pod is a data store. Only its clients reach it.
+                system:    a cluster operator. It is in no shared group.
+  datastore     postgres | redis | openbao | neo4j. Required with role datastore.
+  clients       the data stores that the pod reaches, from the same four names.
+  kubeApi       true when the pod calls the Kubernetes API.
+  internet      true when the pod reaches any host outside the cluster (the
+                Cilium world entity). Use it only when the hosts are not
+                known at render time, for example an API address that a
+                tenant sets.
+  fqdn          the name of an egress host group. The pod reaches only the
+                host names of that group (toFQDNs). The groups and their
+                hosts are in gibson.egressFqdnGroups (helm/gibson).
+  namespaces    true when the pod reaches pods in other namespaces.
+  edge          true for the public edge. Each source reaches its listener.
+  controlPlane  true for a server that the API server or a node dials
+                (an admission webhook, the SPIRE server agent port).
 
-  {{ include "gibson.ciliumEgressPolicy" (dict
-       "ctx" $
-       "name" "gibson-dashboard-egress"
-       "selector" (dict "app.kubernetes.io/component" "dashboard")
-       "hosts" (list (dict "host" "api.stripe.com" "ports" (list 443))
-                     (dict "pattern" "*.amazonaws.com" "ports" (list 443)))) }}
+  {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "redis") "kubeApi" true) | nindent 8 }}
 
-Each host entry names `host` (an exact name) or `pattern` (a Cilium
-matchPattern), and a list of TCP `ports`. The render fails on an empty host
-list, on an entry with neither key, and on an entry with no port.
+scripts/check-secure-pod.py fails on a pod with no role, and on a pod that
+reaches a data store or the internet with no label for it. A pod with only
+the egress-fqdn label must not reach the world entity.
 */}}
-{{- define "gibson.ciliumEgressPolicy" -}}
-{{- $hosts := .hosts | default list -}}
-{{- if not $hosts -}}
-{{- fail (printf "gibson.ciliumEgressPolicy %s: the host list is empty; a pod with no host to reach needs no host policy" .name) -}}
+{{- define "gibson.netLabels" -}}
+{{- $roles := list "platform" "datastore" "system" -}}
+{{- $stores := list "postgres" "redis" "openbao" "neo4j" -}}
+{{- if not (has .role $roles) -}}
+{{- fail (printf "gibson.netLabels: role %v is not one of %s" .role (join ", " $roles)) -}}
 {{- end -}}
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: {{ .name }}
-  namespace: {{ .ctx.Release.Namespace }}
-  labels:
-    {{- include "gibson.labels" .ctx | nindent 4 }}
-spec:
-  endpointSelector:
-    matchLabels:
-      {{- toYaml .selector | nindent 6 }}
-  egress:
-    - toEndpoints:
-        - matchLabels:
-            io.kubernetes.pod.namespace: kube-system
-            k8s-app: kube-dns
-      toPorts:
-        - ports:
-            - port: "53"
-              protocol: ANY
-          rules:
-            dns:
-              - matchPattern: "*"
-    {{- range $h := $hosts }}
-    {{- if not (or $h.host $h.pattern) }}
-    {{- fail (printf "gibson.ciliumEgressPolicy %s: a host entry names neither host nor pattern" $.name) }}
-    {{- end }}
-    {{- if not $h.ports }}
-    {{- fail (printf "gibson.ciliumEgressPolicy %s: the host %s names no port" $.name ($h.host | default $h.pattern)) }}
-    {{- end }}
-    - toFQDNs:
-        {{- if $h.host }}
-        - matchName: {{ $h.host | quote }}
-        {{- else }}
-        - matchPattern: {{ $h.pattern | quote }}
-        {{- end }}
-      toPorts:
-        - ports:
-            {{- range $port := $h.ports }}
-            - port: {{ $port | toString | quote }}
-              protocol: TCP
-            {{- end }}
-    {{- end }}
+gibson.zeroroot.ai/net-role: {{ .role }}
+{{- if eq .role "datastore" }}
+{{- if not (has .datastore $stores) }}
+{{- fail (printf "gibson.netLabels: datastore %v is not one of %s" .datastore (join ", " $stores)) }}
+{{- end }}
+gibson.zeroroot.ai/datastore: {{ .datastore }}
+{{- end }}
+{{- range $s := .clients | default list }}
+{{- if not (has $s $stores) }}
+{{- fail (printf "gibson.netLabels: client of %v: not one of %s" $s (join ", " $stores)) }}
+{{- end }}
+gibson.zeroroot.ai/client-{{ $s }}: "true"
+{{- end }}
+{{- if .kubeApi }}
+gibson.zeroroot.ai/kube-api: "true"
+{{- end }}
+{{- if .internet }}
+gibson.zeroroot.ai/egress-internet: "true"
+{{- end }}
+{{- with .fqdn }}
+{{- $groups := list "zitadel" "tenant-operator" "cert-manager" "external-dns" "object-store" }}
+{{- if not (has . $groups) }}
+{{- fail (printf "gibson.netLabels: egress host group %v is not one of %s" . (join ", " $groups)) }}
+{{- end }}
+gibson.zeroroot.ai/egress-fqdn: {{ . }}
+{{- end }}
+{{- if .namespaces }}
+gibson.zeroroot.ai/egress-namespaces: "true"
+{{- end }}
+{{- if .edge }}
+gibson.zeroroot.ai/ingress-edge: "true"
+{{- end }}
+{{- if .controlPlane }}
+gibson.zeroroot.ai/ingress-control-plane: "true"
+{{- end }}
 {{- end -}}

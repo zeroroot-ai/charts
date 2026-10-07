@@ -10,5 +10,41 @@
     "content": "[Kubernetes auth mechanism]: https://openbao.org/docs/auth/kubernetes/",
     "token": "auth/kubernetes",
     "reason": "A documentation link in a field description of the vendored External Secrets CRD. The chart sets no such field."
+  },
+  {
+    "file": "helm/gibson-workloads/templates/_openbao-policies.tpl",
+    "content": "path \"sys/auth/kubernetes\" { capabilities = [\"create\", \"update\", \"read\", \"sudo\"] }",
+    "token": "auth/kubernetes",
+    "reason": "ADR-0009 exception row, gibson#1004"
+  },
+  {
+    "file": "helm/gibson-workloads/templates/_openbao-policies.tpl",
+    "content": "path \"auth/kubernetes/config\" { capabilities = [\"create\", \"update\", \"read\"] }",
+    "token": "auth/kubernetes",
+    "reason": "ADR-0009 exception row, gibson#1004"
+  },
+  {
+    "file": "helm/gibson-workloads/templates/_openbao-policies.tpl",
+    "content": "path \"auth/kubernetes/role/*\" { capabilities = [\"create\", \"update\", \"read\"] }",
+    "token": "auth/kubernetes",
+    "reason": "ADR-0009 exception row, gibson#1004"
+  },
+  {
+    "file": "scripts/baseline-set-secret.sh",
+    "content": "grep -qF -- \"auth/kubernetes/login\" \"$tmp/stdin\" \\",
+    "token": "auth/kubernetes",
+    "reason": "ADR-0009 exception row, gibson#1004"
+  },
+  {
+    "file": "scripts/baseline-set-secret.sh",
+    "content": "\"http://127.0.0.1:8200/v1/auth/kubernetes/login\" | jq -r '.auth.client_token // empty')",
+    "token": "auth/kubernetes",
+    "reason": "ADR-0009 exception row, gibson#1004"
+  },
+  {
+    "file": "scripts/check-openbao-policies.py",
+    "content": "\"sys/auth/kubernetes\": \"the seeder enables and reads the kubernetes auth mount\",",
+    "token": "auth/kubernetes",
+    "reason": "ADR-0009 exception row, gibson#1004"
   }
 ]

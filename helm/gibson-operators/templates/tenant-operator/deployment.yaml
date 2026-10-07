@@ -1,4 +1,6 @@
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "tenantOperator.daemonServiceAccountName") "use" "nothing: the daemon holds no Kubernetes client, and the connector operator ServiceAccount comes from connectorOperator.serviceAccount.name (gibson#664)") }}
 {{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "tenantOperator.daemonSpiffeID" "connectorOperator.daemonSpiffeID") "use" "the one value global.spire.trustDomain; each SPIFFE ID is built from it and a path (ADR-0164, charts#392)") }}
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "tenantOperator.smtp") "use" "the one mail value global.email (hosted#223)") }}
 {{- /*
   tenant-operator is structural infrastructure (one-code-path /
   deploy#188). The previous outer `.Values.tenantOperator.enabled`
@@ -26,6 +28,11 @@ spec:
         app.kubernetes.io/name: gibson-tenant-operator
         app.kubernetes.io/part-of: gibson
         app.kubernetes.io/component: tenant-operator
+        {{- /* fqdn tenant-operator (D76): the operator sends the welcome mail
+               through the SMTP relay, and it calls AWS KMS when kms.keyARN is
+               set. An external Vault, JWKS URL or tenant Postgres is in the
+               group too. All other peers are in the cluster. */}}
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis" "openbao" "neo4j") "kubeApi" true "fqdn" "tenant-operator" "namespaces" true "controlPlane" true) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -39,21 +46,12 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
         {{- /*
-          The operator reads STRIPE_API_KEY from this Secret into env, captured
-          at pod start, and main.go fails closed at boot if the key disagrees
-          with STRIPE_EXPECTED_MODE. Rotating the Secret without a roll leaves
-          the operator on the old key with no signal at all. Reloader watches
-          the named Secret and rolls this Deployment when it changes, so the
-          roll is declarative rather than a kubectl restart at rotation time
-          (deploy#1144).
-        */}}
-        {{- /*
           The operator also reads its OpenBao token into env at pod start.
           The openbao-auto-init sidecar re-mints it into
           gibson-tenant-operator-vault when it expires, and Reloader rolls
           this Deployment when that Secret changes.
         */}}
-        secret.reloader.stakater.com/reload: {{ printf "%s,gibson-tenant-operator-vault" ((((.Values.tenantOperator).billing).stripeSecretKeySecretRef) | default "gibson-stripe-credentials") | quote }}
+        secret.reloader.stakater.com/reload: "gibson-tenant-operator-vault"
     spec:
       {{- include "gibson.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: gibson-tenant-operator
@@ -215,14 +213,21 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            # The daemon's ServiceAccount, the subject of the per-tenant
-            # RoleBinding to ClusterRole gibson-connector-creds (gibson#137).
-            # It is the workloads release's gibson.serviceAccount.name;
-            # scripts/check-daemon-sa-binding.py fails the render when the
-            # two disagree, because a wrong name is a 403 on every connector
-            # credential write.
-            - name: DAEMON_SERVICE_ACCOUNT_NAME
-              value: {{ .Values.tenantOperator.daemonServiceAccountName | quote }}
+            # The connector operator's ServiceAccount, the subject of the
+            # per-tenant RoleBinding to ClusterRole gibson-connector-creds
+            # (gibson#664). It is the name the connector-operator Deployment
+            # runs as; scripts/check-connector-creds-binding.py fails the render
+            # when the two disagree, because a wrong name is a 403 on every
+            # connector credential write.
+            - name: CONNECTOR_OPERATOR_SERVICE_ACCOUNT_NAME
+              value: {{ .Values.connectorOperator.serviceAccount.name | default "gibson-connector-operator" | quote }}
+            # The namespace of the gibson-velero release (ADR-0075, charts#424).
+            # A tenant delete first takes a last Velero Backup there, and the
+            # operator exits at start when this is empty. gibson-velero renders
+            # the Role that lets this ServiceAccount get and create Backups in
+            # that namespace (templates/tenant-operator-rbac.yaml).
+            - name: VELERO_NAMESPACE
+              value: {{ required "tenantOperator.veleroNamespace is required: the namespace of the gibson-velero release (charts#424)" .Values.tenantOperator.veleroNamespace | quote }}
             # GIBSON_APP_URL — the PRODUCT-surface origin (app.<domain>) the
             # tenant-operator reads to build the two human-facing links it
             # emails: the tenant-member invitation accept-link and the new
@@ -251,6 +256,33 @@ spec:
             # fixed path platform/daemon.
             - name: GIBSON_DAEMON_SPIFFE_ID
               value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/daemon") | quote }}
+            # Per-tenant plugins (gibson#815). The operator deploys one
+            # instance of a catalog plugin for each tenant that enables it, in
+            # the namespace tenant-<t>-plugins, and writes its ClusterSPIFFEID
+            # spiffe://<td>/plugin/<vendor>/<tenant>. The operator exits when
+            # one of the four required values is empty.
+            #   PLUGIN_SPIRE_CLASS_NAME     the className of the SPIRE
+            #                               controller-manager, or SPIRE
+            #                               ignores the ClusterSPIFFEID.
+            #   PLUGIN_TRUST_DOMAIN         the trust domain of the install.
+            #   PLUGIN_GIBSON_URL           the edge origin; the plugin dials
+            #                               the daemon only through Envoy.
+            #   PLUGIN_WAIT_FOR_SPIRE_IMAGE the image of the init container
+            #                               that waits for the SPIRE socket.
+            #   PLUGIN_ENVOY_CA_FILE        the edge CA that the operator
+            #                               copies into each plugin namespace.
+            #                               Empty when the operator mounts no
+            #                               edge CA: the edge has a public cert.
+            - name: PLUGIN_SPIRE_CLASS_NAME
+              value: {{ required "tenantOperator.plugins.spireClassName is required: the className of the SPIRE controller-manager (gibson#815)" ((.Values.tenantOperator.plugins).spireClassName) | quote }}
+            - name: PLUGIN_TRUST_DOMAIN
+              value: {{ include "gibson.trustDomain" . | quote }}
+            - name: PLUGIN_GIBSON_URL
+              value: {{ printf "https://%s" (include "gibson.apiHost" .) | quote }}
+            - name: PLUGIN_WAIT_FOR_SPIRE_IMAGE
+              value: {{ include "gibson.waitForSpireSocketImage" . | quote }}
+            - name: PLUGIN_ENVOY_CA_FILE
+              value: {{ if .Values.envoy.tls.secretName }}"/etc/ssl/envoy-ca/envoy-ca.crt"{{ else }}""{{ end }}
             # First-tenant seed (gibson#1496): on a self-hosted install with no
             # signup, the operator enqueues the first tenant over its SPIFFE
             # identity via EnqueueTenantProvisioning — the session-less path,
@@ -339,167 +371,67 @@ spec:
             - name: ORPHAN_REAPER_GRACE_SECONDS
               value: {{ .Values.tenantOperator.orphanReaper.gracePeriodSeconds | default 300 | quote }}
             {{- /*
-              Stripe API key — REQUIRED at boot per one-code-path
-              (tenant-operator#95). The operator's CreateStripeCustomer +
-              UpdateStripeSubscription saga steps cannot run without it;
-              main.go exits 1 if STRIPE_API_KEY is unset. The chart
-              never gates on a Stripe toggle.
-
-              Sourced from the same Secret the dashboard reads
-              (`gibson-stripe-credentials` in kind dev; an ESO-managed
-              copy of the prod live key in EKS overlays). The underlying
-              Secret key is STRIPE_SECRET_KEY (the env-var name the
-              dashboard expects); tenant-operator's main.go reads it
-              from STRIPE_API_KEY, so we project the same value under
-              that name here.
-            */}}
-            - name: STRIPE_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ (((.Values.tenantOperator).billing).stripeSecretKeySecretRef) | default "gibson-stripe-credentials" | quote }}
-                  key: STRIPE_SECRET_KEY
-            {{- /*
-              STRIPE_EXPECTED_MODE is NOT injected here. The operator reads
-              STRIPE_API_KEY and never compares its prefix to a declared mode:
-              operators/tenant/cmd/main.go has no such check, so the variable
-              asserted a control that did not exist. The guard that does exist
-              is the dashboard's, in src/lib/billing/stripe.ts
-              (validateBillingConfig), which reads the SAME one Stripe key out
-              of the same Secret and throws at boot when the key prefix and
-              dashboard.billing.stripeExpectedMode disagree. One key, one
-              assertion, in the process that holds the guard.
-            */}}
-            {{- /*
               SMTP env block — REQUIRED at boot per one-code-path
-              (tenant-operator#95). main.go exits 1 if SMTP_HOST is
-              unset. The operator's saga steps DO NOT call SMTP
-              (verified: no `sender.Send` / `mailer` references in
-              internal/saga/flows/), but the boot check still enforces
-              non-empty SMTP_HOST.
+              (tenant-operator#95). main.go exits 1 if SMTP_HOST is unset.
 
-              The kind dev defaults below point at the chart's mailpit
-              Service, which gibson-workloads renders. Its name comes from
-              the shared gibson.mailpit.host helper, so the dialer and the
-              Service cannot drift: this default was the literal
-              "gibson-workloads-mailpit" until charts#114, and no release
-              ever rendered a Service by that name, so every welcome email
-              failed with "server misbehaving" on a kind install.
+              The one mail value global.email (hosted#223, gibson.email in
+              gibson-common) decides it. tenantOperator.smtp was deleted.
 
-              Every cloud overlay MUST set `tenantOperator.smtp.host`, which
-              values.yaml now declares. The umbrella's
-              mail-transport-guard.yaml fails the render when the daemon is
-              configured for smtp and this is empty, because two of three
-              senders being right is how staging sent no welcome email for
-              days (hosted#372).
+              provider smtp: the relay of global.email, its port, its TLS
+              mode, and the one credential Secret (username, password) that
+              the daemon and Zitadel also read. credentials.source none is a
+              relay that takes no credential.
+
+              provider log: the in-cluster mailpit sink, port 1025, no TLS
+              and no credential. Its name comes from the shared
+              gibson.mailpit.host helper, so the dialer and the Service cannot
+              drift (charts#114). mailpit offers no STARTTLS, so the mode is
+              plaintext.
+
+              The transport is NAMED, not a boolean (gibson#561): starttls
+              (587, dial plaintext then upgrade), implicit (465, TLS from the
+              first byte) or plaintext. gibson.email refuses plaintext with a
+              credential, and the operator refuses an unknown mode at startup.
             */}}
+            {{- $mail := include "gibson.email" . | fromJson }}
+            {{- if eq $mail.provider "smtp" }}
             - name: SMTP_HOST
-              value: {{ ((.Values.tenantOperator).smtp).host | default (include "gibson.mailpit.host" .) | quote }}
+              value: {{ $mail.host | quote }}
             - name: SMTP_PORT
-              value: {{ ((.Values.tenantOperator).smtp).port | default "1025" | quote }}
-            {{- /*
-              CREDENTIALS COME FROM A SECRET, and only when a relay is named.
-              These two used to be plain values whose comment said prod
-              overlays "inject a real value from ESO-backed Secret". The
-              template had no secretKeyRef, so that mechanism did not exist
-              and the only way to obey the comment was to commit an SES
-              password to a gitops values file (hosted#372).
-
-              A named host means a real relay, which means authentication.
-              No host means the in-cluster mailpit, which accepts anonymous
-              submission, and a secretKeyRef there would wedge every kind
-              install on a Secret it does not render.
-            */}}
-            {{- $toSmtp := (.Values.tenantOperator).smtp | default dict }}
-            {{- if $toSmtp.host }}
-            {{- /*
-              THREE EXPLICIT STATES. Defaulting the Secret name was wrong:
-              `<release>-email-smtp` exists only when gibson-workloads sets
-              gibson.email.smtp.externalSecret.enabled, which staging does and
-              kind does not. So the default rendered a secretKeyRef for a Secret
-              the kind install never creates, and the tenant-operator would have
-              sat in CreateContainerConfigError. check-2core-overlay caught it on
-              the signup exit test's own values, which name the in-cluster
-              mailpit explicitly.
-
-              And a relay that needs no credential must SAY so rather than be
-              inferred from the absence of a Secret name. Inferring it is how a
-              real relay gets contacted anonymously and rejects the mail at send
-              time, with nothing in the chart saying why — the same silent shape
-              as the bug this whole change exists to fix (hosted#372).
-            */}}
-            {{- if $toSmtp.credentialsSecretName }}
+              value: {{ $mail.port | quote }}
+            {{- with $mail.credentialsSecret }}
             - name: SMTP_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: {{ $toSmtp.credentialsSecretName | quote }}
+                  name: {{ . | quote }}
                   key: username
             - name: SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ $toSmtp.credentialsSecretName | quote }}
+                  name: {{ . | quote }}
                   key: password
-            {{- else if $toSmtp.anonymous }}
-            - name: SMTP_USERNAME
-              value: "" {{/* allowlist-silent-default: anonymous: true — a sink that accepts any sender. */}}
-            - name: SMTP_PASSWORD
-              value: "" {{/* allowlist-silent-default: anonymous: true — a sink that accepts any sender. */}}
-            {{- else }}
-            {{- fail (printf "tenantOperator.smtp.host is %q but neither tenantOperator.smtp.credentialsSecretName nor tenantOperator.smtp.anonymous is set. The welcome email would be submitted with no credential, which a real relay rejects at send time and nothing in the chart explains. Name the Secret holding username/password, or set anonymous: true for a sink that accepts any sender (the in-cluster mailpit)." $toSmtp.host) }}
-            {{- end }}
             {{- else }}
             - name: SMTP_USERNAME
-              value: "" {{/* allowlist-silent-default: no host means mailpit, which takes no auth. */}}
+              value: "" {{/* allowlist-silent-default: credentials.source none — a relay that takes no credential. */}}
             - name: SMTP_PASSWORD
-              value: "" {{/* allowlist-silent-default: no host means mailpit, which takes no auth. */}}
-            {{- end }}
-            - name: SMTP_FROM
-              value: {{ ((.Values.tenantOperator).smtp).from | default "no-reply@zeroroot.ai" | quote }}
-            {{- /*
-              The transport is NAMED, not a boolean (gibson#561). "false" never
-              meant plaintext: it meant STARTTLS, because the operator's
-              UseTLS=false branch went through net/smtp.SendMail, which issues
-              STARTTLS and refuses PlainAuth over an unencrypted link. Both
-              branches encrypted, so the flag's name was the whole defect — it
-              cost a staging outage reading "smtp tls dial: tls: first record
-              does not look like a TLS handshake" against SES on 587, which is
-              STARTTLS and not implicit TLS.
-
-              starttls   dial plaintext, then STARTTLS. Port 587. The default.
-              implicit   TLS from the first byte. Port 465.
-              plaintext  no encryption, ever (gibson#574). For a sink that
-                         offers no STARTTLS at all — the in-cluster mailpit
-                         answers a TLS open with "500 5.5.2 Syntax error", and
-                         `starttls` against it fails by design because an
-                         upgrade that silently does not happen is the trap this
-                         whole type exists to remove.
-
-              plaintext is REFUSED when a username is set, here and again in the
-              operator's NewSMTPSender. net/smtp would refuse PlainAuth over a
-              cleartext non-localhost link anyway, so the pair can never deliver;
-              failing at render says why a deploy earlier.
-
-              An unknown value fails the RENDER here, so a typo never reaches a
-              pod. The operator also refuses it at startup, naming the mode, the
-              host and the port.
-            */}}
-            {{- $mode := ((.Values.tenantOperator).smtp).tlsMode | default "starttls" }}
-            {{- if not (has $mode (list "starttls" "implicit" "plaintext")) }}
-            {{- fail (printf "tenantOperator.smtp.tlsMode is %q — it must be \"starttls\" (port 587, dial plaintext then upgrade), \"implicit\" (port 465, TLS from the first byte) or \"plaintext\" (no encryption, for a sink that offers no STARTTLS). The old boolean tenantOperator.smtp.tls is gone: tls=false was STARTTLS, not plaintext, so set tlsMode: starttls to keep that behaviour." $mode) }}
-            {{- end }}
-            {{- if and (eq $mode "plaintext") ((.Values.tenantOperator).smtp).username }}
-            {{- fail (printf "tenantOperator.smtp.tlsMode is \"plaintext\" and tenantOperator.smtp.username is %q: the credential would cross the network in the clear, and net/smtp refuses PlainAuth over a cleartext link to %q, so this pair can never deliver mail. Use \"starttls\" (port 587) or \"implicit\" (port 465) with that username, or drop the username for an anonymous sink." (((.Values.tenantOperator).smtp).username) (((.Values.tenantOperator).smtp).host | default "the relay")) }}
+              value: "" {{/* allowlist-silent-default: credentials.source none — a relay that takes no credential. */}}
             {{- end }}
             - name: SMTP_TLS_MODE
-              value: {{ $mode | quote }}
-            {{- with (((.Values.tenantOperator).billing).stripeAPIBaseURL) }}
-            # DEV ONLY — redirects all Stripe API calls to the in-cluster
-            # stripe-mock server (deployed by the gibson-workloads chart when
-            # stripeMock.enabled=true). Allows the readyz Stripe probe and
-            # billing saga steps to work without a live Stripe key.
-            # Production overlays must NOT set this.
-            - name: STRIPE_API_BASE_URL
-              value: {{ . | quote }}
+              value: {{ $mail.tlsMode | quote }}
+            {{- else }}
+            - name: SMTP_HOST
+              value: {{ include "gibson.mailpit.host" . | quote }}
+            - name: SMTP_PORT
+              value: "1025"
+            - name: SMTP_USERNAME
+              value: "" {{/* allowlist-silent-default: provider log — mailpit takes no auth. */}}
+            - name: SMTP_PASSWORD
+              value: "" {{/* allowlist-silent-default: provider log — mailpit takes no auth. */}}
+            - name: SMTP_TLS_MODE
+              value: "plaintext"
             {{- end }}
+            - name: SMTP_FROM
+              value: {{ $mail.from | quote }}
             {{- /*
             Zitadel env block.
 
@@ -642,7 +574,7 @@ spec:
             # policy reaches tenant-<id> namespaces, sys/namespaces/tenant-*,
             # transit/hmac and the root jwt mount's config, and nothing in
             # the root kv store, where the escrowed Zitadel owner
-            # credentials live. The platform-admin token stays with the
+            # credentials live. The platform-operator token stays with the
             # platform-operator.
             # GIBSON_VAULT_TRANSIT_KEY names the transit key the
             # operator uses for HMAC-SHA256 KEK derivation.

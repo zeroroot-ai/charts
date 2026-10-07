@@ -1,0 +1,136 @@
+{{- /*
+The tenant-operator writes ClusterSPIFFEIDs of plugin instances only
+(gibson#815).
+
+Its cluster role grants create, update and delete on every ClusterSPIFFEID. A
+ClusterSPIFFEID maps a pod selector to a SPIFFE ID. Without this policy one
+write could map spiffe://<td>/platform/daemon onto a pod of the operator, or
+delete the identity of a platform workload.
+
+This policy matches each write of the operator's ServiceAccount, and admits it
+only in the plugin shape. For plugin <v> and tenant <t>:
+
+  name                       gibson-plugin-<v>-<t>
+  labels                     app.kubernetes.io/managed-by: gibson-tenant-operator,
+                             gibson.zeroroot.ai/plugin: <v>,
+                             gibson.zeroroot.ai/tenant: <t>
+  spec.className             the SPIRE class of the chart
+  spec.spiffeIDTemplate      spiffe://<td>/plugin/<v>/<t>, a literal
+  spec.namespaceSelector     kubernetes.io/metadata.name: tenant-<t>-plugins
+  spec.podSelector           app.kubernetes.io/component: plugin,
+                             gibson.zeroroot.ai/plugin: <v>
+  spec.workloadSelectorTemplates
+                             k8s:ns:tenant-<t>-plugins, k8s:sa:gibson-plugin-<v>
+  no other spec field        no DNS names, no federation, no admin, no
+                             downstream, no fallback, no hint, no TTL
+
+An UPDATE or a DELETE must also find the managed-by label on the old object,
+so the operator cannot change or delete a ClusterSPIFFEID of the chart. The
+namespace selector uses kubernetes.io/metadata.name, which the API server
+sets and a namespace author cannot. gibson-tenant-plugin-workloads
+(plugin-namespace-admission.yaml) holds who may write a pod in that namespace.
+*/ -}}
+{{- $ns := .Values.tenantOperator.namespace | default "gibson" }}
+{{- $user := printf "system:serviceaccount:%s:gibson-tenant-operator" $ns }}
+{{- $td := include "gibson.trustDomain" . }}
+{{- $class := required "tenantOperator.plugins.spireClassName is required: the className of the SPIRE controller-manager (gibson#815)" ((.Values.tenantOperator.plugins).spireClassName) }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gibson-tenant-operator-clusterspiffeid-scope
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  # Every field access below is has()-guarded, so an evaluation error means a
+  # malformed policy. That must not turn into no control.
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["spire.spiffe.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["clusterspiffeids"]
+  matchConditions:
+    - name: tenant-operator
+      expression: request.userInfo.username == {{ $user | quote }}
+  variables:
+    - name: obj
+      expression: "request.operation == 'DELETE' ? oldObject : object"
+    - name: labels
+      expression: >-
+        has(variables.obj.metadata.labels) ? variables.obj.metadata.labels : {}
+    - name: managed
+      expression: >-
+        'app.kubernetes.io/managed-by' in variables.labels
+          && variables.labels['app.kubernetes.io/managed-by'] == 'gibson-tenant-operator'
+    - name: oldManaged
+      expression: >-
+        request.operation == 'CREATE'
+          || (has(oldObject.metadata.labels)
+              && 'app.kubernetes.io/managed-by' in oldObject.metadata.labels
+              && oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'gibson-tenant-operator')
+    - name: v
+      expression: >-
+        'gibson.zeroroot.ai/plugin' in variables.labels ? variables.labels['gibson.zeroroot.ai/plugin'] : ''
+    - name: t
+      expression: >-
+        'gibson.zeroroot.ai/tenant' in variables.labels ? variables.labels['gibson.zeroroot.ai/tenant'] : ''
+    - name: pluginNs
+      expression: "'tenant-' + variables.t + '-plugins'"
+  validations:
+    - expression: variables.managed && variables.oldManaged
+      reason: Forbidden
+      message: >-
+        the tenant-operator writes only ClusterSPIFFEIDs labeled
+        app.kubernetes.io/managed-by=gibson-tenant-operator, and changes or
+        deletes only its own (gibson#815)
+    - expression: >-
+        variables.v.matches('^[a-z][a-z0-9-]{2,40}$')
+          && variables.t.matches('^[a-z0-9]([a-z0-9-]*[a-z0-9])?$') && size(variables.t) <= 48
+          && variables.obj.metadata.name == 'gibson-plugin-' + variables.v + '-' + variables.t
+      reason: Forbidden
+      message: >-
+        a plugin ClusterSPIFFEID is named gibson-plugin-<plugin>-<tenant>, from
+        its labels gibson.zeroroot.ai/plugin and gibson.zeroroot.ai/tenant
+    - expression: >-
+        request.operation == 'DELETE' || (
+          has(object.spec)
+          && has(object.spec.className) && object.spec.className == {{ $class | quote }}
+          && has(object.spec.spiffeIDTemplate)
+          && object.spec.spiffeIDTemplate == {{ printf "spiffe://%s/plugin/" $td | quote }} + variables.v + '/' + variables.t
+          && has(object.spec.namespaceSelector) && has(object.spec.namespaceSelector.matchLabels)
+          && !has(object.spec.namespaceSelector.matchExpressions)
+          && object.spec.namespaceSelector.matchLabels == {'kubernetes.io/metadata.name': variables.pluginNs}
+          && has(object.spec.podSelector) && has(object.spec.podSelector.matchLabels)
+          && !has(object.spec.podSelector.matchExpressions)
+          && object.spec.podSelector.matchLabels == {'app.kubernetes.io/component': 'plugin', 'gibson.zeroroot.ai/plugin': variables.v}
+          && has(object.spec.workloadSelectorTemplates)
+          && object.spec.workloadSelectorTemplates == ['k8s:ns:' + variables.pluginNs, 'k8s:sa:gibson-plugin-' + variables.v])
+      reason: Forbidden
+      messageExpression: >-
+        'a plugin ClusterSPIFFEID of the tenant-operator must name the ID spiffe://{{ $td }}/plugin/' +
+        variables.v + '/' + variables.t + ', the class {{ $class }}, and select only the plugin pod in ' +
+        variables.pluginNs + ' (gibson#815)'
+    - expression: >-
+        request.operation == 'DELETE' || (
+          has(object.spec)
+          && !has(object.spec.admin) && !has(object.spec.autoPopulateDNSNames)
+          && !has(object.spec.dnsNameTemplates) && !has(object.spec.downstream)
+          && !has(object.spec.fallback) && !has(object.spec.federatesWith)
+          && !has(object.spec.hint) && !has(object.spec.jwtTtl) && !has(object.spec.ttl))
+      reason: Forbidden
+      message: >-
+        a plugin ClusterSPIFFEID of the tenant-operator sets no DNS name,
+        federation, admin, downstream, fallback, hint or TTL field (gibson#815)
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gibson-tenant-operator-clusterspiffeid-scope
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  policyName: gibson-tenant-operator-clusterspiffeid-scope
+  validationActions: ["Deny"]

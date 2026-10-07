@@ -21,11 +21,11 @@ Deploy posture (post-cutover):
                      ▼
                    handler
 
-The daemon Service is ClusterIP-only across every overlay; ingress is
-gated by templates/gibson/networkpolicy.yaml so only Envoy and Prometheus
-can reach the daemon ports. Liveness/readiness probes use HTTP /healthz on
-the dedicated `health` (8080) container port — kubelet reaches that from
-the node IP and is not subject to the daemon NetworkPolicy.
+The daemon Service is ClusterIP-only across every overlay. The network
+policy of the release (umbrella templates/network-policies.yaml) lets only
+the platform pods and the metrics scrapers reach the daemon ports.
+Liveness/readiness probes use HTTP /healthz on the dedicated `health` (8080)
+container port. The kubelet reaches that from the node, which Cilium allows.
 
 When gibson.auth.spiffe is missing or empty the chart fails to render
 (guard added by spec in-cluster-mtls-restoration Phase 6); see
@@ -47,8 +47,6 @@ mTLS stays ON in every overlay, with no debugging shortcuts permitted.
 {{- include "gibson.validateObservabilityRetiredToggles" . }}
 {{- /* Spec first-deploy-unblock-and-ha R7.18, OD-6 (templates/_validators.tpl) */ -}}
 {{- include "gibson.validateCertManagerCRDs" . }}
-{{- /* Spec first-deploy-unblock-and-ha R13 — fail render if any pinned image tag is :latest. */ -}}
-{{- include "gibson.validateNoLatestTags" . }}
 {{- /* Spec setec-sandbox-prod-default Task 34 (revised deploy#1080) — reject
        setec.tier=demo and reject a non-empty setec.nodeSelector/tolerations
        (cost-guard: those pin the operator, not Sandbox Pods). */ -}}
@@ -58,9 +56,8 @@ mTLS stays ON in every overlay, with no debugging shortcuts permitted.
        declare an explicit default network mode. Each of these renders
        fine when wrong, so the guard is the only thing that catches it. */ -}}
 {{- include "gibson.validateSetecContainment" . }}
-{{- /* deploy#1106 — the daemon→frontend dispatch leg. Reject
-       gibson.sandbox.enabled=true when the frontend this chart would point
-       it at is not being installed, or when no setec tenant is named. */ -}}
+{{- /* deploy#1106 — the daemon→frontend dispatch leg. Reject a render
+       when the frontend that the daemon dials is not being installed. */ -}}
 {{- include "gibson.validateSetecDispatch" . }}
 {{- /* Spec tier-2-host-aliases-cluster-dns Req 2 — validate the optional
        in-cluster IdP discovery URL knob (allow-list: *.svc.cluster.local,
@@ -94,6 +91,12 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: daemon
+        {{- /* internet (D76): the daemon calls the LLM and embedding provider
+               APIs, the OAuth token endpoints of the connector vendors and the
+               SMTP relay. A tenant sets the base URL of each provider, so the
+               hosts are not known at render time and a host list cannot
+               name them. */}}
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis" "openbao" "neo4j") "kubeApi" true "internet" true "namespaces" true) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -143,56 +146,9 @@ spec:
                until the agent socket is reachable. Renders unconditionally
                (the daemon's SPIFFE-mTLS listeners depend on it). */}}
         {{- include "gibson.waitForSpireSocket" . | nindent 8 }}
-        # Wait for ESO to materialise the daemon's IdP-admin Secret.
-        #
-        # ESO is required infrastructure (one-code-path #203). The Secret
-        # is owned by the ExternalSecret at
-        # templates/gibson/idp-admin-externalsecret.yaml, which
-        # materialises asynchronously from the bootstrap-secrets-backend.
-        # The daemon container's `secretKeyRef` lookups would
-        # CreateContainerConfigError if the Secret didn't exist yet, so
-        # we block here until it does.
-        #
-        # Spec: .spec-workflow/specs/deploy-simplification (Phase 3.1).
-        - name: wait-for-idp-admin-secret
-          # kubectl image (bitnamilegacy mirror) ships kubectl + bash —
-          # the only two things this step needs. Pinned to the chart-wide
-          # kubectl version used by other hooks.
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
-          command: ['/bin/bash', '-c']
-          args:
-            - |
-              set -eu
-              name={{ .Values.idp.adminCredentialsSecret | quote }}
-              ns={{ .Release.Namespace | quote }}
-              echo "[wait-for-idp-admin-secret] waiting for Secret ${ns}/${name} (ESO-managed)..."
-              # 5 min budget. Backend mint + ESO refreshInterval (60s) covers
-              # the common case well under this; surface obvious failures fast.
-              for i in $(seq 1 150); do
-                if kubectl get secret -n "${ns}" "${name}" \
-                    -o jsonpath='{.data.client_id}' 2>/dev/null \
-                    | base64 -d 2>/dev/null | grep -q .; then
-                  echo "[wait-for-idp-admin-secret] ok (client_id present)"
-                  exit 0
-                fi
-                sleep 2
-              done
-              echo "[wait-for-idp-admin-secret] timed out after 5 min; the bootstrap-secrets Job may not have completed or ESO may not be syncing — check kubectl get externalsecret -n ${ns}" >&2
-              exit 1
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65532
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
+        # No wait for the IdP-admin Secret (gibson#664, charts#435): the
+        # daemon holds no Secret grant. Its secretKeyRef entries make the
+        # kubelet hold the container until ESO has written the Secret.
         # Setup config directory with correct config file location.
         # Spec 3 R3 — directories are now under /var/lib/gibson because the
         # nonroot user has no $HOME; HOME=/var/lib/gibson is exported in the
@@ -352,23 +308,6 @@ spec:
             # same global.domain default). deploy#662.
             - name: GIBSON_PUBLIC_URL
               value: {{ .Values.dashboard.gibsonPlatformPublicUrl | default (include "gibson.apiOrigin" .) | quote }}
-            # GIBSON_LOKI_URL — the daemon's LogsService queries Loki
-            # server-side and serves mission/daemon logs to the dashboard over
-            # Envoy + ext-authz (dashboard#811). The dashboard no longer dials
-            # Loki itself, so this is the ONLY consumer that matters.
-            #
-            # Unset means logs_service.go reports the backend unavailable and
-            # every mission's Logs tab renders empty — silently, which reads as
-            # "the mission produced no output" rather than "the log backend was
-            # never wired" (deploy#1223). Only set when there is a Loki to
-            # query; an overlay pointing elsewhere sets gibson.lokiUrl.
-            {{- /* The chart ships no Loki. Set gibson.lokiUrl to the address of the
-                   one the cluster already runs; empty disables log query. */ -}}
-            {{- $lokiUrl := (((.Values.gibson).lokiUrl)) | default "" }}
-            {{- if $lokiUrl }}
-            - name: GIBSON_LOKI_URL
-              value: {{ $lokiUrl | quote }}
-            {{- end }}
             # GIBSON_APP_URL — the PRODUCT-surface origin (app.<domain>) used to
             # build user-facing links, above all the self-serve signup email
             # verification link (gibson#1228 companion, deploy
@@ -420,6 +359,40 @@ spec:
             - name: GIBSON_PLATFORM_TENANT
               value: {{ . | quote }}
             {{- end }}
+            {{- /* Audit export to the durable bucket (ADR-0113, charts#446).
+                   The daemon writes each audit record under audit/ with an
+                   object lock, and retention removes only exported rows. The
+                   bucket, the region and the lock come from the durable bucket
+                   of the environment; the credential is the platform bucket
+                   credential (the bringup keyring). An empty endpoint means
+                   AWS S3 in the region. The render fails without a bucket or
+                   a lock mode: a daemon without them exports nothing and
+                   keeps every audit row. */}}
+            {{- $ax := required "gibson.auditExport is required (charts#446)" .Values.gibson.auditExport }}
+            {{- $axRegion := $ax.region | default "us-east-1" }}
+            - name: GIBSON_AUDIT_EXPORT_BUCKET
+              value: {{ required "gibson.auditExport.bucket is REQUIRED: the durable bucket of the environment (charts#446). On prem, the S3-compatible store of the customer." $ax.bucket | quote }}
+            - name: GIBSON_AUDIT_EXPORT_ENDPOINT
+              value: {{ $ax.endpoint | default (printf "https://s3.%s.amazonaws.com" $axRegion) | quote }}
+            - name: GIBSON_AUDIT_EXPORT_REGION
+              value: {{ $axRegion | quote }}
+            {{- if not (has $ax.lockMode (list "GOVERNANCE" "COMPLIANCE")) }}
+            {{- fail (printf "gibson.auditExport.lockMode %q must be GOVERNANCE or COMPLIANCE: the lock mode the durable bucket policy requires under audit/ (charts#446)" ($ax.lockMode | default "")) }}
+            {{- end }}
+            - name: GIBSON_AUDIT_EXPORT_LOCK_MODE
+              value: {{ $ax.lockMode | quote }}
+            - name: GIBSON_AUDIT_EXPORT_LOCK_DAYS
+              value: {{ required "gibson.auditExport.lockDays is required" $ax.lockDays | toString | quote }}
+            - name: GIBSON_AUDIT_EXPORT_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "gibson.auditExport.credentials.accessKeyIdSecret.name is required" $ax.credentials.accessKeyIdSecret.name }}
+                  key: {{ required "gibson.auditExport.credentials.accessKeyIdSecret.key is required" $ax.credentials.accessKeyIdSecret.key }}
+            - name: GIBSON_AUDIT_EXPORT_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "gibson.auditExport.credentials.secretAccessKeySecret.name is required" $ax.credentials.secretAccessKeySecret.name }}
+                  key: {{ required "gibson.auditExport.credentials.secretAccessKeySecret.key is required" $ax.credentials.secretAccessKeySecret.key }}
             {{- /* The exit-test profile is one toggle. gibson.e2eRunner.enabled
                    renders the runner's ServiceAccount and SPIFFE identity, and
                    it turns the daemon's runtime fixture flag on here. The flag
@@ -433,55 +406,41 @@ spec:
             - name: GIBSON_TEST_FIXTURES_ENABLED
               value: "true"
             {{- end }}
+            {{- /* Outbound mail: the one value global.email (hosted#223,
+                   gibson.email in gibson-common). gibson.email was deleted. */}}
+            {{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "gibson.email") "use" "global.email") }}
+            {{- $mail := include "gibson.email" . | fromJson }}
             - name: GIBSON_EMAIL_PROVIDER
-              value: {{ (((.Values.gibson).email).provider) | default "log" | quote }}
+              value: {{ $mail.provider | quote }}
             - name: GIBSON_EMAIL_FROM
-              value: {{ (((.Values.gibson).email).from) | default "no-reply@gibson.local" | quote }}
-            {{- if eq ((((.Values.gibson).email).provider) | default "log") "smtp" }}
+              value: {{ $mail.from | quote }}
+            {{- if eq $mail.provider "smtp" }}
             - name: GIBSON_SMTP_HOST
-              value: {{ required "gibson.email.smtp.host is required when gibson.email.provider=smtp" .Values.gibson.email.smtp.host | quote }}
+              value: {{ $mail.host | quote }}
             - name: GIBSON_SMTP_PORT
-              value: {{ (.Values.gibson.email.smtp.port | default 587) | quote }}
-            {{- if .Values.gibson.email.smtp.configurationSet }}
+              value: {{ $mail.port | quote }}
+            {{- with $mail.configurationSet }}
             # SES (and most managed relays) route bounce/complaint events by this
-            # header (X-SES-CONFIGURATION-SET). Optional — leave unset for
-            # providers that don't use a configuration set.
+            # header (X-SES-CONFIGURATION-SET). Empty for other relays.
             - name: GIBSON_SMTP_CONFIGURATION_SET
-              value: {{ .Values.gibson.email.smtp.configurationSet | quote }}
+              value: {{ . | quote }}
             {{- end }}
-            {{- if .Values.gibson.email.smtp.externalSecret.enabled }}
-            # Credentials path B: BOTH username and password come from the
-            # ExternalSecret-synced Secret (templates/secrets/email-smtp-secret.yaml),
-            # which reads gibson.email.smtp.externalSecret.remoteKey (default
-            # "ses-smtp-credentials", a key in the secret store, OpenBao on
-            # every profile, ADR-0014; see secret-contract.yaml). Not SES-specific —
-            # any delivering provider whose credentials are seeded as one backend
-            # secret with a username + password property fits this path.
+            {{- with $mail.credentialsSecret }}
+            # The relay credential: one Secret with the keys username and
+            # password. secretStore: the ExternalSecret
+            # templates/secrets/email-smtp-secret.yaml writes it. secret: the
+            # operator creates it. The tenant-operator and Zitadel read the
+            # same Secret.
             - name: GIBSON_SMTP_USERNAME
               valueFrom:
                 secretKeyRef:
-                  # Local Secret key — always "username", normalised by the
-                  # ExternalSecret's target template regardless of what
-                  # property name the backend secret uses (that mapping is
-                  # externalSecret.usernameProperty, consumed only by
-                  # templates/secrets/email-smtp-secret.yaml).
-                  name: {{ include "gibson.emailSmtpSecret.name" . | quote }}
+                  name: {{ . | quote }}
                   key: "username"
             - name: GIBSON_SMTP_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "gibson.emailSmtpSecret.name" . | quote }}
+                  name: {{ . | quote }}
                   key: "password"
-            {{- else if .Values.gibson.email.smtp.username }}
-            # Credentials path A: inline plain-value username + a Secret holding
-            # just the password (e.g. mailpit needs neither — no auth in kind).
-            - name: GIBSON_SMTP_USERNAME
-              value: {{ .Values.gibson.email.smtp.username | quote }}
-            - name: GIBSON_SMTP_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "gibson.email.smtp.passwordSecretName is required when smtp.username is set" .Values.gibson.email.smtp.passwordSecretName | quote }}
-                  key: {{ .Values.gibson.email.smtp.passwordSecretKey | default "password" | quote }}
             {{- end }}
             {{- end }}
             # Provider catalogue hot-reload path (spec: gibson#296).
@@ -724,6 +683,12 @@ spec:
             {{- if .Values.gibson.entitlementsEndpoint }}
             - name: ENTITLEMENTS_ENDPOINT
               value: {{ .Values.gibson.entitlementsEndpoint | quote }}
+            # The one SPIFFE ID the daemon accepts as the entitlements server:
+            # the trust domain of the install and the fixed path of the
+            # billing component, platform/entitlements-svc (ADR-0164). The
+            # billing chart issues that ID. No env writes the trust domain.
+            - name: ENTITLEMENTS_BILLING_SVID
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/entitlements-svc") | quote }}
             # The grpcProvider opens a SPIRE X509Source for daemon→entitlements
             # mTLS. Its WorkloadAPISocket option is empty, so go-spiffe reads
             # the socket from SPIFFE_ENDPOINT_SOCKET (the daemon's other mTLS
@@ -743,35 +708,28 @@ spec:
             # not only by the umbrella's signup-seam.bats CI fixtures — the
             # dangerous overlay is the one this repo never sees (GHSA-455w).
             {{- include "gibson.validateEntitlementsCoherence" . }}
+            {{- /* The neutral connection points of the platform (ADR-0060,
+                   charts#375). A private component (billing) uses them; each
+                   is empty by default, and an empty caller identity accepts
+                   no caller. The identities are paths under the trust domain
+                   of the install. */}}
+            {{- with .Values.gibson.connectionPoints }}
+            {{- if .signupStepUrl }}
+            - name: GIBSON_SIGNUP_STEP_URL
+              value: {{ .signupStepUrl | quote }}
+            {{- end }}
+            {{- if .signupStepCompleterPath }}
+            - name: GIBSON_SIGNUP_STEP_COMPLETER_SVID
+              value: {{ include "gibson.spiffeID" (dict "ctx" $ "path" .signupStepCompleterPath) | quote }}
+            {{- end }}
+            {{- if .tenantActivationPath }}
+            - name: GIBSON_TENANT_ACTIVATION_SVID
+              value: {{ include "gibson.spiffeID" (dict "ctx" $ "path" .tenantActivationPath) | quote }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.gibson.entitlementsRequired }}
             - name: GIBSON_ENTITLEMENTS_REQUIRED
               value: "true"
-            {{- end }}
-            # ----------------------------------------------------------------
-            # Billing-webhook shared secret (gibson#1230 / gibson#1270,
-            # deploy#1314). Authenticates TenantProvisioningService.
-            # SetTenantBillingActive — the ONLY writer of tenant_status.
-            # billing_active. The daemon fails CLOSED when this is empty
-            # (billing_webhook_auth.go), so paid signups queue at
-            # status='pending' and never provision until BOTH this daemon end
-            # AND the caller end (dashboard#1016) hold the same value.
-            #
-            # Gated on entitlementsRequired — the ONE condition under which the
-            # withhold bites (ListPendingTenantProvisioning only holds a paid
-            # pending row while billing_active is false when the deployment
-            # enforces entitlements). That keeps this a SaaS-profile-only hard
-            # dependency: self-hosted / OSS renders never reference the Secret,
-            # so their daemon boots with no billing backend. Where it IS
-            # rendered the ref is REQUIRED (no optional: true — one-code-path /
-            # deploy#203): the daemon waits for the ESO-delivered Secret rather
-            # than booting with an empty secret that silently refuses callers.
-            # The value is delivered, never baked.
-            {{- if .Values.gibson.entitlementsRequired }}
-            - name: GIBSON_BILLING_WEBHOOK_SECRET  # allowlist-nul-byte-hazard: terraform/kind mint it as base62 (random_password special=false) — NUL-free by construction; daemon reads it raw via os.Getenv (deploy#1314)
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "gibson.billingWebhookSecret.name" . }}
-                  key: GIBSON_BILLING_WEBHOOK_SECRET
             {{- end }}
             # ----------------------------------------------------------------
             # Setec sandbox wiring.
@@ -843,24 +801,6 @@ spec:
             - name: master-kek
               mountPath: /etc/gibson-kek
               readOnly: true
-            {{- /* deploy#1106 — Setec client mTLS material.
-
-                   config.SandboxConfig.Validate() os.Stat()s cert_file,
-                   key_file and ca_file at daemon startup and refuses to
-                   boot when any is missing, so the mount is what makes
-                   `sandbox.enabled: true` bootable at all. Nothing was
-                   mounted before this: the chart carried the config seam
-                   (deploy#1175) and the SPIFFE env vars, and neither
-                   produced a file on disk.
-
-                   The Secret is the release-namespace mirror of the
-                   setec-namespace daemon client cert — see
-                   templates/setec/daemon-client-secret.yaml. */}}
-            {{- if .Values.gibson.sandbox.enabled }}
-            - name: setec-client-tls
-              mountPath: {{ include "gibson.setecMtlsMountPath" . | quote }}
-              readOnly: true
-            {{- end }}
             {{- /* deploy#201: SPIRE is REQUIRED — agent socket mount is
                    unconditional. */}}
             - name: spire-agent-socket
@@ -913,9 +853,6 @@ spec:
               mountPath: /etc/gibson-providers/provider-catalogue.yaml
               subPath: provider-catalogue.yaml
               readOnly: true
-            {{- with .Values.gibson.extraVolumeMounts }}
-            {{- toYaml . | nindent 12 }}
-            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -1016,20 +953,6 @@ spec:
           secret:
             secretName: gibson-master-key
             defaultMode: 0o400
-        {{- /* deploy#1106 — Setec client mTLS keypair + the CA that signed
-               the frontend's server cert. Materialised in this namespace by
-               templates/setec/daemon-client-secret.yaml (cert-manager mints
-               it next to the frontend; ESO mirrors it here). NOT optional:
-               a daemon that boots without it fails config validation, which
-               is the correct direction — SANDBOXED dispatch silently
-               falling back to in-process execution is the outcome
-               exists to prevent. */}}
-        {{- if .Values.gibson.sandbox.enabled }}
-        - name: setec-client-tls
-          secret:
-            secretName: {{ include "gibson.setecClientSecretName" . | quote }}
-            defaultMode: 0o400
-        {{- end }}
         {{- /* Spec security-hardening R20 — `gibson-daemon-metrics-tls`
                Secret backs the daemon's :9090 mTLS metrics listener. The
                Certificate is rendered in templates/cert-manager/component-
@@ -1073,9 +996,6 @@ spec:
               - key: ca.crt
                 path: ca.crt
             defaultMode: 0444
-        {{- with .Values.gibson.extraVolumes }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
   volumeClaimTemplates:
     {{- if .Values.gibson.persistence.enabled }}
     - metadata:

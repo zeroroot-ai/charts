@@ -17,7 +17,7 @@ in the same render (charts#114).
 Scope: a BARE host — no dot, no colon, no scheme — is an in-cluster Service
 name and must exist in the render. A dotted name is an external relay (SES on
 AWS, an enclave's own Exchange or Postfix in an air gap) and is out of scope;
-a prod overlay sets one through `tenantOperator.smtp.host`.
+a prod overlay sets one through `global.email.smtp.host`.
 
   check-smtp-host-resolves.py             exit 1 on a host no Service answers, 0 when clean
   check-smtp-host-resolves.py --selftest  prove a dangling host fails, a Service-backed one passes, and an external relay is ignored

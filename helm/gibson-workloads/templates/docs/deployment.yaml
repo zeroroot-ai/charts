@@ -14,7 +14,7 @@ fan-out, not by a chart-version match. Per-env overlays may still override the
 tag (gitops staging tracks `main`).
 
  component taxonomy: Core, optional-by-toggle.
-Contrast: billing/www-svc are SaaS-only (absent self-hosted, separate overlay).
+Contrast: billing is SaaS-only, a private component in the private overlay (ADR-0060).
 */}}
 {{- if ne ((.Values.docs).enabled | toString) "false" }}
 apiVersion: apps/v1
@@ -47,6 +47,7 @@ spec:
         app.kubernetes.io/name: docs-svc
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: docs-svc
+        {{- include "gibson.netLabels" (dict "role" "platform") | nindent 8 }}
     spec:
       {{- /* docs-site is a first-party image. The previous
              `.Values.imagePullSecrets` knob read a chart-top-level value no

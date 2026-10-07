@@ -62,8 +62,10 @@ OTHER_REPO = re.compile(r'zeroroot-ai/[a-z0-9.-]+')
 # perfectly well where they live.
 #
 # Rendered goldens are output: they carry a copy of every template comment and
-# would double every finding.
-SKIP_DIRS = ("helm/testdata/golden",)
+# would double every finding. docs/adr-index.md is a byte copy of the file in
+# gibson (charts#365): its paths name files of gibson and of the docs repo, and
+# an edit here would break the copy.
+SKIP_DIRS = ("helm/testdata/golden", "docs/adr-index.md")
 SCAN_EXTS = (".yaml", ".yml", ".py", ".sh", ".txt", ".tpl", ".md", ".bats", ".json")
 
 # Paths that are correct and will never resolve here, each with the reason.

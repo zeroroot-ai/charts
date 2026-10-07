@@ -9,9 +9,10 @@
 #
 # It installs onto the CURRENT kube context: the cluster is stage 1 and is
 # not this script's job. On kind, `make recreate ENV=kind` is the bringup
-# verb that creates the cluster, runs the gVisor node prep and then installs
-# the platform (deploy#1737). An operator on another cluster brings
-# a cluster that already carries the stage 1 rows.
+# verb that creates the cluster and then installs the platform (deploy#1737).
+# An operator on another cluster brings a cluster that already carries the
+# stage 1 rows: each fleet node exposes /dev/kvm (ADR-0083), and a registry
+# holds the signed sandbox disks (SETEC_DISK_REPO in substrate.env).
 #
 # Usage:
 #   scripts/baseline-up.sh                 # use the current kube context
@@ -145,16 +146,19 @@ log "target cluster"
 # sed reads its input to the end, so there is no broken pipe.
 kubectl cluster-info 2>/dev/null | sed -n '1p'
 
-# The cluster must run Cilium (ADR-0087, charts#395). The chart renders
-# CiliumNetworkPolicy for egress by host name, and a cluster without the CRD
-# refuses the install halfway, or, with a plugin that enforces nothing, runs
-# with no egress control at all. So stop here, before anything is installed.
+# The cluster must run Cilium (ADR-0087, charts#395). The network policy of
+# the chart is Cilium-native (ADR-0165 rule 4, D76): a clusterwide default
+# deny and label policies. A cluster without the CRDs refuses the install
+# halfway, or, with a plugin that enforces nothing, runs with no network
+# control at all. So stop here, before anything is installed.
 log "preflight: the network plugin is Cilium"
-if ! kubectl get crd ciliumnetworkpolicies.cilium.io >/dev/null 2>&1; then
-  echo "FATAL: the CiliumNetworkPolicy CRD is absent. Gibson needs Cilium as the network plugin of the cluster (ADR-0087): the chart limits the egress of each platform pod by host name, and only Cilium enforces that. Install Cilium, then run this again." >&2
-  exit 2
-fi
-echo "  ✓ the CiliumNetworkPolicy CRD exists"
+for crd in ciliumnetworkpolicies.cilium.io ciliumclusterwidenetworkpolicies.cilium.io; do
+  if ! kubectl get crd "$crd" >/dev/null 2>&1; then
+    echo "FATAL: the CRD $crd is absent. Gibson needs Cilium as the network plugin of the cluster (ADR-0087): the network policy of the chart is Cilium-native, and only Cilium enforces it. Install Cilium, then run this again." >&2
+    exit 2
+  fi
+done
+echo "  ✓ the Cilium policy CRDs exist"
 
 
 # ---------------------------------------------------------------------------
@@ -179,27 +183,20 @@ EOF
 echo "principal: ${PRINCIPAL}"
 
 # ---------------------------------------------------------------------------
-# The pinned Envoy ClusterIP.
+# The Service CIDR anchor, for the API server egress rule below.
 #
-# The chart REQUIRES one: consuming pods reach Envoy through a hostAlias, and a
-# hostAlias takes an IP, not a Service name (deploy#200). That IP has to sit
-# inside the cluster's Service CIDR, which differs per distribution — kind and
-# kubeadm use 10.96.0.0/12, EKS uses 172.20.0.0/16. A profile can only ship one
-# guess, and the wrong guess is fatal: the API server refuses the Service with
-# "failed to allocate IP ...: the provided IP is not in the valid range"
-# (deploy#1627).
-#
-# So it is DISCOVERED. The `kubernetes` Service in `default` is always the first
-# address of the Service CIDR, which makes it a reliable anchor on any
-# distribution without asking the operator what their CIDR is.
+# The `kubernetes` Service in `default` is always the first address of the
+# Service CIDR, which makes it a reliable anchor on any distribution without
+# asking the operator what their CIDR is. No Envoy ClusterIP is pinned any
+# more (charts#163, ADR-0092): an in-cluster caller reaches Envoy by its
+# Service name, or by api.<domain> through the CoreDNS record written below.
 log "discovering the Service CIDR"
 K8S_SVC_IP="$(kubectl get svc kubernetes -n default -o jsonpath='{.spec.clusterIP}')"
 case "$K8S_SVC_IP" in
   *.*.*.*) ;;
   *) echo "FATAL: could not read the kubernetes Service ClusterIP" >&2; exit 1 ;;
 esac
-ENVOY_CLUSTER_IP="${ENVOY_CLUSTER_IP:-${K8S_SVC_IP%.*.*}.0.250}"
-echo "service CIDR anchor: ${K8S_SVC_IP} -> pinning envoy at ${ENVOY_CLUSTER_IP}"
+echo "service CIDR anchor: ${K8S_SVC_IP}"
 # The SPIFFE trust domain (ADR-0164). It comes from the profile, or from
 # TRUST_DOMAIN. A trust domain cannot change on a running install: every SVID,
 # every agent and the SPIRE CA belong to it. So when the platform already
@@ -434,12 +431,32 @@ fi
 substrate_get() { grep -E "^$1=" "$SUBSTRATE_ENV" | head -n1 | cut -d= -f2-; }
 BUCKET_ENDPOINT="$(substrate_get BUCKET_ENDPOINT)"
 BUCKET_NAME="$(substrate_get BUCKET_NAME)"
+BUCKET_REGION="$(substrate_get BUCKET_REGION)"
 KEYRING_FILE="${KEYRING_FILE:-$(substrate_get KEYRING_FILE)}"
 log "stage 0: bucket s3://${BUCKET_NAME} at ${BUCKET_ENDPOINT}"
 NS="$NS" KEYRING_FILE="$KEYRING_FILE" "$(dirname "$0")/keyring-to-cluster.sh" "$SUBSTRATE_ENV"
 BUCKET_ARGS=(
   --set "platformPostgres.backup.destinationPath=s3://${BUCKET_NAME}/backups/postgres/"
   --set "platformPostgres.backup.endpointURL=${BUCKET_ENDPOINT}"
+  # The audit export writes to the same durable bucket (charts#446).
+  --set "gibson-workloads.gibson.auditExport.bucket=${BUCKET_NAME}"
+  --set "gibson-workloads.gibson.auditExport.endpoint=${BUCKET_ENDPOINT}"
+  --set "gibson-workloads.gibson.auditExport.region=${BUCKET_REGION:-us-east-1}"
+)
+
+# The sandbox disks (ADR-0166). The setec disk builder pushes one signed disk
+# for each image digest to SETEC_DISK_REPO (stage 0 names the registry), and
+# each launcher checks the signature with the public key of the keyring seed
+# SETEC_DISK_SIGNING_SEED. The seed itself reaches the cluster through
+# keyring-to-cluster.sh above, the OpenBao seeder and an ExternalSecret; the
+# public key is derived here from the same member, so the two never disagree.
+SETEC_DISK_REPO="$(substrate_get SETEC_DISK_REPO)"
+[ -n "$SETEC_DISK_REPO" ] || { echo "FATAL: ${SUBSTRATE_ENV} has no SETEC_DISK_REPO: the registry repository of the signed sandbox disks (ADR-0166)" >&2; exit 1; }
+SETEC_DISK_PUBLIC_KEY="$("$(dirname "$0")/setec-disk-public-key.sh" "$KEYRING_FILE")"
+log "setec disks: ${SETEC_DISK_REPO}, signed by the keyring seed (public key sha256:$(printf '%s' "$SETEC_DISK_PUBLIC_KEY" | sha256sum | cut -c1-16))"
+SETEC_ARGS=(
+  --set-string "gibson-workloads.setec.launcher.diskRepo=${SETEC_DISK_REPO}"
+  --set-string "gibson-workloads.setec.launcher.diskBuilder.publicKeys[0]=${SETEC_DISK_PUBLIC_KEY}"
 )
 
 log "phase 1b — velero (its own release, namespace velero)"
@@ -450,6 +467,23 @@ helm upgrade --install velero "${VELERO_CHART[@]}" \
   --set "bucket.endpoint=${BUCKET_ENDPOINT}" \
   --wait --timeout 10m
 
+# The platform hosts in cluster DNS (charts#163, ADR-0092). Plugins, setec
+# sandboxes and the dashboard reach the edge on api.<domain> the way an outside
+# client does. CoreDNS answers that name with the Envoy Service, by name, never
+# by a pinned address. k3s imports kube-system/coredns-custom; every other
+# distribution gets the record in kube-system/coredns.
+log "cluster DNS: the platform hosts lead to the Envoy Service"
+# shellcheck source=lib/coredns-platform-hosts.sh
+. "$(dirname "$0")/lib/coredns-platform-hosts.sh"
+PLATFORM_DOMAIN="$(values_domain "$VALUES" ${OVERLAY_FILE:+"$OVERLAY_FILE"} ${RUNG_FILE:+"$RUNG_FILE"})"
+DNS_MODE=corefile
+if kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null | grep -q '+k3s'; then
+  DNS_MODE=custom
+fi
+coredns_publish_platform_hosts "$DNS_MODE" "${RELEASE}-envoy.${NS}.svc.cluster.local" \
+  "api.${PLATFORM_DOMAIN}" "app.${PLATFORM_DOMAIN}"
+echo "  ✓ api.${PLATFORM_DOMAIN} and app.${PLATFORM_DOMAIN} -> ${RELEASE}-envoy.${NS}.svc.cluster.local (${DNS_MODE})"
+
 log "phase 2 — the platform"
 mapfile -t GIBSON_CHART < <(chart_args gibson)
 helm upgrade --install "$RELEASE" "${GIBSON_CHART[@]}" \
@@ -458,12 +492,10 @@ helm upgrade --install "$RELEASE" "${GIBSON_CHART[@]}" \
   ${RUNG_FILE:+-f "$RUNG_FILE"} \
   "${EXTRA_VALUES_ARGS[@]}" \
   "${BUCKET_ARGS[@]}" \
+  "${SETEC_ARGS[@]}" \
   "${TRUST_DOMAIN_ARGS[@]}" \
   --set-json "gibson-workloads.spire.identityAdmission.workloadCreators=[\"${PRINCIPAL}\"]" \
   --set "global.networkPolicy.apiServerCIDRs={${API_CIDRS}}" \
-  --set "gibson-workloads.envoy.service.clusterIP=${ENVOY_CLUSTER_IP}" \
-  --set "gibson-workloads.dashboard.envoy.service.clusterIP=${ENVOY_CLUSTER_IP}" \
-  --set "gibson-operators.envoy.service.clusterIP=${ENVOY_CLUSTER_IP}" \
   --namespace "$NS" --timeout 30m
 
 log "waiting for OpenBao to bootstrap and ESO to converge"

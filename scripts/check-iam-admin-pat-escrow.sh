@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# check-iam-admin-pat-escrow.sh — the Zitadel IAM_OWNER PAT survives a restore.
+# check-iam-admin-pat-escrow.sh — the Zitadel admin credentials survive a restore,
+# and the IAM_OWNER PAT has one writer (charts#407).
 #
 # The setup Job mints iam-admin-pat once and writes only a Kubernetes Secret;
 # Secrets are excluded from the backup, so after a restore the PAT was gone
@@ -17,18 +18,37 @@ set -euo pipefail
 CHART_DIR="${CHART_DIR:-helm/gibson}"
 RENDER="$(mktemp)"; trap 'rm -f "$RENDER"' EXIT
 helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" -f "$CHART_DIR/../testdata/render-inputs/gibson.yaml" --namespace gibson > "$RENDER"
-python3 - "$RENDER" <<'PY'
+python3 - "$RENDER" "$(dirname "$0")/lib" <<'PY'
 import sys, yaml, copy
+sys.path.insert(0, sys.argv[2])
+import cilium_policy as cp
 KEY = "gibson-zitadel-iam-admin-pat"
 # Every Secret the Zitadel setup Job mints, and the store key each rides in.
+# The IAM admin PAT is not one of them since charts#407: the platform-operator
+# mints it and writes it to OpenBao, and its ExternalSecret is the one writer.
 MINTED = {
-    "iam-admin-pat": ("pat", "gibson-zitadel-iam-admin-pat"),
     "iam-admin": ("iam-admin.json", "gibson-zitadel-iam-admin-machinekey"),
     "login-client": ("pat", "gibson-zitadel-login-client-pat"),
 }
 def check(docs):
     bad = []
-    es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin-pat"]
+    # The PAT: one writer, the ExternalSecret with Owner, and no mint by Zitadel.
+    pat = [d for d in docs if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin-pat"]
+    if not pat:
+        bad.append("no ExternalSecret targets iam-admin-pat: nothing delivers the PAT the platform-operator writes to OpenBao")
+    else:
+        if pat[0]["spec"]["target"].get("creationPolicy") != "Owner":
+            bad.append("the iam-admin-pat ExternalSecret must use creationPolicy Owner: it is the one writer of that Secret (charts#407)")
+        if KEY not in [x["remoteRef"]["key"] for x in pat[0]["spec"].get("data", [])]:
+            bad.append(f"the iam-admin-pat ExternalSecret does not read {KEY}")
+    for d in docs:
+        if d.get("kind") == "ConfigMap" and "zitadel" in d["metadata"]["name"]:
+            for v in (d.get("data") or {}).values():
+                cfg = yaml.safe_load(v) if isinstance(v, str) and "FirstInstance" in v else None
+                m = (((cfg or {}).get("FirstInstance") or {}).get("Org") or {}).get("Machine") or {}
+                if m.get("Pat"):
+                    bad.append("the Zitadel setup Job still mints iam-admin-pat (FirstInstance.Org.Machine.Pat): two writers of one Secret (charts#407)")
+    es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin"]
     for secret, (data_key, store_key) in MINTED.items():
         got = [d for d in docs if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == secret]
         if not got:
@@ -45,7 +65,7 @@ def check(docs):
         e = es[0]
         wave = (e["metadata"].get("annotations") or {}).get("argocd.argoproj.io/sync-wave")
         es_wave = int(wave) if wave is not None else 0
-        # The order that works on BOTH paths: the setup Job mints the PAT,
+        # The order that works on BOTH paths: the setup Job mints the key,
         # the escrow copies it to the store, this reads it back, and all of
         # that before wave 0, where the platform-operator waits for it.
         setup = [d for d in docs if d.get("kind") == "Job" and d["metadata"]["name"].endswith("zitadel-setup")]
@@ -64,7 +84,7 @@ def check(docs):
             if keys and not (wave_of(keys[0]) < jw):
                 bad.append(f"the gibson-openbao-keys ExternalSecret (wave {wave_of(keys[0])}) must be applied BEFORE the escrow hook (wave {jw}) that mounts it: at the same or a later wave the hook pod cannot start")
             if not (sw < jw < es_wave < 0):
-                bad.append(f"the PAT must be minted, escrowed and read back BEFORE wave 0, in that order: zitadel-setup wave {sw}, escrow Job wave {jw}, ExternalSecret wave {es_wave}. Any ExternalSecret wave >= 0 deadlocks a restore (the platform-operator at wave 0 waits for the PAT, and Argo waits for wave 0 before applying it); any wave at or before the escrow is Degraded on a fresh bootstrap")
+                bad.append(f"the machine key must be minted, escrowed and read back BEFORE wave 0, in that order: zitadel-setup wave {sw}, escrow Job wave {jw}, ExternalSecret wave {es_wave}. Any ExternalSecret wave >= 0 deadlocks a restore (the platform-operator at wave 0 waits for the PAT, and Argo waits for wave 0 before applying it); any wave at or before the escrow is Degraded on a fresh bootstrap")
     jobs = [d for d in docs if d.get("kind") == "Job" and d["spec"]["template"]["metadata"].get("labels", {}).get("app.kubernetes.io/component") == "iam-admin-pat-escrow"]
     if not jobs:
         bad.append("no Job carries app.kubernetes.io/component=iam-admin-pat-escrow: nothing writes the minted PAT to OpenBao")
@@ -87,34 +107,27 @@ def check(docs):
                 bad.append(f"the Role {sa!r} does not let the escrow Job get Secret {secret}: it would wait its whole window on a Secret that is there")
         if "restore path" not in script:
             bad.append("the escrow Job must consult the store BEFORE waiting for the Secret: on a restore the Secret is materialised at wave 1, after this hook, and waiting for it deadlocks the sync")
-    pols = [d for d in docs if d.get("kind") == "NetworkPolicy"]
-    covered = any("iam-admin-pat-escrow" in (e.get("values") or []) for p in pols for e in (p["spec"].get("podSelector", {}).get("matchExpressions") or []))
-    if not covered:
-        bad.append("no NetworkPolicy selects app.kubernetes.io/component=iam-admin-pat-escrow: the namespace default-deny severs the escrow Job")
-    # And the other end: the store's own policy must admit the Job on 8200.
-    # Measured 2026-09-08 (loop #7): egress allowed, ingress not, 130 s
-    # connect timeouts, the sync waiting on the hook for an hour.
-    admitted = False
-    for p in pols:
-        if (p["spec"].get("podSelector", {}).get("matchLabels") or {}).get("app.kubernetes.io/component") != "openbao":
-            continue
-        for rule in p["spec"].get("ingress") or []:
-            ports = [x.get("port") for x in (rule.get("ports") or [])]
-            froms = [((f.get("podSelector") or {}).get("matchLabels") or {}).get("app.kubernetes.io/component") for f in (rule.get("from") or [])]
-            if 8200 in ports and "iam-admin-pat-escrow" in froms:
-                admitted = True
-    if not admitted:
-        bad.append("the openbao NetworkPolicy does not admit app.kubernetes.io/component=iam-admin-pat-escrow on 8200: the escrow Job cannot reach the store")
+    # The network half (D76): the Cilium policies select pods by label, so
+    # the escrow Job must reach OpenBao on 8200 through its labels, and the
+    # store must admit it. Measured 2026-09-08 (loop #7): egress allowed,
+    # ingress not, 130 s connect timeouts, the sync waiting on the hook for an hour.
+    if jobs:
+        rules = cp.rules(docs, "gibson")
+        job = cp.endpoint("gibson", jobs[0]["spec"]["template"]["metadata"].get("labels") or {})
+        bao = [cp.endpoint("gibson", d["spec"]["template"]["metadata"].get("labels") or {}) for d in docs
+               if d.get("kind") == "StatefulSet" and (d["spec"]["template"]["metadata"].get("labels") or {}).get("app.kubernetes.io/component") == "openbao"]
+        if not bao or not cp.reaches(rules, job, bao[0], 8200):
+            bad.append("the network policy does not let app.kubernetes.io/component=iam-admin-pat-escrow reach OpenBao on 8200: the escrow Job cannot reach the store")
     return bad
 docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
-for planted in MINTED:
+for planted in list(MINTED) + ["iam-admin-pat"]:
     mut = [d for d in copy.deepcopy(docs) if not (d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == planted)]
     if not any(planted in b for b in check(mut)):
         sys.exit(f"self-test broken: removing the {planted} ExternalSecret was not detected")
 # The deadlock of 2026-09-08, planted: the ExternalSecret at wave 1.
 late = copy.deepcopy(docs)
 for d in late:
-    if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin-pat":
+    if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin":
         d["metadata"].setdefault("annotations", {})["argocd.argoproj.io/sync-wave"] = "1"
 if not any("BEFORE wave 0" in b for b in check(late)):
     sys.exit("self-test broken: the ExternalSecret at wave 1 (the restore deadlock) was not detected")
@@ -124,9 +137,16 @@ for d in narrow:
     if d.get("kind") == "Role" and d["metadata"]["name"] == "iam-admin-pat-escrow":
         for rule in d.get("rules", []):
             if "secrets" in (rule.get("resources") or []):
-                rule["resourceNames"] = ["iam-admin-pat"]
+                rule["resourceNames"] = ["iam-admin"]
 if not any("does not let the escrow Job get Secret" in b for b in check(narrow)):
-    sys.exit("self-test broken: a Role naming the PAT alone was not detected")
+    sys.exit("self-test broken: a Role naming the machine key alone was not detected")
+# charts#407, planted: the PAT ExternalSecret back on Orphan.
+orphan = copy.deepcopy(docs)
+for d in orphan:
+    if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin-pat":
+        d["spec"]["target"]["creationPolicy"] = "Orphan"
+if not any("creationPolicy Owner" in b for b in check(orphan)):
+    sys.exit("self-test broken: the PAT ExternalSecret on Orphan was not detected")
 # The stall of run 34258967223, planted: gibson-openbao-keys at wave 0.
 keys0 = copy.deepcopy(docs)
 for d in keys0:
@@ -134,10 +154,17 @@ for d in keys0:
         d["metadata"].setdefault("annotations", {})["argocd.argoproj.io/sync-wave"] = "0"
 if not any("gibson-openbao-keys" in b for b in check(keys0)):
     sys.exit("self-test broken: gibson-openbao-keys at wave 0 (the hook that cannot start) was not detected")
+# The network half, planted: the escrow Job loses its OpenBao client label.
+unlabeled = copy.deepcopy(docs)
+for d in unlabeled:
+    if d.get("kind") == "Job" and d["spec"]["template"]["metadata"].get("labels", {}).get("app.kubernetes.io/component") == "iam-admin-pat-escrow":
+        d["spec"]["template"]["metadata"]["labels"].pop("gibson.zeroroot.ai/client-openbao", None)
+if not any("reach OpenBao on 8200" in b for b in check(unlabeled)):
+    sys.exit("self-test broken: an escrow Job with no OpenBao client label was not detected")
 bad = check(docs)
 if bad:
     print("✗ check-iam-admin-pat-escrow:", file=sys.stderr)
     for b in bad: print("   " + b, file=sys.stderr)
     sys.exit(1)
-print("✅ self-test: each of the three removed ExternalSecrets, a Role naming the PAT alone, a wave-1 ExternalSecret and a wave-0 gibson-openbao-keys are detected; iam-admin, iam-admin-pat and login-client are escrowed to OpenBao by a covered Job and read back by Orphan ExternalSecrets")
+print("✅ self-test: each removed ExternalSecret, a Role naming the machine key alone, a wave-1 ExternalSecret, a wave-0 gibson-openbao-keys and a PAT ExternalSecret on Orphan are detected; iam-admin and login-client are escrowed by a covered Job and read back by Orphan ExternalSecrets, and iam-admin-pat has one writer, its Owner ExternalSecret")
 PY

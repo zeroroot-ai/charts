@@ -57,19 +57,15 @@ wait-for-vault initContainer.
 {{- $openbaoPort := .Values.openbao.service.port | required "openbao.service.port is REQUIRED for openbao-approle-cert-manager-init Job (deploy#351). Typical value: 8200." -}}
 {{- $auth := $vi.auth | default dict }}
 {{- $aAuth := $auth.appRole | default dict }}
-{{- $approlePath := $aAuth.path | default "approle" }}
+{{- /* The approle mount, the PKI mount and the PKI role. The policies of
+       this Job's token and of the ESO generators read the same names
+       (gibson.certManagerVaultPaths in _helpers.tpl). */ -}}
+{{- $paths := include "gibson.certManagerVaultPaths" . | fromJson }}
+{{- $approlePath := $paths.approle }}
+{{- $pkiMount := $paths.pkiMount }}
+{{- $pkiRole := $paths.pkiRole }}
 {{- $sref := $aAuth.secretRef | default dict }}
 {{- $secretName := $sref.name | default "gibson-cert-manager-approle" }}
-{{- /* PKI mount derived from the Issuer's `path` field. The path is of
-       the form "<mount>/sign/<role>"; we split on "/sign/" to recover
-       the mount + role name. */ -}}
-{{- $issuerPath := required "certManager.issuers.vault.path is required when vault issuer is enabled (e.g. pki_int/sign/gibson)" $vi.path }}
-{{- $pkiSplit := splitList "/sign/" $issuerPath }}
-{{- if ne (len $pkiSplit) 2 }}
-  {{- fail (printf "certManager.issuers.vault.path %q must be of the form <pki-mount>/sign/<role-name> (e.g. pki_int/sign/gibson)" $issuerPath) }}
-{{- end }}
-{{- $pkiMount := index $pkiSplit 0 }}
-{{- $pkiRole := index $pkiSplit 1 }}
 {{- /* deploy#944: the SA/Role/RoleBinding that granted get+patch+create on
        the gibson-cert-manager-approle Secret are gone — this Job no longer
        writes any K8s resource (it only bootstraps Vault over HTTP). The
@@ -108,6 +104,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: openbao-approle-cert-manager-init
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "openbao") "kubeApi" true) | nindent 8 }}
     spec:
       restartPolicy: OnFailure
       # deploy#944: runs on the namespace default ServiceAccount — the Job
@@ -328,6 +325,8 @@ spec:
       volumes:
         - name: openbao-admin-token
           secret:
-            secretName: gibson-openbao-keys
+            # The token of this Job alone, policy cert-manager-approle-init
+            # (_openbao-policies.tpl), minted by openbao-auto-init.
+            secretName: gibson-openbao-approle-init
             defaultMode: 0o400
 {{- end }}

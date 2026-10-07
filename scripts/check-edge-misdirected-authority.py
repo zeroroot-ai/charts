@@ -24,8 +24,9 @@ checks the rendered edge config for that rule:
 2. On a chain that carries jwt_authn or ext_authz, that virtual host turns
    both off. A coalesced request carries no token for the host it names, and
    a 401 would end the browser's retry before it starts.
-3. A chain restricted by source address (the in-cluster chain) carries no
-   "*" virtual host at all (deploy#1204).
+3. No chain is restricted by source address. The auth-free in-cluster chain
+   that was (deploy#1204) is deleted (charts#163, ADR-0092), and a chain
+   selected by source address is how it would come back.
 
   check-edge-misdirected-authority.py             exit 1 on a finding, 0 when clean
   check-edge-misdirected-authority.py --selftest  prove each kind of finding fails
@@ -150,9 +151,8 @@ def audit(docs: list[dict]) -> list[str]:
             where = f"{cm}: {LISTENER} chain {i} ({rc})"
             wild = wildcard_vhosts(hcm)
             if match.get("source_prefix_ranges"):
-                # Reachable from listed source addresses only: never a browser.
-                if wild:
-                    bad.append(f"{where}: a source-restricted chain must carry no '*' virtual host (deploy#1204)")
+                bad.append(f"{where}: a source-restricted chain came back; the in-cluster chain is deleted "
+                           f"(charts#163, ADR-0092)")
                 continue
             public_chains += 1
             if len(wild) != 1:
@@ -229,12 +229,10 @@ def _keep_ext_authz(hcm):
     del _wild(hcm)["typed_per_filter_config"][EXT_AUTHZ]
 
 
-def _wild_on_internal(i, match, hcm):
-    if not match.get("source_prefix_ranges"):
+def _restrict_source(i, match, hcm):
+    if i != 0:
         return False
-    hcm["route_config"]["virtual_hosts"].append(
-        {"name": "misdirected", "domains": ["*"],
-         "routes": [{"match": {"prefix": "/"}, "direct_response": {"status": STATUS}}]})
+    match["source_prefix_ranges"] = [{"address_prefix": "10.0.0.0", "prefix_len": 8}]
     return True
 
 
@@ -261,7 +259,7 @@ def selftest(docs: list[dict]) -> int:
         ("misdirected virtual host carries a second route", _on_chain(public_rc, _extra_route), "exactly one route"),
         ("api chain keeps jwt_authn on the misdirected virtual host", _on_chain(api_rc, _keep_jwt), JWT_AUTHN),
         ("api chain keeps ext_authz on the misdirected virtual host", _on_chain(api_rc, _keep_ext_authz), EXT_AUTHZ),
-        ("in-cluster chain gains a '*' virtual host", _wild_on_internal, "source-restricted"),
+        ("a chain selected by source address comes back", _restrict_source, "source-restricted"),
     ]
     rc = 0
     clean = audit(docs)

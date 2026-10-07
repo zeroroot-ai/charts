@@ -235,6 +235,31 @@ spec:
     - "k8s:ns:{{ $ns }}"
     - "k8s:sa:{{ include "gibson.connectorOperatorServiceAccountName" . }}"
 ---
+{{- /* The platform-operator (gibson-operators sub-chart) sends only its
+       audit records to the daemon (DaemonOperatorService.EmitAuditEvent,
+       gibson#583). The daemon's method policy admits this SVID for exactly
+       that RPC. */}}
+# --- platform-operator ---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-platform-operator
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/platform-operator"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: platform-operator
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ include "gibson.platformOperatorServiceAccountName" . }}"
+---
 {{- /* Envoy holds the highest-trust SVID in the platform: it is in
        spiffe.callbackPeers, so the daemon accepts identity headers from
        any peer presenting it. Until templates/envoy/serviceaccount.yaml
@@ -348,38 +373,15 @@ spec:
   workloadSelectorTemplates:
     - "k8s:ns:{{ $ns }}"
     - "k8s:sa:{{ include "gibson.helmTestServiceAccountName" . }}"
-{{- /* --- first-party plugins ---
-       One ClusterSPIFFEID per ENABLED plugin. The JWT-SVID is the plugin's
-       capability-grant enrollment credential — it replaces the bootstrap token
-       so no autonomous minter is needed (/ no-autonomous-bootstrap-
-       token stays intact). All plugins share component=plugin, so the per-vendor
-       gibson.zeroroot.ai/plugin label is the podSelector discriminator; the
-       literal k8s:ns + k8s:sa workloadSelectorTemplates are the real attested
-       boundary (see this file's header). Rendered only for enabled plugins. */}}
-{{- range $vendor, $p := .Values.plugins }}
-{{- if $p.enabled }}
----
-apiVersion: spire.spiffe.io/v1alpha1
-kind: ClusterSPIFFEID
-metadata:
-  name: {{ printf "gibson-plugin-%s" $vendor }}
-  labels:
-    {{- include "gibson.labels" $ | nindent 4 }}
-    app.kubernetes.io/component: spire-controller-manager
-spec:
-  className: {{ $className | quote }}
-  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/plugin/{{ $vendor }}"
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/component: plugin
-      gibson.zeroroot.ai/plugin: {{ $vendor | quote }}
-  namespaceSelector:
-    matchLabels:
-      kubernetes.io/metadata.name: {{ $ns }}
-  workloadSelectorTemplates:
-    - "k8s:ns:{{ $ns }}"
-    - "k8s:sa:{{ printf "%s-plugin-%s" $.Release.Name $vendor }}"
-{{- end }}
+{{- /* --- plugins ---
+       No plugin identity here. Each tenant runs its own instance of a
+       catalog plugin, and the tenant-operator writes one ClusterSPIFFEID for
+       each (plugin, tenant): spiffe://<td>/plugin/<vendor>/<tenant>
+       (gibson#815). The admission policy
+       gibson-tenant-operator-clusterspiffeid-scope (gibson-operators) holds
+       each write of the operator to that shape. */}}
+{{- if .Values.plugins }}
+{{- fail "plugins was deleted (gibson#815). A tenant enables a catalog plugin through the API, and the tenant-operator deploys one instance for that tenant. Remove plugins from your values." }}
 {{- end }}
 {{/*
   --- e2e exit-test runner (TEST PROFILES ONLY) -------------------------------
@@ -401,6 +403,40 @@ spec:
   namespace and ServiceAccount are pinned too. An entry with no workload is a
   free identity.
 */}}
+{{- if and .Values.setec.enabled .Values.setec.frontend.enabled }}
+{{- $setecNs := include "gibson.setecNamespace" . }}
+---
+# --- setec frontend (ADR-0142) ---
+# The gRPC frontend of the sandbox fleet serves its X509-SVID from the
+# Workload API (setec#175): setec has no PEM credential source. The daemon
+# dials with its own SVID and accepts this ID only
+# (gibson.setecFrontendSpiffeID, rendered into the daemon config as
+# sandbox.setec.spiffe_id). The frontend admits the daemon by the ID of
+# its SVID (setec.frontend.clients, spiffePath platform/daemon). The Pod
+# runs in the setec namespace under the ServiceAccount `<fullname>-frontend`
+# of the setec chart.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-setec-frontend
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/setec-frontend"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: setec
+      app.kubernetes.io/component: frontend
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $setecNs }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $setecNs }}"
+    - "k8s:sa:{{ printf "%s-frontend" (include "gibson.setecFullname" .) }}"
+{{- end }}
+
 {{- if (.Values.gibson.e2eRunner).enabled }}
 ---
 apiVersion: spire.spiffe.io/v1alpha1

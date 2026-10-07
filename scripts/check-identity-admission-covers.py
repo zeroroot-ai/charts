@@ -16,8 +16,10 @@ chart renders identities of its own under other paths. This check holds those
 to a closed list: the two that have a workload in this chart. Any other
 identity from the subchart is a registration with no workload, and it fails.
 The spire chart turns on four SPIKE identities by default, and this chart
-deploys no SPIKE. It renders the baseline twice: as shipped, and with
-one plugin enabled, because the per-plugin identities exist only then.
+deploys no SPIKE. It renders the baseline as shipped. The chart renders no
+plugin identity: the tenant-operator writes one for each plugin instance, and
+the policies of gibson-operators guard those (gibson#815). A `plugin/...` ID
+that the chart renders is still checked, and fails, because no list holds it.
 
 Two identities are outside the lists on purpose. Each is named here with its
 reason, by SPIFFE ID path, and a name that matches no rendered identity fails
@@ -182,20 +184,11 @@ def selftest() -> int:
 def main() -> int:
     if "--selftest" in sys.argv[1:]:
         return selftest()
-    plugin = ["--set", "gibson-workloads.plugins.guardfixture.enabled=true",
-              "--set", "gibson-workloads.plugins.guardfixture.image.repository=ghcr.io/zeroroot-ai/integrations/guardfixture",
-              "--set", "gibson-workloads.plugins.guardfixture.image.tag=0.0.0"]
     problems: list[str] = []
-    total = 0
-    seen_paths: set[str] = set()
-    for label, extra in (("the baseline", []), ("the baseline with one plugin enabled", plugin)):
-        docs = helm_template(extra)
-        found, checked = judge(docs)
-        total += checked
-        seen_paths |= {p for p, _, _ in identities(docs)}
-        problems += [f"{label}: {f}" for f in found]
-        if extra and not any(p.startswith("plugin/") for p, _, _ in identities(docs)):
-            problems.append(f"{label}: the render holds no plugin identity, so the plugin half read nothing")
+    docs = helm_template([])
+    found, total = judge(docs)
+    seen_paths = {p for p, _, _ in identities(docs)}
+    problems += [f"the baseline: {f}" for f in found]
     # A named exception that no profile can render is checked only when its
     # gate is on. helm-test renders on every profile, so it must be present.
     if "platform/helm-test" not in seen_paths:
@@ -204,7 +197,7 @@ def main() -> int:
         print(f"FAIL: {p}", file=sys.stderr)
     if problems:
         return 1
-    print(f"check-identity-admission-covers PASSED ({total} identity checks over two renders, plugin identities included)")
+    print(f"check-identity-admission-covers PASSED ({total} identity checks over the baseline render)")
     return 0
 
 

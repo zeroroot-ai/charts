@@ -24,6 +24,7 @@ spec:
         app.kubernetes.io/name: gibson-platform-operator
         app.kubernetes.io/part-of: gibson
         app.kubernetes.io/component: platform-operator
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "openbao") "kubeApi" true) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -128,10 +129,20 @@ spec:
             {{- /* deploy#201: SPIRE is REQUIRED — env + mount unconditional. */}}
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"
-            # Zitadel System API user private key path (platform-operator#28,
-            #). The reconcile step that registers the cluster
-            # Service name as a Zitadel trusted domain signs JWTs with
-            # this key to call /system/v1/*. The matching public key is
+            # The daemon that receives the audit record of each change
+            # (DaemonOperatorService.EmitAuditEvent, gibson#583). The operator
+            # does not start without both. It dials on first use, never at
+            # boot, so the daemon is not a start dependency: the records wait
+            # in the status of each resource until the daemon answers.
+            - name: GIBSON_DAEMON_GRPC_ADDRESS
+              value: {{ include "gibson.daemonAddress" . | quote }}
+            - name: GIBSON_DAEMON_SPIFFE_ID
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/daemon") | quote }}
+            # Zitadel System API user private key path (platform-operator#28).
+            # The AdminTokenReady step signs JWTs with this key to call
+            # /system/v1/* and mint the Zitadel admin token (gibson#794).
+            # No trusted domain is registered: the instance header alone
+            # selects the instance (gibson#990). The matching public key is
             # provisioned on Zitadel via the chart's SystemAPIUsers
             # config block (gitops apps/zitadel.yaml).
             - name: ZITADEL_SYSTEM_KEY_PATH

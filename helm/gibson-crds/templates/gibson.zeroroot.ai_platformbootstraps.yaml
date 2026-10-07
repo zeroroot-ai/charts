@@ -543,12 +543,6 @@ spec:
                       with a scheme or a port is refused. Equivalent to the
                       ZITADEL_EXTERNAL_DOMAIN env used by the OIDCClient reconciler.
                     type: string
-                  issuer:
-                    description: |-
-                      Issuer is the OIDC issuer URL the platform uses for both browser
-                      and in-cluster traffic (forge Host header as needed).
-                    pattern: ^https?://
-                    type: string
                   loginBranding:
                     description: |-
                       LoginBranding is the declared brand of the login pages. The
@@ -684,10 +678,9 @@ spec:
                     type: object
                   systemClient:
                     description: |-
-                      SystemClient configures the System API client used to register the
-                      cluster-internal Zitadel Service hostname as an additional trusted
-                      domain. When nil, the TrustedDomainReady step is skipped (for existing
-                      clusters without a system-bot user provisioned).
+                      SystemClient configures the System API client that mints the Zitadel
+                      admin token (gibson#794). When nil, the AdminTokenReady step cannot run
+                      and PlatformBootstrap is not Ready.
                     properties:
                       apiURL:
                         description: |-
@@ -696,9 +689,9 @@ spec:
                           System API is an instance-superuser surface and must never leave the
                           cluster, so no ingress route needs to publish it.
 
-                          The public issuer (spec.zitadel.issuer) is deliberately NOT a valid
-                          value here — dialling it sends instance-superuser traffic out to the
-                          internet-facing edge and back.
+                          The public origin is deliberately NOT a valid value here — dialling it
+                          sends instance-superuser traffic out to the internet-facing edge and
+                          back.
 
                           Resolution order when empty:
                            1. the ZITADEL_URL env var on the operator Pod, then
@@ -726,15 +719,16 @@ spec:
                         type: string
                       trustedClusterDomain:
                         description: |-
-                          TrustedClusterDomain is the cluster-internal Service hostname to
-                          register as an additional trusted domain on the Zitadel instance.
-                          When empty the controller derives it from the CR name and the
-                          operator's namespace: "<cr-name>-zitadel.<namespace>.svc.cluster.local".
+                          TrustedClusterDomain is the cluster-internal Zitadel Service hostname.
+                          The operator dials the System API at "http://<it>:8080" when apiURL
+                          and ZITADEL_URL are empty. No trusted domain is registered: the
+                          x-zitadel-instance-host header alone selects the instance (ADR-0092,
+                          gibson#990). When empty the controller derives it from the CR name and
+                          the operator's namespace: "<cr-name>-zitadel.<namespace>.svc.cluster.local".
                         type: string
                     type: object
                 required:
                 - adminTokenRef
-                - issuer
                 - project
                 type: object
             required:
@@ -842,6 +836,58 @@ spec:
                   required:
                   - name
                   - ready
+                  type: object
+                type: array
+              pendingAuditRecords:
+                description: |-
+                  PendingAuditRecords are the audit records of changes the daemon has not
+                  accepted yet (gibson#583). The operator sends them when the daemon
+                  answers, then removes them.
+                items:
+                  description: |-
+                    PendingAuditRecord is the audit record of a change the platform operator
+                    made, kept in the status of the changed resource until the daemon accepts
+                    it (gibson#583). The platform operator runs before the daemon exists, so a
+                    change cannot wait for its record: the operator makes the change, keeps the
+                    record here, sends it when the daemon answers, and then removes it.
+                  properties:
+                    action:
+                      description: Action is the audit action, for example "operator.platform_bootstrap".
+                      type: string
+                    count:
+                      description: |-
+                        Count is how many passes in a row made this same record. One pending
+                        record stands for all of them, so the status stays small while the
+                        daemon does not exist.
+                      format: int32
+                      type: integer
+                    fields:
+                      additionalProperties:
+                        type: string
+                      description: Fields are more facts about the change.
+                      type: object
+                    firstAt:
+                      description: FirstAt is when the operator first made this record.
+                      format: date-time
+                      type: string
+                    reason:
+                      description: Reason is why the change failed.
+                      type: string
+                    result:
+                      description: Result is empty for the record of a change, or
+                        "failure".
+                      type: string
+                    targetID:
+                      description: TargetID is the id of the changed object.
+                      type: string
+                    targetType:
+                      description: TargetType is the kind of the changed object.
+                      type: string
+                  required:
+                  - action
+                  - firstAt
+                  - targetID
+                  - targetType
                   type: object
                 type: array
               platformOwnerLinkConfirmedSMTPActive:

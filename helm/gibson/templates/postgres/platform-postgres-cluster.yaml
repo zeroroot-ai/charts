@@ -53,6 +53,14 @@ claim the role `postgres`.
 {{- if not (regexMatch "^s3://[^/]+/backups/" $dest) }}
   {{- fail (printf "platformPostgres.backup.destinationPath %q must be s3://<durable-bucket>/backups/<prefix>: backups/ is the prefix the durable bucket's lifecycle rule covers and preflight proves (deploy#1730)." $dest) }}
 {{- end }}
+{{- /* One durable bucket (charts#446): the audit export of the daemon writes
+       to the same bucket as the WAL archive. Two values name it, so the
+       render fails when they differ. */ -}}
+{{- $axBucket := ((((index .Values "gibson-workloads") | default dict).gibson | default dict).auditExport | default dict).bucket | default "" }}
+{{- $pgBucket := regexReplaceAll "^s3://([^/]+)/.*$" $dest "${1}" }}
+{{- if ne $axBucket $pgBucket }}
+  {{- fail (printf "gibson-workloads.gibson.auditExport.bucket %q and the bucket of platformPostgres.backup.destinationPath %q differ: both name the one durable bucket of the environment (charts#446)." $axBucket $pgBucket) }}
+{{- end }}
 {{- $_ := required "platformPostgres.backup.s3Credentials.accessKeyIdSecret.name is REQUIRED (deploy#1730)." ($backup.s3Credentials.accessKeyIdSecret).name }}
 {{- $_ := required "platformPostgres.backup.s3Credentials.secretAccessKeySecret.name is REQUIRED (deploy#1730)." ($backup.s3Credentials.secretAccessKeySecret).name }}
 apiVersion: postgresql.cnpg.io/v1
@@ -93,6 +101,11 @@ spec:
   inheritedMetadata:
     labels:
       velero.io/exclude-from-backup: "true"
+      # The network labels of each instance and each CNPG Job (ADR-0165 rule
+      # 4, D76): the Postgres data store, a client of its own replicas, the
+      # API server for the instance manager, and the archive bucket. The
+      # bucket is the object-store egress group: AWS S3 or backup.endpointURL.
+      {{- include "gibson.netLabels" (dict "role" "datastore" "datastore" "postgres" "clients" (list "postgres") "kubeApi" true "fqdn" "object-store") | nindent 6 }}
 {{- $instances := int $pg.instances }}
 {{- /* The redundancy posture (deploy#1729). Aurora leaves the
        platform only because this Cluster carries the same durability, so

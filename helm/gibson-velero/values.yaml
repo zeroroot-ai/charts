@@ -57,6 +57,12 @@ schedule:
 # departure from its defaults.
 # ---------------------------------------------------------------------------
 velero:
+  # The network policy of the namespace is templates/network-policy.yaml:
+  # a default deny with DNS, and an allow to the API server and the bucket
+  # host only. The role label meets rule 4 of the secure pod check. No egress
+  # label of the umbrella applies in this namespace.
+  podLabels:
+    gibson.zeroroot.ai/net-role: system
   image:
     repository: ghcr.io/zeroroot-ai/mirror/velero
     tag: "v1.18.1@sha256:11459094b1b21ec7c817b08f8067d9e89380835547915cac9c4132ff05b55b90"
@@ -72,6 +78,28 @@ velero:
       volumeMounts:
         - mountPath: /target
           name: plugins
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+
+  # The restricted Pod Security Standard and a read-only root (ADR-0165,
+  # charts#394). The server writes only to its emptyDir volumes (plugins,
+  # scratch). The image names its user by name, so the pod names a numeric
+  # user that the API server can check.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
 
   # THE deploy#1193 SETTING. The upstream default binds this ServiceAccount
   # to cluster-admin AND gives it apiGroups/resources/verbs `*` in its own
@@ -144,6 +172,8 @@ velero:
       cpu: "1"
       memory: 512Mi
   nodeAgent:
+    podLabels:
+      gibson.zeroroot.ai/net-role: system
     resources:
       requests:
         cpu: 50m
@@ -159,3 +189,12 @@ velero:
       enabled: false
     prometheusRule:
       enabled: false
+
+# ---------------------------------------------------------------------------
+# The platform namespace: the namespace of the gibson release. The Schedule
+# backs it up whole (templates/schedule.yaml), and the tenant-operator runs in
+# it. templates/tenant-operator-rbac.yaml grants that operator get and create
+# on Backups in this release's namespace, for the last Backup of a deleted
+# tenant (ADR-0075, charts#424).
+# ---------------------------------------------------------------------------
+platformNamespace: gibson

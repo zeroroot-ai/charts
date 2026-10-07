@@ -85,7 +85,9 @@ gibson-workloads.tests.kubectlImage — kubectl-bearing image for K8s-API probes
 gibson-workloads.tests.labels — common labels for every helm-test pod.
 Includes the standard chart labels PLUS `helm-test/keep: "false"` so an
 external janitor (e.g. `kubectl get pods -l helm-test/keep=false`) can
-sweep stragglers if `helm.sh/hook-delete-policy` is misconfigured.
+sweep stragglers if `helm.sh/hook-delete-policy` is misconfigured. It adds
+the network labels of a platform pod (gibson.netLabels), so the network
+policy of the release admits the test pod.
 
 NOTE: this helper deliberately does NOT emit `app.kubernetes.io/component`
 because individual test pods need to set their own component to match
@@ -96,6 +98,7 @@ adding its own `app.kubernetes.io/component` label.
 {{- define "gibson-workloads.tests.labels" -}}
 {{ include "gibson.labels" . }}
 helm-test/keep: "false"
+{{ include "gibson.netLabels" (dict "role" "platform" "kubeApi" true) }}
 {{- end -}}
 
 {{/*

@@ -84,6 +84,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: fga-init
+        {{- include "gibson.netLabels" (dict "role" "platform" "kubeApi" true) | nindent 8 }}
     spec:
       restartPolicy: OnFailure
       serviceAccountName: {{ .Release.Name }}-fga-init

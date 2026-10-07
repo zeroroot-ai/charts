@@ -9,21 +9,22 @@
 */}}
 
 {{/*
-stripe-mock host — dev-only stub that replaces api.stripe.com in kind so
-the tenant-operator readyz Stripe probe passes without a live Stripe key.
-Disabled in production overlays (stripeMock.enabled: false).
+gibson.certManagerVaultPaths: the OpenBao names of the cert-manager Vault
+issuer, as JSON {"approle": ..., "pkiMount": ..., "pkiRole": ...}. The
+approle init Job and the OpenBao policies of its two tokens read the same
+names from here. certManager.issuers.vault.path has the form
+<pki-mount>/sign/<role>, and the render fails on another form.
 */}}
-{{- define "gibson.stripeMock.host" -}}
-{{- printf "%s-stripe-mock" .Release.Name }}
-{{- end }}
-
-{{/*
-gibson.emailSmtpSecret.name — the K8s Secret name the daemon's SMTP
-credentials ExternalSecret materialises (gibson.email.smtp.externalSecret).
-*/}}
-{{- define "gibson.emailSmtpSecret.name" -}}
-{{- printf "%s-email-smtp" .Release.Name }}
-{{- end }}
+{{- define "gibson.certManagerVaultPaths" -}}
+{{- $vi := .Values.certManager.issuers.vault -}}
+{{- $approle := ((($vi.auth | default dict).appRole | default dict).path) | default "approle" -}}
+{{- $issuerPath := required "certManager.issuers.vault.path is required when vault issuer is enabled (e.g. pki_int/sign/gibson)" $vi.path -}}
+{{- $split := splitList "/sign/" $issuerPath -}}
+{{- if ne (len $split) 2 -}}
+{{- fail (printf "certManager.issuers.vault.path %q must be of the form <pki-mount>/sign/<role-name> (e.g. pki_int/sign/gibson)" $issuerPath) -}}
+{{- end -}}
+{{- dict "approle" $approle "pkiMount" (index $split 0) "pkiRole" (index $split 1) | toJson -}}
+{{- end -}}
 
 {{/*
 Capability-Grant JWT signing key Secret name (GHSA-3957, gibson#1288).
@@ -37,33 +38,6 @@ releases in one namespace from colliding.
 {{- printf "%s-cg-signing-key" (include "gibson.fullname" .) }}
 {{- end }}
 
-{{/*
-Stripe credentials Secret name.
-
-This name is the default `dashboard.billing.stripeSecretKeySecretRef` resolves
-to in templates/dashboard/deployment.yaml, and it is consumed by that
-Deployment's wait-for-stripe-secrets init container and its STRIPE_SECRET_KEY /
-STRIPE_WEBHOOK_SECRET env entries.
-
-Do NOT prefix with .Release.Name — the value in dashboard.billing.*SecretRef
-is the literal Secret name and is intentionally environment-stable.
-*/}}
-{{- define "gibson.stripeSecrets.name" -}}
-gibson-stripe-credentials
-{{- end }}
-
-{{/*
-Billing-webhook shared-secret Secret name (deploy#1314).
-
-Materialised by templates/secrets/billing-webhook-secret.yaml with the single
-key GIBSON_BILLING_WEBHOOK_SECRET. Both ends of the SetTenantBillingActive hop
-reference it by this literal name — the daemon StatefulSet's secretKeyRef and,
-once dashboard#1016 is decided, the caller workload — so it is intentionally
-NOT release-prefixed and environment-stable, exactly like the Stripe Secret.
-*/}}
-{{- define "gibson.billingWebhookSecret.name" -}}
-gibson-billing-webhook-secret
-{{- end }}
 
 {{/*
 gibson.envoyEdge.caRequired — TRUE when consumers must mount the Envoy
@@ -133,37 +107,13 @@ gibson.setecFrontendAddress — host:port the daemon dials.
 {{- end }}
 
 {{/*
-gibson.setecFrontendServerName — the TLS serverName the daemon verifies.
-
-Must be a name the frontend's server certificate actually carries. That cert
-is minted by templates/setec/frontend-tls.yaml with commonName
-`<frontend>.<ns>.svc` and dnsNames covering the short, two-label, `.svc` and
-`.svc.cluster.local` forms — the `.svc` form is used here because it is what
-setec's own round-trip test defaults to (gibson
-internal/engine/harness/setec_roundtrip_setec_test.go), so both callers
-verify the same name.
+gibson.setecFrontendSpiffeID — the SPIFFE ID of the in-chart setec frontend,
+the one server the daemon accepts on the dispatch leg (ADR-0142). It is the
+ID that templates/spire-server/clusterspiffeids.yaml registers for the
+frontend Pod, built from global.spire.trustDomain (ADR-0164).
 */}}
-{{- define "gibson.setecFrontendServerName" -}}
-{{- printf "%s.%s.svc" (include "gibson.setecFrontendName" .) (include "gibson.setecNamespace" .) -}}
-{{- end }}
-
-{{/*
-gibson.setecClientSecretName — the release-namespace Secret holding the
-daemon's client keypair plus the CA that signed the frontend's server cert.
-*/}}
-{{- define "gibson.setecClientSecretName" -}}
-{{- (.Values.gibson.sandbox.setec).clientSecretName | default "gibson-setec-client-tls" -}}
-{{- end }}
-
-{{/*
-gibson.setecMtlsMountPath — where that Secret is mounted in the daemon pod.
-A sibling of /etc/gibson, not a subpath of it: kubelet rejects a mount that
-targets a path already occupied by another volume, and the `config`
-ConfigMap already owns /etc/gibson (same reason /etc/gibson-kek is a
-sibling).
-*/}}
-{{- define "gibson.setecMtlsMountPath" -}}
-{{- (.Values.gibson.sandbox.setec).mtlsMountPath | default "/etc/gibson-setec-mtls" -}}
+{{- define "gibson.setecFrontendSpiffeID" -}}
+{{- printf "spiffe://%s/platform/setec-frontend" (include "gibson.trustDomain" .) -}}
 {{- end }}
 
 {{/*

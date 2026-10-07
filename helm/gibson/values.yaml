@@ -160,7 +160,7 @@ global:
     # same mechanism global.platformOwner.offlineSetup uses, reused here
     # rather than a second one (ADR-0027). Set this explicitly on a profile
     # with no delivering mail transport
-    # (gibson-workloads.gibson.email.provider != "smtp") — the render fails
+    # (global.email.provider != "smtp") — the render fails
     # otherwise, naming both keys. Ignored when firstTenant.enabled is false.
     offlineSetup: false
     # setupSecretRef names the Secret (and the key within it) the
@@ -203,7 +203,7 @@ global:
     # one-time, expiring link to a Secret readable only by cluster
     # administrators (ADR-0093 decision 8). Set this explicitly on a
     # profile with no delivering mail transport
-    # (gibson-workloads.email.provider != "smtp") — the render fails
+    # (global.email.provider != "smtp") — the render fails
     # otherwise, naming both keys, so a cluster can never be left unable to
     # reach the one person who can sign in and set everything else up.
     offlineSetup: false
@@ -218,6 +218,55 @@ global:
     # new setup link. A reviewed change to this value, committed and
     # rolled out like any other — never a live-cluster action.
     setupGeneration: 1
+  # The one mail value of the install (hosted#223, ADR-0027). The daemon, the
+  # tenant-operator's welcome mail and Zitadel's SMTP provider (the
+  # PlatformBootstrap) all read it, so the three cannot drift apart. The old
+  # blocks gibson-workloads.gibson.email, gibson-operators.tenantOperator.smtp
+  # and gibson-operators.platformBootstrap.zitadel.smtp were deleted, and
+  # setting one fails the render.
+  #
+  # provider: log   the daemon logs each mail and sends none. The
+  #                 tenant-operator sends its welcome mail to the in-cluster
+  #                 mailpit sink. Zitadel gets no SMTP provider, so set
+  #                 global.platformOwner.offlineSetup (and
+  #                 global.firstTenant.offlineSetup when it is enabled).
+  # provider: smtp  all three send through smtp.host.
+  #
+  # Worked example, an SES relay whose credential is seeded in the secret
+  # store under ses-smtp-credentials (properties username and password):
+  #
+  #   global:
+  #     email:
+  #       provider: smtp
+  #       from: "no-reply@example.com"
+  #       fromName: "Example"
+  #       smtp:
+  #         host: "email-smtp.us-east-1.amazonaws.com"
+  #         port: 587
+  #         tlsMode: starttls        # starttls (587) | implicit (465) | plaintext
+  #         configurationSet: ""     # SES only; empty for other relays
+  #         credentials:
+  #           source: secretStore    # secretStore | secret | none
+  #           remoteKey: "ses-smtp-credentials"
+  #           secretName: ""         # source secret: a Secret with keys username, password
+  #
+  # source secretStore renders the ExternalSecret <release>-email-smtp from
+  # remoteKey. source secret names a Secret the operator creates. source none
+  # is a relay that takes no credential, and it is the only source allowed
+  # with tlsMode plaintext.
+  email:
+    provider: "log"
+    from: ""
+    fromName: ""
+    smtp:
+      host: ""
+      port: 587
+      tlsMode: "starttls"
+      configurationSet: ""
+      credentials:
+        source: "secretStore"
+        remoteKey: "ses-smtp-credentials"
+        secretName: ""
 
 # In-cluster CNPG `Cluster` shape (deploy#1389), rendered by
 # templates/postgres/platform-postgres-cluster.yaml on EVERY profile
@@ -422,6 +471,14 @@ postgresSetup:
     tag: "16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
 
 gibson-operators:
+  tenantOperator:
+    daemonGrpcAddress: "gibson-gibson-workloads:50051"
+    # The className of the SPIRE controller-manager, for the ClusterSPIFFEID
+    # of each plugin instance (gibson#815). The anchor keeps it equal to
+    # gibson-workloads.spire.controllerManager.className below, which takes
+    # its value from this anchor.
+    plugins:
+      spireClassName: &spireClassName "gibson-gibson"
   # The login brand. templates/zitadel-login-branding.yaml renders this
   # ConfigMap from files/branding, and the platform-operator applies it to
   # the Zitadel instance label policy (a bootstrap step, LoginBrandingReady).
@@ -454,19 +511,6 @@ gibson-workloads:
     required:
       - gibson-iam-admin
       - gibson-tenant-operator
-  gibson:
-    embedder:
-      cache:
-        # Without a hydrated model cache the daemon's GraphRAG bridge falls
-        # back to its built-in 10-second HuggingFace download against a
-        # READ-ONLY rootfs — CrashLoopBackOff at 'failed to create embedder'
-        # (observed live on staging 2026-06-11). kind uses initMode=image
-        # with a locally-built model image; that image is not published to
-        # ghcr, so the umbrella uses the chart's `download` init container
-        # (proper timeout, hydrates the PVC once; NAT egress to
-        # huggingface.co is available on EKS).
-        enabled: true
-        initMode: download
   spire:
     controllerManager:
       # MUST equal the className the umbrella's spire sub-chart computes for
@@ -479,7 +523,7 @@ gibson-workloads:
       # tenant-operator all hung at startup with no log line (observed live
       # on staging 2026-06-11; the failure mode is documented at the knob in
       # gibson-workloads/values.yaml).
-      className: "gibson-gibson"
+      className: *spireClassName
 
 # Cross-cutting platform secrets folded from gitops (deploy#787).
 externalSecrets:
@@ -505,6 +549,10 @@ neo4j:
   disableLookups: true
   neo4j:
     name: gibson-neo4j
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    labels:
+      gibson.zeroroot.ai/net-role: datastore
+      gibson.zeroroot.ai/datastore: neo4j
     minimumClusterSize: 1
     acceptLicenseAgreement: "yes"
     edition: community
@@ -669,6 +717,11 @@ neo4j:
     apoc.import.file.enabled: "false"
 
 openfga:
+  # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  commonLabels:
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/client-postgres: "true"
+    gibson.zeroroot.ai/kube-api: "true"
   # deploy#1170 — the openfga subchart defaults to `openfga/openfga` on Docker
   # Hub with an empty tag (so the tag falls out of the subchart's appVersion
   # and moves silently on every dependency bump). Pin it to the ghcr mirror
@@ -722,6 +775,18 @@ openfga:
   # the server without making it world-readable.
   podSecurityContext:
     fsGroup: 65532
+  # The restricted Pod Security Standard and a read-only root (ADR-0165,
+  # charts#394). The server and the migrate Job run the same distroless
+  # image as USER 65532 and write nothing to the root filesystem.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
   extraVolumes:
     - name: http-tls
       secret:
@@ -774,6 +839,32 @@ openfga:
       enabled: false
 
 zitadel:
+  # The restricted Pod Security Standard (ADR-0165, charts#394). Helm merges
+  # these keys into the chart-wide container securityContext, which already
+  # runs as user 1000 with a read-only root. Each ZITADEL container reads it:
+  # the server, the login UI and its wait init, and the init, setup and
+  # cleanup Jobs.
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  # egress-fqdn zitadel: ZITADEL sends mail through the SMTP relay of
+  # platformBootstrap.zitadel.smtp. External identity providers are off
+  # (AllowExternalIDP: false). The chart gives the login UI these labels too.
+  podAdditionalLabels:
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/client-postgres: "true"
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/egress-fqdn: zitadel
+  cleanupJob:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podAdditionalLabels:
+      gibson.zeroroot.ai/net-role: platform
+      gibson.zeroroot.ai/client-postgres: "true"
+      gibson.zeroroot.ai/kube-api: "true"
   # Identity provider — sole canonical IdP for the gibson stack.
   # Postgres: shared platform-postgres-rw, role/db zitadel.
 
@@ -811,7 +902,7 @@ zitadel:
     wait4x:
       image:
         repository: zeroroot-ai/mirror/wait4x
-        tag: "3.7.1@sha256:4168ec1328e4fa51b82f7d601c18813b5e4aa85d0eda237cf3501b4ddd70d2c5"
+        tag: "3.7.2@sha256:2337e64637e1aa9d5d638de6d877914806be6c5156a7221ea40f11911ea4071a"
 
   zitadel:
     # deploy#1348 — the masterkey is ESO-materialised, never a literal.
@@ -854,6 +945,15 @@ zitadel:
       # trips the hostname-guard (deploy#630/#938). Per-env overlays
       # (ci/values-staging.yaml) still pin the env-specific host explicitly.
       ExternalDomain: ""
+      # The setup Job mints no IAM admin PAT (charts#407). The upstream
+      # default creates iam-admin-pat next to the machine key; null deletes
+      # that block. The platform-operator mints the PAT with its System API
+      # key and writes it to OpenBao, and the ExternalSecret iam-admin-pat is
+      # the one writer of the Secret (gibson#794, ADR-0014).
+      FirstInstance:
+        Org:
+          Machine:
+            Pat: null
       ExternalPort: 30443
       ExternalSecure: true
       TLS:
@@ -929,6 +1029,9 @@ zitadel:
               - MemberType: System
                 Roles:
                   - SYSTEM_OWNER
+                  # The platform-operator mints the first IAM admin PAT with
+                  # this key (charts#407, gibson#794), which needs IAM_OWNER.
+                  - IAM_OWNER
             Path: /etc/zitadel-system-keys/system-bot-pub.pem
 
   # deploy#1631: DO NOT LET ZITADEL BOOT WITHOUT ITS SYSTEM KEY.
@@ -945,7 +1048,7 @@ zitadel:
   #
   #   issuer does not match: Expected: https://<domain>, got: gibson-system-bot
   #
-  # which stalls the platform-operator at TrustedDomainReady, so it never
+  # which stalls the platform-operator at AdminTokenReady, so it never
   # reaches the master-key step, so gibson-master-key is never created, so the
   # daemon never leaves init, and nobody can log in.
   #
@@ -973,7 +1076,7 @@ zitadel:
           done
           echo "FATAL: ${KEY} never appeared. Zitadel would boot trusting no" >&2
           echo "system-bot key and reject every System API call, stalling the" >&2
-          echo "platform-operator at TrustedDomainReady (deploy#1631)." >&2
+          echo "platform-operator at AdminTokenReady (deploy#1631)." >&2
           exit 1
       volumeMounts:
         - name: zitadel-system-key
@@ -989,7 +1092,7 @@ zitadel:
   #
   #   zitadel system 401: Errors.Token.Invalid (AUTH-7fs1e)
   #
-  # which stalls the platform-operator at TrustedDomainReady, so it never
+  # which stalls the platform-operator at AdminTokenReady, so it never
   # reaches the master-key step, so gibson-master-key is never created, so the
   # daemon never leaves init and nobody can log in. Measured on a baseline
   # install: Zitadel started at 20:48:20, the Secret was created at 20:50:27.
@@ -1045,7 +1148,8 @@ zitadel:
   # client's PAT auth with X.509 cert auth (breaking, needs migration).
   # Both core and the Login-V2 container must move together.
   image:
-    tag: "v4.19.4"
+    repository: "ghcr.io/zeroroot-ai/mirror/zitadel"
+    tag: "v4.19.4@sha256:90a3045b80a2b5b395e1e770302076906af3a5911225af7c464b4f3bd00d0a1b"
 
   # ---- Hook-lifecycle correction (deploy#820, observed live 2026-06-11) ----
   # The zitadel chart defaults its ConfigMaps / ServiceAccounts (+ the RBAC
@@ -1094,12 +1198,22 @@ zitadel:
   # unaffected — it honours the argocd.* annotations below, and sync-waves order
   # hooks and ordinary resources on a single axis.
   initJob:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podAdditionalLabels:
+      gibson.zeroroot.ai/net-role: platform
+      gibson.zeroroot.ai/client-postgres: "true"
+      gibson.zeroroot.ai/kube-api: "true"
     annotations:
       helm.sh/hook: post-install,post-upgrade
       argocd.argoproj.io/hook: Sync
       argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
       argocd.argoproj.io/sync-wave: "-4"
   setupJob:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podAdditionalLabels:
+      gibson.zeroroot.ai/net-role: platform
+      gibson.zeroroot.ai/client-postgres: "true"
+      gibson.zeroroot.ai/kube-api: "true"
     # The upstream default is 300s, and a COLD bringup does not fit in it.
     # MEASURED (kind, deploy#1737, 2026-09-02): 8m27s. The pod SUCCEEDED —
     # "setup completed", iam-admin, iam-admin-pat and login-client all
@@ -1123,6 +1237,9 @@ zitadel:
       argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
       argocd.argoproj.io/sync-wave: "-3"
   login:
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podAdditionalLabels:
+      gibson.zeroroot.ai/net-role: platform
     image:
       # deploy#888: self-hosted Login V2 image — a THIN fork of the upstream
       # Zitadel login app (zeroroot-ai/zitadel-login) that adds the logo
@@ -1142,7 +1259,7 @@ zitadel:
       # zitadel.image.tag name different releases (charts#13). The digest is
       # re-resolved from the tag at chart publish (bump-image-digest.py).
       repository: "ghcr.io/zeroroot-ai/zitadel-login"
-      tag: "v4.19.4@sha256:3670859a776a8e9be5919b3041a1ed848b113ea996019094ad0c18429e16deaa"
+      tag: "v4.19.4@sha256:56b1d6a039156a4dd486c095d3a6d604780d08890af83388e7425ee654ef80d3"
     # The login UI is a Next.js server, so it needs a memory bound and a heap
     # ceiling inside that bound. It shipped with neither: measured on staging
     # 2026-10-01 the container had `resources: {}` — no request, no limit — so
@@ -1196,6 +1313,21 @@ zitadel:
 # `gibson-workloads.redis.*`, which is a different tree.
 
 spire:
+  spiffe-csi-driver:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      registry: "ghcr.io"
+      repository: "zeroroot-ai/mirror/spiffe-csi-driver"
+      tag: "0.2.7@sha256:9dfe4f0caff096164fd921aa7f15319804df2fc0325f1d90bc793ef3256ab1cd"
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: system
+    nodeDriverRegistrar:
+      # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+      image:
+        registry: "ghcr.io"
+        repository: "zeroroot-ai/mirror/csi-node-driver-registrar"
+        tag: "v2.9.4@sha256:ab6c4603d8da43d9f33361a5716552080e3f72badfad099d76fcf4b59e547d80"
   global:
     spire:
       # No trustDomain here: Helm gives the SPIRE chart the top-level
@@ -1233,6 +1365,39 @@ spire:
     deleteHooks:
       enabled: false
   spire-server:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      registry: "ghcr.io"
+      repository: "zeroroot-ai/mirror/spire-server"
+      tag: "1.14.5@sha256:295af37293ffef6530ba0cafce055c41fd4d26dbabaca24944c029bbc8291214"
+    # The restricted Pod Security Standard and a read-only root (ADR-0165,
+    # charts#394). These are the values of the SPIRE chart recommendations,
+    # set here for this chart only: the SPIRE agent and the CSI driver are
+    # node components and keep their own settings.
+    # fsGroup 1000 owns the server volume, so the root chown init container
+    # leaves (it renders only when runAsUser is unset).
+    podSecurityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      fsGroupChangePolicy: OnRootMismatch
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+      seccompProfile:
+        type: RuntimeDefault
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    # No egress label: the server uses the disk KeyManager, no
+    # UpstreamAuthority and no federation. It calls only the API server and
+    # Postgres.
+    podLabels:
+      gibson.zeroroot.ai/net-role: platform
+      gibson.zeroroot.ai/client-postgres: "true"
+      gibson.zeroroot.ai/kube-api: "true"
+      gibson.zeroroot.ai/ingress-control-plane: "true"
     # Velero fs-backup skips these: sockets and scratch. spire-data (the
     # datastore volume) stays in the backup. scripts/check-velero-volume-excludes.sh.
     podAnnotations:
@@ -1250,6 +1415,19 @@ spire:
           name: spire-postgres-credentials
           key: password
     controllerManager:
+      # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+      image:
+        registry: "ghcr.io"
+        repository: "zeroroot-ai/mirror/spire-controller-manager"
+        tag: "0.6.4@sha256:f8fd8e6637f4d4fa21a46fb6a285a5166f5adc812dbe1f9f6ebe48c09dfda9bf"
+      securityContext:
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
       enabled: true
       # The spire chart registers four identities for SPIKE by default. This
       # chart deploys no SPIKE workload, and a registration with no workload
@@ -1269,6 +1447,13 @@ spire:
     telemetry:
       prometheus:
         enabled: false
+    tests:
+      bash:
+        # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+        image:
+          registry: "ghcr.io"
+          repository: "zeroroot-ai/mirror/chainguard-bash"
+          tag: "sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
 
 # =============================================================================
 # The cluster operators (deploy#1728). The umbrella owns
@@ -1302,16 +1487,116 @@ spire:
 # and are never refused by a webhook whose pod is not up yet.
 # =============================================================================
   spire-agent:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      registry: "ghcr.io"
+      repository: "zeroroot-ai/mirror/spire-agent"
+      tag: "1.14.5@sha256:efb8d29ace803852c8f3d0001c3d183102bfda2c6ff52e4a93a067269a2caa5e"
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: system
     # The agent's SVID cache: it re-attests on start, a restored copy is
     # stale. Velero fs-backup skips it.
     podAnnotations:
       backup.velero.io/backup-volumes-excludes: "spire-agent-admin-socket-dir,spire-agent-persistence"
+    socketAlternate:
+      # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+      image:
+        registry: "ghcr.io"
+        repository: "zeroroot-ai/mirror/chainguard-bash"
+        tag: "sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
+    fsGroupFix:
+      # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+      image:
+        registry: "ghcr.io"
+        repository: "zeroroot-ai/mirror/chainguard-bash"
+        tag: "sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
+    hostCert:
+      # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+      image:
+        registry: "ghcr.io"
+        repository: "zeroroot-ai/mirror/chainguard-min-toolkit-debug"
+        tag: "sha256:6ba4fb1b19bb35fa0b7e6bf08b308379a5b865727e50b7b3068efb824b39ebba"
   spiffe-oidc-discovery-provider:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      registry: "ghcr.io"
+      repository: "zeroroot-ai/mirror/oidc-discovery-provider"
+      tag: "1.14.5@sha256:553704280654f49ba58bf52d5e84d8deca8daf5d91ff8b34dbd47dd3cc325eca"
+    # The restricted Pod Security Standard and a read-only root (ADR-0165,
+    # charts#394). These are the values of the SPIRE chart recommendations,
+    # set here for this chart only: the SPIRE agent and the CSI driver are
+    # node components and keep their own settings.
+    podSecurityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      fsGroupChangePolicy: OnRootMismatch
+    securityContext:
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+      seccompProfile:
+        type: RuntimeDefault
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: platform
     # Sockets and a cert scratch dir. Velero fs-backup skips them.
     podAnnotations:
       backup.velero.io/backup-volumes-excludes: "certdir,nginx-tmp,spiffe-workload-api,spire-oidc-sockets"
+    spiffeHelper:
+      # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+      image:
+        registry: "ghcr.io"
+        repository: "zeroroot-ai/mirror/spiffe-helper"
+        tag: "0.11.0@sha256:1c92e5998ad3621e3323f25aabe40f5a88ba730ee0edb248aa8c943ca504e8a2"
+    tests:
+      step:
+        # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+        image:
+          registry: "ghcr.io"
+          repository: "zeroroot-ai/mirror/step-cli"
+          tag: "0.30.2@sha256:c75414251d4d8234945fb01e1374707dcc6a7adced88679bae4f0fd526331e74"
+      busybox:
+        # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+        image:
+          registry: "ghcr.io"
+          repository: "zeroroot-ai/mirror/busybox"
+          tag: "1.37.0-uclibc@sha256:31b72538c3019a20336b04c4cebcd47c36511d0b45aa76666804c2845055bbd3"
+      agent:
+        # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+        image:
+          registry: "ghcr.io"
+          repository: "zeroroot-ai/mirror/spire-agent"
+          tag: "1.14.5@sha256:efb8d29ace803852c8f3d0001c3d183102bfda2c6ff52e4a93a067269a2caa5e"
+      bash:
+        # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+        image:
+          registry: "ghcr.io"
+          repository: "zeroroot-ai/mirror/chainguard-bash"
+          tag: "sha256:ef209fd7d231ead12bf24287db24991bdd979669f4df2e037698f94545816d3e"
+      toolkit:
+        # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+        image:
+          registry: "ghcr.io"
+          repository: "zeroroot-ai/mirror/chainguard-min-toolkit-debug"
+          tag: "sha256:6ba4fb1b19bb35fa0b7e6bf08b308379a5b865727e50b7b3068efb824b39ebba"
 
 cert-manager:
+  # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+  image:
+    repository: "ghcr.io/zeroroot-ai/mirror/cert-manager-controller"
+    tag: "v1.21.1"
+    digest: "sha256:416a2d76870d996460e62bd7f521bf14fa017be9e3e904aab92163a331fcb61a"
+  # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  # egress-fqdn cert-manager: the ACME directory of Let's Encrypt, and the
+  # hosts of the solver (the self-check, or Route53 and its name servers).
+  podLabels:
+    gibson.zeroroot.ai/net-role: system
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/egress-fqdn: cert-manager
   # Canonical names (cert-manager, cert-manager-webhook, cert-manager-cainjector)
   # rather than gibson-cert-manager-*: the vendored RBAC in templates/operators/
   # names these ServiceAccounts, and the admission inventory pins the webhook
@@ -1340,6 +1625,16 @@ cert-manager:
     annotations:
       argocd.argoproj.io/sync-wave: "-20"
   webhook:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      repository: "ghcr.io/zeroroot-ai/mirror/cert-manager-webhook"
+      tag: "v1.21.1"
+      digest: "sha256:d8b3961b51c8c7320633f8208dc46bf88aa13804d0f7cbe48a096b2c523cee42"
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: system
+      gibson.zeroroot.ai/kube-api: "true"
+      gibson.zeroroot.ai/ingress-control-plane: "true"
     deploymentAnnotations:
       argocd.argoproj.io/sync-wave: "-20"
     serviceAnnotations:
@@ -1352,6 +1647,15 @@ cert-manager:
     validatingWebhookConfigurationAnnotations:
       argocd.argoproj.io/sync-wave: "-20"
   cainjector:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      repository: "ghcr.io/zeroroot-ai/mirror/cert-manager-cainjector"
+      tag: "v1.21.1"
+      digest: "sha256:ccf6b919ec0500745a47a910118f834f9636d0aac1ff221245cd2557ed8c7c98"
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: system
+      gibson.zeroroot.ai/kube-api: "true"
     deploymentAnnotations:
       argocd.argoproj.io/sync-wave: "-20"
     serviceAnnotations:
@@ -1361,6 +1665,15 @@ cert-manager:
         argocd.argoproj.io/sync-wave: "-20"
 
 external-secrets:
+  # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+  image:
+    repository: "ghcr.io/zeroroot-ai/mirror/external-secrets"
+    tag: "v2.10.0@sha256:814117b0fd6d121b03e8ba3b6db1cecbe7449a354fc0fc9c4faf73a37aa221b1"
+  # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  podLabels:
+    gibson.zeroroot.ai/net-role: system
+    gibson.zeroroot.ai/client-openbao: "true"
+    gibson.zeroroot.ai/kube-api: "true"
   # Canonical name: the ClusterSecretStore (gibson-workloads) authenticates to
   # OpenBao as ServiceAccount `external-secrets` in the release namespace, and
   # the OpenBao kubernetes auth role binds exactly that name.
@@ -1376,6 +1689,15 @@ external-secrets:
     annotations:
       argocd.argoproj.io/sync-wave: "-20"
   webhook:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      repository: "ghcr.io/zeroroot-ai/mirror/external-secrets"
+      tag: "v2.10.0@sha256:814117b0fd6d121b03e8ba3b6db1cecbe7449a354fc0fc9c4faf73a37aa221b1"
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: system
+      gibson.zeroroot.ai/kube-api: "true"
+      gibson.zeroroot.ai/ingress-control-plane: "true"
     # The two ValidatingWebhookConfigurations (secretstore-validate,
     # externalsecret-validate).
     annotations:
@@ -1391,6 +1713,14 @@ external-secrets:
       annotations:
         argocd.argoproj.io/sync-wave: "-20"
   certController:
+    # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+    image:
+      repository: "ghcr.io/zeroroot-ai/mirror/external-secrets"
+      tag: "v2.10.0@sha256:814117b0fd6d121b03e8ba3b6db1cecbe7449a354fc0fc9c4faf73a37aa221b1"
+    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    podLabels:
+      gibson.zeroroot.ai/net-role: system
+      gibson.zeroroot.ai/kube-api: "true"
     rbac:
       create: false
     deploymentAnnotations:
@@ -1400,6 +1730,16 @@ external-secrets:
         argocd.argoproj.io/sync-wave: "-20"
 
 external-dns:
+  # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+  image:
+    repository: "ghcr.io/zeroroot-ai/mirror/external-dns"
+    tag: "v0.21.0@sha256:f53faaf71cb270d1ca9dce6ea0c94bfebf1a18696263487f0fbc74b9bf2bd7ff"
+  # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  # egress-fqdn external-dns: the API of the DNS provider (Route53 for aws).
+  podLabels:
+    gibson.zeroroot.ai/net-role: system
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/egress-fqdn: external-dns
   fullnameOverride: external-dns
   # The provider is the one per-cloud seam these two operators keep
   #. `inmemory` starts on a cluster with no cloud attached: it
@@ -1416,18 +1756,17 @@ external-dns:
     - service
     - ingress
 
-# The hosts each platform pod reaches outside the cluster, by name (ADR-0165
-# rule 4, charts#396). The chart renders one CiliumNetworkPolicy for each list
-# (gibson.ciliumEgressPolicy). Add a host here for a private endpoint; never
-# open egress to all. Each entry: host (exact) or pattern, and TCP ports.
-egressHosts:
-  # The DNS provider of external-dns, when it is not inmemory. AWS: Route53
-  # and STS (IRSA) answer on regional and global amazonaws.com names.
-  externalDns:
-    - pattern: "*.amazonaws.com"
-      ports: [443]
-
 cnpg:
+  # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
+  image:
+    repository: "ghcr.io/zeroroot-ai/mirror/cloudnative-pg"
+    tag: "1.30.0@sha256:a2701eb97cdd2a34b1fdb2cb51987f544b706e40bec72ae7146cd8580efefebb"
+  # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  podLabels:
+    gibson.zeroroot.ai/net-role: system
+    gibson.zeroroot.ai/client-postgres: "true"
+    gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/ingress-control-plane: "true"
   # Operator-substitution seam; see the block at the top of this file.
   enabled: true
   # The CNPG operator locates its own Deployment by the hardcoded label

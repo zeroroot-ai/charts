@@ -19,11 +19,6 @@ data:
     core:
       # Spec 3 R3 — daemon runs as nonroot uid 65532; HOME is /var/lib/gibson.
       home_dir: /var/lib/gibson/.gibson
-      # Nil-safe access: .Values.gibson.config.core may be unset when an
-      # overlay only contributes other gibson.config.* subkeys (e.g.,
-      # values-kind.yaml only sets gibson.config.identity). Parenthesized
-      # paths return nil instead of erroring on missing intermediates.
-      timeout: {{ ((.Values.gibson.config).core).timeout | default "5m" }}
 
     security:
       {{- /* Spec first-deploy-unblock-and-ha R6.2: render the security block
@@ -160,7 +155,6 @@ data:
 
     logging:
       level: {{ ((.Values.gibson.config).logging).level | default "info" }}
-      format: {{ ((.Values.gibson.config).logging).format | default "json" }}
 
     registry:
       type: platform
@@ -187,7 +181,7 @@ data:
       # laptop) has never been able to use the internal name either. Envoy
       # already routes gibson.harness.v1.HarnessCallbackService for exactly
       # these callers, so both reach the daemon by the same path.
-      advertise_address: {{ (((.Values.gibson.config).callback).advertiseAddress) | default (include "gibson.apiEndpoint" .) | quote }}
+      advertise_address: {{ include "gibson.apiEndpoint" . | quote }}
 
     registration:
       enabled: true
@@ -224,19 +218,16 @@ data:
 
     {{- $tenantPgHost := include "gibson.tenant.dbHost" . }}
     {{- if $tenantPgHost }}
-    # Per-tenant admin Postgres — host, port, admin_username and ssl_mode, which
-    # are the keys the daemon still binds. admin_password and admin_database are
-    # NOT rendered: gibson#599 unbound both, so viper dropped them in silence, and
-    # the bootstrap credential reaches the tenant-operator instead.
+    # Per-tenant admin Postgres — host, port and ssl_mode, which are the keys
+    # the daemon still binds. admin_username, admin_password and admin_database
+    # are NOT rendered: gibson#599 and D78 unbound them, so viper dropped them in
+    # silence, and the bootstrap credential reaches the tenant-operator instead.
     # Spec: per-tenant-data-plane-completion Req 1, D1, D5; Tasks 6, 25.
     #
-    # Host resolution order (gibson.tenant.dbHost):
-    #   1. dataPlane.postgres.host (explicit override — RDS, Aurora, etc.)
-    #   2. {{ .Release.Name }}-tenant-postgresql Service (in-chart subchart)
+    # Host: dataPlane.postgres.host (gibson.tenant.dbHost).
     tenant_postgres:
       host: {{ $tenantPgHost | quote }}
       port: {{ .Values.dataPlane.postgres.port | default 5432 }}
-      admin_username: {{ .Values.dataPlane.postgres.admin_username | default "gibson_admin" | quote }}
       {{- /* sslmode=require is hardcoded — Spec first-deploy-unblock-and-ha R7. */}}
       ssl_mode: "require"
     {{- end }}
@@ -257,11 +248,6 @@ data:
       enabled: false
       metrics:
         enabled: false
-
-    tracing:
-      enabled: {{ (((.Values.gibson).tracing).enabled) | default false }}
-      sample_rate: 1
-      service_name: gibson
 
     # Prometheus metrics listener (Spec security-hardening R20).
     # Daemon-owned :9090 mTLS endpoint; cert material mounted from the
@@ -289,10 +275,13 @@ data:
       enabled: true
       provider: openfga
       fga:
-{{- /* deploy#1382: explicit https:// — the OpenFGA HTTP listener serves
-            TLS; the daemon's FGA client honours the scheme and the pod
-            trusts the issuing CA via SSL_CERT_DIR (statefulset.yaml). */}}
-        endpoint: {{ ((.Values.gibson.authz).fga).endpoint | default (printf "https://gibson-openfga:%d" (int (.Values.openfga.service.httpPort | default 8080))) | required "gibson.authz.fga.endpoint must resolve to the in-cluster OpenFGA HTTP endpoint — one-code-path slice deploy#195 requires FGA at daemon startup" }}
+{{- /* deploy#1382: explicit https://, because the OpenFGA HTTP listener
+            serves TLS. The daemon trusts only the CA in tls.ca_file, not
+            SSL_CERT_DIR. It refuses an https endpoint when tls.enabled is
+            false, and it refuses to start when ca_file is not a readable PEM
+            file. The fga-http-ca volume (statefulset.yaml) mounts the CA at
+            /etc/ssl/fga-ca. make fga-tls checks each render. */}}
+        endpoint: {{ printf "https://gibson-openfga:%d" (int (.Values.openfga.service.httpPort | default 8080)) }}
         store_id: ""
         model_id: ""
         {{- /*
@@ -310,14 +299,13 @@ data:
           so the chart contradicted itself. It is now 5s. If you change either
           number, change both.
         */}}
-        timeout_ms: {{ ((.Values.gibson.authz).fga).timeoutMs | default 4000 }}
+        timeout_ms: 4000
         tls:
-          enabled: false
+          enabled: true
+          ca_file: "/etc/ssl/fga-ca/ca.crt"
 
 
-    {{- if .Values.gibson.sandbox.enabled }}
     {{- $sbx := .Values.gibson.sandbox }}
-    {{- $mtlsDir := include "gibson.setecMtlsMountPath" . }}
     # sandbox: the Setec connection details, and the ONLY surface the daemon
     # reads them from (config.SandboxConfig, gibson
     # internal/infra/config/sandbox.go). Per-tool registration (the old
@@ -326,17 +314,21 @@ data:
     # each names the shared gibson-executor image and selects a parser by
     # GIBSON_TOOL_NAME. The runtime catalog refresher was removed (gibson#1641).
     #
-    # address / server_name / the three mTLS paths are DERIVED, not restated
-    # (deploy#1106): they have to agree with where the setec subchart puts
-    # the frontend, what SANs its certificate carries, and where the
-    # StatefulSet mounts the keypair, and a disagreement produces no render
-    # error — just a dial timeout or a handshake failure at the first
-    # sandboxed tool call. An overlay sets enabled + tenant.
+    # address and spiffe_id are DERIVED, not restated (deploy#1106,
+    # ADR-0142): they have to agree with where the setec subchart puts the
+    # frontend and with the SPIFFE ID this chart registers for it, and a
+    # disagreement produces no render error — just a dial timeout or a
+    # handshake failure at the first sandboxed tool call. The daemon always
+    # dials setec (D5, gibson#756): there is no enabled switch, and the
+    # daemon sends the tenant in each request, so no fixed tenant is
+    # configured.
     sandbox:
-      enabled: true
       setec:
         address: {{ $sbx.setec.address | default (include "gibson.setecFrontendAddress" .) | quote }}
-        tenant: {{ $sbx.setec.tenant | quote }}
+        # spiffe_id: the fleet frontend is the one server the daemon accepts.
+        # The daemon dials with its own SVID from the Workload API (gibson
+        # internal/server/daemon/sandboxed_setec_adapter.go).
+        spiffe_id: {{ $sbx.setec.spiffeID | default (include "gibson.setecFrontendSpiffeID" .) | quote }}
         call_timeout: {{ $sbx.setec.callTimeout | default "5m" | quote }}
         {{- with $sbx.setec.sandboxClass }}
         sandbox_class: {{ . | quote }}
@@ -349,15 +341,3 @@ data:
         # agent workload can carry a different isolation posture.
         agent_sandbox_class: {{ . | quote }}
         {{- end }}
-        # File-based mTLS is what the daemon adapter implements — it builds a
-        # component.TLSConfig and hands it to credentials.NewTLS. It does not
-        # speak the SPIFFE Workload API on this leg, and the frontend does not
-        # serve an SVID, so the cert-manager chain that already signs the
-        # frontend's server cert is the trust root for both directions.
-        mtls:
-          enabled: true
-          cert_file: {{ $sbx.setec.mtls.certFile | default (printf "%s/tls.crt" $mtlsDir) | quote }}
-          key_file: {{ $sbx.setec.mtls.keyFile | default (printf "%s/tls.key" $mtlsDir) | quote }}
-          ca_file: {{ $sbx.setec.mtls.caFile | default (printf "%s/ca.crt" $mtlsDir) | quote }}
-          server_name: {{ $sbx.setec.mtls.serverName | default (include "gibson.setecFrontendServerName" .) | quote }}
-    {{- end }}

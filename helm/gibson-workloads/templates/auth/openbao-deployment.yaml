@@ -42,10 +42,10 @@ THE SIDECAR (deploy#1732). `openbao-auto-init` renders on every profile and
 is THE seed path: kind/gibson/credentials.tf and the Kubernetes-Secrets ESO
 backend are deleted. On a fresh PVC it calls /sys/init with recovery shares,
 holds the initial root token in memory for one bootstrap pass, mounts kv v2
-and transit, writes the policies `platform-admin` and `eso-reader`, enables
+and transit, writes one narrow policy for each consumer (below), enables
 the kubernetes auth mount with the roles `eso-reader` (ESO's ServiceAccount)
 and `openbao-seeder` (this pod's own ServiceAccount), proves the seeder
-login works, mints the two operator service tokens, seeds every key in
+login works, mints one service token for each consumer, seeds every key in
 files/openbao-seed-keys.txt, and then REVOKES the initial root token. The
 recovery keys that /sys/init returns are never parsed, never logged and
 never written: see vault_init for why. No profile mints a literal root token
@@ -57,8 +57,15 @@ to a Kubernetes Secret. The standing credentials are two renewable service
 tokens: `gibson-tenant-operator-vault`, policy `tenant-operator` (tenant
 namespaces, the KEK HMAC, and no read of the root kv store where the
 escrowed Zitadel owner credentials live), and
-`gibson-platform-operator-vault`, policy `platform-admin`,
-both minted no_parent so revoking the initial root does not cascade to
+`gibson-platform-operator-vault`, policy `platform-operator` (the transit
+mount, its one transit key and the one KV key of the Zitadel admin token).
+The Jobs that configure the store each get their own token in their own
+Secret, with only the paths of their script: `gibson-openbao-iam-admin-escrow`
+(policy `iam-admin-escrow`), `gibson-openbao-jwt-auth-init` (policy
+`jwt-auth-init`) and, with the cert-manager Vault issuer,
+`gibson-openbao-approle-init` (policy `cert-manager-approle-init`) and
+`gibson-openbao-approle-reader` (policy `cert-manager-approle-reader`, the
+ESO generators). No policy grants `path "*"`. Every token is minted no_parent so revoking the initial root does not cascade to
 them. When one dies (sidecar down longer than its period, or a store restored
 into a new cluster) the sidecar logs in with the `openbao-seeder` role from its
 projected ServiceAccount token and mints a replacement. That login is the
@@ -69,8 +76,10 @@ The seed inputs that are not self-generated randoms arrive through the
 bringup keyring Secret: the GHCR pull token (member GHCR_PULL_TOKEN,
 scripts/keyring.sh) as `ghcr-pull-token`, and the SMTP relay credential
 (SMTP_USER from substrate.env, SMTP_PASSWORD from the keyring) as
-`smtp-username` and `smtp-password`. The chart projects those three keys,
-and only those three, into the sidecar; the seed table names which OpenBao
+`smtp-username` and `smtp-password`, and the Stripe account as
+`stripe-secret-key`, `stripe-publishable-key` and `stripe-webhook-secret`
+(charts#486). The chart projects those six keys, and only those six, into
+the sidecar; the seed table names which OpenBao
 property each fills. There is no platform LLM credential: a tenant's LLM
 providers and their keys live in that tenant's provider configuration and
 reach the daemon through the secrets broker.
@@ -78,6 +87,8 @@ reach the daemon through the secrets broker.
 {{- $openbaoRepo := .Values.openbao.image.repository | required "openbao.image.repository is REQUIRED (OpenBao is structural — see deploy#223). Set it in values.yaml or the env's gitops Application's helm.values block." }}
 {{- $openbaoTag := .Values.openbao.image.tag | required "openbao.image.tag is REQUIRED (OpenBao is structural — see deploy#223). Pin to a specific OpenBao version (e.g. \"2.5.3\")." }}
 {{- $openbaoPort := .Values.openbao.service.port | required "openbao.service.port is REQUIRED (OpenBao is structural — see deploy#223). Typical value: 8200." }}
+{{- /* The cert-manager Vault issuer adds two consumer tokens (the approle init Job and the ESO generators). */}}
+{{- $cmVault := (((.Values.certManager).issuers).vault).enabled }}
 {{- /* / deploy#1731: the bringup keyring Secret. Both names are
        required so that an empty value fails the render instead of rendering
        a volume that points at nothing. The chart renders NO Secret with this
@@ -130,6 +141,10 @@ data:
     storage "file" {
       path = "/etc/openbao/data"
     }
+
+    # The server runs with no capability (ADR-0165, charts#394), so it cannot
+    # lock memory. The nodes run with no swap, so a page never leaves RAM.
+    disable_mlock = true
 
     {{- if (.Values.openbao.config).audit }}{{- if .Values.openbao.config.audit.enabled }}
     # deploy#1195: OpenBao audit device. `bao audit enable` was never called in
@@ -231,14 +246,23 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: openbao
+        {{- include "gibson.netLabels" (dict "role" "datastore" "datastore" "openbao" "kubeApi" true) | nindent 8 }}
       annotations:
         checksum/config: {{ .Values.openbao.config | toYaml | sha256sum }}
+        # Velero fs-backup skips the scratch volumes. scripts/check-velero-volume-excludes.sh.
+        backup.velero.io/backup-volumes-excludes: "tmp,auto-init-tmp"
     spec:
       serviceAccountName: {{ .Release.Name }}-openbao
+      # The restricted Pod Security Standard (ADR-0165, charts#394). The
+      # image runs as the openbao user (uid 100). SKIP_CHOWN and SKIP_SETCAP
+      # keep the entrypoint from the root-only steps.
       securityContext:
         fsGroup: 1000
         runAsUser: 100
         runAsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: openbao
           image: "{{ $openbaoRepo }}:{{ $openbaoTag }}"
@@ -276,6 +300,9 @@ spec:
             - name: seal-key
               mountPath: /etc/openbao/seal
               readOnly: true
+            # The root filesystem is read-only. The server writes scratch here.
+            - name: tmp
+              mountPath: /tmp
           # LIVENESS keeps sealedcode=204 deliberately. Restarting a sealed
           # OpenBao does not unseal it — it destroys the sidecar's in-progress
           # recovery and, in a CrashLoopBackOff, prevents recovery entirely.
@@ -312,7 +339,7 @@ spec:
           # build a client against an OpenBao that would not answer, Argo spent
           # its five retries on that one task, and every resource behind it —
           # the daemon included — was never created. Three gibson exit tests
-          # failed at "Stand up the setec+gvisor cluster" for three days with no
+          # failed at "Stand up the setec cluster" for three days with no
           # further detail.
           #
           # The whole bringup waits on this one endpoint, so it gets the longest
@@ -340,9 +367,9 @@ spec:
             failureThreshold: 6
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
-              add:
-                - IPC_LOCK
+              drop: ["ALL"]
         # openbao-auto-init — sidecar that drives OpenBao from a fresh PVC to
         # initialized, seeded and root-free, and stays running so the platform
         # service token is kept renewed (deploy#1732).
@@ -409,11 +436,18 @@ spec:
               # the ClusterSecretStore against AUTH_MOUNT and ESO_ROLE.
               AUTH_MOUNT="kubernetes"
               SEEDER_ROLE="openbao-seeder"
-              ADMIN_POLICY="platform-admin"
+              SEEDER_POLICY="openbao-seeder"
+              PLATFORM_POLICY="platform-operator"
+              # The policy every token carried before each consumer got its
+              # own. The reconcile pass deletes it after the re-mint.
+              LEGACY_POLICY="platform-admin"
               # The two operator tokens, each in its own Secret (vault_mint_token).
               PLATFORM_TOKEN_SECRET="gibson-platform-operator-vault"
               TENANT_OP_TOKEN_SECRET="gibson-tenant-operator-vault"
               TENANT_OP_POLICY="tenant-operator"
+              # The token of each Job that configures the store, as
+              # <Secret>:<policy>. Each Job mounts its own Secret and nothing else.
+              JOB_TOKENS="gibson-openbao-iam-admin-escrow:iam-admin-escrow gibson-openbao-jwt-auth-init:jwt-auth-init{{ if $cmVault }} gibson-openbao-approle-init:cert-manager-approle-init gibson-openbao-approle-reader:cert-manager-approle-reader{{ end }}"
               ESO_ROLE="eso-reader"
               ESO_POLICY="eso-reader"
               ESO_SA_NAME="{{ $esoSA.name | default "external-secrets" }}"
@@ -627,7 +661,7 @@ spec:
                 # Log in with THIS pod's ServiceAccount through the kubernetes
                 # auth mount, role openbao-seeder. The projected token is
                 # short-lived and re-read at every call; the OpenBao token it
-                # buys carries the platform-admin policy and a short TTL, and
+                # buys carries the openbao-seeder policy and a short TTL, and
                 # every pass revokes it when done. This is the standing path
                 # back into the store on every profile: no stored credential,
                 # no root token, no recovery key (closes the deploy#1731 gap).
@@ -661,7 +695,7 @@ spec:
                   return 1
                 fi
                 vault_revoke_self "$t"
-                echo "[openbao-auto-init] seeder role login OK: ServiceAccount ${OWN_SA} -> auth/${AUTH_MOUNT} role ${SEEDER_ROLE} (policy ${ADMIN_POLICY})"
+                echo "[openbao-auto-init] seeder role login OK: ServiceAccount ${OWN_SA} -> auth/${AUTH_MOUNT} role ${SEEDER_ROLE} (policy ${SEEDER_POLICY})"
               }
 
               vault_mint_token() {
@@ -681,8 +715,8 @@ spec:
                 # revocation of whatever minted it (the initial root at init,
                 # a seeder login token on a re-mint).
                 #
-                # Two tokens, one per operator:
-                #   gibson-platform-operator-vault  policy platform-admin, the
+                # One token for each consumer, each in its own Secret:
+                #   gibson-platform-operator-vault  policy platform-operator, the
                 #     platform-operator's (through the ESO copy
                 #     gibson-openbao-keys, see seed key gibson-vault-admin-token)
                 #   gibson-tenant-operator-vault    policy tenant-operator, the
@@ -690,6 +724,8 @@ spec:
                 # The tenant-operator's token reaches tenant namespaces, the
                 # KEK HMAC and nothing in the root namespace's kv store, where
                 # the escrowed Zitadel owner credentials live.
+                #   JOB_TOKENS                      one token for each Job that
+                #     configures the store, with the paths of its script only
                 #
                 # Nothing here restarts a workload. Reloader rolls each
                 # operator when the Secret it reads changes (the
@@ -851,11 +887,27 @@ spec:
               }
 
               vault_ensure_tokens() {
-                # Both operator tokens. $1 (optional) a held seeder token.
+                # Every consumer token. $1 (optional) a held seeder token.
                 trc=0
-                vault_ensure_token "$PLATFORM_TOKEN_SECRET" "$ADMIN_POLICY" "${1:-}" || trc=1
+                vault_ensure_token "$PLATFORM_TOKEN_SECRET" "$PLATFORM_POLICY" "${1:-}" || trc=1
                 vault_ensure_token "$TENANT_OP_TOKEN_SECRET" "$TENANT_OP_POLICY" "${1:-}" || trc=1
+                for pair in $JOB_TOKENS; do
+                  vault_ensure_token "${pair%%:*}" "${pair#*:}" "${1:-}" || trc=1
+                done
                 return $trc
+              }
+
+              vault_delete_legacy_policy() {
+                # $1 token. Each token that carried the legacy policy was
+                # re-minted with its own policy before this call (vault_ensure_token
+                # replaces a token that lacks its policy). 204 and 404 are done.
+                c=$(curl -sS -o ${TMPD}/delpol.json -w '%{http_code}' \
+                  -X DELETE -H "X-Vault-Token: $1" \
+                  "${BAO_ADDR_LOCAL}/v1/sys/policies/acl/${LEGACY_POLICY}")
+                case "$c" in 200|204|404) return 0 ;; *)
+                  echo "[openbao-auto-init] WARN: delete policy ${LEGACY_POLICY} returned HTTP $c: $(cat ${TMPD}/delpol.json)" >&2
+                  return 1 ;;
+                esac
               }
 
               # ---------------------------------------------------------------
@@ -1027,6 +1079,18 @@ spec:
                       elif [ "$present" != "true" ]; then
                         val=""; write=1
                       fi ;;
+                    inputor)
+                      # inputor:<file>:<literal> (charts#486): the keyring
+                      # input when the bringup supplied one, else the literal.
+                      # A non-empty input replaces the stored value, as
+                      # `input` does; an empty one leaves it, and an absent
+                      # property gets the literal.
+                      val=$(seed_input input "${arg%%:*}" "$prop")
+                      if [ -n "$val" ] && [ "$val" != "$curval" ]; then
+                        write=1
+                      elif [ -z "$val" ] && [ "$present" != "true" ]; then
+                        val="${arg#*:}"; write=1
+                      fi ;;
                     svctoken)
                       val=$(kube_read_token "$PLATFORM_TOKEN_SECRET")
                       if [ -n "$val" ] && [ "$val" != "$curval" ]; then write=1; fi ;;
@@ -1124,14 +1188,46 @@ spec:
                   return 1 ;;
                 esac
 
-                # platform-admin: what the operators and this sidecar hold.
-                # Every capability on every path, including sudo, because the
-                # operators create tenant namespaces, policies, transit keys
-                # and auth mounts. It is not root: no token carrying it is a
-                # root token, and a token carrying it can mint another.
-                vault_write_policy "$tok" "$ADMIN_POLICY" \
-                  'path "*" { capabilities = ["create", "read", "update", "delete", "list", "sudo", "patch"] }
-              ' || return 1
+                # One policy for each consumer, each with the paths its code
+                # calls and nothing else. No policy grants path "*".
+                # scripts/check-openbao-policies.py reads each policy of the
+                # render and fails on path "*" and on sudo outside a named list.
+                #
+                # openbao-seeder: this sidecar, on every pass after the
+                # bootstrap. It mounts kv and transit, enables the kubernetes
+                # auth, writes these policies and roles, mints each consumer
+                # token (a no_parent token with a policy the caller does not
+                # hold needs sudo), seeds the platform KV keys and the transit
+                # keypairs, and deletes the legacy policy. The seeder can still
+                # write any policy, so it keeps the reach of the store by
+                # design. Its token lives 15 minutes and only this pod logs in
+                # with the role.
+                vault_write_policy "$tok" "$SEEDER_POLICY" \
+                  '{{- include "gibson.openbaoPolicy.seeder" . | nindent 14 }}' || return 1
+
+                # platform-operator: gibson operators/platform/internal/clients/vault.
+                #   sys/mounts               mountExists reads the mount table
+                #   sys/mounts/transit       EnsureTransitMounted
+                #   transit/keys/<key>       EnsureTransitKey, the one key of
+                #                            platformBootstrap.vaultTransit.keyName
+                #   secret/data/gibson-zitadel-iam-admin-pat
+                #                            the admin token it mints (gibson#794)
+                # lookup-self and renew-self come with the default policy.
+                vault_write_policy "$tok" "$PLATFORM_POLICY" \
+                  '{{- include "gibson.openbaoPolicy.platformOperator" . | nindent 14 }}' || return 1
+
+                # The Jobs that configure the store, each with the paths of its
+                # own script (helpers in _openbao-policies.tpl).
+                vault_write_policy "$tok" iam-admin-escrow \
+                  '{{- include "gibson.openbaoPolicy.iamAdminEscrow" . | nindent 14 }}' || return 1
+                vault_write_policy "$tok" jwt-auth-init \
+                  '{{- include "gibson.openbaoPolicy.jwtAuthInit" . | nindent 14 }}' || return 1
+                {{- if $cmVault }}
+                vault_write_policy "$tok" cert-manager-approle-init \
+                  '{{- include "gibson.openbaoPolicy.approleInit" . | nindent 14 }}' || return 1
+                vault_write_policy "$tok" cert-manager-approle-reader \
+                  '{{- include "gibson.openbaoPolicy.approleReader" . | nindent 14 }}' || return 1
+                {{- end }}
 
                 # tenant-operator: what the tenant-operator's code calls, and
                 # nothing in the root namespace's kv store, where the escrowed
@@ -1174,8 +1270,8 @@ spec:
               ' || return 1
 
                 vault_write_k8s_role "$tok" "$ESO_ROLE" "$ESO_SA_NAME" "$ESO_SA_NS" "$ESO_POLICY" "1h" || return 1
-                vault_write_k8s_role "$tok" "$SEEDER_ROLE" "$OWN_SA" "$NAMESPACE" "$ADMIN_POLICY" "15m" || return 1
-                echo "[openbao-auto-init] access configured: auth/${AUTH_MOUNT} roles ${ESO_ROLE} (${ESO_SA_NS}/${ESO_SA_NAME}, policy ${ESO_POLICY}) and ${SEEDER_ROLE} (${NAMESPACE}/${OWN_SA}, policy ${ADMIN_POLICY})"
+                vault_write_k8s_role "$tok" "$SEEDER_ROLE" "$OWN_SA" "$NAMESPACE" "$SEEDER_POLICY" "15m" || return 1
+                echo "[openbao-auto-init] access configured: auth/${AUTH_MOUNT} roles ${ESO_ROLE} (${ESO_SA_NS}/${ESO_SA_NAME}, policy ${ESO_POLICY}) and ${SEEDER_ROLE} (${NAMESPACE}/${OWN_SA}, policy ${SEEDER_POLICY})"
               }
 
               vault_ensure_kv_v2_secret_mount() {
@@ -1218,7 +1314,8 @@ spec:
                 return 1
               }
 
-              # The keyring inputs (ghcr-pull-token, smtp-username,
+              # The keyring inputs (ghcr-pull-token, smtp-username, the three
+              # stripe-* members,
               # smtp-password) follow the keyring: a member set AFTER the
               # bringup reaches the Secret through keyring-to-cluster.sh and the
               # kubelet, and this pass writes it into OpenBao without a pod
@@ -1255,6 +1352,7 @@ spec:
                 vault_configure_access "$seeder" || rc=1
                 vault_ensure_tokens "$seeder" || rc=1
                 vault_seed_platform_secrets "$seeder" || rc=1
+                [ "$rc" -eq 0 ] && { vault_delete_legacy_policy "$seeder" || rc=1; }
                 vault_revoke_self "$seeder"
                 seeder=""
                 return $rc
@@ -1330,8 +1428,13 @@ spec:
                     continue
                   fi
                   retry_n 5 5 vault_mint_token "$initial_root" "$TENANT_OP_POLICY" "$TENANT_OP_TOKEN_SECRET" || { sleep 5; continue; }
+                  jobs_ok=1
+                  for pair in $JOB_TOKENS; do
+                    retry_n 5 5 vault_mint_token "$initial_root" "${pair#*:}" "${pair%%:*}" || jobs_ok=0
+                  done
+                  [ "$jobs_ok" = 1 ] || { sleep 5; continue; }
                   # The platform token last: svc_token holds it for the check below.
-                  retry_n 5 5 vault_mint_token "$initial_root" "$ADMIN_POLICY" "$PLATFORM_TOKEN_SECRET" || { sleep 5; continue; }
+                  retry_n 5 5 vault_mint_token "$initial_root" "$PLATFORM_POLICY" "$PLATFORM_TOKEN_SECRET" || { sleep 5; continue; }
                   retry_n 5 5 vault_seed_platform_secrets "$initial_root" || { sleep 5; continue; }
                   # The replacement credential must authenticate BEFORE the
                   # initial root is destroyed.
@@ -1397,6 +1500,9 @@ spec:
             # seeded empty.
             - name: bringup-inputs
               mountPath: /etc/openbao/inputs
+            # The ready marker and mktemp write here. The root filesystem is read-only.
+            - name: auto-init-tmp
+              mountPath: /tmp
               readOnly: true
           # Ready = the store serves its consumers (see the marker above).
           # A readiness probe never restarts the container; until the marker
@@ -1413,6 +1519,10 @@ spec:
           env:
             - name: BAO_ADDR
               value: "http://127.0.0.1:8200"
+            # The root filesystem is read-only. A tool that writes to HOME
+            # writes to the scratch volume.
+            - name: HOME
+              value: /tmp
           resources:
             requests:
               cpu: 10m
@@ -1422,10 +1532,14 @@ spec:
               memory: 64Mi
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
       volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: auto-init-tmp
+          emptyDir: {}
         - name: config
           configMap:
             name: {{ .Release.Name }}-openbao-config
@@ -1459,6 +1573,19 @@ spec:
                 path: smtp-username
               - key: smtp-password
                 path: smtp-password
+              # The Stripe account (charts#486): written by the bringup from
+              # the keyring members STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY
+              # and STRIPE_WEBHOOK_SECRET, the empty string when not supplied.
+              - key: stripe-secret-key
+                path: stripe-secret-key
+              - key: stripe-publishable-key
+                path: stripe-publishable-key
+              - key: stripe-webhook-secret
+                path: stripe-webhook-secret
+              # The sandbox disk signing seed (ADR-0166): the keyring member
+              # SETEC_DISK_SIGNING_SEED, seeded to secret/data/setec-disk-signing.
+              - key: setec-disk-signing-seed
+                path: setec-disk-signing-seed
   volumeClaimTemplates:
     {{- if .Values.openbao.persistence.enabled }}
     - metadata:
@@ -1510,9 +1637,6 @@ spec:
       port: {{ $openbaoPort }}
       targetPort: http
       protocol: TCP
-      {{- if and (eq .Values.openbao.service.type "NodePort") .Values.openbao.service.nodePort }}
-      nodePort: {{ .Values.openbao.service.nodePort }}
-      {{- end }}
     - name: cluster
       port: 8201
       targetPort: cluster
@@ -1542,10 +1666,12 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 ---
-# openbao-auto-init RBAC. The sidecar manages TWO Secrets, the renewable
-# service tokens of the two operators (deploy#454):
-#   gibson-platform-operator-vault — policy platform-admin
+# openbao-auto-init RBAC. The sidecar manages one Secret for each consumer,
+# the renewable service token of that consumer (deploy#454):
+#   gibson-platform-operator-vault — policy platform-operator
 #   gibson-tenant-operator-vault   — policy tenant-operator
+#   gibson-openbao-iam-admin-escrow, gibson-openbao-jwt-auth-init,
+#   gibson-openbao-approle-init, gibson-openbao-approle-reader — the Jobs
 # A non-renewable root token in either would cause VaultTransitReady=False,
 # because vaulttoken.Renewer calls renew-self and OpenBao rejects it with
 # 400 "lease is not renewable".
@@ -1593,6 +1719,12 @@ rules:
     resourceNames:
       - gibson-platform-operator-vault
       - gibson-tenant-operator-vault
+      - gibson-openbao-iam-admin-escrow
+      - gibson-openbao-jwt-auth-init
+      {{- if $cmVault }}
+      - gibson-openbao-approle-init
+      - gibson-openbao-approle-reader
+      {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

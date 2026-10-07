@@ -69,13 +69,11 @@ OPERATORS: dict[str, list[str]] = {
 #
 # external-secrets-controller: `create serviceaccounts/token` on every
 # ServiceAccount in the cluster. The controller mints a token only for the
-# ServiceAccount a store names for its own auth. The umbrella's stores name
-# two: its own ServiceAccount (the OpenBao ClusterSecretStore) and
-# gibson-setec-cert-reader (the setec mirror store). Minting a token for any
-# other ServiceAccount would let the controller act as that workload, which
-# is the same as becoming it. The two grants it needs are
-# templates/operators/external-secrets-token-rbac.yaml and the Role beside
-# the setec store (gibson-workloads templates/setec/daemon-client-secret.yaml).
+# ServiceAccount a store names for its own auth. The umbrella's one store
+# names its own ServiceAccount (the OpenBao ClusterSecretStore). Minting a
+# token for any other ServiceAccount would let the controller act as that
+# workload, which is the same as becoming it. The one grant it needs is
+# templates/operators/external-secrets-token-rbac.yaml.
 REMOVED_RULES: list[tuple[str, str, str, str]] = [
     ("external-secrets", "external-secrets-controller", "serviceaccounts/token", "create"),
 ]

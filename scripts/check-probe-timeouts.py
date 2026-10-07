@@ -15,7 +15,7 @@ on a loaded 2-core runner /v1/sys/health did not answer inside it:
 A deadline, not a refusal. ESO's ClusterSecretStore is a sync hook, it could
 not build a client against an OpenBao that would not answer, Argo spent its
 five retries on that one task, and nothing behind it — the daemon included —
-was ever created. Three gibson exit tests failed at "Stand up the setec+gvisor
+was ever created. Three gibson exit tests failed at "Stand up the setec
 cluster" with no further detail (gibson exit-test-bank run 36922487157).
 
 So: every probe states its timeout. An explicit 1 is a fine answer. The point
@@ -34,7 +34,7 @@ WHY THE RENDER AND NOT THE TEMPLATES
 
 A probe inside an `{{- if }}` is invisible to a grep over the templates, and
 every probe in this chart that was missing a timeout sat behind one. The render
-is the baseline profile with mailpit, stripe-mock and one plugin switched on,
+is the baseline profile with mailpit switched on,
 which is the smallest render that contains every probe-bearing workload.
 
 VENDORED CHARTS
@@ -79,13 +79,11 @@ RENDER = [
     "-f", "helm/gibson/values-baseline.yaml",
     "-f", "helm/testdata/render-inputs/gibson.yaml",
     "--namespace", "gibson",
-    # The probe-bearing workloads the baseline leaves off. Without these three
-    # the render contains no mailpit, stripe-mock or plugin probe at all.
+    # The probe-bearing workload the baseline leaves off. Without it the
+    # render contains no mailpit probe at all. The chart renders no plugin pod
+    # (the tenant-operator deploys each plugin instance, gibson#815) and no
+    # stripe-mock (billing is a private component, charts#375).
     "--set", "gibson-workloads.mailpit.enabled=true",
-    "--set", "gibson-workloads.stripeMock.enabled=true",
-    "--set", "gibson-workloads.plugins.probeguard.enabled=true",
-    "--set", "gibson-workloads.plugins.probeguard.image.repository=ghcr.io/zeroroot-ai/integrations/probeguard",
-    "--set", "gibson-workloads.plugins.probeguard.image.tag=v0.0.0",
 ]
 
 

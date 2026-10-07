@@ -19,12 +19,6 @@ spec:
       port: {{ .Values.dashboard.service.port | default 3000 }}
       targetPort: http
       protocol: TCP
-      {{- if and (eq .Values.dashboard.service.type "NodePort") .Values.dashboard.service.nodePort }}
-      nodePort: {{ .Values.dashboard.service.nodePort }}
-      {{- end }}
   selector:
     {{- include "gibson.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: dashboard
-  {{- if .Values.dashboard.service.sessionAffinity }}
-  sessionAffinity: {{ .Values.dashboard.service.sessionAffinity }}
-  {{- end }}

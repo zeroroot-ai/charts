@@ -80,7 +80,9 @@ record_bytes() { # <chart dir> [values file...]
   local out chart="$1"; shift
   local args=() f
   for f in "$@"; do args+=(-f "$f"); done
-  out="$(helm template release "$chart" "${args[@]}")" || return 1
+  # --namespace gibson: the umbrella names the release namespace in the setec
+  # namespace policy (setec.systemPolicy.frontendCallers) and refuses another.
+  out="$(helm template release "$chart" "${args[@]}" --namespace gibson)" || return 1
   [ -n "$out" ] || return 1
   printf '%s' "$out" | gzip -9 | wc -c | awk '{printf "%d", $1 * 4 / 3}'
 }

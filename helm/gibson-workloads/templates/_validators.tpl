@@ -40,9 +40,9 @@ else" or "I set componentIngress.enabled with no Envoy in front of it."
 Rules (Envoy is required infrastructure — deploy#200; the gates that used
 to inspect envoy.enabled are unconditional now):
   1. .Values.gibson.service.type MUST be ClusterIP (or unset).
-  2. .Values.gibson.networkPolicy.enabled MUST be true when the daemon is
-     deployed. (Without the policy, anyone in the cluster could reach
-     :50051 directly even though Envoy IS the supported path.)
+  2. .Values.gibson.networkPolicy MUST NOT be set. The toggle was deleted
+     (D76): the umbrella renders the Cilium network policy on each profile,
+     so only the edge and the platform pods reach :50051.
   3. .Values.ingress (the unified platform ingress) MUST NOT have
      gateway-bypassing routes. We can't fully introspect the rendered
      Ingress object from another template, so we approximate: the unified
@@ -60,7 +60,6 @@ Spec Reqs: 3.4, 3.5.
 {{- if hasKey .Values "dev" -}}
 {{- fail "dev was deleted (charts#399). The dev escape hatches turned off a NetworkPolicy, a data-plane check, SPIFFE and the pull-secret check. Each cluster runs Cilium and the full platform, so none of them has a use. Remove dev from your values." -}}
 {{- end -}}
-{{- if .Values.gibson.enabled -}}
 
 {{- /* Rule 1 — daemon Service type. */ -}}
 {{- $svcType := .Values.gibson.service.type | default "ClusterIP" -}}
@@ -68,16 +67,12 @@ Spec Reqs: 3.4, 3.5.
 {{- fail (printf "validateAllPathsViaEnvoy: gibson.service.type=%q exposes daemon gRPC ports outside the Envoy mesh. Set gibson.service.type=ClusterIP and route external traffic through Envoy. Spec unified-identity-and-authorization Req 3.4." $svcType) -}}
 {{- end -}}
 
-{{- /* Rule 2 — NetworkPolicy (Envoy is unconditionally enabled per deploy#200). */ -}}
-{{- $npEnabled := false -}}
-{{- with .Values.gibson.networkPolicy -}}
-{{- $npEnabled = .enabled -}}
-{{- end -}}
-{{- /* No escape hatch: each cluster runs Cilium, which enforces NetworkPolicy
-       (hosted#436). The dev.networkPolicy.disabled bypass was deleted
-       (charts#399). */ -}}
-{{- if not $npEnabled -}}
-{{- fail "validateAllPathsViaEnvoy: gibson.networkPolicy.enabled=true is required so non-Envoy pods cannot reach the daemon's gRPC ports directly. Set gibson.networkPolicy.enabled=true. Spec unified-identity-and-authorization Req 3.5." -}}
+{{- /* Rule 2 — the network policy. It is no longer a value: the umbrella
+       renders the Cilium policies on each profile, and only the edge and
+       the platform pods reach the daemon (ADR-0165 rule 4, D76). A values
+       file that still sets the deleted toggle fails here. */ -}}
+{{- if hasKey .Values.gibson "networkPolicy" -}}
+{{- fail "gibson.networkPolicy was deleted (D76). The umbrella renders the Cilium network policy of the release on each profile, with no toggle. Remove gibson.networkPolicy from your values." -}}
 {{- end -}}
 
 {{- /* Rule 3 — unified ingress gRPC route incompatible with Envoy. (Previous
@@ -103,7 +98,6 @@ Spec Reqs: 3.4, 3.5.
        cross-chart-check Check 24 enforces "no tenant primitive in the platform
        namespace" instead. */ -}}
 
-{{- end -}}
 {{- end -}}
 
 {{/* =========================================================================
@@ -137,7 +131,6 @@ exact failure mode this guard catches.
 Spec Reqs: 4.7, 14.2.
 ========================================================================= */}}
 {{- define "gibson.validateRegistryFromSDK" -}}
-{{- if .Values.gibson.enabled -}}
 {{- $sdk := .Values.sdk | default dict -}}
 {{- if not $sdk.bypassRegistryValidation -}}
 
@@ -145,7 +138,6 @@ Spec Reqs: 4.7, 14.2.
 {{- fail "validateRegistryFromSDK: sdk.version is empty — the ext-authz registry ConfigMap (Phase H/8.6) downloads the (rpc → authz) registry from the gibson release artifact pinned by sdk.version. Set sdk.version to a published zeroroot-ai/gibson version (e.g. v0.124.3) or set sdk.bypassRegistryValidation=true for an air-gapped install with a baked-in registry. Spec unified-identity-and-authorization Req 4.7." -}}
 {{- end -}}
 
-{{- end -}}
 {{- end -}}
 {{- end -}}
 
@@ -168,7 +160,6 @@ failure here.
 Spec Reqs: 5.1, 13.3, 14.2.
 ========================================================================= */}}
 {{- define "gibson.validateKMSConfigured" -}}
-{{- if .Values.gibson.enabled -}}
 
 {{- $sec := ((.Values.gibson).config).security | default dict -}}
 {{- $kp := $sec.key_provider | default dict -}}
@@ -197,7 +188,6 @@ Spec Reqs: 5.1, 13.3, 14.2.
 {{- end -}}
 
 {{- end -}}
-{{- end -}}
 
 {{/* =========================================================================
 gibson.validateCertManagerCRDs
@@ -217,7 +207,6 @@ Operators MUST install the cert-manager CRDs before installing this chart:
   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
 ========================================================================= */}}
 {{- define "gibson.validateCertManagerCRDs" -}}
-{{- if .Values.gibson.enabled -}}
 {{- $cm := .Values.certManager | default dict -}}
 {{- $issuers := $cm.issuers | default dict -}}
 {{- $le := $issuers.letsencrypt | default dict -}}
@@ -226,7 +215,6 @@ Operators MUST install the cert-manager CRDs before installing this chart:
 {{- $vault := $issuers.vault | default dict -}}
 {{- if not (or $le.enabled $ss.enabled $awspca.enabled $vault.enabled) -}}
 {{- fail "validateCertManagerCRDs: at least one cert-manager issuer must be enabled (certManager.issuers.{letsencrypt,selfsigned,awspca,vault}.enabled). cert-manager is REQUIRED infrastructure (deploy#201) — install cert-manager (kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml) and enable an issuer for your environment (vault for kind, awspca for prod, letsencrypt for ingress-only setups). Spec first-deploy-unblock-and-ha R7.18 + epic one-code-path." -}}
-{{- end -}}
 {{- end -}}
 {{- end -}}
 
@@ -258,7 +246,6 @@ itself called from the daemon StatefulSet template so any chart render that
 includes the daemon hits the check.
 ========================================================================= */}}
 {{- define "gibson.validateTenantStoresConfigured" -}}
-{{- if .Values.gibson.enabled -}}
 
 
 {{- $dp := .Values.dataPlane | default dict -}}
@@ -268,21 +255,15 @@ includes the daemon hits the check.
        platformPostgres.host MUST resolve to a non-empty value — directly or via
        platformPostgres.external.host when external.enabled=true. The
        gibson.platformPostgres.host helper fails render LOUD when neither is
-       set. This validator additionally accepts the legacy data-plane host
-       and the legacy tenant-postgresql alias to keep upgrade paths green for
-       one release cycle. The in-chart-StatefulSet toggle arm is GONE
-       (one-code-path epic deploy#186). */ -}}
+       set. This validator additionally accepts the data-plane host. The
+       in-chart Postgres arm is GONE (one-code-path epic deploy#186, D78). */ -}}
 {{- $pg := $dp.postgres | default dict -}}
-{{- $pgInChart := false -}}
-{{- with (index .Values "tenant-postgresql") -}}
-{{- $pgInChart = .enabled -}}
-{{- end -}}
 {{- $pgHost := and $pg.host (ne $pg.host "") -}}
 {{- $pp := .Values.platformPostgres | default dict -}}
 {{- $ppHost := and (hasKey $pp "host") (ne (toString ($pp.host | default "")) "") -}}
 {{- $ppExternal := and ($pp.external | default dict).enabled (($pp.external).host) -}}
-{{- if not (or $pgInChart $pgHost $ppHost $ppExternal) -}}
-{{- fail (printf "validateTenantStoresConfigured: gibson.enabled=true requires a Postgres data-plane store. Provide one of:\n  a) Consolidated tier (in-cluster):  set platformPostgres.host=\"<cluster-pg-endpoint>\" (preferred — kind: kind-bootstrap CNPG)\n  b) Consolidated tier (external):    set platformPostgres.external.enabled=true + platformPostgres.external.host=\"<rds-endpoint>\"\n  c) Legacy in-chart Postgres:        set tenant-postgresql.enabled=true\n  d) Legacy external Postgres:        set dataPlane.postgres.host=\"<rds-endpoint>\" (port/admin_database/admin_username/admin_password_secret_ref filled in)\nSpec: per-tenant-data-plane-completion Requirements 6.1, 7.1; one-code-path epic deploy#186.") -}}
+{{- if not (or $pgHost $ppHost $ppExternal) -}}
+{{- fail (printf "validateTenantStoresConfigured: the daemon requires a Postgres data-plane store. Provide one of:\n  a) Consolidated tier (in-cluster):  set platformPostgres.host=\"<cluster-pg-endpoint>\" (preferred — kind: kind-bootstrap CNPG)\n  b) Consolidated tier (external):    set platformPostgres.external.enabled=true + platformPostgres.external.host=\"<rds-endpoint>\"\n  c) External data-plane Postgres:    set dataPlane.postgres.host=\"<rds-endpoint>\" (port/admin_database/admin_password_secret_ref filled in)\nSpec: per-tenant-data-plane-completion Requirements 6.1, 7.1; one-code-path epic deploy#186.") -}}
 {{- end -}}
 
 {{- /* ---- Neo4j ----------------------------------------------------------- */ -}}
@@ -296,7 +277,7 @@ includes the daemon hits the check.
 {{- $tenantMode = .tenant_mode | default "" -}}
 {{- end -}}
 {{- if not (or (eq $tenantMode "instance") (eq $tenantMode "multi-db")) -}}
-{{- fail (printf "validateTenantStoresConfigured: gibson.enabled=true requires neo4j.tenant_mode to be either \"instance\" or \"multi-db\" (got %q).\n  - instance:  per-tenant Neo4j Community StatefulSets, provisioned by tenant-operator (default for kind/dev)\n  - multi-db:  shared Neo4j Enterprise cluster with tenant_<id> databases (prod-Enterprise migration path)\nSpec: per-tenant-data-plane-completion Requirement 5." $tenantMode) -}}
+{{- fail (printf "validateTenantStoresConfigured: the daemon requires neo4j.tenant_mode to be either \"instance\" or \"multi-db\" (got %q).\n  - instance:  per-tenant Neo4j Community StatefulSets, provisioned by tenant-operator (default for kind/dev)\n  - multi-db:  shared Neo4j Enterprise cluster with tenant_<id> databases (prod-Enterprise migration path)\nSpec: per-tenant-data-plane-completion Requirement 5." $tenantMode) -}}
 {{- end -}}
 {{- if eq $tenantMode "instance" -}}
 {{- $tenantNeo4jTag := "" -}}
@@ -329,7 +310,6 @@ includes the daemon hits the check.
        gibson.redis.host helper hard-fails render via `| required` on an
        empty redis.addr, which covers the only remaining knob. */ -}}
 
-{{- end -}}{{/* end if gibson.enabled */}}
 {{- end -}}{{/* end define */}}
 
 {{/* =========================================================================
@@ -348,33 +328,6 @@ Spec: tenant-operator-saga-capabilities Requirements 2.1 + NFR Security.
 {{- $env := default "" (.Values.global).environment -}}
 {{- if and $kindRoot (eq $env "prod") -}}
 {{- fail (printf "validateKindRootTokenSafety: refusing to render — dataPlane.openbao.kindRootToken=true (which writes the Vault dev-mode root token \"root\" into the cluster) is incompatible with global.environment=%q. Production overlays MUST create the openbao admin Secret out-of-band with a periodic token before `helm install` and leave kindRootToken=false. Spec tenant-operator-saga-capabilities Requirement 2.1." $env) -}}
-{{- end -}}
-{{- end -}}
-
-{{/* =========================================================================
-gibson.validateNoLatestTags
-
-Spec 2 R13 — fails the render when any image string in the chart's well-known
-image-tag values resolves to :latest. This render-side guard is the only one:
-no CI job greps the rendered output for the same regression.
-========================================================================= */}}
-
-{{- define "gibson.validateNoLatestTags" -}}
-{{- $offenders := list -}}
-{{- /* The four Bitnami Postgres aliases this loop used to walk
-       (dashboard-postgresql, tenant-postgresql, fga-postgresql,
-       zitadel-postgresql) are not dependencies of any chart, so the loop could
-       never find an image tag and never report an offender. Deleted with their
-       values blocks in charts#292. SPIRE's in-pod Postgres is a real subchart
-       and is still checked. */ -}}
-{{- /* SPIRE in-pod Postgres */ -}}
-{{- $spirePg := ((.Values.spire).postgresql) | default dict -}}
-{{- $spirePgImg := $spirePg.image | default dict -}}
-{{- if eq ($spirePgImg.tag | default "") "latest" -}}
-{{- $offenders = append $offenders "spire.postgresql.image.tag=latest" -}}
-{{- end -}}
-{{- if $offenders -}}
-{{- fail (printf "validateNoLatestTags: refusing to render — image tags resolved to ':latest' for: %s. Pin to a concrete tag (Spec first-deploy-unblock-and-ha R13)." (join ", " $offenders)) -}}
 {{- end -}}
 {{- end -}}
 
@@ -411,10 +364,10 @@ The validator only fires when `setec.enabled == true`. Kind/dev overlays
 that disable the Setec subchart entirely skip both rules — they never
 reach the SANDBOXED dispatch path.
 
-Real Sandbox-Pod placement onto sandbox-host nodes is NOT this chart's
-concern: it is driven by the runtimeAgent DaemonSet's node-capability
-labels (consumed by each RuntimeClass's own `scheduling.nodeSelector`) and,
-per-class, a SandboxClass CR's `spec.nodeSelector`
+Real Sandbox-Pod placement onto fleet nodes is NOT this chart's concern:
+each launcher Pod asks for the device resources of the setec device plugin,
+so it lands on a node that exposes /dev/kvm (ADR-0083), and, per-class, a
+SandboxClass CR's `spec.nodeSelector`
 (zeroroot-ai/setec api/v1alpha1). Neither of those has a matching
 Tolerations mechanism today — tracked as a known gap in
 zeroroot-ai/setec.
@@ -453,8 +406,8 @@ Sandboxes run untrusted code. Three things have to hold for that to be
 confined, and each of them is a values key that renders fine when wrong:
 
   (1) `setec.webhook.enabled` — with the admission webhook off, a
-      SandboxClass's allowedNetworkModes, the runc dev-only gate, and the
-      tenant-label check never run. The constraints still render; they
+      SandboxClass's allowedNetworkModes and the tenant-label check never
+      run. The constraints still render; they
       just do not bind.
   (2) `setec.netpol.reservedCIDRs` non-empty — this is the address space
       subtracted from every permissive egress rule the operator
@@ -481,13 +434,6 @@ confined, and each of them is a values key that renders fine when wrong:
       failurePolicy Fail (which (1) already requires) every Sandbox and
       SandboxClass write is rejected. That is the failure mode where the
       chart installs cleanly and nothing works.
-  (6) every SandboxClass names a backend that is ENABLED in
-      `setec.runtimes`. A disabled backend is not a degraded backend: no
-      RuntimeClass renders for it and the admission webhook rejects any
-      SandboxClass referencing it, so every launch into that class fails.
-      This one renders cleanly and is invisible until dispatch —
-      deploy#1105 was exactly this shape, with a kata-qemu SandboxClass
-      against a chart that shipped `runtimes.kata-qemu.enabled: false`.
 
 The vendored subchart enforces (2), (4) and (5) at render time as well,
 and the operator enforces (2) again at startup. Those three are kept here
@@ -507,7 +453,7 @@ Only fires when `setec.enabled == true`.
 {{- /* (1) Admission must be on, and fail-closed. */ -}}
 {{- $webhook := $setec.webhook | default dict -}}
 {{- if not $webhook.enabled -}}
-{{- fail "validateSetecContainment: setec.webhook.enabled must be true. Sandboxes run untrusted code; with the admission webhook off, a SandboxClass's allowedNetworkModes, the runc dev-only gate and the tenant-label check are advisory only — they render but never bind. Set setec.webhook.enabled=true (and keep failurePolicy=Fail), or set setec.enabled=false." -}}
+{{- fail "validateSetecContainment: setec.webhook.enabled must be true. Sandboxes run untrusted code; with the admission webhook off, a SandboxClass's allowedNetworkModes and the tenant-label check are advisory only — they render but never bind. Set setec.webhook.enabled=true (and keep failurePolicy=Fail), or set setec.enabled=false." -}}
 {{- end -}}
 {{- $fp := $webhook.failurePolicy | default "" -}}
 {{- if ne $fp "Fail" -}}
@@ -559,20 +505,6 @@ Only fires when `setec.enabled == true`.
 {{- end -}}
 {{- if has ($setec.namespace | default "setec-system") $sandboxNs -}}
 {{- fail (printf "validateSetecContainment: setec.sandboxNamespaces contains %q, which is setec.namespace — the namespace this chart installs the operator, the frontend and the node agents into. The baseline policy denies all traffic for every Pod in the namespaces it names, so listing the operator's own namespace would cut off the operator itself. Give Sandboxes a namespace of their own." ($setec.namespace | default "setec-system")) -}}
-{{- end -}}
-
-{{- /* (6) Every class must name a backend this cluster actually has. */ -}}
-{{- $runtimes := $setec.runtimes | default dict -}}
-{{- $enabledBackends := list -}}
-{{- range $name, $cfg := $runtimes -}}
-{{- if (default dict $cfg).enabled -}}{{- $enabledBackends = append $enabledBackends $name -}}{{- end -}}
-{{- end -}}
-{{- range $list -}}
-{{- $spec := .spec | default dict -}}
-{{- $backend := ($spec.runtime | default dict).backend | default "" -}}
-{{- if and $backend (not (has $backend $enabledBackends)) -}}
-{{- fail (printf "validateSetecContainment: SandboxClass %q names runtime.backend=%q, which is not enabled in setec.runtimes (enabled: %s). A disabled backend is not a slower backend — templates/runtime-classes.yaml renders no RuntimeClass for it and the admission webhook rejects every SandboxClass that references it, so each launch into this class fails at dispatch while the chart renders and installs cleanly. Set setec.runtimes.%s.enabled=true, or point the class at an enabled backend. deploy#1105." (.name | default "<unnamed>") $backend (join ", " (default (list "<none>") $enabledBackends)) $backend) -}}
-{{- end -}}
 {{- end -}}
 
 {{- end -}}
@@ -628,11 +560,11 @@ the estate ran a log store nothing read. That site now keys off
 `observability.provider`, and the boolean is retired with the rest.
 
 Dead config that reads as configuration is worse than no config: it earns
-trust it cannot honour. Ignoring a stale key reproduces exactly that
-failure, so the retired names are a render error carrying the
-replacement. `jaeger.enabled` is NOT in this set —
-templates/observability/jaeger-deployment.yaml still gates on it, so it
-remains a live knob.
+trust it cannot honor. Ignoring a stale key reproduces exactly that
+failure, so the retired names are a render error that tells the operator
+to delete them. `jaeger.enabled` is not in this set: no template reads it
+either, and a hosted overlay still sets it (lane 11 list), so a fail here
+would break that render before the overlay drops it.
 
 Spec: deploy#1199 (b). Parent enum: deploy#313.
 ========================================================================= */}}
@@ -652,7 +584,7 @@ Spec: deploy#1199 (b). Parent enum: deploy#313.
 {{- end -}}
 {{- end -}}
 {{- if $set -}}
-{{- fail (printf "validateObservabilityRetiredToggles: %s. These keys are retired. observability.provider went with the in-chart prometheus/grafana/loki/promtail stack, which the chart no longer ships in ANY profile: it emits ServiceMonitors, PrometheusRules and grafana_dashboard ConfigMaps for a stack the cluster already runs, each gated on .Capabilities.APIVersions.Has. The other five were retired in deploy#313 and NO template has read them since — setting them changes nothing, which is how values-aws-prod.yaml came to render the entire in-chart prometheus/grafana/loki/promtail stack while declaring observability disabled (deploy#1199 b). Delete them and set observability.provider instead: 'in-chart' deploys the stack in-cluster; 'external-grafana-cloud' deploys none of it and leaves the ServiceMonitors for an external scraper. Note jaeger.enabled is still live and is not affected." (join ", " $set)) -}}
+{{- fail (printf "validateObservabilityRetiredToggles: %s. These keys are retired, and no template reads them. The chart ships no monitoring stack (ADR-0087). It emits only ServiceMonitor and PrometheusRule objects, and only when the cluster serves monitoring.coreos.com/v1, for a stack that the cluster runs. Delete these keys from your values file. No other value replaces them." (join ", " $set)) -}}
 {{- end -}}
 {{- end -}}
 
@@ -801,6 +733,7 @@ Invoked from templates/gibson/statefulset.yaml, where both values are consumed.
 {{- if and $endpoint (not (eq $required true)) -}}
 {{- fail (printf "validateEntitlementsCoherence: gibson.entitlementsEndpoint is set (%q) but gibson.entitlementsRequired is %v. That is the SaaS profile with the fail-closed guard OFF: the daemon computes enforceBilling from entitlementsRequired, so withholdPendingTenant is skipped and a failed or unavailable entitlements-svc silently provisions paid tiers with no billing record (GHSA-455w, gibson#1270 §5). Set gibson.entitlementsRequired: true alongside the endpoint. If you meant the self-hosted profile, clear gibson.entitlementsEndpoint instead — on-prem is supposed to run with no billing backend and the unlimited ConfigProvider is correct there." $endpoint $required) -}}
 {{- end -}}
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "gibson.entitlementsBillingSVID") "use" "nothing: the chart builds the ID from global.spire.trustDomain and the path platform/entitlements-svc (ADR-0164)") -}}
 {{- if and (eq $required true) (not $endpoint) -}}
 {{- fail "validateEntitlementsCoherence: gibson.entitlementsRequired is true but gibson.entitlementsEndpoint is empty. The daemon would fail closed on every provision with no EntitlementsService to dial — a total signup outage, not a safe default. Set the endpoint, or set entitlementsRequired: false for the self-hosted profile." -}}
 {{- end -}}
@@ -809,51 +742,55 @@ Invoked from templates/gibson/statefulset.yaml, where both values are consumed.
 {{/* =========================================================================
 gibson.validateSetecDispatch
 
-Guards the daemon→setec-frontend leg (deploy#1106).
+Guards the daemon→setec-frontend leg (deploy#1106, D5).
 
-`gibson.sandbox.enabled` is not a preference. When it is true the daemon
-routes every UNTRUSTED tool call through setec and, under the default
-setec-only dispatch shape, DENIES the call rather than running it in-process
-when that route is unavailable (gibson internal/engine/harness/
-dispatchpolicy). So a render that turns it on against a frontend nobody is
-installing does not degrade — it takes untrusted tooling offline, and it does
-so at the first tool call rather than at install.
+The daemon always dials setec (gibson#756). It routes every UNTRUSTED tool
+call through setec and, under the default setec-only dispatch shape, DENIES
+the call rather than running it in-process when that route is unavailable
+(gibson internal/engine/harness/dispatchpolicy). So a render with no frontend
+does not degrade: it takes untrusted tooling offline at the first tool call.
 
-Two ways to get there, both of which render clean YAML:
+`setec.enabled=false`, or the setec subchart on with
+`setec.frontend.enabled=false`, renders clean YAML. Every derived value (the
+address, the fleet SPIFFE ID) then points at a frontend that will not exist,
+and the daemon learns that at the first dispatch, not at the render.
 
-  (1) `gibson.sandbox.enabled` with `setec.enabled=false`, or with the setec
-      subchart on but `setec.frontend.enabled=false`. Every derived value —
-      the address, the TLS serverName, the client cert — is computed from a
-      frontend that will not exist. This is also what makes the
-      cert-manager Certificate and the ESO mirror in
-      templates/setec/daemon-client-secret.yaml unresolvable: their source
-      Secret is never minted, the ExternalSecret sits in SecretSyncedError,
-      and the daemon Pod stays Pending on a missing volume.
-
-  (2) `gibson.sandbox.enabled` with no `setec.tenant`. config.SandboxConfig's
-      own Validate() rejects an empty tenant, so the daemon exits at startup.
-      Failing here names the values key instead.
-
-An install pointing at a setec frontend this chart does not provision is a
-real deployment, and it is not this one: it would supply its own
-sandbox.setec.address, mtls paths and client Secret, and it can have a values
-knob when someone actually runs it. Speculating a second codepath for it now
-is what forbids.
+`gibson.sandbox.enabled` and `gibson.sandbox.setec.tenant` were deleted with
+the daemon settings they fed (gibson#756). The daemon sends the tenant in each
+request. A values file that still sets either one fails here.
 ========================================================================= */}}
 {{- define "gibson.validateSetecDispatch" -}}
 {{- $sbx := (.Values.gibson).sandbox | default dict -}}
-{{- if $sbx.enabled -}}
+{{- if hasKey $sbx "enabled" -}}
+{{- fail "validateSetecDispatch: gibson.sandbox.enabled was deleted (gibson#756). The daemon always dials setec. Remove the key from your values." -}}
+{{- end -}}
+{{- if hasKey ($sbx.setec | default dict) "tenant" -}}
+{{- fail "validateSetecDispatch: gibson.sandbox.setec.tenant was deleted (gibson#756). The daemon sends the tenant in each request. Remove the key from your values." -}}
+{{- end -}}
 {{- $setec := .Values.setec | default dict -}}
 {{- if not $setec.enabled -}}
-{{- fail "validateSetecDispatch: gibson.sandbox.enabled=true requires setec.enabled=true. The daemon's whole sandbox config — address, TLS serverName, the client keypair it mounts — is derived from the setec subchart's frontend, and with the subchart off none of it exists. Under the default setec-only dispatch shape an unreachable sandbox backend does not fall back to in-process execution; it denies the call, so this renders cleanly and takes untrusted tooling offline at the first invocation. Install setec, or set gibson.sandbox.enabled=false." -}}
+{{- fail "validateSetecDispatch: the daemon requires setec.enabled=true. Its sandbox config — the frontend address and the fleet SPIFFE ID — is derived from the setec subchart's frontend, and with the subchart off none of it exists. An unreachable sandbox backend does not fall back to in-process execution; it denies the call, so this renders cleanly and takes untrusted tooling offline at the first invocation. A fleet in another cluster is gibson.sandbox.setec.address and spiffeID with setec.enabled=false (ADR-0087), and that pair is not built yet." -}}
 {{- end -}}
 {{- $frontend := $setec.frontend | default dict -}}
 {{- if not $frontend.enabled -}}
-{{- fail "validateSetecDispatch: gibson.sandbox.enabled=true requires setec.frontend.enabled=true. The frontend IS the daemon's gRPC endpoint into setec — the operator alone serves no Launch RPC. With it off the daemon dials a Service that is never created, and templates/setec/daemon-client-secret.yaml has no source Secret to mirror, so the daemon Pod stays Pending on a volume that never appears." -}}
+{{- fail "validateSetecDispatch: the daemon requires setec.frontend.enabled=true. The frontend IS the daemon's gRPC endpoint into setec — the operator alone serves no Launch RPC. With it off the daemon dials a Service that is never created." -}}
 {{- end -}}
-{{- $tenant := ($sbx.setec | default dict).tenant | default "" -}}
-{{- if not $tenant -}}
-{{- fail "validateSetecDispatch: gibson.sandbox.enabled=true requires gibson.sandbox.setec.tenant. It is the setec tenant every Launch is attributed to and there is no defensible default; the daemon's own config.SandboxConfig.Validate() refuses to start without it, so leaving it empty trades a render error that names the key for a CrashLoopBackOff that does not." -}}
+{{- /* The namespace policy of the setec namespace admits the frontend gRPC
+       port from setec.systemPolicy.frontendCallers only (D76). A subchart
+       value cannot read .Release.Namespace, so the entry names the release
+       namespace as a literal; a daemon in another namespace would then be
+       denied at the first dispatch with no render error. */ -}}
+{{- $callers := (($setec.systemPolicy | default dict).frontendCallers) | default list -}}
+{{- $daemonCaller := false -}}
+{{- range $c := $callers -}}
+{{- if and (hasKey $c "namespace") (ne (toString $c.namespace) $.Release.Namespace) -}}
+{{- fail (printf "validateSetecDispatch: setec.systemPolicy.frontendCallers names namespace %q, and this release installs the daemon into %q. The setec namespace policy admits the frontend gRPC port from the listed Pods only, so the daemon of this release would be denied at the first dispatch. Set the entry to the release namespace." (toString $c.namespace) $.Release.Namespace) -}}
 {{- end -}}
+{{- if and (eq (toString $c.namespace) $.Release.Namespace) (eq (toString (dig "podLabels" "app.kubernetes.io/component" "" $c)) "daemon") -}}
+{{- $daemonCaller = true -}}
+{{- end -}}
+{{- end -}}
+{{- if not $daemonCaller -}}
+{{- fail (printf "validateSetecDispatch: setec.systemPolicy.frontendCallers has no entry for the daemon of this release ({namespace: %s, podLabels: {app.kubernetes.io/component: daemon}}). The setec namespace policy admits the frontend gRPC port from the listed Pods only (D76), so the daemon would be denied at the first dispatch." $.Release.Namespace) -}}
 {{- end -}}
 {{- end -}}

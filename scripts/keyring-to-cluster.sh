@@ -107,6 +107,19 @@ data:
 YAML
 
 # The two seed inputs (deploy#1732), each value allowed to be empty.
+SETEC_DISK_SIGNING_SEED="$(keyring_get SETEC_DISK_SIGNING_SEED)"
+[ "${#SETEC_DISK_SIGNING_SEED}" -eq 44 ] \
+  || { echo "FATAL: ${KEYRING_FILE} has no 44-character SETEC_DISK_SIGNING_SEED member (base64 of 32 bytes); generate a new keyring with scripts/keyring.sh generate" >&2; exit 1; }
+log "setec disk signing seed -> Secret ${NS}/bringup-keyring key setec-disk-signing-seed (sha256:$(printf '%s' "$SETEC_DISK_SIGNING_SEED" | sha256sum | cut -c1-16))"
+kubectl apply --server-side --field-manager=bringup-setec-disk-signing -f - >/dev/null <<YAML
+apiVersion: v1
+kind: Secret
+metadata:
+  name: bringup-keyring
+  namespace: ${NS}
+data:
+  setec-disk-signing-seed: "$(printf '%s' "$SETEC_DISK_SIGNING_SEED" | base64 -w0)"
+YAML
 GHCR_PULL_TOKEN_VALUE="$(keyring_get GHCR_PULL_TOKEN)"
 if [ -n "$GHCR_PULL_TOKEN_VALUE" ]; then
   log "GHCR pull token -> Secret ${NS}/bringup-keyring key ghcr-pull-token (sha256:$(printf '%s' "$GHCR_PULL_TOKEN_VALUE" | sha256sum | cut -c1-16))"

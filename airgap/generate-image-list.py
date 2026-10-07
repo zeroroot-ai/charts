@@ -6,7 +6,7 @@ time anyone looked, not one first-party entry matched the chart: the umbrella
 was pinned at 0.104.0 against a repo at 0.110.x, `gibson:v0.35.1` /
 `dashboard:v1.11.0` / `ext-authz:0.2.2` named tags the chart had long since
 digest-pinned past, `tenant-operator:latest` was a tag the chart no longer
-emits, and docs-site, setec, setec-runtime-agent, zitadel-login, www and the
+emits, and docs-site, setec, setec-launcher, zitadel-login, www and the
 whole `mirror/*` family were simply absent. An air-gapped install from that
 list cannot come up — and the failure surfaces in a customer's disconnected
 environment, which is the worst place to find out.
@@ -118,7 +118,10 @@ NOTES: dict[str, dict[str, str]] = {
     },
     "ghcr.io/zeroroot-ai/setec": {"role": "setec microVM operator (untrusted-exec boundary)"},
     "ghcr.io/zeroroot-ai/setec-frontend": {"role": "setec frontend (daemon dispatch endpoint)"},
-    "ghcr.io/zeroroot-ai/setec-runtime-agent": {"role": "setec in-guest runtime agent"},
+    "ghcr.io/zeroroot-ai/setec-launcher": {"role": "setec launcher (Firecracker machine of each sandbox)"},
+    "ghcr.io/zeroroot-ai/setec-disk-builder": {"role": "setec disk builder (signed image disks)"},
+    "ghcr.io/zeroroot-ai/setec-device-plugin": {"role": "setec KVM device plugin"},
+    "ghcr.io/zeroroot-ai/setec-node-agent": {"role": "setec node agent (snapshots, off by default)"},
     "ghcr.io/zeroroot-ai/billing": {
         "role": "closed Stripe entitlements provider (OPTIONAL — bypassable on-prem)",
         "hardening": "closed seam; federal/air-gap typically disables billing (no-op provider)",

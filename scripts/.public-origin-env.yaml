@@ -1,0 +1,20 @@
+# Environment variables whose value may hold a public origin (api., app., www.
+# or docs. of the platform domain), each with its meaning. Keyed by the name
+# and its meaning, never by a line number (charts#163). An in-cluster dial
+# target must name a Service, never the public origin (ADR-0092); a name not
+# listed here fails make no-pinned-addressing.
+names:
+  ADMIN_ENVOY_BASE_URL: "an outside-style client: the dashboard calls the admin API through the edge, and cluster DNS maps api.<domain> to the Envoy Service by name (scripts/lib/coredns-platform-hosts.sh)"
+  APP_ORIGIN: "a link: docs-svc writes the product origin into the pages it serves"
+  AUTH_URL: "the browser origin of Auth.js: callback and redirect URLs"
+  DOCS_URL: "a link: the dashboard points the browser at the docs"
+  EXT_AUTHZ_CGJWT_ISSUER: "an issuer string compared with the iss claim; ext-authz dials nothing with it"
+  EXT_AUTHZ_ZITADEL_ISSUER: "an issuer string compared with the iss claim; ext-authz dials nothing with it"
+  GIBSON_APP_URL: "a link: the product origin in emails and invitations"
+  GIBSON_IDP_ADMIN_ISSUER: "the claimed Zitadel host (ADR-0092): sent as a header; the client dials the Zitadel Service by name"
+  GIBSON_PLATFORM_PUBLIC_URL: "a link: the API origin that the dashboard shows to a user"
+  GIBSON_PUBLIC_URL: "a link: the API origin stamped into what an outside client reads"
+  PLUGIN_GIBSON_URL: "an outside-style client: the tenant-operator hands each plugin the edge origin, the plugin dials the daemon only through Envoy, and cluster DNS maps api.<domain> to the Envoy Service by name (gibson#815)"
+  POST_LOGOUT_REDIRECT_URI: "a browser redirect after sign-out"
+  WWW_ORIGIN: "a link: docs-svc writes the marketing origin into the pages it serves"
+  ZITADEL_ISSUER: "an issuer string compared with the iss claim; the dashboard dials Zitadel by Service name"

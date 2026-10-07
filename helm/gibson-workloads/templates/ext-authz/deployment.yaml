@@ -51,6 +51,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: ext-authz
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis" "openbao") "kubeApi" true) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -313,13 +314,13 @@ spec:
             - name: EXT_AUTHZ_DAEMON_SVID
               value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/daemon") | quote }}
             - name: EXT_AUTHZ_REGISTRY_FETCH_TIMEOUT
-              value: {{ .Values.extAuthz.registryFetchTimeout | default "600s" | quote }}
+              value: "600s"
             {{- end }}
             # Per-kid Capability-Grant key descriptor endpoint (ext-authz#103). ext-authz fetches GET {KEYS_URL}/{kid} to verify a
             # component's self-signed agent+jwt and resolve its daemon-asserted
             # principal + tenant. Reached DIRECTLY on the pod network — the
-            # daemon NetworkPolicy opens ext-authz → daemon:8086 for exactly
-            # this — never through the Envoy edge, which no longer publishes the
+            # platform network policy lets ext-authz reach daemon:8086 —
+            # never through the Envoy edge, which no longer publishes the
             # route at all (GHSA-88fg / GHSA-9q4v).
             # Unset ⇒ component CG-JWT auth disabled.
             #

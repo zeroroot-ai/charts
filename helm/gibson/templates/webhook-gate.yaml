@@ -132,11 +132,11 @@ spec:
   template:
     metadata:
       labels:
-        # The gibson namespace is default-deny. This label is what
-        # templates/networkpolicy-bringup-jobs.yaml selects; without it the
-        # pod cannot even reach CoreDNS and every probe reads as a dead
-        # webhook (deploy#1631 taught this the hard way).
         app.kubernetes.io/component: webhook-gate
+        # The gibson namespace is default-deny. A platform pod reaches the
+        # webhook ports (templates/network-policies.yaml). Without the label
+        # each probe reads as a dead webhook (deploy#1631).
+        {{- include "gibson.netLabels" (dict "role" "platform") | nindent 8 }}
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false

@@ -17,10 +17,13 @@ that minting.
 
 PlatformBootstrap is required infrastructure (one-code-path epic /
 deploy#187). The previous `.Values.platformBootstrap.enabled` toggle was
-a degradation surface and has been deleted; this CR always renders, and
-overlays MUST supply `platformBootstrap.zitadel.issuer` (the `required`
-pipeline below fails chart render loudly otherwise).
+a degradation surface and has been deleted; this CR always renders.
+
+The CR has no issuer (gibson#933, ADR-0092): the operator dials its own
+ZITADEL_URL. A values file that still sets platformBootstrap.zitadel.issuer
+fails the render (charts#487).
 */}}
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "platformBootstrap.zitadel.issuer") "use" "no value. The platform-operator dials its own ZITADEL_URL, and the PlatformBootstrap CRD has no issuer field (gibson#933, ADR-0092)") }}
 apiVersion: gibson.zeroroot.ai/v1alpha1
 kind: PlatformBootstrap
 metadata:
@@ -34,7 +37,6 @@ metadata:
     velero.io/exclude-from-backup: "true"
 spec:
   zitadel:
-    issuer: {{ required "platformBootstrap.zitadel.issuer is required (one-code-path/187): set to the OIDC issuer URL the platform-operator should reconcile against (e.g. http://gibson-zitadel:8080 in kind, https://app.<domain> in EKS — the auth.<domain> host is retired)." .Values.platformBootstrap.zitadel.issuer | quote }}
     # The public host the operator claims in the x-zitadel-instance-host
     # header (ADR-0092). A bare host: the operator refuses a scheme or a port.
     # It is the same value every other Zitadel client claims.
@@ -59,12 +61,13 @@ spec:
     {{- end }}
     {{- with .Values.platformBootstrap.zitadel.systemClient }}
     {{- /*
-      systemClient activates the TrustedDomainReady reconcile step
-      (platform-operator#29). The operator signs a JWT with
-      the mounted RSA key, exchanges it at /oauth/v2/token for a
-      SYSTEM_OWNER access token, then calls /system/v1/instances/me/
-      domains to register the cluster Service hostname. The default
-      derivation (<cr-name>-zitadel.<ns>.svc.cluster.local) is wrong
+      systemClient is the System API client that mints the Zitadel admin
+      token (AdminTokenReady, gibson#794). The operator signs a JWT with
+      the mounted RSA key and exchanges it at /oauth/v2/token for a
+      SYSTEM_OWNER access token. It registers no trusted domain: the
+      x-zitadel-instance-host header alone selects the instance
+      (gibson#990). trustedClusterDomain names the Service that the
+      operator dials. The default derivation (<cr-name>-zitadel.<ns>.svc.cluster.local) is wrong
       for this chart — the Service is `gibson-zitadel`, not
       `<release>-zitadel` — so kind values explicitly pin
       trustedClusterDomain.
@@ -84,7 +87,7 @@ spec:
         (GHSA-534c, gibson#1275). It MUST stay cluster-internal: the
         System API is the instance-superuser surface, so the Envoy edge
         deliberately publishes no /system/v1/ route any more. Dialling
-        spec.zitadel.issuer here would send instance-superuser traffic
+        the public origin here would send instance-superuser traffic
         out to the internet-facing edge and back, which is exactly what
         the CRD's `^https?://` field exists to prevent; the API rejects
         nothing, so the chart has to be explicit.
@@ -116,72 +119,34 @@ spec:
     {{- /* hosted#189: Zitadel has no mail server of its own. Every
            Zitadel-sent email (the Platform owner's setup link below, a
            tenant Owner's setup link, invitations, an MFA reset routed
-           through Zitadel) is silently undeliverable until the instance has
-           an active SMTP provider — Zitadel's own invite-code call still
-           succeeds and logs as sent either way.
+           through Zitadel) is undeliverable until the instance has an
+           active SMTP provider.
 
-           Point this at the SAME credentials gibson-workloads' own mail
-           settings use (gibson-workloads.gibson.email.smtp), so there is one
-           mail transport per install, never a second one configured only
-           for Zitadel. The umbrella's mail-transport-guard template fails the
-           render if gibson-workloads.gibson.email.provider is "smtp" while
-           this block is unset.
+           The provider comes from the one mail value global.email
+           (hosted#223, gibson.email in gibson-common), the same relay, sender
+           and credential Secret as the daemon and the tenant-operator.
+           platformBootstrap.zitadel.smtp was deleted.
 
-           credentialsSecretName is the convenience form for the common case
-           (gibson-workloads.gibson.email.smtp.externalSecret.enabled: true,
-           the ONLY path staging and prod use): it names ONE Secret carrying
-           both a "username" and a "password" key — the exact shape
-           gibson.emailSmtpSecret.name (helm/gibson-workloads/templates/
-           _helpers.tpl) materialises, "<release>-email-smtp" — so an overlay
-           states the daemon's mail settings once and points Zitadel at the
-           SAME already-materialised Secret by name, rather than repeating a
-           userSecretRef/passwordSecretRef pair. userSecretRef/
-           passwordSecretRef, set explicitly, override it field-by-field —
-           needed for gibson.email.smtp's OTHER path (a plain username value
-           + an operator-created Secret holding only the password), where the
-           username is not a Secret key at all.
-
-           Omitted entirely (not rendered empty) when unset: the CRD reads a
-           nil spec.zitadel.smtp as an explicit offline install (ADR-0093
-           decision 11) and does nothing, exactly like the guard's
-           `platformOwner.offlineSetup` escape hatch.
-
-           Gated on `.host` (not a bare `with` on the map), because the
-           chart's own default value is the map {host: "", port: 587, ...} —
-           `with` treats any non-empty map as truthy regardless of its
-           values, which would render this block, and its `required`
-           checks would fail, on every install that never touches SMTP at
-           all (every kind/CI render today). */}}
-    {{- $smtp := .Values.platformBootstrap.zitadel.smtp | default dict }}
-    {{- if $smtp.host }}
+           provider log renders no spec.zitadel.smtp: the CRD reads a nil
+           block as an explicit offline install (ADR-0093 decision 11), and
+           the platform-owner guard then requires offlineSetup. tls is false
+           only for tlsMode plaintext. */}}
+    {{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "platformBootstrap.zitadel.smtp") "use" "the one mail value global.email (hosted#223)") }}
+    {{- $mail := include "gibson.email" . | fromJson }}
+    {{- if eq $mail.provider "smtp" }}
     smtp:
-      host: {{ $smtp.host | quote }}
-      port: {{ required "platformBootstrap.zitadel.smtp.port is required when platformBootstrap.zitadel.smtp.host is set." $smtp.port }}
-      fromAddress: {{ required "platformBootstrap.zitadel.smtp.fromAddress is required when platformBootstrap.zitadel.smtp.host is set." $smtp.fromAddress | quote }}
-      fromName: {{ required "platformBootstrap.zitadel.smtp.fromName is required when platformBootstrap.zitadel.smtp.host is set." $smtp.fromName | quote }}
-      {{- if hasKey $smtp "tls" }}
-      tls: {{ $smtp.tls }}
-      {{- end }}
-      {{- $userRef := $smtp.userSecretRef | default dict }}
-      {{- $passRef := $smtp.passwordSecretRef | default dict }}
-      {{- $sharedName := $smtp.credentialsSecretName }}
-      {{- $userName := $userRef.name | default $sharedName }}
-      {{- if $userName }}
+      host: {{ $mail.host | quote }}
+      port: {{ $mail.port }}
+      fromAddress: {{ $mail.from | quote }}
+      fromName: {{ $mail.fromName | quote }}
+      tls: {{ ne $mail.tlsMode "plaintext" }}
+      {{- with $mail.credentialsSecret }}
       userSecretRef:
-        name: {{ $userName | quote }}
-        key: {{ $userRef.key | default "username" | quote }}
-        {{- with $userRef.namespace }}
-        namespace: {{ . | quote }}
-        {{- end }}
-      {{- end }}
-      {{- $passName := $passRef.name | default $sharedName }}
-      {{- if $passName }}
+        name: {{ . | quote }}
+        key: "username"
       passwordSecretRef:
-        name: {{ $passName | quote }}
-        key: {{ $passRef.key | default "password" | quote }}
-        {{- with $passRef.namespace }}
-        namespace: {{ . | quote }}
-        {{- end }}
+        name: {{ . | quote }}
+        key: "password"
       {{- end }}
     {{- end }}
   {{- /* ADR-0093 decisions 5, 8 and 12 (hosted#201): the one human Zitadel

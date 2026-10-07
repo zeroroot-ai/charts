@@ -175,9 +175,11 @@ lists.
 {{- $ia := (.Values.spire.identityAdmission | default dict) -}}
 {{- /* PROTECTED_COMPONENTS holds the podSelector component of every
        ClusterSPIFFEID in clusterspiffeids.yaml, and PROTECTED_SAS holds their
-       literal k8s:sa: workload selectors, through the same helpers and the
-       same range over .Values.plugins. A pod that matches EITHER is an
-       identity candidate.
+       literal k8s:sa: workload selectors, through the same helpers. A pod
+       that matches EITHER is an identity candidate. Plugin identities are not
+       in this namespace: the tenant-operator runs each plugin in a
+       tenant-<t>-plugins namespace, and gibson-tenant-plugin-workloads
+       (gibson-operators) guards those (gibson#815).
 
        The two files are held together by a check, not by a comment:
        scripts/check-identity-admission-covers.py renders both and fails when
@@ -185,23 +187,23 @@ lists.
        lists. Two identities stay out on purpose, and the check names them:
        platform/helm-test and platform/e2e-runner (see clusterspiffeids.yaml
        for the reason each carries no privilege). */ -}}
-{{- $protectedComponents := list "daemon" "ext-authz" "ratelimit" "dashboard" "tenant-operator" "connector-operator" "envoy" "openbao" "plugin" -}}
+{{- /* The setec frontend (platform/setec-frontend, ADR-0142) runs in the setec
+       namespace under the ServiceAccount of the setec chart; both bindings
+       below select that namespace as well, so a pod there that wears its
+       component or its ServiceAccount is fenced the same way. */ -}}
+{{- $setecNs := include "gibson.setecNamespace" . -}}
+{{- $protectedComponents := list "daemon" "ext-authz" "ratelimit" "dashboard" "tenant-operator" "connector-operator" "platform-operator" "envoy" "openbao" "frontend" -}}
 {{- $protectedSAs := list
+      (printf "%s-frontend" (include "gibson.setecFullname" .))
       (include "gibson.serviceAccountName" .)
       (include "gibson.extAuthzServiceAccountName" .)
       (include "gibson.dashboardServiceAccountName" .)
       (include "gibson.tenantOperatorServiceAccountName" .)
       (include "gibson.connectorOperatorServiceAccountName" .)
+      (include "gibson.platformOperatorServiceAccountName" .)
       (include "gibson.envoyServiceAccountName" .)
       (include "gibson.ratelimitServiceAccountName" .)
       (include "gibson.openbaoServiceAccountName" .) -}}
-{{- /* One ServiceAccount for each enabled plugin: the same range and the
-       same name that clusterspiffeids.yaml and plugins/plugins.yaml use. */ -}}
-{{- range $vendor, $p := .Values.plugins }}
-{{- if $p.enabled }}
-{{- $protectedSAs = append $protectedSAs (printf "%s-plugin-%s" $.Release.Name $vendor) }}
-{{- end }}
-{{- end }}
 {{- /* Built-in workload controllers. A pod created by any of these was
        produced from a Deployment/StatefulSet/DaemonSet/Job/CronJob that
        the SECOND policy in this file checked as its own object — which is
@@ -309,14 +311,17 @@ spec:
   # report, not a control.
   validationActions: {{ $actions | toJson }}
   matchResources:
-    # Scoped to the one namespace the platform ClusterSPIFFEIDs select on.
+    # Scoped to the two namespaces the platform ClusterSPIFFEIDs select on:
+    # the release namespace and the setec namespace (the frontend identity).
     # Their namespaceSelector is `kubernetes.io/metadata.name: <ns>`, and
     # that label is apiserver-managed (NamespaceDefaultLabelName), not
     # settable by a namespace author — so the two scopes cannot be made to
     # disagree.
     namespaceSelector:
-      matchLabels:
-        kubernetes.io/metadata.name: {{ $ns }}
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [{{ $ns | quote }}, {{ $setecNs | quote }}]
 ---
 {{/*
 =============================================================================
@@ -422,5 +427,7 @@ spec:
   validationActions: {{ $actions | toJson }}
   matchResources:
     namespaceSelector:
-      matchLabels:
-        kubernetes.io/metadata.name: {{ $ns }}
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [{{ $ns | quote }}, {{ $setecNs | quote }}]

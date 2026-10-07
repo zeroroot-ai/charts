@@ -1,0 +1,39 @@
+{{- /*
+The rules of the tenant-operator in each plugin namespace (gibson#815).
+
+A tenant that enables a catalog plugin gets one instance of it, in the
+namespace tenant-<t>-plugins. The operator makes that namespace, then binds
+this ClusterRole in it with the RoleBinding gibson-tenant-operator-plugins.
+The cluster role of the operator holds `bind` on this one name, and the
+policy gibson-tenant-operator-rolebinding-scope admits the RoleBinding because
+the namespace name starts with `tenant-`.
+
+The rules are the objects of one plugin instance: its Deployment, its
+ServiceAccount, the ConfigMap gibson-envoy-ca (a copy of the edge CA, never
+the Secret of the edge), the NetworkPolicies of the namespace and the
+CiliumNetworkPolicy of each instance (DNS, the hosts of its catalog entry and
+the edge host). No Secret.
+The operator references this name as a Go constant in the catalog plugin
+controller of gibson. A change of the name breaks each plugin namespace.
+*/ -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gibson-tenant-operator-plugin-namespace
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/component: tenant-operator-plugin-namespace-rbac
+    app.kubernetes.io/part-of: gibson
+rules:
+  - apiGroups: ["apps"]
+    resources: [deployments]
+    verbs: [get, list, create, update, delete]
+  - apiGroups: [""]
+    resources: [serviceaccounts, configmaps]
+    verbs: [get, list, create, update, delete]
+  - apiGroups: ["networking.k8s.io"]
+    resources: [networkpolicies]
+    verbs: [get, list, create, update, delete]
+  - apiGroups: ["cilium.io"]
+    resources: [ciliumnetworkpolicies]
+    verbs: [get, list, create, update, delete]

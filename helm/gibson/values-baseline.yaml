@@ -108,24 +108,6 @@ gibson-workloads:
     service:
       type: LoadBalancer
       httpsPort: 443
-      # A PINNED ClusterIP, required by the chart: consuming pods (dashboard,
-      # bootstrap Job, daemon) reach Envoy through a hostAlias, and a hostAlias
-      # takes an IP, not a Service name (deploy#200).
-      #
-      # It therefore has to sit inside the cluster's Service CIDR, and that is
-      # cluster-specific. 10.96.0.0/12 is the kubeadm and kind default, so this
-      # is the right default for a plain Kubernetes cluster. EKS uses 172.20.0.0/16, and
-      # this profile was extracted from the EKS one and carried 172.20.0.250
-      # across — kind rejected it outright (deploy#1627):
-      #
-      #   Service "gibson-envoy" is invalid: spec.clusterIPs: failed to
-      #   allocate IP 172.20.0.250: the provided IP is not in the valid range.
-      #   The range of valid IPs is 10.96.0.0/16
-      #
-      # A customer whose Service CIDR is neither must override this. There is no
-      # portable default, which is why the chart requires the value rather than
-      # inventing one.
-      clusterIP: "10.96.0.250"
       annotations: {}
     tls:
       selfSigned: false
@@ -172,23 +154,17 @@ gibson-workloads:
       audience: "gibson-saas"
   gibson:
     replicas: 1
-    # First-party plugin SVID enrollment. The baseline install always
-    # provisions tenant "primary", so bind plugin SVIDs to it. The owner sub is
-    # per-instance runtime data (a fresh Zitadel org on every cluster recreate),
-    # so platformTenantOwner is NOT set here — it is supplied at deploy via
-    # --set / EXTRA_VALUES. Without the owner set, SVID enrollment stays off (a
-    # safe no-op) rather than binding to a stale sub.
+    # The baseline install always provisions tenant "primary". The e2e
+    # runner tenancy and the Neo4j APOC check of the daemon read this slug.
     platformTenant: "primary"
     # Daemon → setec dispatch. Untrusted tools AND the platform agent
     # (zerocool) run as ephemeral setec sandboxes launched through the frontend
-    # under the platform tenant. gibson.validateSetecDispatch rejects enabled=true
-    # without a running in-chart frontend (setec.frontend.enabled above) or without
-    # a tenant. sandbox_class is the tool/catalog class; agent_sandbox_class is the
+    # with the tenant of each request (D5, gibson#756). gibson.validateSetecDispatch
+    # rejects a render without a running in-chart frontend (setec.frontend.enabled
+    # above). sandbox_class is the tool/catalog class; agent_sandbox_class is the
     # ephemeral platform-agent class (: named, never inherited).
     sandbox:
-      enabled: true
       setec:
-        tenant: "primary"
         sandboxClass: "tool"
         agentSandboxClass: "agent"
     resources:
@@ -206,41 +182,12 @@ gibson-workloads:
       enabled: true
       storageClassName: ""   # cluster default
       size: 20Gi
-    embedder:
-      cache:
-        enabled: false
-        initMode: skip
     # Self-hosted profile: entitlements seam knob is UNSET (ConfigProvider).
     # The no-closed-refs guard asserts this renders with no billing image ref.
     entitlementsEndpoint: ""
     # Self-hosted profile: entitlements-required guard MUST be absent/false.
     # The OSS fail-open unlimited posture is the correct default here.
     entitlementsRequired: false
-    # Mail transport: "log" — signup emails are written to the daemon log and
-    # nothing is sent. This is the ONLY setting that installs out of the box:
-    # the previous provider:"smtp" block referenced an EXAMPLE Secret
-    # (gibson-signup-smtp-credentials) that no template produces by design,
-    # and the daemon container sat in CreateContainerConfigError forever on a
-    # Secret the operator was never told to create (deploy#1631). A profile
-    # whose defaults cannot start is a broken profile, whatever the comment
-    # beside it says.
-    #
-    # The daemon boots fine on "log" (gibson#1228); self-serve signup is inert
-    # until real mail exists, and the seeded first admin (global.firstTenant above)
-    # is how the operator gets in. To wire real mail, switch to path A:
-    #
-    #   email:
-    #     provider: "smtp"
-    #     from: "no-reply@<your-domain>"
-    #     smtp:
-    #       host: "<your-relay>"
-    #       port: 587
-    #       username: "<user>"           # then CREATE the Secret first:
-    #       passwordSecretName: "gibson-signup-smtp-credentials"
-    #       passwordSecretKey: "password"
-    email:
-      provider: "log"
-      from: "no-reply@localhost.zeroroot.ai"
   dashboard:
     replicas: 1
     resources:
@@ -255,7 +202,6 @@ gibson-workloads:
       annotations: {}
     zitadel:
       issuer: ""
-      authUrl: ""
     postgres:
       host: "platform-postgres-rw.gibson.svc.cluster.local"
   extAuthz:
@@ -302,7 +248,6 @@ gibson-workloads:
       host: "platform-postgres-rw.gibson.svc.cluster.local"
       port: 5432
       admin_database: "postgres"
-      admin_username: "gibson_admin"
       admin_password_secret_ref:
         name: "gibson-gibson-workloads-db-secrets"
         key: "TENANT_POSTGRES_ADMIN_PASSWORD"
@@ -315,35 +260,19 @@ gibson-workloads:
   ingress:
     enabled: false
   # ---------------------------------------------------------------------------
-  # Setec sandbox runtime — the SANCTIONED kind profile. There is
-  # exactly ONE sanctioned kind shape and this is it: setec ON, gvisor the one
-  # backend. gvisor is a userspace kernel (runsc) — real escape containment, no
-  # /dev/kvm and no metal nodes, ~40MiB overhead. EKS runs the high-assurance
-  # kata profile instead (values-eks.yaml). There is no setec-off variant.
+  # Setec sandbox runtime — the SANCTIONED profile. There is exactly ONE
+  # sanctioned shape and this is it: setec ON, the launcher the one runtime
+  # (ADR-0166). Each sandbox is a Firecracker machine in a launcher Pod that
+  # is not privileged; the device plugin hands /dev/kvm to it, so each fleet
+  # node must expose /dev/kvm (ADR-0083). There is no setec-off variant.
   #
-  # NODE PREP: gvisor needs the runsc binary + a containerd runtime handler on
-  # the node. Unlike kata, the setec installer does NOT lay gvisor down, so the
-  # bring-up does it (scripts/baseline-up.sh: install runsc + a containerd
-  # config drop-in registering runsc under the containerd 2.x plugin path
-  # `io.containerd.cri.v1.runtime`). installer.enabled is therefore false —
-  # there is no kata payload to lay.
+  # INSTALL INPUTS: setec.launcher.diskRepo and
+  # setec.launcher.diskBuilder.publicKeys are install-specific and have no
+  # default. scripts/baseline-up.sh sets them from substrate.env
+  # (SETEC_DISK_REPO) and from the keyring seed SETEC_DISK_SIGNING_SEED; the
+  # golden render takes them from helm/testdata/render-inputs/gibson.yaml.
   setec:
     enabled: true
-    # Kata node-prep DaemonSet — OFF. gvisor is the only backend and its
-    # node-prep is done by the bring-up, not this installer.
-    installer:
-      enabled: false
-    # The gRPC frontend the daemon dials to launch sandboxes (mTLS on :50051).
-    # Required for tool and platform-agent dispatch. TLS secret names default
-    # to setec-frontend-tls (minted by templates/setec/frontend-tls.yaml).
-    frontend:
-      enabled: true
-    # The runtime-agent must READ the node's containerd config to verify runsc
-    # before it advertises setec.zeroroot.ai/runtime.gvisor=true. Mount it
-    # read-only; without this the node stays gvisor=false and no Sandbox
-    # schedules.
-    runtimeAgent:
-      mountContainerdConfig: true
     webhook:
       enabled: true
       failurePolicy: Fail
@@ -352,19 +281,6 @@ gibson-workloads:
         issuerRef:
           kind: ClusterIssuer
           name: setec-webhook-selfsigned
-    # gvisor is the default and only enabled microVM-alternative backend.
-    defaults:
-      runtime:
-        backend: gvisor
-    runtimes:
-      kata-fc:
-        enabled: false
-      kata-qemu:
-        enabled: false
-      gvisor:
-        enabled: true
-      runc:
-        enabled: true
     netpol:
       reservedCIDRs:
         - 10.0.0.0/8
@@ -374,11 +290,6 @@ gibson-workloads:
         - 100.64.0.0/10
         - 127.0.0.0/8
         - 224.0.0.0/4
-        # IPv6: a reserved prefix subtracts only from a block of its own
-        # family, so a list with no IPv6 entry leaves every IPv6
-        # destination unrestricted. setec 0.115.0 refuses to render
-        # without one. This list overrides the subchart's whole list, so
-        # the entries live here too.
         - "::1/128"
         - fc00::/7
         - fe80::/10
@@ -391,8 +302,6 @@ gibson-workloads:
       classes:
         - name: tool
           spec:
-            runtime:
-              backend: gvisor
             maxResources:
               vcpu: 4
               memory: 8Gi
@@ -404,8 +313,6 @@ gibson-workloads:
             default: true
         - name: connector
           spec:
-            runtime:
-              backend: gvisor
             maxResources:
               vcpu: 4
               memory: 8Gi
@@ -413,30 +320,8 @@ gibson-workloads:
             allowedNetworkModes:
               - egress-allow-list
               - none
-        # agent: the class a platform-agent launch names, and the
-        # class an always-on bank member runs in (gibson#1706).
-        #
-        # A member stays up for weeks and idles most of that time, so it
-        # RESERVES a small slice of the node and bursts to its ceiling. The
-        # two halves come from two places:
-        #   requests      the reservation, a chart value (this block).
-        #                 setec 0.113.0+ writes min(request, limit) onto the
-        #                 Pod, so the class can only ever lower what the
-        #                 scheduler sets aside. Unset keeps requests = limits.
-        #   maxResources  the ceiling a Sandbox may ask for. The actual limit
-        #                 is the Sandbox's own spec.resources, which the daemon
-        #                 sends on Launch from the claude manifest (gibson#1717,
-        #                 2 vCPU / 4Gi). defaultResources is NOT that limit:
-        #                 setec reads it for the warm-pool template only.
-        #
-        # Two idle members cost 0.5 vCPU / 1.5Gi of reservation. The vendored
-        # SandboxClass CRD must carry spec.requests (setec 0.113.0+), or the
-        # API server prunes the block and the reservation silently becomes the
-        # limit.
         - name: agent
           spec:
-            runtime:
-              backend: gvisor
             requests:
               cpu: 250m
               memory: 768Mi
@@ -455,17 +340,6 @@ gibson-workloads:
       allowClusterWideSandboxWrite: false
     multiTenancy:
       enabled: false
-  # First-party plugins (R5): the `plugins` mechanism is shipped by the
-  # gibson-workloads chart and is EMPTY here on purpose. values-baseline.yaml is
-  # the customer-install-grade profile — every first-party image it names must
-  # be an @sha256 digest of a RELEASED image (digest-pin-check, deploy#789). The
-  # github reference plugin's image is published by the integrations-repo CI and
-  # is not yet a released, digest-pinned artifact, so it is brought up through
-  # the sanctioned moving-tag overlay (test/baseline/plugins.values.yaml, layered
-  # by `make baseline-plugins` / EXTRA_VALUES) rather than pinned here. Once the
-  # plugin image is published and a release is cut, promote it into this file
-  # digest-pinned (bump-image-digest) and retire the overlay — the standard
-  # first-party image onboarding lifecycle documented in scripts/baseline-up.sh.
 gibson-operators:
   global:
     domain: "localhost.zeroroot.ai"
@@ -474,8 +348,6 @@ gibson-operators:
       pullPolicy: IfNotPresent
     serviceAccount:
       annotations: {}
-    billing:
-      stripeExpectedMode: test
     brokerConfig:
       platformPg:
         host: "platform-postgres-rw.gibson.svc.cluster.local"
@@ -493,14 +365,7 @@ gibson-operators:
         namespaceTemplate: "tenant-{tenant_id}"
         authMethod: "jwt"
         mountPath: "secret"
-  dashboard:
-    zitadel:
-      issuer: ""
   envoy:
-    service:
-      # Must match envoy.service.clusterIP above — same Service, and the
-      # dashboard's hostAlias points at this IP.
-      clusterIP: "10.96.0.250"
     tls:
       secretName: "gibson-envoy-tls"
   # Names below are the UMBRELLA-rendered names (release `gibson`), not the
@@ -545,8 +410,6 @@ gibson-operators:
   #.
   platformBootstrap:
     zitadel:
-      issuer: "http://gibson-zitadel:8080"
-      externalDomain: ""
       adminTokenRef:
         name: iam-admin-pat
         key: pat
@@ -695,7 +558,7 @@ global:
     tenantId: "primary"
     displayName: "Primary Workspace"
     ownerEmail: "admin@localhost.zeroroot.ai"
-    # This profile ships gibson-workloads.email.provider: "log" below (no
+    # This profile ships global.email.provider: "log" below (no
     # delivering mail transport), so offlineSetup is explicit, the same way
     # global.platformOwner.offlineSetup is below (ADR-0093 decision 8,
     # hosted#202): the first-admin Job writes a one-time setup link to the
@@ -706,7 +569,7 @@ global:
       key: "setup-link"
   # Platform owner (ADR-0093 decision 6/8, hosted#201). A different address
   # from firstTenant.ownerEmail above — the render fails otherwise. This
-  # profile ships gibson-workloads.email.provider: "log" below (no
+  # profile ships global.email.provider: "log" below (no
   # delivering mail transport), so offlineSetup is explicit: the
   # platform-operator writes a one-time setup link to the named Secret
   # instead of emailing it.
@@ -716,6 +579,14 @@ global:
     setupSecretRef:
       name: "gibson-platform-owner-setup"
       key: "setup-link"
+  # Mail: "log". Mail is written to the daemon log and nothing is sent, so
+  # this profile installs with no relay. The daemon boots on "log"
+  # (gibson#1228). Self-serve signup is inert until real mail exists, and the
+  # seeded first admin (global.firstTenant above) is how the operator gets in.
+  # To wire real mail, see global.email in values.yaml (worked example).
+  email:
+    provider: "log"
+    from: "no-reply@localhost.zeroroot.ai"
 # TLS to Postgres, kept on for a customer install (deploy#1197 / deploy#1239).
 # These were inherited from the EKS profile, where RDS force_ssl=1 requires
 # them. They are kept here rather than dropped: CNPG generates its own server

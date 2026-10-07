@@ -69,19 +69,28 @@ seed-passwords: ## Every password the OpenBao seeder mints is argument-safe (let
 set-secret-env: ## baseline-set-secret.sh hands the operator's value to the pod as environment, never as script text
 	@./scripts/baseline-set-secret.sh --selftest
 
-cnpg-netpol-covers-jobs: ## Every pod CNPG creates, bootstrap Jobs included, has an egress-allowing NetworkPolicy
+cnpg-netpol-covers-jobs: ## Every pod CNPG creates, bootstrap Jobs included, reaches the bucket and the primary under the network policy (D76)
 	@./scripts/check-cnpg-netpol-covers-jobs.sh
 
 .PHONY: values-no-duplicate-keys
 values-no-duplicate-keys: ## No values file declares a key twice (YAML keeps the last and drops the first, silently)
 	@./scripts/check-values-no-duplicate-keys.sh
 
-.PHONY: envoy-anchor
 smtp-host-resolves: ## An in-cluster SMTP_HOST names a Service the release renders (charts#114)
 	@./scripts/check-smtp-host-resolves.py --selftest
 
-envoy-anchor: ## Every subchart pinning Envoy's ClusterIP gets the discovered value, not the shipped kind default
-	@./scripts/check-envoy-anchor-one-value.sh
+.PHONY: no-pinned-addressing
+no-pinned-addressing: ## No hostAliases, no pinned Envoy address, and no public origin as an unexplained dial target (ADR-0092, charts#163)
+	@python3 scripts/check-no-pinned-addressing.py --selftest
+	@python3 scripts/check-no-pinned-addressing.py
+
+.PHONY: openbao-seed-inputor
+openbao-seed-inputor: ## The inputor seed kind takes the keyring value when present and the placeholder when not (charts#486)
+	@bats tests/openbao-seed-inputor.bats
+
+.PHONY: edge-extra-routes
+edge-extra-routes: ## Each extra edge route states its auth mode and rate-limit class; the baseline has none and no billing object (charts#375)
+	@python3 scripts/check-edge-extra-routes.py
 
 .PHONY: workflows
 workflows: ## The workflow files are valid: a bad expression is rejected at dispatch with no jobs and no log
@@ -135,7 +144,7 @@ signin-policy: ## The first Zitadel instance starts with MFA forced, no external
 	@python3 scripts/check-signin-policy.py --selftest
 	@python3 scripts/check-signin-policy.py
 
-netpol-before-hooks: ## Every hook Job's NetworkPolicy applies in an earlier Argo wave than the Job
+netpol-before-hooks: ## Every network policy that selects a hook Job applies in an earlier Argo wave than the Job
 	@python3 scripts/check-netpol-before-hooks.py --selftest
 	@python3 scripts/check-netpol-before-hooks.py
 
@@ -229,7 +238,11 @@ secure-pod: ## Each rendered pod meets the six rules of a secure pod, or has an 
 	@python3 scripts/check-secure-pod.py --selftest
 	@python3 scripts/check-secure-pod.py
 
-daemon-netpol-admits-callers: ## Every in-cluster caller of the daemon is admitted by its NetworkPolicy (charts#153)
+.PHONY: hubble-drops
+hubble-drops: ## The Hubble flow check of the exit tests fails on a flow that a policy drops (charts#489)
+	@python3 scripts/check-hubble-drops.py --selftest
+
+daemon-netpol-admits-callers: ## The network policy lets every in-cluster caller reach the daemon (charts#153, D76)
 	@python3 scripts/check-daemon-netpol-admits-callers.py --selftest
 	@python3 scripts/check-daemon-netpol-admits-callers.py
 
@@ -293,15 +306,60 @@ extauthz-redis: ## The ext-authz pod of each profile has the Redis address, the 
 	@python3 scripts/check-extauthz-redis.py --selftest
 	@python3 scripts/check-extauthz-redis.py
 
+.PHONY: fga-tls
+fga-tls: ## The daemon dials OpenFGA over TLS with the mounted CA in each render (gibson fix/fga-client-uses-tls)
+	@python3 scripts/check-fga-tls.py --selftest
+	@python3 scripts/check-fga-tls.py
+
+.PHONY: namespace-policy
+namespace-policy: ## Each namespace a render creates or fills with pods has a default deny (D76)
+	@python3 scripts/check-namespace-policy.py --selftest
+	@python3 scripts/check-namespace-policy.py
+
+.PHONY: openbao-policies
+openbao-policies: ## No OpenBao policy grants path "*", sudo only on named paths, one policy for each token (ADR-0032)
+	@python3 scripts/check-openbao-policies.py --selftest
+	@python3 scripts/check-openbao-policies.py
+
+.PHONY: entitlements-identity
+entitlements-identity: ## With the entitlements endpoint set, the daemon pins the SPIFFE ID of the entitlements service
+	@python3 scripts/check-entitlements-identity.py --selftest
+	@python3 scripts/check-entitlements-identity.py
+
+.PHONY: connector-proxy-caller
+connector-proxy-caller: ## The connector-operator gets the issuer, the JWKS and the daemon ID that each connector proxy checks
+	@python3 scripts/check-connector-proxy-caller.py --selftest
+	@python3 scripts/check-connector-proxy-caller.py
+
+.PHONY: connector-grant-alert
+connector-grant-alert: ## An unrevoked connector grant raises an alert, and Prometheus scrapes its metric
+	@python3 scripts/check-connector-grant-alert.py --selftest
+	@python3 scripts/check-connector-grant-alert.py
+
+.PHONY: email-one-value
+email-one-value: ## One mail value, global.email: each old mail key fails the render, and the three senders agree (hosted#223)
+	@python3 scripts/check-email-one-value.py --selftest
+	@python3 scripts/check-email-one-value.py
+
+.PHONY: platform-operator-audit
+platform-operator-audit: ## The platform-operator has the daemon env, the SPIRE socket, its identity and a daemon allow-list entry (gibson#583)
+	@python3 scripts/check-platform-operator-audit.py --selftest
+	@python3 scripts/check-platform-operator-audit.py
+
 .PHONY: secret-contract
 secret-contract: ## Every secret has a producer AND a consumer, both directions (charts#433, from hosted#350)
 	@python3 scripts/check-secret-contract.py --selftest
 	@python3 scripts/check-secret-contract.py
 
 .PHONY: egress-policy-type
-egress-policy-type: ## One policy type for egress by host name, CiliumNetworkPolicy, with no disagreeing allow-all rule (ADR-0165, charts#395)
+egress-policy-type: ## One policy type, Cilium, and each policy rule selects a pod (ADR-0165 rule 4, D76, charts#395)
 	@python3 scripts/check-egress-policy-type.py --selftest
 	@python3 scripts/check-egress-policy-type.py
+
+.PHONY: alert-rules-test
+alert-rules-test: ## Each alert rule with a test in tests/alerts fires as its promtool test says (charts#446)
+	@./scripts/check-alert-rules-test.sh --selftest
+	@./scripts/check-alert-rules-test.sh
 
 .PHONY: edge-zitadel-routes edge-zitadel-routes-live
 edge-zitadel-routes: ## The edge sends only listed routes to Zitadel, and refuses a user's own email or username change (ADR-0093)
@@ -372,9 +430,9 @@ owner-credential-readers: ## Only bootstrap reads the Zitadel owner credentials,
 owner-credential-readers-live: ## The same check against the current kube context: kubectl auth can-i and a SelfSubjectRulesReview for every ServiceAccount
 	@python3 scripts/check-owner-credential-readers.py --live
 
-daemon-sa-binding: ## The tenant-operator binds the daemon's real ServiceAccount to gibson-connector-creds, per tenant namespace only (gibson#137)
-	@python3 scripts/check-daemon-sa-binding.py --selftest
-	@python3 scripts/check-daemon-sa-binding.py
+connector-creds-binding: ## The tenant-operator binds the connector operator's ServiceAccount to gibson-connector-creds per tenant namespace, and the daemon holds no grant (gibson#664) (gibson#137)
+	@python3 scripts/check-connector-creds-binding.py --selftest
+	@python3 scripts/check-connector-creds-binding.py
 
 zitadel-claimed-host: ## No claimed Zitadel host carries a port, and no caller forges Host with curl (charts#162, ADR-0092)
 	@python3 scripts/check-zitadel-claimed-host.py --selftest
@@ -398,6 +456,11 @@ fixture-flag-follows-runner: ## GIBSON_TEST_FIXTURES_ENABLED follows gibson.e2eR
 webhooks: ## Every Fail webhook is probed before activation, every webhook is service-backed, and only the two accepted webhooks use Ignore (charts#17, ADR-0076)
 	@python3 scripts/check-webhooks.py --selftest
 	@python3 scripts/check-webhooks.py
+
+.PHONY: plugin-namespace-role
+plugin-namespace-role: ## The tenant-operator may write each object of a plugin instance, and no Secret (gibson#815)
+	@python3 scripts/check-plugin-namespace-role.py --selftest
+	@python3 scripts/check-plugin-namespace-role.py
 
 .PHONY: spiffeid-selectors
 spiffeid-selectors: ## Each ClusterSPIFFEID names its workload selectors, or its name is on the list in the guard (charts#358)
@@ -431,7 +494,7 @@ operator-rbac-fresh: ## The vendored cert-manager and External Secrets RBAC matc
 	@python3 scripts/vendor-operator-rbac.py --selftest
 	@python3 scripts/vendor-operator-rbac.py --check
 
-check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted daemon-sa-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed env-consumed config-consumed contract-pins probes probe-timeouts helper-docs referenced-paths-exist cg-rotation-window email-smtp-external-secret smtp-tls-mode edge-rate-limits secure-pod daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows upgrade-pair envoy-anchor platform-owner-values no-owner-password-secret edge-zitadel-routes edge-grpc-routes edge-jwt-payload-unforgeable netpol-before-hooks openbao-login-diagnosis zitadel-claimed-host openbao-one-replica identity-admission-covers operator-rbac-covers reloader-names purge-tenant-backup-test no-render-time-secrets spiffeid-selectors trust-domain-literal optional-references no-closed-images operator-crd-bundle alert-runbooks registration-rung extauthz-redis secret-contract egress-policy-type ## Everything that runs without a cluster
+check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted connector-creds-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed env-consumed config-consumed contract-pins probes probe-timeouts helper-docs referenced-paths-exist cg-rotation-window email-smtp-external-secret smtp-tls-mode edge-rate-limits secure-pod daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows upgrade-pair platform-owner-values no-owner-password-secret edge-zitadel-routes edge-grpc-routes edge-jwt-payload-unforgeable netpol-before-hooks openbao-login-diagnosis zitadel-claimed-host openbao-one-replica identity-admission-covers operator-rbac-covers reloader-names purge-tenant-backup-test no-render-time-secrets spiffeid-selectors trust-domain-literal optional-references no-closed-images operator-crd-bundle alert-runbooks registration-rung extauthz-redis secret-contract egress-policy-type no-pinned-addressing openbao-seed-inputor hubble-drops fga-tls namespace-policy openbao-policies entitlements-identity connector-proxy-caller connector-grant-alert email-one-value platform-operator-audit alert-rules-test plugin-namespace-role edge-extra-routes ## Everything that runs without a cluster
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
 
 baseline-up: ## Install onto the current kube context

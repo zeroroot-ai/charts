@@ -3,6 +3,10 @@
 # scripts/check-optional-references.py reads this file. A case with no entry
 # fails, and so does an entry that matches no case. Keyed by content.
 cases:
+  ? helm/gibson-common/templates/_helpers.tpl default {{- $_ := set $out "configurationSet" ($s.configurationSet | default "") -}}
+  : global.email.smtp.configurationSet is optional; only SES routes bounce events by it, and the daemon gets no GIBSON_SMTP_CONFIGURATION_SET when it is empty.
+  ? helm/gibson-common/templates/_helpers.tpl default {{- $out := dict "provider" $provider "from" $from "fromName" ($e.fromName | default "") "host" "" "port" "" "tlsMode" "" "configurationSet" "" "credentialsSource" "" "credentialsSecret" "" "remoteKey" "" -}}
+  : global.email.fromName is optional with provider log, where no sender name is used; with provider smtp gibson.email requires it and fails the render without it.
   helm/gibson-common/templates/_helpers.tpl default {{- $digest := .digest | default "" -}}: The registry host and the digest are optional parts of an image reference; the helper builds the reference without them.
   ? 'helm/gibson-common/templates/_helpers.tpl default {{- $hasCluster := contains "name: gibson_daemon_grpc" ($envoyCfg | default "") -}}'
   : The validator searches the Envoy config text; empty text makes the search fail, and the validator then fails the render.
@@ -25,8 +29,6 @@ cases:
   : PlatformBootstrap writes gibson-master-key later in the bringup; a required mount deadlocks the waves. The operator reads the KEK lazily and requeues (deploy#971).
   ? helm/gibson-workloads/templates/_helpers.tpl default {{- $issuer := (.Values.certManager.envoyEdge).issuer | default "" -}}
   : An empty issuer means the edge needs no private CA; the helper returns false.
-  ? helm/gibson-workloads/templates/_validators.tpl default {{- $backend := ($spec.runtime | default dict).backend | default "" -}}
-  : The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
   helm/gibson-workloads/templates/_validators.tpl default {{- $fp := $webhook.failurePolicy | default "" -}}: The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
   ? helm/gibson-workloads/templates/_validators.tpl default {{- $kmsKeyId := $aws.kms_key_id | default ($aws.secret_arn | default "") -}}
   : The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
@@ -35,11 +37,9 @@ cases:
   : The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
   helm/gibson-workloads/templates/_validators.tpl default {{- $roleArn := $aws.role_arn | default "" -}}: The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
   helm/gibson-workloads/templates/_validators.tpl default {{- $sharedURI = .shared_cluster_uri | default "" -}}: The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
-  helm/gibson-workloads/templates/_validators.tpl default {{- $tenant := ($sbx.setec | default dict).tenant | default "" -}}: The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
   helm/gibson-workloads/templates/_validators.tpl default {{- $tenantMode = .tenant_mode | default "" -}}: The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
   helm/gibson-workloads/templates/_validators.tpl default {{- $tenantNeo4jTag = .tag | default "" -}}: The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
   helm/gibson-workloads/templates/_validators.tpl default {{- $tier := $setec.tier | default "" -}}: The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
-  helm/gibson-workloads/templates/_validators.tpl default {{- if eq ($spirePgImg.tag | default "") "latest" -}}: The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
   helm/gibson-workloads/templates/auth/openbao-deployment.yaml optional secret {{ $keyringSecretName | quote }}: The two keyring inputs (pull token, SMTP relay) are optional members of the keyring; the pod starts without them (deploy#1732).
   helm/gibson-workloads/templates/dashboard/deployment.yaml default {{ .metrics.allowedCIDRs | default "" | quote }}: Empty disables CIDR filtering of the metrics endpoint, which stays cluster-internal.
   helm/gibson-workloads/templates/dashboard/deployment.yaml optional configMap gibson-sa-identity-map: The Zitadel bootstrap writes the map after install; the resolve-sa-identity-map init container handles the empty case (canonical-service-identity Req 5).
@@ -49,8 +49,8 @@ cases:
   helm/gibson-workloads/templates/envoy/deployment.yaml optional secret gibson-native-login-oidc: The native-login OIDCClient is minted at run time; the render-envoy-config init container substitutes a sentinel that matches no token until it exists.
   helm/gibson-workloads/templates/ext-authz/deployment.yaml optional secretKeyRef gibson-dashboard-oidc/client_id: The platform-operator mints the client at run time; ext-authz builds the human-client list from both ids, and an empty id matches no token (charts#148).
   helm/gibson-workloads/templates/ext-authz/deployment.yaml optional secretKeyRef gibson-native-login-oidc/client_id: The platform-operator mints the client at run time; ext-authz builds the human-client list from both ids, and an empty id matches no token (charts#148).
-  ? helm/gibson-workloads/templates/gibson/statefulset.yaml default {{- $lokiUrl := (((.Values.gibson).lokiUrl)) | default "" }}
-  : The chart ships no Loki; empty disables log queries, and the daemon reports the log backend as unavailable.
+  ? 'helm/gibson-workloads/templates/gibson/statefulset.yaml default {{- fail (printf "gibson.auditExport.lockMode %q must be GOVERNANCE or COMPLIANCE: the lock mode the durable bucket policy requires under audit/ (charts#446)" ($ax.lockMode | default "")) }}'
+  : The empty default only prints an absent lock mode in the failure message; the render fails.
   helm/gibson-workloads/templates/gibson/statefulset.yaml optional configMap gibson-sa-identity-map: The Zitadel bootstrap writes the map after install; the identity resolver returns no match for an unknown sub (canonical-service-identity Req 8.2).
   helm/gibson-workloads/templates/gibson/statefulset.yaml optional configMapKeyRef gibson-fga-config/model_id: The fga-init Job writes the ConfigMap after install; the daemon's ResolveWithRetry waits for both values before the FGA authorizer starts.
   helm/gibson-workloads/templates/gibson/statefulset.yaml optional configMapKeyRef gibson-fga-config/store_id: The fga-init Job writes the ConfigMap after install; the daemon's ResolveWithRetry waits for both values before the FGA authorizer starts.
@@ -58,4 +58,14 @@ cases:
   helm/gibson-workloads/templates/gibson/statefulset.yaml optional secretKeyRef gibson-native-login-oidc/client_id: The /.well-known/gibson-login endpoint answers 503 while the native-login client is not minted; a required ref crashlooped the daemon (gibson#623).
   ? helm/gibson/templates/app-url-guard.yaml default {{- $checks := list (dict "label" "gibson-workloads.gibson.appUrl" "value" ((((index .Values "gibson-workloads") | default dict).gibson | default dict).appUrl | default "")) (dict "label" "gibson-operators.gibson.appUrl" "value" ((((index .Values "gibson-operators") | default dict).gibson | default dict).appUrl | default "")) -}}
   : The guard reads an absent appUrl as empty and checks only a set value.
+  ? helm/gibson/templates/postgres/platform-postgres-cluster.yaml default {{- $axBucket := ((((index .Values "gibson-workloads") | default dict).gibson | default dict).auditExport | default dict).bucket | default "" }}
+  : An absent export bucket reads as empty, which differs from the archive bucket, so the render fails with a named error.
   helm/gibson/templates/webhook-gate.yaml default {{- if eq ($p.component | default "") "setec" -}}: A probe with no component is not the setec probe; the empty default only selects the branch.
+  ? "helm/gibson-workloads/templates/envoy/configmap.yaml default {{- $extraRoutes = append $extraRoutes (dict \"path\" $r.path \"rewrite\" ($r.rewrite | default \"\") \"service\" $r.service \"port\" (int $r.port) \"descriptor\" (get $rlClass (toString $r.rateLimitClass)) \"auth\" $r.auth \"cluster\" (printf \"extra_%s_%d\" (replace \"-\" \"_\" $r.service) (int $r.port))) -}}"
+  : rewrite is the optional prefix rewrite of an extra route; empty means the edge forwards the path as it is (charts#375).
+  ? "helm/gibson-workloads/templates/envoy/configmap.yaml default {{- if not (has (toString ($r.auth | default \"\")) (list \"signed-request\" \"own-sign-in\")) -}}"
+  : The validator normalizes an absent mode to empty; the empty string is no known mode, and the render fails with a named error (charts#375).
+  ? "helm/gibson-workloads/templates/envoy/configmap.yaml default {{- if not (hasKey $rlClass (toString ($r.rateLimitClass | default \"\"))) -}}"
+  : The validator normalizes an absent class to empty; the empty string is no known class, and the render fails with a named error (charts#375).
+  ? "helm/gibson-workloads/templates/envoy/configmap.yaml default {{- if not (regexMatch \"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$\" (toString ($r.service | default \"\"))) -}}"
+  : The validator normalizes an absent service to empty; the empty string fails the name pattern, and the render fails with a named error (charts#375).

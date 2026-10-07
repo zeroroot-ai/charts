@@ -87,6 +87,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: openbao-jwt-auth-init
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "openbao") "kubeApi" true) | nindent 8 }}
     spec:
       restartPolicy: OnFailure
       serviceAccountName: {{ .Release.Name }}-openbao-jwt-auth-init
@@ -248,9 +249,9 @@ spec:
             # read-only root filesystem).
             - name: tmp
               mountPath: /tmp
-            # gibson-openbao-keys is ESO-managed (templates/secrets/vault-keys.yaml).
-            # kubelet projects each key in the Secret as a file under
-            # mountPath; the script reads VAULT_ADMIN_TOKEN with cat above.
+            # gibson-openbao-jwt-auth-init holds the token of this Job alone,
+            # policy jwt-auth-init (_openbao-policies.tpl), minted by
+            # openbao-auto-init. The script reads VAULT_ADMIN_TOKEN with cat above.
             - name: openbao-admin-token
               mountPath: /etc/vault-init
               readOnly: true
@@ -278,7 +279,7 @@ spec:
           emptyDir: {}
         - name: openbao-admin-token
           secret:
-            secretName: gibson-openbao-keys
+            secretName: gibson-openbao-jwt-auth-init
             defaultMode: 0o400
         - name: spire-bundle
           configMap:
