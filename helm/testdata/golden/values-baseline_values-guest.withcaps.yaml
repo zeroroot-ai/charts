@@ -11818,7 +11818,9 @@ spec:
                 # nothing. Fails when the Secret cannot be read, so a caller
                 # never reads an API error as "no annotation".
                 sa_json=$(kube_curl "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/$1" 2>/dev/null) || return 1
-                printf '%s' "$sa_json" | jq -e '.metadata' >/dev/null 2>&1 || return 1
+                # A Kubernetes error answer is a Status object, so only a
+                # Secret object counts as an answer.
+                printf '%s' "$sa_json" | jq -e '.kind == "Secret"' >/dev/null 2>&1 || return 1
                 printf '%s' "$sa_json" | jq -r --arg a "$2" '.metadata.annotations[$a] // empty'
               }
 
@@ -11845,7 +11847,12 @@ spec:
                 acc=$(secret_annotation "$1" "$REVOKE_ACCESSOR_ANN") || return 1
                 [ -n "$acc" ] || return 0
                 after=$(secret_annotation "$1" "$REVOKE_AFTER_ANN") || return 1
-                [ "$(date +%s)" -ge "${after:-0}" ] 2>/dev/null || return 0
+                case "${after:-}" in
+                  ''|*[!0-9]*)
+                    echo "[openbao-auto-init] ${1} has the revoke record ${acc} with no valid ${REVOKE_AFTER_ANN} (\"${after}\"); it is revoked now" >&2
+                    after=0 ;;
+                esac
+                [ "$(date +%s)" -ge "$after" ] || return 0
                 [ -n "$2" ] || return 1
                 c=$(curl -sS -o ${TMPD}/revacc.json -w '%{http_code}' \
                   -X POST -H "X-Vault-Token: $2" -H "Content-Type: application/json" \
@@ -11963,9 +11970,13 @@ spec:
                   # A rotation whose mint failed leaves the old token in force.
                   # It is still valid, so keep it alive.
                   if [ "$rotating" = 1 ]; then
-                    curl -sS -o /dev/null -X POST -H "X-Vault-Token: ${current_tok}" \
-                      "${BAO_ADDR_LOCAL}/v1/auth/token/renew-self" || true
-                    echo "[openbao-auto-init] the successor of ${secret} could not be minted; the old token was renewed and stays in force" >&2
+                    rn=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "X-Vault-Token: ${current_tok}" \
+                      "${BAO_ADDR_LOCAL}/v1/auth/token/renew-self" || true)
+                    if [ "$rn" = "200" ]; then
+                      echo "[openbao-auto-init] the successor of ${secret} could not be minted; the old token was renewed and stays in force" >&2
+                    else
+                      echo "[openbao-auto-init] the successor of ${secret} could not be minted, and the renewal of the old token returned HTTP ${rn}" >&2
+                    fi
                   fi
                 fi
                 rotate_old=""

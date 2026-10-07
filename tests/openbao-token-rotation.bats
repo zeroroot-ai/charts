@@ -42,7 +42,7 @@ teardown_file() { rm -rf "$WORK"; }
 # Secret read fail.
 # Prints one line per effect: "mint", "renew", "annotate <accessor> <after-now>", or "none".
 run_ensure() {
-  HELD="${HELD-held}" MINTFAIL="${MINTFAIL:-}" READFAIL="${READFAIL:-}" sh -c '
+  HELD="${HELD-held}" MINTFAIL="${MINTFAIL:-}" READFAIL="${READFAIL:-}" STATUS403="${STATUS403:-}" sh -c '
     set -u
     AGE="$1"; REQ="$2"; PENDING="$3"
     TMPD="$(mktemp -d)"; NAMESPACE=gibson; KUBE_API=https://k; BAO_ADDR_LOCAL=http://b
@@ -68,7 +68,8 @@ run_ensure() {
                  echo "annotate $(jq -r ".metadata.annotations[\"gibson.zeroroot.ai/revoke-accessor\"]" "$TMPD/patch.json") $(( $(jq -r ".metadata.annotations[\"gibson.zeroroot.ai/revoke-after\"] | tonumber" "$TMPD/patch.json") - NOW ))" >> "$EFFECTS"
                  printf 200 ;;
         *) if [ -n "$READFAIL" ]; then return 7; fi
-           if [ -n "$PENDING" ]; then printf "{\"metadata\":{\"annotations\":{\"gibson.zeroroot.ai/revoke-accessor\":\"%s\"}}}" "$PENDING"; else echo "{\"metadata\":{}}"; fi ;;
+           if [ -n "${STATUS403:-}" ]; then echo "{\"kind\":\"Status\",\"metadata\":{},\"code\":403}"; return 0; fi
+           if [ -n "$PENDING" ]; then printf "{\"kind\":\"Secret\",\"metadata\":{\"annotations\":{\"gibson.zeroroot.ai/revoke-accessor\":\"%s\"}}}" "$PENDING"; else echo "{\"kind\":\"Secret\",\"metadata\":{}}"; fi ;;
       esac
     }
     kv_get() { printf "{\"requested_at\":\"%s\"}" "$REQ"; }
@@ -121,7 +122,7 @@ run_revoke() {
     kube_curl() {
       case "$*" in
         *PATCH*) echo cleared >> "$TMPD/effects"; printf 200 ;;
-        *) printf "{\"metadata\":{\"annotations\":{\"gibson.zeroroot.ai/revoke-accessor\":\"acc-old\",\"gibson.zeroroot.ai/revoke-after\":\"%s\"}}}" $((NOW + LEFT)) ;;
+        *) printf "{\"kind\":\"Secret\",\"metadata\":{\"annotations\":{\"gibson.zeroroot.ai/revoke-accessor\":\"acc-old\",\"gibson.zeroroot.ai/revoke-after\":\"%s\"}}}" $((NOW + LEFT)) ;;
       esac
     }
     token_revoke_pending gibson-platform-operator-vault seeder 2>/dev/null; rc=$?
@@ -189,4 +190,17 @@ run_revoke() {
   [ "$status" -eq 0 ]
   [[ "$output" != *cleared* ]]
   [[ "$output" == *"rc=1"* ]]
+}
+
+@test "FAILING FIXTURE: a Kubernetes error answer does not count as no pending revoke" {
+  STATUS403=1 run run_ensure 90000 0 ""
+  [ "$status" -eq 0 ]
+  [[ "$output" != *mint* ]]
+}
+
+@test "an unknown accessor answer (200 with a warning) counts as revoked" {
+  run run_revoke -5 200 '{"warnings":["No token found with this accessor"]}'
+  [ "$status" -eq 0 ]
+  [ "${lines[1]}" = "cleared" ]
+  [ "${lines[2]}" = "rc=0" ]
 }
