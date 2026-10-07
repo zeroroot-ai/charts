@@ -1394,11 +1394,13 @@ port of a pod that carries its label. scripts/check-metrics-policy.py checks
 this on each render.
 
   8080  the operators of this chart, External Secrets and CloudNativePG
+  9003  ext-authz (GET /metrics only, mTLS)
   9090  the daemon, the rate limiter and Reloader
   9187  the Postgres instances
+  9464  the dashboard (GET /metrics only)
   9402  cert-manager
   9901  the probe listener of the edge (/ready and /stats/prometheus only)
 */}}
 {{- define "gibson.metricsPorts" -}}
-8080 9090 9187 9402 9901
+8080 9003 9090 9187 9402 9464 9901
 {{- end -}}

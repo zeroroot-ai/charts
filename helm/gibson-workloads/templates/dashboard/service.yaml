@@ -19,6 +19,11 @@ spec:
       port: {{ .Values.dashboard.service.port | default 3000 }}
       targetPort: http
       protocol: TCP
+    # The metrics-only listener (charts#515).
+    - name: metrics
+      port: 9464
+      targetPort: metrics
+      protocol: TCP
   selector:
     {{- include "gibson.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: dashboard

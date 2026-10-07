@@ -367,7 +367,7 @@ gibson:
     # on the SPIRE socket — so the fga-init Job hangs in dump-model until
     # its deadline and the whole install wedges. Verified on this digest:
     # `gibson dump-fga-model` exits 0 in under a second with the model.
-    tag: "v0.154.0@sha256:560d708bc9814dfb272643baa8afe14d1869b98f1833518a2f1c4048dbdccc23"
+    tag: "v0.156.0@sha256:ea83c303215cf5cfe6de26d06f2d907b1286e617781dadb56cafda4b4ba63036"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     # Empty by default: first-party pins are hand-committed in the combined
@@ -784,11 +784,6 @@ dashboard:
   # provisioning routes (/api/admin/provisioning/*). Spec: service-acting-auth.
   zitadel:
     issuer: ""
-    # audience — the JWT audience claim the dashboard verifier asserts.
-    # Must match additionalAudiences set on the Zitadel project by the
-    # post-install bootstrap Job. Override in env overlays only if the
-    # project audience differs.
-    audience: "gibson-platform"
 
   image:
     repository: ghcr.io/zeroroot-ai/dashboard
@@ -804,7 +799,7 @@ dashboard:
     # kind keeps a moving :main tag (values-kind.yaml), exempt on purpose.
     # Bump: scripts/bump-image-digest.py --image dashboard --ref v<x.y.z> \
     #         --digest "$(HEAD /v2/zeroroot-ai/dashboard/manifests/v<x.y.z>)"
-    tag: "v0.128.0@sha256:41ce2921bd056f01938bb1188644ba16baac7503c43971293c1cad880ffa3588"
+    tag: "v0.130.1@sha256:19b122306fe11a6c3131fd1f503e8cce8c296507b2ca609a6006c0817eaa0544"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -900,11 +895,6 @@ dashboard:
         clientId: ""                   # MICROSOFT_CLIENT_ID
         clientSecret: ""               # MICROSOFT_CLIENT_SECRET (Secret ref)
         tenantId: ""                   # MICROSOFT_TENANT_ID (required when microsoft is enabled)
-
-    # Comma-separated list of CIDRs allowed to scrape /api/metrics.
-    # Empty string means "no restriction" — tighten in production.
-    metrics:
-      allowedCIDRs: ""                 # DASHBOARD_METRICS_ALLOWED_CIDRS
 
   # The account link of the billing component (ADR-0060, charts#375). The
   # dashboard shows it when both are set. Both or neither: half a pair fails
@@ -1335,7 +1325,7 @@ extAuthz:
     # EXT_AUTHZ_CGJWT_KEYS_URL. It moves in lockstep with the daemon pin above
     # and with the https/:8086 value in ext-authz/deployment.yaml (deploy#1386)
     # — the three are one change, in both directions.
-    tag: "v0.154.0@sha256:394bfc66f423cf706a72b0abd1a8dddfd741662831eaa950b094d326ef31f738"
+    tag: "v0.156.0@sha256:de8de16c113df239dbc100d1d6ae128834d784799dc318a2b50a89b076cfeb36"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
