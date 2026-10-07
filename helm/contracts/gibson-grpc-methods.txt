@@ -5,9 +5,9 @@
 # registry (internal/platform/authz/registry/registry.yaml).
 # An edge route for a service that is not in this list matches no request.
 #
-# 379 method(s) of 36 service(s).
+# 392 method(s) of 38 service(s).
 #
-# Source: zeroroot-ai/gibson @ v0.153.2
+# Source: zeroroot-ai/gibson @ v0.154.0
 #
 /gibson.agent.v1.AgentService/Execute
 /gibson.agent.v1.AgentService/GetDescriptor
@@ -36,6 +36,7 @@
 /gibson.component.v1.ComponentService/DelegateToAgent
 /gibson.component.v1.ComponentService/DisablePlugin
 /gibson.component.v1.ComponentService/EnablePlugin
+/gibson.component.v1.ComponentService/EnrollComponent
 /gibson.component.v1.ComponentService/FindSimilarAttacks
 /gibson.component.v1.ComponentService/FindSimilarFindings
 /gibson.component.v1.ComponentService/GetAttackChains
@@ -70,6 +71,10 @@
 /gibson.component.v1.ComponentService/WatchComponentEvents
 /gibson.daemon.agentconsole.v1.AgentConsoleService/ListRunningAgents
 /gibson.daemon.agentconsole.v1.AgentConsoleService/StreamAgentEvents
+/gibson.daemon.connection.v1.ConnectionPointService/CompleteSignupStep
+/gibson.daemon.connection.v1.ConnectionPointService/DescribeSignupStep
+/gibson.daemon.connection.v1.ConnectionPointService/ListTenantUsage
+/gibson.daemon.connection.v1.ConnectionPointService/SetTenantActivation
 /gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ApproveDestructiveAction
 /gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/DenyDestructiveAction
 /gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ListPendingDestructiveActions
@@ -88,20 +93,27 @@
 /gibson.daemon.logs.v1.LogsService/QueryMissionLogs
 /gibson.daemon.operator.v1.DaemonOperatorService/AckTenantOp
 /gibson.daemon.operator.v1.DaemonOperatorService/AckTenantProvisioned
+/gibson.daemon.operator.v1.DaemonOperatorService/AdoptConnector
 /gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent
 /gibson.daemon.operator.v1.DaemonOperatorService/EnqueueTenantProvisioning
+/gibson.daemon.operator.v1.DaemonOperatorService/GetBeliefTrainingData
 /gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorAuthStatus
+/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorCredential
+/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredCatalogPlugins
+/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredConnectors
 /gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples
 /gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps
 /gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning
+/gibson.daemon.operator.v1.DaemonOperatorService/ReportCatalogPluginStatus
+/gibson.daemon.operator.v1.DaemonOperatorService/ReportConnectorStatus
 /gibson.daemon.operator.v1.DaemonOperatorService/ReportTenantStatus
 /gibson.daemon.operator.v1.DaemonOperatorService/RevokeConnectorGrant
 /gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled
 /gibson.daemon.operator.v1.DaemonOperatorService/SetAgentEnrollmentLimits
 /gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg
+/gibson.daemon.operator.v1.DaemonOperatorService/StoreBeliefArtifact
 /gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota
 /gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples
-/gibson.daemon.v1.DaemonService/BuildComponent
 /gibson.daemon.v1.DaemonService/CompleteMissionCUE
 /gibson.daemon.v1.DaemonService/Connect
 /gibson.daemon.v1.DaemonService/CreateMission
@@ -111,6 +123,7 @@
 /gibson.daemon.v1.DaemonService/GetAgentStatus
 /gibson.daemon.v1.DaemonService/GetCapabilityManifest
 /gibson.daemon.v1.DaemonService/GetComponentLogs
+/gibson.daemon.v1.DaemonService/GetMissionCheckpoints
 /gibson.daemon.v1.DaemonService/GetMissionDefinition
 /gibson.daemon.v1.DaemonService/GetMissionGraph
 /gibson.daemon.v1.DaemonService/GetMissionHistory
@@ -132,9 +145,9 @@
 /gibson.daemon.v1.DaemonService/RenderCatalogMission
 /gibson.daemon.v1.DaemonService/RenewCapabilityGrant
 /gibson.daemon.v1.DaemonService/ResumeMission
+/gibson.daemon.v1.DaemonService/RewindMission
 /gibson.daemon.v1.DaemonService/RunMission
 /gibson.daemon.v1.DaemonService/SaveMissionLayout
-/gibson.daemon.v1.DaemonService/ShowComponent
 /gibson.daemon.v1.DaemonService/StartComponent
 /gibson.daemon.v1.DaemonService/Status
 /gibson.daemon.v1.DaemonService/StopComponent
@@ -159,6 +172,7 @@
 /gibson.harness.v1.HarnessCallbackService/CallToolProto
 /gibson.harness.v1.HarnessCallbackService/CallToolProtoStream
 /gibson.harness.v1.HarnessCallbackService/CancelMission
+/gibson.harness.v1.HarnessCallbackService/ClaimFork
 /gibson.harness.v1.HarnessCallbackService/CloseJob
 /gibson.harness.v1.HarnessCallbackService/CreateMission
 /gibson.harness.v1.HarnessCallbackService/DelegateToAgent
@@ -231,7 +245,6 @@
 /gibson.pluginadmin.v1.PluginAdminService/EditPluginSecretBinding
 /gibson.pluginadmin.v1.PluginAdminService/GetPluginInstall
 /gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls
-/gibson.pluginadmin.v1.PluginAdminService/RegisterPlugin
 /gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding
 /gibson.secrets.v1.SecretsService/CountSecrets
 /gibson.secrets.v1.SecretsService/DeleteSecret
@@ -247,7 +260,7 @@
 /gibson.session.v1.SessionService/RevokeMySession
 /gibson.tenant.v1.AdminTenantService/AdminApproveRegistration
 /gibson.tenant.v1.AdminTenantService/AdminDeleteTenant
-/gibson.tenant.v1.AdminTenantService/AdminGetTenantBilling
+/gibson.tenant.v1.AdminTenantService/AdminGetPlatformHealth
 /gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations
 /gibson.tenant.v1.AdminTenantService/AdminProvisionTenant
 /gibson.tenant.v1.AdminTenantService/AdminRejectRegistration
@@ -258,6 +271,11 @@
 /gibson.tenant.v1.BudgetService/ListBudgets
 /gibson.tenant.v1.BudgetService/SetBudget
 /gibson.tenant.v1.BudgetService/SetTenantBudgetDefaults
+/gibson.tenant.v1.CatalogPluginService/DisableCatalogPlugin
+/gibson.tenant.v1.CatalogPluginService/EnableCatalogPlugin
+/gibson.tenant.v1.CatalogPluginService/ListCatalogPlugins
+/gibson.tenant.v1.CatalogPluginService/ListPluginCatalog
+/gibson.tenant.v1.ComplianceService/ListComplianceEvidence
 /gibson.tenant.v1.ConnectorAuthService/CompleteConnectorAuthorization
 /gibson.tenant.v1.ConnectorAuthService/GetConnectorAuthStatus
 /gibson.tenant.v1.ConnectorAuthService/RevokeConnectorGrant
@@ -269,11 +287,14 @@
 /gibson.tenant.v1.ConnectorService/ListConnectors
 /gibson.tenant.v1.DomainPackService/DisableDomainPack
 /gibson.tenant.v1.DomainPackService/EnableDomainPack
+/gibson.tenant.v1.DomainPackService/ExportDomainPack
+/gibson.tenant.v1.DomainPackService/ImportDomainPack
 /gibson.tenant.v1.DomainPackService/ListDomainPackCatalog
 /gibson.tenant.v1.DomainPackService/ListDomainPacks
 /gibson.tenant.v1.GrantsService/DeleteAgentGrants
 /gibson.tenant.v1.GrantsService/ListActiveGrants
 /gibson.tenant.v1.GrantsService/WriteAgentGrants
+/gibson.tenant.v1.GrantsService/WriteSecretGrants
 /gibson.tenant.v1.MembershipService/AcceptInvitation
 /gibson.tenant.v1.MembershipService/AddTeamMember
 /gibson.tenant.v1.MembershipService/CancelInvitation
@@ -285,6 +306,7 @@
 /gibson.tenant.v1.MembershipService/ListMembers
 /gibson.tenant.v1.MembershipService/ListTeamMembers
 /gibson.tenant.v1.MembershipService/ListTeams
+/gibson.tenant.v1.MembershipService/ReassignAgentIdentity
 /gibson.tenant.v1.MembershipService/RemoveMember
 /gibson.tenant.v1.MembershipService/RemoveTeamMember
 /gibson.tenant.v1.MembershipService/ResendInvitation
@@ -315,33 +337,23 @@
 /gibson.tenant.v1.ProviderService/SetDefaultProvider
 /gibson.tenant.v1.ProviderService/TestProvider
 /gibson.tenant.v1.ProviderService/UpdateProvider
-/gibson.tenant.v1.SecretsService/CountSecrets
-/gibson.tenant.v1.SecretsService/DeleteSecret
-/gibson.tenant.v1.SecretsService/GetBrokerConfig
-/gibson.tenant.v1.SecretsService/GetMissionAudit
-/gibson.tenant.v1.SecretsService/GetSecret
-/gibson.tenant.v1.SecretsService/ListSecrets
-/gibson.tenant.v1.SecretsService/ProbeBrokerConfig
-/gibson.tenant.v1.SecretsService/RotateSecret
-/gibson.tenant.v1.SecretsService/SetBrokerConfig
-/gibson.tenant.v1.SecretsService/SetSecret
-/gibson.tenant.v1.SignupService/AttachSignupCustomer
+/gibson.tenant.v1.SignupService/GetSignupStep
 /gibson.tenant.v1.SignupService/RedeemEmailVerification
 /gibson.tenant.v1.SignupService/Register
 /gibson.tenant.v1.SignupService/RequestEmailVerification
 /gibson.tenant.v1.SignupService/Signup
 /gibson.tenant.v1.TenantProvisioningService/GetTenantProvisioningStatus
-/gibson.tenant.v1.TenantProvisioningService/SetTenantBillingActive
 /gibson.tenant.v1.TenantService/DeleteMissionDraft
 /gibson.tenant.v1.TenantService/ExportFindings
+/gibson.tenant.v1.TenantService/GetAuditRetention
 /gibson.tenant.v1.TenantService/GetMissionDraft
 /gibson.tenant.v1.TenantService/GetOnboardingState
-/gibson.tenant.v1.TenantService/GetTenantBilling
 /gibson.tenant.v1.TenantService/GetTenantQuota
 /gibson.tenant.v1.TenantService/GetTenantQuotaUsage
 /gibson.tenant.v1.TenantService/ListAuditEvents
 /gibson.tenant.v1.TenantService/ListMissionDrafts
 /gibson.tenant.v1.TenantService/SaveMissionDraft
+/gibson.tenant.v1.TenantService/SetAuditRetention
 /gibson.tenant.v1.TenantService/UpdateOnboardingState
 /gibson.tenant.v1.UsageService/ListUsage
 /gibson.tenant.v1.UserService/ConsumeAttachment
@@ -385,6 +397,7 @@
 /gibson.world.v1.WorldService/ListLlmCalls
 /gibson.world.v1.WorldService/ListMissions
 /gibson.world.v1.WorldService/ListOpenBets
+/gibson.world.v1.WorldService/ListProofReviews
 /gibson.world.v1.WorldService/ListReviewQueue
 /gibson.world.v1.WorldService/SettleBetByHITL
 /gibson.world.v1.WorldService/SubmitLabel
