@@ -1322,6 +1322,10 @@ A new pod gets labels, not a new policy. Input is a dict:
   edge          true for the public edge. Each source reaches its listener.
   controlPlane  true for a server that the API server or a node dials
                 (an admission webhook, the SPIRE server agent port).
+  metricsPort   the port that serves only metrics, one of gibson.metricsPorts.
+                The cluster scraper reaches the pod on this port and on no
+                other. Never an API port. A pod with no metrics port gets
+                no scraper traffic.
 
   {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "redis") "kubeApi" true) | nindent 8 }}
 
@@ -1370,4 +1374,31 @@ gibson.zeroroot.ai/ingress-edge: "true"
 {{- if .controlPlane }}
 gibson.zeroroot.ai/ingress-control-plane: "true"
 {{- end }}
+{{- with .metricsPort }}
+{{- $ports := include "gibson.metricsPorts" $ | splitList " " }}
+{{- if not (has (toString .) $ports) }}
+{{- fail (printf "gibson.netLabels: metrics port %v is not one of %s" . (join ", " $ports)) }}
+{{- end }}
+gibson.zeroroot.ai/metrics-port: {{ . | quote }}
+{{- end }}
+{{- end -}}
+
+{{/*
+gibson.metricsPorts: the ports that serve only metrics (D76, the metrics
+policy of helm/gibson/templates/network-policies.yaml).
+
+The metrics policy renders one rule for each port. The rule selects the pods
+with the label gibson.zeroroot.ai/metrics-port set to that port, and admits
+the cluster scraper to that port only. A port here must never be an API
+port of a pod that carries its label. scripts/check-metrics-policy.py checks
+this on each render.
+
+  8080  the operators of this chart, External Secrets and CloudNativePG
+  9090  the daemon, the rate limiter and Reloader
+  9187  the Postgres instances
+  9402  cert-manager
+  9901  the probe listener of the edge (/ready and /stats/prometheus only)
+*/}}
+{{- define "gibson.metricsPorts" -}}
+8080 9090 9187 9402 9901
 {{- end -}}

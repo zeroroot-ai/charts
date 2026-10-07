@@ -161,7 +161,7 @@ spec:
       labels:
         app.kubernetes.io/name: reloader
         app.kubernetes.io/component: reloader
-        {{- include "gibson.netLabels" (dict "role" "system" "kubeApi" true) | nindent 8 }}
+        {{- include "gibson.netLabels" (dict "role" "system" "kubeApi" true "metricsPort" 9090) | nindent 8 }}
     spec:
       serviceAccountName: reloader
       {{- include "gibson.imagePullSecrets" . | nindent 6 }}

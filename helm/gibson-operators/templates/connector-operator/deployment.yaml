@@ -41,7 +41,7 @@ spec:
         {{- /* No internet label (D76): the operator calls only the API server
                and the daemon. Each connector runtime gets its own egress
                policy from the operator (spec.egressAllow). */}}
-        {{- include "gibson.netLabels" (dict "role" "platform" "kubeApi" true "namespaces" true "controlPlane" true) | nindent 8 }}
+        {{- include "gibson.netLabels" (dict "role" "platform" "kubeApi" true "namespaces" true "controlPlane" true "metricsPort" 8080) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a

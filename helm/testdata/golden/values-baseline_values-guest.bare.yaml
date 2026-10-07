@@ -2954,8 +2954,8 @@ data:
               explicit_http_config:
                 http2_protocol_options: {}
           # Envoy → ext-authz SPIFFE mTLS via SPIRE SDS. ext-authz's gRPC
-          # listener is RequireAndVerifyClientCert (the deployment template
-          # mounts gibson-ext-authz-grpc-tls and SPIRE-issued client certs);
+          # listener is RequireAndVerifyClientCert (ext-authz takes its server
+          # cert and the client trust bundle from SPIRE);
           # without a transport_socket here Envoy connects plain TCP, the
           # TLS handshake EOFs, every ext_authz check errors, and Envoy's
           # failure_mode_allow:false returns grpc-status:7 (permission_denied)
@@ -7020,6 +7020,7 @@ spec:
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/egress-namespaces: "true"
         gibson.zeroroot.ai/ingress-control-plane: "true"
+        gibson.zeroroot.ai/metrics-port: "8080"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -7195,6 +7196,7 @@ spec:
         gibson.zeroroot.ai/client-postgres: "true"
         gibson.zeroroot.ai/client-openbao: "true"
         gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/metrics-port: "8080"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -7407,6 +7409,7 @@ spec:
         app.kubernetes.io/component: reloader
         gibson.zeroroot.ai/net-role: system
         gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/metrics-port: "9090"
     spec:
       serviceAccountName: reloader
       
@@ -7510,6 +7513,7 @@ spec:
         gibson.zeroroot.ai/egress-fqdn: tenant-operator
         gibson.zeroroot.ai/egress-namespaces: "true"
         gibson.zeroroot.ai/ingress-control-plane: "true"
+        gibson.zeroroot.ai/metrics-port: "8080"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -9371,6 +9375,7 @@ spec:
         app.kubernetes.io/component: envoy
         gibson.zeroroot.ai/net-role: platform
         gibson.zeroroot.ai/ingress-edge: "true"
+        gibson.zeroroot.ai/metrics-port: "9901"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -9381,7 +9386,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 32aea5681cab8a1c7c88c0f442a9b2bfcf52cb91e75db2a62ec3cf5a6b0c1844
+        checksum/config: 3e7dbe99648568fc9ea37407f211ad0b981be4bcc2b530b6c2a7aad24187310e
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -9758,7 +9763,7 @@ spec:
         checksum/registry: c1c29512582a893a867405ae14499183f952c17ed756544d689ca1b5877c2c5c
         checksum/daemon-registry: 1aefec506e4e855d4c7619472786376435758fa29be3234389f9c42a93036671
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
-        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc"
+        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc,gibson-ext-authz-health-tls"
     spec:
       
       imagePullSecrets:
@@ -10078,9 +10083,6 @@ spec:
             - name: EXT_AUTHZ_ENVOY_SVID
               value: "spiffe://zeroroot.ai/platform/envoy"
           volumeMounts:
-            - name: grant-key
-              mountPath: /etc/ext-authz/grant-key
-              readOnly: true
             # NOTE: sa-identity-map ConfigMap is NOT mounted on ext-authz.
             # The ext-authz binary does not consume it — only the daemon
             # (core/gibson identityresolver) does, for log enrichment.
@@ -10092,14 +10094,11 @@ spec:
             - name: spire-agent-socket
               mountPath: /run/spire/sockets
               readOnly: true
-            # cert-manager-issued component TLS material. Mount paths are
-            # the binary's defaults (EXT_AUTHZ_HEALTH_CERT_DIR /
-            # EXT_AUTHZ_GRPC_CERT_DIR) — see core/ext-authz/cmd/ext-authz/main.go.
+            # cert-manager-issued TLS of the health listener. The mount path
+            # is the binary's default (EXT_AUTHZ_HEALTH_CERT_DIR, gibson
+            # cmd/ext-authz/main.go). The gRPC listener uses a SPIRE SVID.
             - name: health-tls
               mountPath: /etc/extauthz/tls/health
-              readOnly: true
-            - name: grpc-tls
-              mountPath: /etc/extauthz/tls/grpc
               readOnly: true
             # CA that signs the OpenFGA HTTP-listener cert (deploy#1382);
             # picked up via SSL_CERT_DIR above.
@@ -10157,10 +10156,6 @@ spec:
               cpu: 100m
               memory: 128Mi
       volumes:
-        - name: grant-key
-          secret:
-            secretName: gibson-extauthz-grant-key
-            defaultMode: 0400
         # sa-identity-map volume removed from ext-authz: the binary does
         # not read it, and mounting it inside /etc/gibson collides with the
         # registry mount (OCI runtime: read-only file system). The daemon
@@ -10179,10 +10174,6 @@ spec:
         - name: health-tls
           secret:
             secretName: gibson-ext-authz-health-tls
-            defaultMode: 0400
-        - name: grpc-tls
-          secret:
-            secretName: gibson-ext-authz-grpc-tls
             defaultMode: 0400
         # CA for the OpenFGA HTTP-listener cert (deploy#1382). Only ca.crt
         # is projected — ext-authz must never hold the listener's private
@@ -10225,6 +10216,7 @@ spec:
         app.kubernetes.io/component: ratelimit
         gibson.zeroroot.ai/net-role: platform
         gibson.zeroroot.ai/client-redis: "true"
+        gibson.zeroroot.ai/metrics-port: "9090"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -11373,7 +11365,6 @@ spec:
               #                  set-initial-password -Xyz` reads that as an option (exit
               #                  64, blocker 3 loops #16/#18). scripts/check-seed-passwords.sh
               #                  refuses password:rand.
-              #   ecpem:<name>   the private key of transit key <name> (ecdsa-p256), PEM
               #   rsapem:<name>  the private key of transit key <name> (rsa-2048), PEM
               #   rsapub:<name>  the public key of transit key <name> (rsa-2048), PEM
               #   literal:<v>    the literal value <v>
@@ -11395,7 +11386,6 @@ spec:
               # gibson-platform-operator-vault Secret. Everything else is generated once
               # and kept, so an upgrade never rotates a credential under a workload.
               gibson-gibson-platform-postgres-password password:pw
-              gibson-dashboard-postgres-password password:pw
               gibson-tenant-admin-postgres-password password:pw
               gibson-zitadel-postgres-password password:pw
               gibson-openfga-postgres-password password:pw
@@ -11403,11 +11393,8 @@ spec:
               gibson-neo4j-password password:pw
               gibson-redis-password password:pw
               zitadel-masterkey value:rand
-              gibson-billing-webhook-secret secret:rand
               gibson-dashboard-session-secrets auth_secret:rand server_actions_key:randb64
               gibson-cg-signing-key key:rand kid:rand8
-              gibson-extauthz-grant-current pem:ecpem:extauthz-grant-current kid:rand8
-              gibson-extauthz-grant-previous pem:ecpem:extauthz-grant-previous kid:rand8
               gibson-zitadel-system-bot-key private_key:rsapem:zitadel-system-bot public_key:rsapub:zitadel-system-bot
               ghcr-pull-secret pat:input:ghcr-pull-token
               gibson-dashboard-auth-hardening captcha_secret_key:empty email_resend_api_key:empty
@@ -11993,7 +11980,6 @@ spec:
                   randb64) gen_rand_b64 32 ;;
                   rand8)   gen_rand 8 ;;
                   pw)      gen_pw 43 ;;
-                  ecpem)   transit_private_pem "$1" "$3" ecdsa-p256 ;;
                   rsapem)  transit_private_pem "$1" "$3" rsa-2048 ;;
                   rsapub)  transit_public_pem "$1" "$3" rsa-2048 ;;
                   literal) printf '%s' "$3" ;;
@@ -12806,6 +12792,7 @@ spec:
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/egress-internet: "true"
         gibson.zeroroot.ai/egress-namespaces: "true"
+        gibson.zeroroot.ai/metrics-port: "9090"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -12827,7 +12814,11 @@ spec:
         # (deploy#517) enforces that order. Listing this Secret in Reloader
         # would race-restart the daemon simultaneously with redis-stack,
         # causing WRONGPASS.
-        secret.reloader.stakater.com/reload: "gibson-gibson-workloads-db-secrets,gibson-platform-postgres-credentials,gibson-native-login-oidc"
+        #
+        # gibson-daemon-metrics-tls: the metrics listener loads its cert one
+        # time at start, so a cert-manager renewal restarts the daemon
+        # (ADR-0171, row component-tls).
+        secret.reloader.stakater.com/reload: "gibson-gibson-workloads-db-secrets,gibson-platform-postgres-credentials,gibson-native-login-oidc,gibson-daemon-metrics-tls"
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
     spec:
       serviceAccountName: gibson
@@ -15213,44 +15204,18 @@ spec:
   secretName: gibson-selfsigned-ca
   duration: 87600h   # 10 years
   renewBefore: 8760h # 1 year
+  # The root keeps its key when cert-manager renews it (ADR-0171, row
+  # component-tls). Each client loads this CA one time at start. With the
+  # same key, a leaf signed after the renewal still chains to the CA that a
+  # running client holds, so a renewal of the root restarts nothing.
   privateKey:
     algorithm: ECDSA
     size: 256
+    rotationPolicy: Never
   issuerRef:
     name: selfsigned-bootstrap
     kind: ClusterIssuer
     group: cert-manager.io
----
-# Source: gibson/charts/gibson-workloads/templates/cert-manager/component-certificates.yaml
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: gibson-daemon-callback-tls
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: daemon-tls
-spec:
-  secretName: gibson-daemon-callback-tls
-  duration: 2160h
-  renewBefore: 360h
-  commonName: "gibson-gibson-workloads.gibson.svc"
-  dnsNames:
-    - "gibson-gibson-workloads"
-    - "gibson-gibson-workloads.gibson"
-    - "gibson-gibson-workloads.gibson.svc"
-    - "gibson-gibson-workloads.gibson.svc.cluster.local"
-  privateKey:
-    algorithm: ECDSA
-    size: 256
-  issuerRef:
-    name: "selfsigned-ca"
-    kind: "Issuer"
-    group: "cert-manager.io"
 ---
 # Source: gibson/charts/gibson-workloads/templates/cert-manager/component-certificates.yaml
 apiVersion: cert-manager.io/v1
@@ -15274,37 +15239,6 @@ spec:
     - "gibson-gibson-workloads"
     - "gibson-gibson-workloads.gibson.svc"
     - "gibson-gibson-workloads.gibson.svc.cluster.local"
-  privateKey:
-    algorithm: ECDSA
-    size: 256
-  issuerRef:
-    name: "selfsigned-ca"
-    kind: "Issuer"
-    group: "cert-manager.io"
----
-# Source: gibson/charts/gibson-workloads/templates/cert-manager/component-certificates.yaml
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: gibson-ext-authz-grpc-tls
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: ext-authz-tls
-spec:
-  secretName: gibson-ext-authz-grpc-tls
-  duration: 2160h
-  renewBefore: 360h
-  commonName: "gibson-ext-authz.gibson.svc"
-  dnsNames:
-    - "gibson-ext-authz"
-    - "gibson-ext-authz.gibson"
-    - "gibson-ext-authz.gibson.svc"
-    - "gibson-ext-authz.gibson.svc.cluster.local"
   privateKey:
     algorithm: ECDSA
     size: 256
@@ -16050,46 +15984,72 @@ metadata:
     app.kubernetes.io/component: network-metrics
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
-spec:
-  description: "The cluster scrapers reach the metrics ports."
-  endpointSelector:
-    matchExpressions:
-      - key: gibson.zeroroot.ai/net-role
-        operator: Exists
-  ingress:
-    - fromEndpoints:
-        - matchLabels:
-            app.kubernetes.io/name: prometheus
-          matchExpressions:
-            - key: k8s:io.kubernetes.pod.namespace
-              operator: Exists
-        - matchLabels:
-            app: grafana-agent
-          matchExpressions:
-            - key: k8s:io.kubernetes.pod.namespace
-              operator: Exists
-      toPorts:
-        - ports:
-            - port: "2112"
-              protocol: TCP
-            - port: "3000"
-              protocol: TCP
-            - port: "7979"
-              protocol: TCP
-            - port: "8008"
-              protocol: TCP
-            - port: "8080"
-              protocol: TCP
-            - port: "9090"
-              protocol: TCP
-            - port: "9187"
-              protocol: TCP
-            - port: "9402"
-              protocol: TCP
-            - port: "9901"
-              protocol: TCP
-            - port: "9002"
-              protocol: TCP
+specs:
+  - description: "The cluster scraper reaches the metrics port 8080 of the pods that serve metrics there."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/metrics-port: "8080"
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: "monitoring"
+              app.kubernetes.io/name: prometheus
+        toPorts:
+          - ports:
+              - port: "8080"
+                protocol: TCP
+  - description: "The cluster scraper reaches the metrics port 9090 of the pods that serve metrics there."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/metrics-port: "9090"
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: "monitoring"
+              app.kubernetes.io/name: prometheus
+        toPorts:
+          - ports:
+              - port: "9090"
+                protocol: TCP
+  - description: "The cluster scraper reaches the metrics port 9187 of the pods that serve metrics there."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/metrics-port: "9187"
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: "monitoring"
+              app.kubernetes.io/name: prometheus
+        toPorts:
+          - ports:
+              - port: "9187"
+                protocol: TCP
+  - description: "The cluster scraper reaches the metrics port 9402 of the pods that serve metrics there."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/metrics-port: "9402"
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: "monitoring"
+              app.kubernetes.io/name: prometheus
+        toPorts:
+          - ports:
+              - port: "9402"
+                protocol: TCP
+  - description: "The cluster scraper reaches the metrics port 9901 of the pods that serve metrics there."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/metrics-port: "9901"
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: "monitoring"
+              app.kubernetes.io/name: prometheus
+        toPorts:
+          - ports:
+              - port: "9901"
+                protocol: TCP
 ---
 # Source: gibson/templates/postgres/platform-postgres-cluster.yaml
 apiVersion: postgresql.cnpg.io/v1
@@ -16139,6 +16099,7 @@ spec:
       gibson.zeroroot.ai/client-postgres: "true"
       gibson.zeroroot.ai/kube-api: "true"
       gibson.zeroroot.ai/egress-fqdn: object-store
+      gibson.zeroroot.ai/metrics-port: "9187"
   instances: 3
   # A primary roll promotes a replica first, then restarts the old primary as
   # a replica. `restart` would take the primary down before anything else.
@@ -16715,44 +16676,6 @@ spec:
     - secretKey: captcha_secret_key
       remoteRef: { key: gibson-dashboard-auth-hardening, property: captcha_secret_key }
 ---
-# Source: gibson/charts/gibson-workloads/templates/ext-authz/secret.yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: gibson-extauthz-grant-key
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: ext-authz
-spec:
-  refreshInterval: 60s
-  secretStoreRef:
-    name: "gibson-secrets"
-    kind: ClusterSecretStore
-  target:
-    name: gibson-extauthz-grant-key
-    creationPolicy: Owner
-    template:
-      type: Opaque
-      data:
-        current.pem: "{{ .current_pem }}"
-        current.kid: "{{ .current_kid }}"
-        previous.pem: "{{ .previous_pem }}"
-        previous.kid: "{{ .previous_kid }}"
-  data:
-    - secretKey: current_pem
-      remoteRef: { key: gibson-extauthz-grant-current, property: pem }
-    - secretKey: current_kid
-      remoteRef: { key: gibson-extauthz-grant-current, property: kid }
-    - secretKey: previous_pem
-      remoteRef: { key: gibson-extauthz-grant-previous, property: pem }
-    - secretKey: previous_kid
-      remoteRef: { key: gibson-extauthz-grant-previous, property: kid }
----
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/iam-admin-pat-externalsecret.yaml
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -16866,8 +16789,8 @@ spec:
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/missing-secrets.yaml
 # gibson-workloads-db-secrets — referenced by gibson daemon for tenant
-# admin DB password, dashboard DB password, neo4j admin password, and the
-# SPIRE datastore password (Aurora/RDS spire role; deploy#572).
+# admin DB password, neo4j admin password, and the SPIRE datastore password
+# (Aurora/RDS spire role; deploy#572).
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -16890,13 +16813,10 @@ spec:
     template:
       type: Opaque
       data:
-        DASHBOARD_DB_PASSWORD: "{{ .dashboard_password }}"
         NEO4J_PASSWORD: "{{ .neo4j_password }}"
         TENANT_POSTGRES_ADMIN_PASSWORD: "{{ .tenant_admin_password }}"
         SPIRE_DB_PASSWORD: "{{ .spire_password }}"
   data:
-    - secretKey: dashboard_password
-      remoteRef: { key: gibson-dashboard-postgres-password, property: password }
     - secretKey: neo4j_password
       remoteRef: { key: gibson-neo4j-password, property: password }
     - secretKey: tenant_admin_password
@@ -17147,36 +17067,6 @@ spec:
         key: setec-disk-signing
         property: seed
 ---
-# Source: gibson/templates/externalsecrets/dashboard-postgres-credentials.yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  # Deterministic cold-bringup ordering (deploy#820): this ExternalSecret is
-  # STANDING infrastructure — it owns its target Secret for the life of the
-  # install (creationPolicy: Owner), so it must NOT be an Argo hook: hook
-  # lifecycle (BeforeHookCreation deletes, operation-retry cleanup) deletes the
-  # ExternalSecret and cascade-deletes the owned Secret out from under running
-  # workloads (observed live on staging, 2026-06-11). A regular resource at an
-  # early sync-wave (-8, after the store at -10, before the zitadel init chain
-  # at -6/-4/-3) gives the same cold-sync ordering with a durable object.
-  annotations:
-    argocd.argoproj.io/sync-wave: "-8"
-  name: dashboard-postgres-credentials
-  namespace: gibson
-spec:
-  data:
-  - remoteRef:
-      key: gibson-dashboard-postgres-password
-      property: password
-    secretKey: password
-  refreshInterval: 60s
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: gibson-secrets
-  target:
-    creationPolicy: Owner
-    name: dashboard-postgres-credentials
----
 # Source: gibson/templates/externalsecrets/gibson-neo4j-auth.yaml
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -17422,7 +17312,7 @@ spec:
 ---
 # Source: gibson/charts/gibson-workloads/templates/cert-manager/cluster-issuer.yaml
 # CA-backed Issuer that signs end-entity certs (e.g., the Envoy edge cert,
-# the daemon callback/metrics certs, the ext-authz grpc/health certs) with
+# the daemon metrics cert, the ext-authz health cert, the OpenFGA HTTP cert) with
 # the gibson-selfsigned-ca root above. Namespaced Issuer (not ClusterIssuer)
 # because the CA Secret lives in this release's namespace; cert-manager's
 # --cluster-resource-namespace defaults to the controller's namespace, so
@@ -17644,8 +17534,6 @@ spec:
     databases:
       - name: "gibson_platform"
         owner: "gibson_platform"
-      - name: "dashboard"
-        owner: "dashboard"
       - name: "tenant_admin"
         owner: "tenant_admin"
       - name: "zitadel"
@@ -21146,7 +21034,7 @@ metadata:
   name: gibson-workloads-postgres-setup
   namespace: gibson
   annotations:
-    # gitops#297: this role-creating job (gibson_platform/dashboard/tenant_admin
+    # gitops#297: this role-creating job (gibson_platform/tenant_admin
     # roles + DBs, pg_trgm seed, tenant_neo4j_endpoints registry) MUST run
     # BEFORE anything that logs in with those roles — the zitadel-init Sync hook
     # at wave -4 and every DB-consuming service. As a post-install/PostSync hook
@@ -21236,11 +21124,6 @@ spec:
             secretKeyRef:
               name: gibson-platform-postgres-credentials
               key: password
-        - name: PGSETUP_PW_DASHBOARD
-          valueFrom:
-            secretKeyRef:
-              name: dashboard-postgres-credentials
-              key: password
         - name: PGSETUP_PW_TENANT_ADMIN
           valueFrom:
             secretKeyRef:
@@ -21287,7 +21170,6 @@ spec:
             echo "[$1] setup complete"
           }
           setup "gibson_platform" "gibson_platform" "LOGIN" PGSETUP_PW_GIBSON_PLATFORM
-          setup "dashboard" "dashboard" "LOGIN" PGSETUP_PW_DASHBOARD
           setup "tenant_admin" "tenant_admin" "LOGIN CREATEDB CREATEROLE" PGSETUP_PW_TENANT_ADMIN
           # gitops#101: per-tenant databases need pg_trgm for the
           # missions_name_trgm_idx GIN index in migration 003. CREATE DATABASE copies

@@ -2,8 +2,8 @@
 ext_authz Deployment.
 
 Sole authorization-decision service for the platform. Called synchronously by
-Envoy ExtAuthz for every authenticated RPC; mints Capability Grant JWTs for
-tool dispatch; validates API keys for the Envoy Lua filter. ≥2 replicas so
+Envoy ExtAuthz for every authenticated RPC; verifies the Capability Grant
+JWTs that the daemon signs; validates API keys for the Envoy Lua filter. ≥2 replicas so
 that ext_authz unavailability never single-points the gateway.
 
 PodSecurityContext: distroless nonroot UID, read-only root filesystem, all
@@ -12,9 +12,6 @@ container has no shell and no writable filesystem outside the explicit
 emptyDir for /tmp.
 
 Mounts:
-  - Grant key    → /etc/ext-authz/grant-key/ from gibson-extauthz-grant-key
-                   (this chart, see secret.yaml). Holds current.pem + current.kid
-                   and optional previous.pem/previous.kid for key rotation.
   - RPC registry → /etc/gibson/registry.yaml from either:
       (a) an init container that `oras pull`s the private gibson registry
           artifact (oci://{{ .Values.sdk.registry }}:{{ .Values.sdk.version }})
@@ -102,7 +99,10 @@ spec:
           time. Reloader watches the live object instead.
         */}}
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
-        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc"
+        {{- /* gibson-ext-authz-health-tls: the health listener loads its cert
+               one time at start, so a cert-manager renewal restarts the pod
+               (ADR-0171, row component-tls). */}}
+        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc,gibson-ext-authz-health-tls"
     spec:
       {{- include "gibson.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ .Values.extAuthz.serviceAccount.name | default "gibson-ext-authz" }}
@@ -441,9 +441,6 @@ spec:
                    legacyHmacEnabled toggle was a transitional shim and is
                    removed in spec helm-eks-readiness-and-pg-split Phase 6. */}}
           volumeMounts:
-            - name: grant-key
-              mountPath: /etc/ext-authz/grant-key
-              readOnly: true
             {{- if and .Values.sdk.bypassRegistryValidation .Values.sdk.embeddedRegistry }}
             # Air-gapped only: the registry comes from a mounted ConfigMap. In
             # the default daemon-fetch path (deploy#852) there is no registry
@@ -465,14 +462,11 @@ spec:
             - name: spire-agent-socket
               mountPath: /run/spire/sockets
               readOnly: true
-            # cert-manager-issued component TLS material. Mount paths are
-            # the binary's defaults (EXT_AUTHZ_HEALTH_CERT_DIR /
-            # EXT_AUTHZ_GRPC_CERT_DIR) — see core/ext-authz/cmd/ext-authz/main.go.
+            # cert-manager-issued TLS of the health listener. The mount path
+            # is the binary's default (EXT_AUTHZ_HEALTH_CERT_DIR, gibson
+            # cmd/ext-authz/main.go). The gRPC listener uses a SPIRE SVID.
             - name: health-tls
               mountPath: /etc/extauthz/tls/health
-              readOnly: true
-            - name: grpc-tls
-              mountPath: /etc/extauthz/tls/grpc
               readOnly: true
             # CA that signs the OpenFGA HTTP-listener cert (deploy#1382);
             # picked up via SSL_CERT_DIR above.
@@ -525,10 +519,6 @@ spec:
           resources:
             {{- toYaml .Values.extAuthz.resources | nindent 12 }}
       volumes:
-        - name: grant-key
-          secret:
-            secretName: gibson-extauthz-grant-key
-            defaultMode: 0400
         # sa-identity-map volume removed from ext-authz: the binary does
         # not read it, and mounting it inside /etc/gibson collides with the
         # registry mount (OCI runtime: read-only file system). The daemon
@@ -549,10 +539,6 @@ spec:
         - name: health-tls
           secret:
             secretName: gibson-ext-authz-health-tls
-            defaultMode: 0400
-        - name: grpc-tls
-          secret:
-            secretName: gibson-ext-authz-grpc-tls
             defaultMode: 0400
         # CA for the OpenFGA HTTP-listener cert (deploy#1382). Only ca.crt
         # is projected — ext-authz must never hold the listener's private

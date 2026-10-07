@@ -6,7 +6,7 @@ metadata:
   name: gibson-workloads-postgres-setup
   namespace: gibson
   annotations:
-    # gitops#297: this role-creating job (gibson_platform/dashboard/tenant_admin
+    # gitops#297: this role-creating job (gibson_platform/tenant_admin
     # roles + DBs, pg_trgm seed, tenant_neo4j_endpoints registry) MUST run
     # BEFORE anything that logs in with those roles — the zitadel-init Sync hook
     # at wave -4 and every DB-consuming service. As a post-install/PostSync hook
@@ -36,13 +36,12 @@ metadata:
     helm.sh/hook-weight: '-6'
     helm.sh/hook-delete-policy: before-hook-creation
 {{- /*
-Three roles. tenant_admin also gets CREATEROLE (gitops#99): the
+Two roles. tenant_admin also gets CREATEROLE (gitops#99): the
 tenant-operator's per-tenant Postgres provisioner creates both the
 per-tenant database and a per-tenant `<tenant>_app` role inside it.
 */}}
 {{- $entries := list
   (dict "role" "gibson_platform" "db" "gibson_platform" "opts" "LOGIN" "secret" "gibson-platform-postgres-credentials")
-  (dict "role" "dashboard" "db" "dashboard" "opts" "LOGIN" "secret" "dashboard-postgres-credentials")
   (dict "role" "tenant_admin" "db" "tenant_admin" "opts" "LOGIN CREATEDB CREATEROLE" "secret" "tenant-admin-postgres-credentials") }}
 {{- $extra := `# gitops#101: per-tenant databases need pg_trgm for the
 # missions_name_trgm_idx GIN index in migration 003. CREATE DATABASE copies

@@ -22,7 +22,9 @@ a new policy, and no policy lists each internal peer.
   7. edge             The public edge accepts each source on its listener.
   8. control plane    Admission webhooks and the SPIRE server agent port accept
                       the API server and the nodes.
-  9. metrics          The cluster scrapers reach the metrics ports.
+  9. metrics          The cluster scraper reaches the metrics port of each
+                      pod that has one (gibson.metricsPorts), and no other
+                      port.
 
 Cilium allows a flow only when the egress side and the ingress side both allow
 it. So a pod with no client label cannot reach a data store, even with a
@@ -462,6 +464,14 @@ specs:
                 protocol: TCP
               {{- end }}
 ---
+{{- /* Each spec selects the pods that serve metrics on one port
+       (gibson.netLabels metricsPort) and admits the scraper to that port
+       only. An API port of a pod is never open to the scraper.
+       scripts/check-metrics-policy.py checks this on each render. */}}
+{{- $scraper := ((.Values.global).networkPolicy | default dict).metricsScraper | default dict }}
+{{- if not (and $scraper.namespace $scraper.matchLabels) }}
+{{- fail "global.networkPolicy.metricsScraper needs a namespace and matchLabels: the metrics policy admits only that scraper" }}
+{{- end }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -472,27 +482,19 @@ metadata:
     app.kubernetes.io/component: network-metrics
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
-spec:
-  description: "The cluster scrapers reach the metrics ports."
-  endpointSelector:
-    matchExpressions:
-      - key: {{ $role }}
-        operator: Exists
-  ingress:
-    - fromEndpoints:
-        - matchLabels:
-            app.kubernetes.io/name: prometheus
-          matchExpressions:
-            - key: k8s:io.kubernetes.pod.namespace
-              operator: Exists
-        - matchLabels:
-            app: grafana-agent
-          matchExpressions:
-            - key: k8s:io.kubernetes.pod.namespace
-              operator: Exists
-      toPorts:
-        - ports:
-            {{- range $p := list 2112 3000 7979 8008 8080 9090 9187 9402 9901 9002 }}
-            - port: {{ $p | quote }}
-              protocol: TCP
-            {{- end }}
+specs:
+  {{- range $p := include "gibson.metricsPorts" . | splitList " " }}
+  - description: "The cluster scraper reaches the metrics port {{ $p }} of the pods that serve metrics there."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/metrics-port: {{ $p | quote }}
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: {{ $scraper.namespace | quote }}
+              {{- toYaml (omit $scraper.matchLabels "k8s:io.kubernetes.pod.namespace") | nindent 14 }}
+        toPorts:
+          - ports:
+              - port: {{ $p | quote }}
+                protocol: TCP
+  {{- end }}
