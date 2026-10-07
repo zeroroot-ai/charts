@@ -31,13 +31,15 @@ path "transit/export/signing-key/*" { capabilities = ["read"] }
 {{/*
 gibson.openbaoPolicy.platformOperator: gibson
 operators/platform/internal/clients/vault. The mount table read, the transit
-mount, the one transit key and the one KV key of the Zitadel admin token.
+mount, the one transit key, and the KV keys of the two Zitadel tokens it
+mints and rotates: the admin token and the login-client token (ADR-0171).
 */}}
 {{- define "gibson.openbaoPolicy.platformOperator" -}}
 path "sys/mounts" { capabilities = ["read"] }
 path "sys/mounts/transit" { capabilities = ["create", "update"] }
 path "transit/keys/{{ required "openbao.platformTransitKey is required: the transit key of the platform-operator." .Values.openbao.platformTransitKey }}" { capabilities = ["create", "read", "update"] }
 path "secret/data/gibson-zitadel-iam-admin-pat" { capabilities = ["create", "read", "update"] }
+path "secret/data/gibson-zitadel-login-client-pat" { capabilities = ["create", "read", "update"] }
 {{- end -}}
 
 {{/*
