@@ -15912,7 +15912,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "The operator-started callers in tenant namespaces reach the daemon on the callback and gRPC ports only."
+  description: "The belief trainer of each tenant namespace reaches the daemon on the gRPC port only."
   endpointSelector:
     matchLabels:
       app.kubernetes.io/component: daemon
@@ -15921,13 +15921,13 @@ spec:
     - fromEndpoints:
         - matchLabels:
             k8s:io.cilium.k8s.namespace.labels.gibson.zeroroot.ai/managed-by: tenant-operator
+            app.kubernetes.io/component: belief-trainer
+            gibson.zeroroot.ai/managed-by: tenant-operator
           matchExpressions:
             - key: k8s:io.kubernetes.pod.namespace
               operator: Exists
       toPorts:
         - ports:
-            - port: "50001"
-              protocol: TCP
             - port: "50051"
               protocol: TCP
 ---

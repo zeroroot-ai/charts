@@ -17,9 +17,9 @@ a new policy, and no policy lists each internal peer.
                       (_egress-fqdn.tpl).
   6. namespaces       Pods with the egress-namespaces label reach pods in other
                       namespaces. The policies of those namespaces still apply.
+                      The daemon accepts the belief trainer of each tenant
+                      namespace on its gRPC port.
   7. edge             The public edge accepts each source on its listener.
-                      The daemon accepts the operator-started callers of
-                      the tenant namespaces on the callback and gRPC ports.
   8. control plane    Admission webhooks and the SPIRE server agent port accept
                       the API server and the nodes.
   9. metrics          The cluster scrapers reach the metrics ports.
@@ -328,14 +328,13 @@ spec:
               values:
                 - {{ $ns }}
 ---
-{{- /* The callers that the tenant and connector operators start in a tenant
-       namespace dial the daemon directly over SPIFFE mTLS: the belief
-       trainer on the daemon gRPC port (gibson.daemonAddress), and a
-       connector runner on the harness callback port. The operators write
-       the egress side in each tenant namespace. This rule is the ingress
-       side, on those two ports only. A tenant namespace carries the label
-       gibson.zeroroot.ai/managed-by: tenant-operator, and only the tenant
-       operator sets it (charts#505). */}}
+{{- /* The belief trainer that the tenant operator starts in a tenant
+       namespace dials the daemon gRPC port (gibson.daemonAddress) directly
+       over SPIFFE mTLS. The operator writes the egress side in the tenant
+       namespace. This rule is the ingress side, on that port only, for the
+       trainer pods only: a tenant namespace also runs third-party MCP
+       server code. The namespace label and both pod labels are the ones
+       the tenant operator writes (charts#505). */}}
 {{- $daemonGrpc := include "gibson.daemonAddress" . | splitList ":" | last }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -348,7 +347,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "The operator-started callers in tenant namespaces reach the daemon on the callback and gRPC ports only."
+  description: "The belief trainer of each tenant namespace reaches the daemon on the gRPC port only."
   endpointSelector:
     matchLabels:
       app.kubernetes.io/component: daemon
@@ -357,13 +356,13 @@ spec:
     - fromEndpoints:
         - matchLabels:
             k8s:io.cilium.k8s.namespace.labels.gibson.zeroroot.ai/managed-by: tenant-operator
+            app.kubernetes.io/component: belief-trainer
+            gibson.zeroroot.ai/managed-by: tenant-operator
           matchExpressions:
             - key: k8s:io.kubernetes.pod.namespace
               operator: Exists
       toPorts:
         - ports:
-            - port: "50001"
-              protocol: TCP
             - port: {{ $daemonGrpc | quote }}
               protocol: TCP
 ---
