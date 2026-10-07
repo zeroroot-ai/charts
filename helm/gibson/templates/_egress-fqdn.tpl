@@ -9,13 +9,12 @@ no host outside the cluster.
 A host in the cluster (a name with no dot, or a name under .svc or
 .cluster.local) is not in a group. The shared label policies cover it.
 
-  zitadel          The SMTP relay of ZITADEL
-                   (gibson-operators.platformBootstrap.zitadel.smtp.host).
+  zitadel          The SMTP relay of global.email when its provider is smtp.
                    The ZITADEL chart gives the login UI the same labels.
-  tenant-operator  The SMTP relay of the welcome mail
-                   (gibson-operators.tenantOperator.smtp.host), an external
-                   Vault, an external JWKS URL, an external tenant Postgres,
-                   and AWS KMS and STS when gibson-operators.kms.keyARN is set.
+  tenant-operator  The SMTP relay of global.email when its provider is smtp,
+                   an external Vault, an external JWKS URL, an external
+                   tenant Postgres, and AWS KMS and STS when
+                   gibson-operators.kms.keyARN is set.
   cert-manager     The ACME directory of Let's Encrypt and, for the http01
                    solver, the public host names of the edge certificate
                    (the self-check). For dns01-route53: the Route53 API, STS
@@ -23,44 +22,57 @@ A host in the cluster (a name with no dot, or a name under .svc or
                    Nothing when the Let's Encrypt issuers are off.
   external-dns     The API of the DNS provider. Nothing for the inmemory
                    provider.
-  object-store     The durable bucket: AWS S3 (any region) and STS, or the
-                   S3 endpoint of platformPostgres.backup.endpointURL. The
-                   Postgres instances, the CloudNativePG Jobs and the Redis
-                   backup CronJob use it.
+  object-store     The durable bucket of the install, on AWS S3 (the bucket of
+                   platformPostgres.backup.destinationPath and of the Redis
+                   backup, in any region) and STS, or the S3 endpoint of
+                   platformPostgres.backup.endpointURL. Only the buckets of
+                   the install, never each bucket of S3. The Postgres
+                   instances, the CloudNativePG Jobs and the Redis backup
+                   CronJob use it.
 
 Each entry is a Cilium FQDN selector, {matchName: <host>} or
 {matchPattern: <pattern>}, or {cidr: <address>/32} for a host that a value
 names by its IP address (the MinIO of the kind rungs). In a pattern, "*"
-matches one DNS label.
+matches one DNS label. Each entry also names its ports: 443 for an HTTPS
+API, the port of the URL or the value for a host that a value names, and
+53 for a name server. network-policies.yaml opens each host on its ports
+only.
 */}}
 {{- define "gibson.egressFqdnGroups" -}}
 {{- $ops := index .Values "gibson-operators" | default dict -}}
 {{- $wl := index .Values "gibson-workloads" | default dict -}}
-{{- $s3 := list (dict "matchName" "s3.amazonaws.com") (dict "matchPattern" "*.s3.amazonaws.com") (dict "matchPattern" "s3.*.amazonaws.com") (dict "matchPattern" "*.s3.*.amazonaws.com") -}}
-{{- $sts := list (dict "matchName" "sts.amazonaws.com") (dict "matchPattern" "sts.*.amazonaws.com") -}}
+{{- $https := list (dict "port" "443" "protocol" "TCP") -}}
+{{- $sts := list (dict "matchName" "sts.amazonaws.com" "ports" $https) (dict "matchPattern" "sts.*.amazonaws.com" "ports" $https) -}}
+
+{{- /* The SMTP relay of global.email, for zitadel and the tenant-operator. */ -}}
+{{- $smtp := list -}}
+{{- $email := (.Values.global).email | default dict -}}
+{{- if eq ($email.provider | default "") "smtp" -}}
+{{- $mail := $email.smtp | default dict -}}
+{{- with include "gibson.externalHost" $mail.host -}}
+{{- $smtp = append $smtp (include "gibson.egressHostEntry" (dict "host" . "port" ($mail.port | default 587)) | fromYaml) -}}
+{{- end -}}
+{{- end -}}
 
 {{- /* zitadel */ -}}
-{{- $zitadel := list -}}
-{{- with include "gibson.externalHost" (((($ops.platformBootstrap | default dict).zitadel | default dict).smtp | default dict).host) -}}
-{{- $zitadel = append $zitadel (include "gibson.egressHostEntry" . | fromYaml) -}}
-{{- end -}}
+{{- $zitadel := $smtp -}}
 
 {{- /* tenant-operator */ -}}
-{{- $to := list -}}
-{{- $toHosts := list
-  ((($ops.tenantOperator | default dict).smtp | default dict).host)
-  ((($ops.dataPlane | default dict).vault | default dict).addr)
-  ((($ops.vault | default dict).jwtAuth | default dict).spireOidcJwksURL)
-  ((($ops.dataPlane | default dict).postgres | default dict).host)
--}}
-{{- range $h := $toHosts -}}
-{{- with include "gibson.externalHost" $h -}}
-{{- $to = append $to (include "gibson.egressHostEntry" . | fromYaml) -}}
+{{- $to := $smtp -}}
+{{- $dp := $ops.dataPlane | default dict -}}
+{{- $urls := list (($dp.vault | default dict).addr) (((($ops.vault | default dict).jwtAuth | default dict)).spireOidcJwksURL) -}}
+{{- range $u := $urls -}}
+{{- with include "gibson.externalHost" $u -}}
+{{- $to = append $to (include "gibson.egressHostEntry" (dict "host" . "port" (include "gibson.urlPort" $u)) | fromYaml) -}}
 {{- end -}}
+{{- end -}}
+{{- $pg := $dp.postgres | default dict -}}
+{{- with include "gibson.externalHost" $pg.host -}}
+{{- $to = append $to (include "gibson.egressHostEntry" (dict "host" . "port" (include "gibson.urlPort" (dict "url" $pg.host "default" ($pg.port | default 5432)))) | fromYaml) -}}
 {{- end -}}
 {{- if ($ops.kms | default dict).keyARN -}}
 {{- $region := ($ops.aws | default dict).region | default "us-east-1" -}}
-{{- $to = append $to (dict "matchName" (printf "kms.%s.amazonaws.com" $region)) -}}
+{{- $to = append $to (dict "matchName" (printf "kms.%s.amazonaws.com" $region) "ports" $https) -}}
 {{- $to = concat $to $sts -}}
 {{- end -}}
 
@@ -68,19 +80,21 @@ matches one DNS label.
 {{- $cm := list -}}
 {{- $le := ((($wl.certManager | default dict).issuers | default dict).letsencrypt | default dict) -}}
 {{- if $le.enabled -}}
-{{- $cm = append $cm (dict "matchName" "acme-v02.api.letsencrypt.org") -}}
-{{- $cm = append $cm (dict "matchName" "acme-staging-v02.api.letsencrypt.org") -}}
+{{- $cm = append $cm (dict "matchName" "acme-v02.api.letsencrypt.org" "ports" $https) -}}
+{{- $cm = append $cm (dict "matchName" "acme-staging-v02.api.letsencrypt.org" "ports" $https) -}}
 {{- if eq ($le.solver | default "http01") "dns01-route53" -}}
-{{- $cm = append $cm (dict "matchName" "route53.amazonaws.com") -}}
+{{- $cm = append $cm (dict "matchName" "route53.amazonaws.com" "ports" $https) -}}
 {{- $cm = concat $cm $sts -}}
+{{- $dns53 := list (dict "port" "53" "protocol" "UDP") (dict "port" "53" "protocol" "TCP") -}}
 {{- range $tld := list "com" "net" "org" "co.uk" -}}
-{{- $cm = append $cm (dict "matchPattern" (printf "ns-*.awsdns-*.%s" $tld)) -}}
+{{- $cm = append $cm (dict "matchPattern" (printf "ns-*.awsdns-*.%s" $tld) "ports" $dns53) -}}
 {{- end -}}
 {{- else -}}
+{{- /* The http01 self-check fetches the challenge over plain HTTP. */ -}}
 {{- $names := (($wl.certManager | default dict).envoyEdge | default dict).dnsNames | default (include "gibson.tlsSans" . | fromYamlArray) -}}
 {{- range $n := $names -}}
 {{- with include "gibson.externalHost" $n -}}
-{{- $cm = append $cm (include "gibson.egressHostEntry" . | fromYaml) -}}
+{{- $cm = append $cm (include "gibson.egressHostEntry" (dict "host" . "port" 80) | fromYaml) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -90,16 +104,33 @@ matches one DNS label.
 {{- $dns := list -}}
 {{- $provider := (((index .Values "external-dns" | default dict).provider | default dict).name | default "inmemory") -}}
 {{- if eq $provider "aws" -}}
-{{- $dns = append $dns (dict "matchName" "route53.amazonaws.com") -}}
+{{- $dns = append $dns (dict "matchName" "route53.amazonaws.com" "ports" $https) -}}
 {{- $dns = concat $dns $sts -}}
 {{- else if ne $provider "inmemory" -}}
 {{- fail (printf "external-dns provider %q has no egress host group. Add the API hosts of the provider to gibson.egressFqdnGroups (helm/gibson/templates/_egress-fqdn.tpl)." $provider) -}}
 {{- end -}}
 
-{{- /* object-store */ -}}
-{{- $obj := concat $s3 $sts -}}
-{{- with include "gibson.externalHost" (((.Values.platformPostgres | default dict).backup | default dict).endpointURL) -}}
-{{- $obj = append $obj (include "gibson.egressHostEntry" . | fromYaml) -}}
+{{- /* object-store: the buckets of the install, never each bucket of S3. */ -}}
+{{- $backup := (.Values.platformPostgres | default dict).backup | default dict -}}
+{{- $buckets := list -}}
+{{- with $backup.destinationPath -}}
+{{- $buckets = append $buckets (regexReplaceAll "^s3://([^/]+).*$" . "${1}") -}}
+{{- end -}}
+{{- $rb := (($wl.redis | default dict).backup | default dict) -}}
+{{- if and $rb.enabled $rb.s3Bucket -}}
+{{- $buckets = append $buckets $rb.s3Bucket -}}
+{{- end -}}
+{{- $obj := list -}}
+{{- with $backup.endpointURL -}}
+{{- with include "gibson.externalHost" $backup.endpointURL -}}
+{{- $obj = append $obj (include "gibson.egressHostEntry" (dict "host" . "port" (include "gibson.urlPort" $backup.endpointURL)) | fromYaml) -}}
+{{- end -}}
+{{- else -}}
+{{- range $b := $buckets | uniq -}}
+{{- $obj = append $obj (dict "matchName" (printf "%s.s3.amazonaws.com" $b) "ports" $https) -}}
+{{- $obj = append $obj (dict "matchPattern" (printf "%s.s3.*.amazonaws.com" $b) "ports" $https) -}}
+{{- end -}}
+{{- $obj = concat $obj $sts -}}
 {{- end -}}
 
 {{- toYaml (dict "zitadel" $zitadel "tenant-operator" $to "cert-manager" $cm "external-dns" $dns "object-store" $obj) -}}
@@ -126,13 +157,49 @@ is outside the cluster. Empty for no input and for a host in the cluster.
 
 {{/*
 gibson.egressHostEntry: the entry of one external host in an egress host
-group. A host name is {matchName: <host>}. An IPv4 address is
-{cidr: <address>/32}, because a toFQDNs rule names a host.
+group, from a dict {host, port}. A host name is {matchName: <host>}. An
+IPv4 address is {cidr: <address>/32}, because a toFQDNs rule names a host.
+The entry opens the one TCP port of the dict.
 */}}
 {{- define "gibson.egressHostEntry" -}}
-{{- if regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$" . -}}
-cidr: {{ printf "%s/32" . }}
+{{- if regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$" .host -}}
+cidr: {{ printf "%s/32" .host }}
 {{- else -}}
-matchName: {{ . }}
+matchName: {{ .host }}
+{{- end }}
+ports:
+  - port: {{ .port | toString | quote }}
+    protocol: TCP
+{{- end -}}
+
+{{/*
+gibson.urlPort: the port of a URL, a host:port or a host. The input is the
+string, or a dict {url, default}. With no port in the input: the default of
+the dict, else 443 for https and for no scheme, and 80 for http.
+*/}}
+{{- define "gibson.urlPort" -}}
+{{- $in := . -}}
+{{- $def := "" -}}
+{{- if kindIs "map" . -}}
+{{- $in = .url -}}
+{{- $def = .default | toString -}}
+{{- end -}}
+{{- $in = toString $in | trim -}}
+{{- $hostport := $in -}}
+{{- $scheme := "" -}}
+{{- if contains "://" $in -}}
+{{- $u := urlParse $in -}}
+{{- $hostport = $u.host -}}
+{{- $scheme = $u.scheme -}}
+{{- end -}}
+{{- $parts := splitList ":" $hostport -}}
+{{- if and (eq (len $parts) 2) (regexMatch "^[0-9]+$" (last $parts)) -}}
+{{- last $parts -}}
+{{- else if $def -}}
+{{- $def -}}
+{{- else if eq $scheme "http" -}}
+80
+{{- else -}}
+443
 {{- end -}}
 {{- end -}}

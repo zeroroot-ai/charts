@@ -22,6 +22,13 @@ externalDns:
 cnpg:
   enabled: false
 
+# The CloudNativePG operator of the cluster runs in its own namespace. The
+# Postgres rule admits it on the instance manager port from that namespace
+# only. Set it to the namespace of your CloudNativePG install.
+global:
+  networkPolicy:
+    cnpgOperatorNamespace: cnpg-system
+
 # The cluster's External Secrets runs in its own namespace, with its own
 # ServiceAccount. The store logs in to OpenBao as that ServiceAccount, the
 # OpenBao role binds the same one, and the OpenBao NetworkPolicy admits that

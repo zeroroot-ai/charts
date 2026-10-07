@@ -129,6 +129,12 @@ global:
     # allowed, the ENI addresses answered and the ClusterIP timed out, and
     # OpenBao's Kubernetes-auth TokenReview died with it.
     apiServerCIDRs: []
+    # The namespace of the CloudNativePG operator of the cluster, on a guest
+    # profile (cnpg.enabled false). The Postgres rule admits that operator on
+    # the instance manager port from this namespace only. Empty is refused
+    # when cnpg.enabled is false. With cnpg.enabled true the operator of this
+    # chart carries the Postgres client label and no rule reads this value.
+    cnpgOperatorNamespace: ""
   # (deploy#1733): OpenBao is the one External Secrets backend on
   # every substrate, so there is no backend selector and no key prefix.
   # `global.secretBackend` and `global.secretPrefix` are DELETED. A values
@@ -472,7 +478,6 @@ postgresSetup:
 
 gibson-operators:
   tenantOperator:
-    daemonGrpcAddress: "gibson-gibson-workloads:50051"
     # The className of the SPIRE controller-manager, for the ClusterSPIFFEID
     # of each plugin instance (gibson#815). The anchor keeps it equal to
     # gibson-workloads.spire.controllerManager.className below, which takes
