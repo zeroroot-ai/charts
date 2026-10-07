@@ -1397,8 +1397,8 @@ this on each render.
   9003  ext-authz (GET /metrics only, mTLS)
   9090  the daemon, the rate limiter and Reloader
   9187  the Postgres instances
-  9464  the dashboard (GET /metrics only)
   9402  cert-manager
+  9464  the dashboard (GET /metrics only)
   9901  the probe listener of the edge (/ready and /stats/prometheus only)
 */}}
 {{- define "gibson.metricsPorts" -}}

@@ -8,6 +8,11 @@ endpoint names a CA Secret and a serverName instead. This guard renders the
 umbrella and fails on any endpoint that skips verification, or on any https
 endpoint with no CA.
 
+Each https metrics listener of the chart requires a client certificate (the
+gibson observability metrics server), so an https endpoint with no client
+cert and key fails too (charts#515): the daemon scrape object sent none, and
+every scrape of the daemon failed while the render looked fine.
+
   check-servicemonitor-tls.py             exit 1 on a violation, 0 when clean
   check-servicemonitor-tls.py --selftest  prove insecureSkipVerify fails
 """
@@ -45,6 +50,9 @@ def judge(docs: list[dict]) -> list[str]:
                 out.append(f"ServiceMonitor {name} endpoint {ep.get('port')}: insecureSkipVerify is set")
             if ep.get("scheme") == "https" and not (tls.get("ca") or tls.get("caFile")):
                 out.append(f"ServiceMonitor {name} endpoint {ep.get('port')}: https with no CA")
+            if ep.get("scheme") == "https" and not ((tls.get("cert") or tls.get("certFile"))
+                                                    and (tls.get("keySecret") or tls.get("keyFile"))):
+                out.append(f"ServiceMonitor {name} endpoint {ep.get('port')}: https with no client certificate")
     if seen == 0:
         out.append("no ServiceMonitor in the render; the monitoring API version is missing from the template call")
     return out
@@ -68,12 +76,25 @@ def selftest() -> int:
     for d in noca:
         for ep in d["spec"]["endpoints"]:
             if ep.get("scheme") == "https":
-                ep["tlsConfig"] = {"serverName": "x"}
+                ep["tlsConfig"].pop("ca", None)
+                ep["tlsConfig"].pop("caFile", None)
     got = judge(noca)
     if not got or not all("no CA" in g for g in got):
         print(f"SELFTEST FAIL: an https endpoint with no CA must fail, got {got}")
         return 1
-    print(f"OK: insecureSkipVerify fails, https without a CA fails, {len(sms)} ServiceMonitors in the baseline pass")
+    # charts#515: an https endpoint that presents no client cert fails.
+    nocert = copy.deepcopy(sms)
+    for d in nocert:
+        for ep in d["spec"]["endpoints"]:
+            if ep.get("scheme") == "https":
+                ep["tlsConfig"].pop("cert", None)
+                ep["tlsConfig"].pop("keySecret", None)
+    got = judge(nocert)
+    if not got or not all("no client certificate" in g for g in got):
+        print(f"SELFTEST FAIL: an https endpoint with no client cert must fail, got {got}")
+        return 1
+    print(f"OK: insecureSkipVerify fails, https without a CA or a client cert fails, {len(sms)} ServiceMonitors in "
+          "the baseline pass")
     return 0
 
 

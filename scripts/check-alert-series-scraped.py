@@ -61,11 +61,13 @@ absent absent_over_time label_replace label_join sort sort_desc
 avg_over_time min_over_time max_over_time sum_over_time count_over_time
 quantile_over_time stddev_over_time last_over_time present_over_time
 day_of_month day_of_week hour minute month year days_in_month
+atan2 sin cos tan asin acos atan sinh cosh tanh asinh acosh atanh deg rad pi
 inf nan
 """.split())
 
 
 def series(expr: str) -> set[str]:
+    named = set(re.findall(r'__name__\s*=\s*"([^"]+)"', str(expr)))
     e = re.sub(r'"(?:\\.|[^"\\])*"', "", str(expr))
     e = re.sub(r"\{[^}]*\}", "", e)
     e = re.sub(r"\[[^\]]*\]", "", e)
@@ -76,7 +78,7 @@ def series(expr: str) -> set[str]:
         if call or name.lower() in PROMQL_WORDS:
             continue
         out.add(name)
-    return out
+    return out | named
 
 
 def ns_of(d: dict) -> str:
@@ -110,6 +112,11 @@ def scraped_ports(docs: list, ns: str, labels: dict, containers: list) -> list[i
     """The container ports of the pod that a scrape object of the render reads."""
     out = []
     for m in docs:
+        # The Prometheus operator looks for targets in the namespace of the
+        # monitor unless the monitor names others.
+        sel_ns = ((m.get("spec") or {}).get("namespaceSelector") or {}).get("matchNames") or [ns_of(m)]
+        if ns not in sel_ns:
+            continue
         if m.get("kind") == "PodMonitor" and selects((m.get("spec") or {}).get("selector"), labels):
             for ep in m["spec"].get("podMetricsEndpoints") or []:
                 n = port_number(containers, ep.get("port") or ep.get("targetPort"))
@@ -226,6 +233,9 @@ def selftest() -> int:
          [rule(expr), pod("dashboard", label=False), svc("dashboard"), sm("dashboard")]),
         ("a series with no known producer", [rule("gibson_sandbox_health < 1")]),
         ("a producer with no pod", [rule("extauthz_x_total > 0")]),
+        ("a monitor in another namespace",
+         [rule(expr), pod("dashboard"), svc("dashboard"), dict(sm("dashboard"), metadata={"name": "d", "namespace": "other"})]),
+        ("a series named only by __name__", [rule('rate({__name__="gibson_sandbox_health"}[5m]) > 0')]),
     )
     for what, docs in failing:
         if len(judge(docs)) != 1:

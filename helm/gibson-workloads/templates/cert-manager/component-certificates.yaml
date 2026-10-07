@@ -13,8 +13,9 @@ cert lands in a Secret that one listener mounts:
   - gibson-openfga-http-tls     the OpenFGA HTTP listener :8080
 
 Rotation (ADR-0171, row component-tls): cert-manager renews each cert
-360 hours before its end. Each listener loads its cert one time at start,
-so Reloader restarts the workload when its Secret changes (the
+360 hours before its end. The metrics listeners of the daemon and ext-authz
+re-read their files on each handshake. Reloader restarts the workloads whose
+other listeners load the cert one time at start (the
 secret.reloader.stakater.com/reload annotation of the daemon, ext-authz
 and OpenFGA). The SPIFFE listeners (daemon :50001 and :50051, ext-authz
 :9001) take their certs from SPIRE, not from this file.
