@@ -38,3 +38,32 @@ tests:
                 and timeout name the Velero Backup, create and read name the
                 Velero API, read_namespace names the tenant namespace, and
                 audit names the daemon.
+  # The producer creates the label set at its first failure: the series has
+  # no sample before it starts at 1. The rule fires on it, and it stops once
+  # the series is older than the window (charts#507).
+  - interval: 1m
+    input_series:
+      - series: 'gibson_tenant_operator_final_backup_failures_total{reason="backup_failed", pod="tenant-operator-0"}'
+        values: '_x5 1x40'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TenantOperatorFinalBackupFailed
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: TenantOperatorFinalBackupFailed
+        exp_alerts:
+          - exp_labels: {severity: page, component: tenant-operator}
+            exp_annotations:
+              summary: "The last backup of a tenant delete failed"
+              runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/tenant-operator.md#tenantoperatorfinalbackupfailed"
+              description: |
+                A tenant delete stopped in the last 15 minutes because the last
+                backup of the tenant did not complete. The delete removed
+                nothing and retries on the next pass. Read the reason label of
+                gibson_tenant_operator_final_backup_failures_total: backup_failed
+                and timeout name the Velero Backup, create and read name the
+                Velero API, read_namespace names the tenant namespace, and
+                audit names the daemon.
+      - eval_time: 24m
+        alertname: TenantOperatorFinalBackupFailed
+        exp_alerts: []
