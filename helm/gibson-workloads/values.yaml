@@ -2936,10 +2936,10 @@ setec:
   # enabled is the setec seam (ADR-0087). The daemon always dials a setec
   # frontend (ADR-0142), so the seam selects whose fleet runs, never whether
   # one runs. Off means that the setec endpoint names a fleet outside this
-  # cluster (gibson.sandbox.setec.address and spiffeID). That endpoint pair
-  # is not built, so the render refuses off today (validateSetecDispatch).
-  # scripts/check-seam-conditions.py holds the list of seams and proves the
-  # refusal.
+  # cluster: set gibson.sandbox.setec.address and spiffeID to its frontend.
+  # The render refuses off when the address is empty or names the in-chart
+  # frontend (validateSetecDispatch). scripts/check-seam-conditions.py holds
+  # the list of seams and renders each case.
   enabled: true
 
   # fullnameOverride pins the Setec subchart's object names to the CANONICAL

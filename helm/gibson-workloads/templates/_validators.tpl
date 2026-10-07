@@ -750,10 +750,12 @@ the call rather than running it in-process when that route is unavailable
 (gibson internal/engine/harness/dispatchpolicy). So a render with no frontend
 does not degrade: it takes untrusted tooling offline at the first tool call.
 
-`setec.enabled=false`, or the setec subchart on with
-`setec.frontend.enabled=false`, renders clean YAML. Every derived value (the
-address, the fleet SPIFFE ID) then points at a frontend that will not exist,
-and the daemon learns that at the first dispatch, not at the render.
+`setec.enabled=false` is the setec seam (ADR-0087): the fleet runs outside
+this cluster, and gibson.sandbox.setec.address names its frontend. The render
+refuses the seam off when that address is empty or names the in-chart
+frontend, because the daemon would then dial a Service that is never created.
+With the subchart on, the render refuses `setec.frontend.enabled=false` for
+the same reason. scripts/check-seam-conditions.py renders each case.
 
 `gibson.sandbox.enabled` and `gibson.sandbox.setec.tenant` were deleted with
 the daemon settings they fed (gibson#756). The daemon sends the tenant in each
@@ -769,8 +771,21 @@ request. A values file that still sets either one fails here.
 {{- end -}}
 {{- $setec := .Values.setec | default dict -}}
 {{- if not $setec.enabled -}}
-{{- fail "validateSetecDispatch: the daemon requires setec.enabled=true. Its sandbox config — the frontend address and the fleet SPIFFE ID — is derived from the setec subchart's frontend, and with the subchart off none of it exists. An unreachable sandbox backend does not fall back to in-process execution; it denies the call, so this renders cleanly and takes untrusted tooling offline at the first invocation. A fleet in another cluster is gibson.sandbox.setec.address and spiffeID with setec.enabled=false (ADR-0087), and that pair is not built yet." -}}
+{{- /* The setec seam (ADR-0087) selects whose fleet runs, never whether one
+       runs. Off means that the endpoint names a fleet outside this cluster.
+       An empty endpoint, or one that names the in-chart frontend, names no
+       fleet: the daemon would dial a Service that is never created. */ -}}
+{{- $addr := toString ((($sbx.setec | default dict).address) | default "") -}}
+{{- if not $addr -}}
+{{- fail "validateSetecDispatch: setec.enabled=false and gibson.sandbox.setec.address is empty. The setec seam selects whose fleet runs, never whether one runs (ADR-0087). Set gibson.sandbox.setec.address (and spiffeID) to the frontend of the fleet outside this cluster, or set setec.enabled=true." -}}
 {{- end -}}
+{{- $host := index (splitList ":" $addr) 0 -}}
+{{- $name := include "gibson.setecFrontendName" . -}}
+{{- $ns := include "gibson.setecNamespace" . -}}
+{{- if has $host (list $name (printf "%s.%s" $name $ns) (printf "%s.%s.svc" $name $ns) (printf "%s.%s.svc.cluster.local" $name $ns)) -}}
+{{- fail (printf "validateSetecDispatch: setec.enabled=false and gibson.sandbox.setec.address %q names the in-chart setec frontend, which this render does not create. Set the address to the frontend of the fleet outside this cluster, or set setec.enabled=true." $addr) -}}
+{{- end -}}
+{{- else -}}
 {{- $frontend := $setec.frontend | default dict -}}
 {{- if not $frontend.enabled -}}
 {{- fail "validateSetecDispatch: the daemon requires setec.frontend.enabled=true. The frontend IS the daemon's gRPC endpoint into setec — the operator alone serves no Launch RPC. With it off the daemon dials a Service that is never created." -}}
@@ -792,5 +807,6 @@ request. A values file that still sets either one fails here.
 {{- end -}}
 {{- if not $daemonCaller -}}
 {{- fail (printf "validateSetecDispatch: setec.systemPolicy.frontendCallers has no entry for the daemon of this release ({namespace: %s, podLabels: {app.kubernetes.io/component: daemon}}). The setec namespace policy admits the frontend gRPC port from the listed Pods only (D76), so the daemon would be denied at the first dispatch." $.Release.Namespace) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}

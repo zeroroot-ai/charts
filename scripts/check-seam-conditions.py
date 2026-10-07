@@ -12,13 +12,13 @@ The check reads each helm/*/Chart.yaml and fails when:
   - a SEAMS entry names a dependency or a condition that no Chart.yaml has,
   - the condition of a seam does not default to true in the values.yaml of
     its chart, or
-  - a shipped profile (helm/gibson/values-*.yaml) turns the setec seam off.
+  - the setec seam does not select whose fleet runs.
 
-The setec seam selects whose fleet runs. A fleet in another cluster needs the
-endpoint pair of ADR-0087 (gibson.sandbox.setec.address and spiffeID), and
-that pair is not built. So the render refuses setec.enabled=false today. The
-check renders the umbrella with the seam off and fails when the render passes,
-or when it fails for a reason other than validateSetecDispatch.
+The setec seam (ADR-0087) is off when gibson.sandbox.setec.address names a
+fleet outside this cluster. The check renders the umbrella with the seam off
+three times. An empty address and the address of the in-chart frontend must
+fail in validateSetecDispatch. An outside address must render, and the daemon
+config must carry it.
 
   check-seam-conditions.py             exit 1 on a finding
   check-seam-conditions.py --selftest  prove each finding fails
@@ -43,13 +43,15 @@ SEAMS = {
     ("gibson", "cloudnative-pg", "cnpg.enabled"):
         "operator seam: a cluster that runs CloudNativePG uses its own",
     ("gibson-workloads", "setec", "setec.enabled"):
-        "fleet seam: off means the fleet runs in another cluster (not built, the render refuses off)",
+        "fleet seam: off means gibson.sandbox.setec.address names a fleet outside this cluster",
     ("gibson-crds", "prometheus-operator-crds", "prometheus-operator-crds.enabled"):
         "monitoring seam: a cluster that runs the Prometheus operator owns these CRDs",
 }
 
 SETEC_OFF = "gibson-workloads.setec.enabled"
 SETEC_REFUSAL = "validateSetecDispatch"
+SETEC_ADDRESS = "gibson-workloads.gibson.sandbox.setec.address"
+SETEC_SPIFFE_ID = "gibson-workloads.gibson.sandbox.setec.spiffeID"
 
 
 def load_charts(root):
@@ -106,43 +108,52 @@ def chart_findings(charts):
     return findings
 
 
-def profile_findings(profiles):
-    """profiles: {file name: parsed values}. A shipped profile never turns setec off."""
-    findings = []
-    for name, values in profiles.items():
-        if dig(values or {}, SETEC_OFF) is False:
-            findings.append(
-                f"{name}: sets {SETEC_OFF}=false. Each install runs one sandbox fleet, and a "
-                "fleet in another cluster is not built (ADR-0087).")
-    return findings
+OUTSIDE_ADDRESS = "setec.fleet.example.com:443"
+OUTSIDE_SPIFFE_ID = "spiffe://fleet.example.com/platform/setec-frontend"
+
+# (case name, address, expect the render to pass)
+SETEC_CASES = [
+    ("no endpoint", "", False),
+    ("the in-chart frontend", "setec-frontend.setec-system.svc.cluster.local:50051", False),
+    ("a fleet outside this cluster", OUTSIDE_ADDRESS, True),
+]
 
 
-def load_profiles(root):
-    out = {}
-    for path in sorted(glob.glob(os.path.join(root, "helm", "gibson", "values-*.yaml"))):
-        with open(path) as f:
-            out[os.path.relpath(path, root)] = yaml.safe_load(f) or {}
-    return out
-
-
-def render_setec_off(root):
+def render_setec_off(root, address):
     cmd = ["helm", "template", "gibson", os.path.join(root, "helm", "gibson"),
            "-f", os.path.join(root, "helm", "gibson", "values-baseline.yaml"),
            "-f", os.path.join(root, "helm", "testdata", "render-inputs", "gibson.yaml"),
-           "--namespace", "gibson", "--set", f"{SETEC_OFF}=false"]
+           "--namespace", "gibson", "--set", f"{SETEC_OFF}=false",
+           "--set-string", f"{SETEC_ADDRESS}={address}",
+           "--set-string", f"{SETEC_SPIFFE_ID}={OUTSIDE_SPIFFE_ID}"]
     p = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    return p.returncode, p.stderr
+    return p.returncode, p.stdout, p.stderr
 
 
-def render_findings(returncode, stderr):
+def first_error(stderr):
+    for line in stderr.splitlines():
+        if line.startswith("Error"):
+            return line
+    return stderr.strip().splitlines()[-1] if stderr.strip() else "(no stderr)"
+
+
+def render_findings(case, address, want_pass, returncode, stdout, stderr):
+    if want_pass:
+        if returncode != 0:
+            tail = first_error(stderr)
+            return [f"{case}: the render with {SETEC_OFF}=false and address {address!r} "
+                    f"fails: {tail}. The seam must select an outside fleet (ADR-0087)."]
+        if address not in stdout:
+            return [f"{case}: the render passes, but no rendered object carries the "
+                    f"address {address!r}. The daemon would not dial the outside fleet."]
+        return []
     if returncode == 0:
-        return [f"the umbrella renders with {SETEC_OFF}=false. The render must refuse it "
-                "until the endpoint pair of ADR-0087 is built: the daemon would dial a "
-                "setec frontend that does not exist."]
+        return [f"{case}: the render with {SETEC_OFF}=false and address {address!r} passes. "
+                "It must refuse it: the daemon would dial a frontend that does not exist."]
     if SETEC_REFUSAL not in stderr:
-        tail = stderr.strip().splitlines()[-1:] or ["(no stderr)"]
-        return [f"the render with {SETEC_OFF}=false fails, but not in {SETEC_REFUSAL}: "
-                f"{tail[0]}. The check cannot prove the refusal."]
+        tail = first_error(stderr)
+        return [f"{case}: the render fails, but not in {SETEC_REFUSAL}: {tail}. "
+                "The check cannot prove the refusal."]
     return []
 
 
@@ -172,25 +183,23 @@ def selftest():
         if got != want:
             print(f"  ✗ selftest: {name}: finding={got}, want {want}")
             failed = True
-    if not profile_findings({"values-guest.yaml": {"gibson-workloads": {"setec": {"enabled": False}}}}):
-        print("  ✗ selftest: a profile that turns setec off does not fail")
-        failed = True
-    if profile_findings({"values-guest.yaml": {"certManager": {"enabled": False}}}):
-        print("  ✗ selftest: a profile that turns an operator seam off fails")
-        failed = True
-    if not render_findings(0, ""):
-        print("  ✗ selftest: a render that accepts setec off does not fail")
-        failed = True
-    if not render_findings(1, "Error: some other template error"):
-        print("  ✗ selftest: a render that fails for another reason does not fail")
-        failed = True
-    if render_findings(1, f"Error: {SETEC_REFUSAL}: the daemon requires setec.enabled=true"):
-        print("  ✗ selftest: the expected refusal fails")
-        failed = True
+    render_cases = [
+        ("an accepted empty endpoint fails", ("c", "", False, 0, "", ""), True),
+        ("a refusal for another reason fails", ("c", "", False, 1, "", "Error: other"), True),
+        ("the expected refusal passes", ("c", "", False, 1, "", f"Error: {SETEC_REFUSAL}: x"), False),
+        ("a refused outside fleet fails", ("c", OUTSIDE_ADDRESS, True, 1, "", f"Error: {SETEC_REFUSAL}"), True),
+        ("an outside fleet the config drops fails", ("c", OUTSIDE_ADDRESS, True, 0, "kind: X", ""), True),
+        ("an outside fleet in the config passes", ("c", OUTSIDE_ADDRESS, True, 0, f"address: {OUTSIDE_ADDRESS}", ""), False),
+    ]
+    for name, args, want in render_cases:
+        got = bool(render_findings(*args))
+        if got != want:
+            print(f"  ✗ selftest: {name}: finding={got}, want {want}")
+            failed = True
     if failed:
         return 1
-    print("  ✓ selftest: an unnamed condition, a stale entry, a false default, a profile "
-          "with setec off and a render that accepts setec off each fail")
+    print("  ✓ selftest: an unnamed condition, a stale entry, a false default, an accepted "
+          "empty or in-cluster endpoint, a refused outside fleet and a dropped address each fail")
     return 0
 
 
@@ -204,14 +213,15 @@ def main():
     if not any(deps for deps, _ in charts.values()):
         print("FAIL: no Chart.yaml with dependencies found; the check read nothing")
         return 1
-    findings = chart_findings(charts) + profile_findings(load_profiles(ROOT))
-    findings += render_findings(*render_setec_off(ROOT))
+    findings = chart_findings(charts)
+    for case, address, want_pass in SETEC_CASES:
+        findings += render_findings(case, address, want_pass, *render_setec_off(ROOT, address))
     for f in findings:
         print(f"FAIL: {f}")
     if findings:
         return 1
-    print(f"  ✓ seam-conditions: {len(SEAMS)} named seams, each defaults to true, no profile "
-          "turns setec off, and the render refuses setec off")
+    print(f"  ✓ seam-conditions: {len(SEAMS)} named seams, each defaults to true; with setec off "
+          "the render refuses no endpoint and the in-chart frontend, and renders an outside fleet")
     return 0
 
 
