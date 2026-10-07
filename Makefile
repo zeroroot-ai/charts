@@ -313,6 +313,10 @@ extauthz-redis: ## The ext-authz pod of each profile has the Redis address, the 
 seam-conditions: ## Each dependency condition is a named seam that defaults on, and the render refuses setec off (charts#381)
 	@python3 scripts/check-seam-conditions.py --selftest
 	@python3 scripts/check-seam-conditions.py
+.PHONY: kvm-fleet-selector
+kvm-fleet-selector: ## The KVM preflight default selector is the nodeSelector of the setec device plugin (charts#508)
+	@python3 scripts/check-kvm-fleet-selector.py --selftest
+	@python3 scripts/check-kvm-fleet-selector.py
 
 .PHONY: fga-init-seeds
 fga-init-seeds: ## fga-init seeds signup_service for the dashboard service identity and platform_operator for the operators only, and prunes each (charts#485)
