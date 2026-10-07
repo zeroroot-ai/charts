@@ -632,15 +632,13 @@ gibson.openbaoCAMount: the mount of gibson.openbaoCAVolume. Put it under
 
 {{/*
 gibson.openbaoCAEnv: the env that makes each client trust the OpenBao CA. Go
-reads SSL_CERT_DIR and keeps the system roots of /etc/ssl/certs, curl reads
-CURL_CA_BUNDLE, and the bao CLI reads BAO_CACERT. Put it under `env:`.
+reads SSL_CERT_DIR and keeps the system roots of /etc/ssl/certs, and curl
+reads CURL_CA_BUNDLE. Put it under `env:`.
 */}}
 {{- define "gibson.openbaoCAEnv" -}}
 - name: SSL_CERT_DIR
   value: {{ printf "/etc/ssl/certs:%s" (include "gibson.openbaoCADir" .) | quote }}
 - name: CURL_CA_BUNDLE
-  value: {{ printf "%s/ca.crt" (include "gibson.openbaoCADir" .) | quote }}
-- name: BAO_CACERT
   value: {{ printf "%s/ca.crt" (include "gibson.openbaoCADir" .) | quote }}
 {{- end -}}
 

@@ -123,7 +123,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       volumes:
-        {{- include "gibson.openbaoCAVolume" . | nindent 8 }}
+      {{- include "gibson.openbaoCAVolume" . | nindent 6 }}
       - name: tmp
         emptyDir: {}
       containers:
@@ -135,11 +135,11 @@ spec:
           capabilities:
             drop: ["ALL"]
         volumeMounts:
-          {{- include "gibson.openbaoCAMount" . | nindent 10 }}
+        {{- include "gibson.openbaoCAMount" . | nindent 8 }}
         - name: tmp
           mountPath: /tmp
         env:
-          {{- include "gibson.openbaoCAEnv" . | nindent 10 }}
+        {{- include "gibson.openbaoCAEnv" . | nindent 8 }}
         # kubectl writes its discovery cache under $HOME; /tmp is the one
         # writable path.
         - name: HOME

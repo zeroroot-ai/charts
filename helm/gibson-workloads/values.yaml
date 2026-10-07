@@ -2078,7 +2078,6 @@ certManager:
       # full migration history; that ADR also lists the literal path
       # string in the deny-list so it MUST NOT appear here.
       enabled: false
-      server: ""     # Defaults to the in-chart OpenBao Service when empty.
       path: ""       # OpenBao PKI sign mount path, e.g. pki_int/sign/gibson
       auth:
         appRole:
@@ -2707,10 +2706,6 @@ dataPlane:
   # dataPlane.openbao) and is retained only as a values-shape anchor for
   # future workloads-side bindings.
   openbao:
-    # addr — the OpenBao HTTP API endpoint reachable from operator + daemon.
-    # Example: "http://gibson-openbao.gibson.svc:8200"
-    addr: ""
-
     # transitKey — name of the transit key the operator uses for
     # per-tenant KEK derivation via HMAC-SHA256. The chart's vault-
     # transit-bootstrap Job creates the key on post-install/upgrade.
