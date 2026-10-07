@@ -2,24 +2,19 @@
 Per-component TLS Certificate resources (Spec 3 §1 R20).
 
 Issued by the same ClusterIssuer used by the per-Postgres-alias certs:
-awspca-issuer in prod, vault-issuer in kind. Each cert lands in a Secret
-mounted by the corresponding workload (daemon callback, daemon metrics,
-ext-authz gRPC, ext-authz health).
+awspca-issuer in prod, vault-issuer in kind, selfsigned-ca otherwise. Each
+cert lands in a Secret that one listener mounts:
 
-Coordination notes (handed off in the agent return summary):
-  - daemon Go agent: mount `gibson-daemon-callback-tls` at
-    `/etc/gibson/tls/callback/` and wrap the :50001 listener with
-    SPIFFE-mTLS (R1).
-  - daemon Go agent: mount `gibson-daemon-metrics-tls` at
-    `/etc/gibson/tls/metrics/` and wrap the :9090 metrics listener
-    (R20).
-  - ext-authz Go agent: mount `gibson-ext-authz-grpc-tls` at
-    `/etc/ext-authz/tls/grpc/` and wrap :9001 with SPIFFE-mTLS (R13).
-  - ext-authz Go agent: mount `gibson-ext-authz-health-tls` at
-    `/etc/ext-authz/tls/health/` and wrap :9002 with TLS (R20).
+  - gibson-daemon-metrics-tls   the daemon metrics listener :9090
+  - gibson-ext-authz-health-tls the ext-authz health listener :9002
+  - gibson-openfga-http-tls     the OpenFGA HTTP listener :8080
 
-The daemon main gRPC :50051 cert is already provisioned via SPIRE SDS in
-the existing wiring; this file does NOT duplicate that path.
+Rotation (ADR-0171, row component-tls): cert-manager renews each cert
+360 hours before its end. Each listener loads its cert one time at start,
+so Reloader restarts the workload when its Secret changes (the
+secret.reloader.stakater.com/reload annotation of the daemon, ext-authz
+and OpenFGA). The SPIFFE listeners (daemon :50001 and :50051, ext-authz
+:9001) take their certs from SPIRE, not from this file.
 
 deploy#201: cert-manager itself is REQUIRED infrastructure — the
 `.Values.certManager.enabled` precondition is gone. Per-issuer toggles
@@ -45,36 +40,7 @@ remain.
 
 {{- if $issuerName -}}
 
-{{- /* Daemon callback TLS (port 50001).
-       gibson daemon is structural infrastructure (one-code-path /
-       deploy#188). The previous `.Values.gibson.enabled` gate has been
-       deleted — these certificates render unconditionally. */}}
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: gibson-daemon-callback-tls
-  namespace: {{ .Release.Namespace }}
-  labels:
-    {{- include "gibson.labels" . | nindent 4 }}
-    app.kubernetes.io/component: daemon-tls
-spec:
-  secretName: gibson-daemon-callback-tls
-  duration: 2160h
-  renewBefore: 360h
-  commonName: {{ printf "%s.%s.svc" (include "gibson.fullname" .) .Release.Namespace | quote }}
-  dnsNames:
-    - {{ include "gibson.fullname" . | quote }}
-    - {{ printf "%s.%s" (include "gibson.fullname" .) .Release.Namespace | quote }}
-    - {{ printf "%s.%s.svc" (include "gibson.fullname" .) .Release.Namespace | quote }}
-    - {{ printf "%s.%s.svc.cluster.local" (include "gibson.fullname" .) .Release.Namespace | quote }}
-  privateKey:
-    algorithm: ECDSA
-    size: 256
-  issuerRef:
-    name: {{ $issuerName | quote }}
-    kind: {{ $issuerKind | quote }}
-    group: {{ ternary "awspca.cert-manager.io" "cert-manager.io" (eq $issuerKind "AWSPCAClusterIssuer") | quote }}
+{{- /* Daemon metrics TLS (port 9090). */}}
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -101,36 +67,9 @@ spec:
     kind: {{ $issuerKind | quote }}
     group: {{ ternary "awspca.cert-manager.io" "cert-manager.io" (eq $issuerKind "AWSPCAClusterIssuer") | quote }}
 
-{{- /* ext-authz gRPC + health TLS.
-       ext-authz is structural infrastructure (deploy#188) —
-       these certificates render unconditionally; the extAuthz.enabled
-       toggle was deleted. */}}
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: gibson-ext-authz-grpc-tls
-  namespace: {{ .Release.Namespace }}
-  labels:
-    {{- include "gibson.labels" . | nindent 4 }}
-    app.kubernetes.io/component: ext-authz-tls
-spec:
-  secretName: gibson-ext-authz-grpc-tls
-  duration: 2160h
-  renewBefore: 360h
-  commonName: {{ printf "%s-ext-authz.%s.svc" .Release.Name .Release.Namespace | quote }}
-  dnsNames:
-    - {{ printf "%s-ext-authz" .Release.Name | quote }}
-    - {{ printf "%s-ext-authz.%s" .Release.Name .Release.Namespace | quote }}
-    - {{ printf "%s-ext-authz.%s.svc" .Release.Name .Release.Namespace | quote }}
-    - {{ printf "%s-ext-authz.%s.svc.cluster.local" .Release.Name .Release.Namespace | quote }}
-  privateKey:
-    algorithm: ECDSA
-    size: 256
-  issuerRef:
-    name: {{ $issuerName | quote }}
-    kind: {{ $issuerKind | quote }}
-    group: {{ ternary "awspca.cert-manager.io" "cert-manager.io" (eq $issuerKind "AWSPCAClusterIssuer") | quote }}
+{{- /* ext-authz health TLS (port 9002). ext-authz is structural
+       infrastructure (deploy#188), so this certificate renders
+       unconditionally. */}}
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate

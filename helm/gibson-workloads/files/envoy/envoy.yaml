@@ -1607,8 +1607,8 @@ static_resources:
           explicit_http_config:
             http2_protocol_options: {}
       # Envoy → ext-authz SPIFFE mTLS via SPIRE SDS. ext-authz's gRPC
-      # listener is RequireAndVerifyClientCert (the deployment template
-      # mounts gibson-ext-authz-grpc-tls and SPIRE-issued client certs);
+      # listener is RequireAndVerifyClientCert (ext-authz takes its server
+      # cert and the client trust bundle from SPIRE);
       # without a transport_socket here Envoy connects plain TCP, the
       # TLS handshake EOFs, every ext_authz check errors, and Envoy's
       # failure_mode_allow:false returns grpc-status:7 (permission_denied)

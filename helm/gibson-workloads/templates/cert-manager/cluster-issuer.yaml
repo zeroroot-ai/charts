@@ -121,9 +121,14 @@ spec:
   secretName: gibson-selfsigned-ca
   duration: 87600h   # 10 years
   renewBefore: 8760h # 1 year
+  # The root keeps its key when cert-manager renews it (ADR-0171, row
+  # component-tls). Each client loads this CA one time at start. With the
+  # same key, a leaf signed after the renewal still chains to the CA that a
+  # running client holds, so a renewal of the root restarts nothing.
   privateKey:
     algorithm: ECDSA
     size: 256
+    rotationPolicy: Never
   issuerRef:
     name: selfsigned-bootstrap
     kind: ClusterIssuer
