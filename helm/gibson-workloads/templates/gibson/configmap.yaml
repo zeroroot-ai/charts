@@ -306,7 +306,6 @@ data:
           ca_file: "/etc/ssl/fga-ca/ca.crt"
 
 
-    {{- if .Values.gibson.sandbox.enabled }}
     {{- $sbx := .Values.gibson.sandbox }}
     {{- $mtlsDir := include "gibson.setecMtlsMountPath" . }}
     # sandbox: the Setec connection details, and the ONLY surface the daemon
@@ -322,12 +321,12 @@ data:
     # the frontend, what SANs its certificate carries, and where the
     # StatefulSet mounts the keypair, and a disagreement produces no render
     # error — just a dial timeout or a handshake failure at the first
-    # sandboxed tool call. An overlay sets enabled + tenant.
+    # sandboxed tool call. The daemon always dials setec (D5, gibson#756):
+    # there is no enabled switch, and the daemon sends the tenant in each
+    # request, so no fixed tenant is configured.
     sandbox:
-      enabled: true
       setec:
         address: {{ $sbx.setec.address | default (include "gibson.setecFrontendAddress" .) | quote }}
-        tenant: {{ $sbx.setec.tenant | quote }}
         call_timeout: {{ $sbx.setec.callTimeout | default "5m" | quote }}
         {{- with $sbx.setec.sandboxClass }}
         sandbox_class: {{ . | quote }}
@@ -351,4 +350,3 @@ data:
           key_file: {{ $sbx.setec.mtls.keyFile | default (printf "%s/tls.key" $mtlsDir) | quote }}
           ca_file: {{ $sbx.setec.mtls.caFile | default (printf "%s/ca.crt" $mtlsDir) | quote }}
           server_name: {{ $sbx.setec.mtls.serverName | default (include "gibson.setecFrontendServerName" .) | quote }}
-    {{- end }}
