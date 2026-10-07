@@ -257,15 +257,6 @@ gibson:
     # unless GIBSON_CGJWT_SIGNING_KEY_DIR is also changed — the chart sets that
     # env var from this value, so they cannot drift.
     mountPath: /etc/gibson/cg-signing-key
-    # Rotation window. FALSE in steady state.
-    #
-    # true projects previous.kid / previous.key alongside the current pair, so
-    # grants signed under the outgoing key still verify while they expire.
-    # Only flip it AFTER seeding gibson-cg-signing-key-previous in the backend:
-    # the daemon treats a previous.kid file that exists but is empty as a broken
-    # mount and disables capability grants entirely — it does not degrade.
-    # The four steps are in templates/secrets/cg-signing-key.yaml.
-    rotationWindow: false
 
   # Product-surface origin (gibson#1228 companion, deploy signup-email-delivery).
   #

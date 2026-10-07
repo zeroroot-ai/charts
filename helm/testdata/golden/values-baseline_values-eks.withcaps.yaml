@@ -15048,6 +15048,10 @@ spec:
               zitadel-masterkey value:rand
               gibson-dashboard-session-secrets auth_secret:rand server_actions_key:randb64
               gibson-cg-signing-key key:rand kid:rand8
+              # The verify-only slots of the CG signing key set. Empty in steady state; the
+              # sidecar fills and clears them during a rotation (cg_key_rotate, ADR-0171).
+              gibson-cg-signing-key-next kid:empty key:empty
+              gibson-cg-signing-key-previous kid:empty key:empty
               gibson-zitadel-system-bot-key private_key:rsapem:zitadel-system-bot public_key:rsapub:zitadel-system-bot
               ghcr-pull-secret pat:input:ghcr-pull-token
               gibson-dashboard-auth-hardening captcha_secret_key:empty email_resend_api_key:empty
@@ -15774,8 +15778,64 @@ spec:
                 done <<SEED_EOF
               $SEED_TABLE
               SEED_EOF
+                cg_key_rotate "$tok" || seed_failed=$((seed_failed + 1))
                 echo "[openbao-auto-init] seed pass complete: ${seed_checked} keys checked, ${seed_written} written, ${seed_failed} failed"
                 [ "$seed_failed" -eq 0 ]
+              }
+
+              # The rotation of the Capability-Grant signing key set (ADR-0171,
+              # row platform-signing-keys). Each slot is its own OpenBao key,
+              # and the daemon reads the three slots from one projected Secret.
+              # One step at most runs on each pass:
+              #   1. no rotation in progress and `current` older than
+              #      CG_KEY_LIFETIME_S: write a new kid and seed to `next`.
+              #   2. `next` older than CG_PROMOTE_WAIT_S: write `previous` =
+              #      the old current, then `current` = next, then clear `next`.
+              #      With this order each state that an ESO refresh can read
+              #      holds both kids.
+              #   3. `previous` set and `current` older than CG_RETIRE_WAIT_S:
+              #      clear `previous`. The daemon then refuses its kid.
+              # The monthly drill starts a rotation by writing `next` with
+              # scripts/baseline-set-secret.sh, the same write as step 1.
+              CG_KEY="gibson-cg-signing-key"
+              CG_KEY_LIFETIME_S=2592000
+              # Longer than the ESO refresh, the kubelet sync and the 30-second
+              # reload of the daemon together.
+              CG_PROMOTE_WAIT_S=600
+              # The longest token life (a 24-hour bootstrap token) plus the
+              # 1-hour ext-authz key cache.
+              CG_RETIRE_WAIT_S=90000
+              cg_key_rotate() {
+                cgt="$1"
+                cg_cur=$(kv_get "$cgt" "$CG_KEY") || return 1
+                cg_next=$(kv_get "$cgt" "${CG_KEY}-next") || return 1
+                cg_prev=$(kv_get "$cgt" "${CG_KEY}-previous") || return 1
+                cg_now=$(date +%s)
+                if [ -z "$(printf '%s' "$cg_cur" | jq -r '.kid // empty')" ]; then
+                  return 0  # The seed pass writes the first key.
+                fi
+                if [ -n "$(printf '%s' "$cg_next" | jq -r '.kid // empty')" ]; then
+                  cg_t=$(kv_created_epoch "$cgt" "${CG_KEY}-next") || return 1
+                  [ $(( cg_now - ${cg_t:-$cg_now} )) -ge "$CG_PROMOTE_WAIT_S" ] || return 0
+                  kv_put "$cgt" "${CG_KEY}-previous" "$cg_cur" || return 1
+                  kv_put "$cgt" "$CG_KEY" "$cg_next" || return 1
+                  kv_put "$cgt" "${CG_KEY}-next" '{"kid":"","key":""}' || return 1
+                  echo "[openbao-auto-init] the CG signing key moved to its next kid; the old kid only verifies now" >&2
+                  return 0
+                fi
+                cg_t=$(kv_created_epoch "$cgt" "$CG_KEY") || return 1
+                cg_age=$(( cg_now - ${cg_t:-$cg_now} ))
+                if [ -n "$(printf '%s' "$cg_prev" | jq -r '.kid // empty')" ]; then
+                  [ "$cg_age" -ge "$CG_RETIRE_WAIT_S" ] || return 0
+                  kv_put "$cgt" "${CG_KEY}-previous" '{"kid":"","key":""}' || return 1
+                  echo "[openbao-auto-init] the previous CG signing key is retired" >&2
+                  return 0
+                fi
+                [ "$cg_age" -ge "$CG_KEY_LIFETIME_S" ] || return 0
+                cg_body=$(jq -nc --arg kid "$(gen_rand 8)" --arg key "$(gen_rand 32)" '{kid:$kid,key:$key}')
+                kv_put "$cgt" "${CG_KEY}-next" "$cg_body" || return 1
+                cg_body=""
+                echo "[openbao-auto-init] the CG signing key is older than its lifetime; published its next kid" >&2
               }
 
               vault_write_policy() {
@@ -21271,11 +21331,23 @@ spec:
       data:
         current.kid: "{{ .current_kid }}"
         current.key: "{{ .current_key }}"
+        next.kid: "{{ .next_kid }}"
+        next.key: "{{ .next_key }}"
+        previous.kid: "{{ .previous_kid }}"
+        previous.key: "{{ .previous_key }}"
   data:
     - secretKey: current_kid
       remoteRef: { key: gibson-cg-signing-key, property: kid }
     - secretKey: current_key
       remoteRef: { key: gibson-cg-signing-key, property: key }
+    - secretKey: next_kid
+      remoteRef: { key: gibson-cg-signing-key-next, property: kid }
+    - secretKey: next_key
+      remoteRef: { key: gibson-cg-signing-key-next, property: key }
+    - secretKey: previous_kid
+      remoteRef: { key: gibson-cg-signing-key-previous, property: kid }
+    - secretKey: previous_key
+      remoteRef: { key: gibson-cg-signing-key-previous, property: key }
 ---
 # Source: gibson/charts/gibson-workloads/templates/secrets/openbao-keys.yaml
 apiVersion: external-secrets.io/v1
