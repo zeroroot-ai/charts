@@ -1,0 +1,130 @@
+{{/*
+The TLS listener of OpenBao (GHSA advisory of 2026-10-07; ADR-0027).
+
+OpenBao serves only TLS on :8200. There is no value that turns TLS off. The
+chart issues the listener certificate from its own CA, through cert-manager:
+
+  <release>-openbao-selfsigned   Issuer, selfSigned: signs only the CA below
+  <release>-openbao-ca           Certificate, isCA: the CA of the listener
+  <release>-openbao-ca           Issuer, ca: signs the listener certificate
+  <release>-openbao-tls          Certificate: the Service names, localhost
+                                 and 127.0.0.1, for the listener and for the
+                                 sidecars that dial the pod itself
+
+A dedicated CA, not the component issuer: in kind the component issuer is
+the OpenBao PKI itself (openbao-issuer), and OpenBao cannot sign the
+certificate it needs to start.
+
+Every client trusts the CA through the key ca.crt of <release>-openbao-tls,
+projected alone (gibson.openbaoCAVolume), never the key of the listener:
+the Go clients through SSL_CERT_DIR, curl through CURL_CA_BUNDLE, External
+Secrets through the caProvider of its store and cert-manager through the
+caBundleSecretRef of openbao-issuer.
+scripts/check-openbao-tls.py fails on a plaintext listener or an http://
+OpenBao address.
+
+Wave -13 under Argo: after cert-manager (-20), before OpenBao (-12).
+*/}}
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "openbao.config.tlsDisable") "use" "nothing: OpenBao serves only TLS, from the chart CA of this template") }}
+{{- $rel := .Release.Name }}
+{{- $ns := .Release.Namespace }}
+{{- $wave := dict }}
+{{- if (.Values.externalSecrets).preSyncBringup }}
+{{- $wave = dict "argocd.argoproj.io/sync-wave" "-13" }}
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $rel }}-openbao-selfsigned
+  namespace: {{ $ns }}
+  {{- with $wave }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao-tls
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $rel }}-openbao-ca
+  namespace: {{ $ns }}
+  {{- with $wave }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao-tls
+spec:
+  isCA: true
+  commonName: {{ printf "%s-openbao-ca" $rel | quote }}
+  secretName: {{ $rel }}-openbao-ca
+  duration: 87600h
+  renewBefore: 8760h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ $rel }}-openbao-selfsigned
+    kind: Issuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $rel }}-openbao-ca
+  namespace: {{ $ns }}
+  {{- with $wave }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao-tls
+spec:
+  ca:
+    secretName: {{ $rel }}-openbao-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "gibson.openbaoTLSSecret" . }}
+  namespace: {{ $ns }}
+  {{- with $wave }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openbao-tls
+spec:
+  secretName: {{ include "gibson.openbaoTLSSecret" . }}
+  # As long as the CA. OpenBao reads the file at start and no workload may
+  # restart it on a change, so the renewal comes a year before the end and
+  # any pod restart in that year loads it.
+  duration: 87600h
+  renewBefore: 8760h
+  commonName: {{ printf "%s-openbao.%s.svc" $rel $ns | quote }}
+  dnsNames:
+    - {{ printf "%s-openbao" $rel | quote }}
+    - {{ printf "%s-openbao.%s" $rel $ns | quote }}
+    - {{ printf "%s-openbao.%s.svc" $rel $ns | quote }}
+    - {{ printf "%s-openbao.%s.svc.cluster.local" $rel $ns | quote }}
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ $rel }}-openbao-ca
+    kind: Issuer
+    group: cert-manager.io

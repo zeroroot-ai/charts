@@ -1,3 +1,4 @@
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "dataPlane.vault.addr") "use" "nothing: the operator dials the in-chart OpenBao at gibson.openbaoAddr, over TLS only") }}
 {{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "tenantOperator.daemonServiceAccountName") "use" "nothing: the daemon holds no Kubernetes client, and the connector operator ServiceAccount comes from connectorOperator.serviceAccount.name (gibson#664)") }}
 {{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "tenantOperator.daemonSpiffeID" "connectorOperator.daemonSpiffeID") "use" "the one value global.spire.trustDomain; each SPIFFE ID is built from it and a path (ADR-0164, charts#392)") }}
 {{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "tenantOperator.smtp") "use" "the one mail value global.email (hosted#223)") }}
@@ -481,9 +482,9 @@ spec:
             # so the env is unconditional.
             - name: SSL_CERT_DIR
             {{- if .Values.envoy.tls.secretName }}
-              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca:{{ include "gibson.openbaoCADir" . }}"
             {{- else }}
-              value: "/etc/ssl/certs:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/fga-ca:{{ include "gibson.openbaoCADir" . }}"
             {{- end }}
             # ADR-0093 decision 2: the gibson project each tenant org is
             # granted and whose four tenant roles the role sync reads. The
@@ -579,7 +580,8 @@ spec:
             # GIBSON_VAULT_TRANSIT_KEY names the transit key the
             # operator uses for HMAC-SHA256 KEK derivation.
             - name: GIBSON_VAULT_ADDR
-              value: {{ .Values.dataPlane.vault.addr | required "dataPlane.vault.addr is required (one-code-path: deploy#197 — Vault is non-negotiable; set this to the Vault Service URL, e.g. http://gibson-vault.gibson.svc:8200 for in-chart kind or your external Vault address in prod)" | quote }}
+              # The in-chart OpenBao, over TLS only (gibson.openbaoAddr).
+              value: {{ include "gibson.openbaoAddr" . | quote }}
             - name: GIBSON_VAULT_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -690,6 +692,7 @@ spec:
             - name: GIBSON_VAULT_JWKS_CA_PEM_PATH
               value: "/etc/spire-bundle/bundle.spiffe"
           volumeMounts:
+            {{- include "gibson.openbaoCAMount" . | nindent 12 }}
             # plans mount removed alongside the --plans-file arg above: the
             # monorepo operator bakes tiers in at build time.
             # System-tenant KEK mount (one-code-path: deploy#194 —
@@ -731,6 +734,7 @@ spec:
               readOnly: true
             {{- end }}
       volumes:
+        {{- include "gibson.openbaoCAVolume" . | nindent 8 }}
         # Only ca.crt is projected — the operator must never hold the
         # OpenFGA listener's private key (deploy#1382).
         - name: fga-http-ca

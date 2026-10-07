@@ -23,6 +23,7 @@ The CR has no issuer (gibson#933, ADR-0092): the operator dials its own
 ZITADEL_URL. A values file that still sets platformBootstrap.zitadel.issuer
 fails the render (charts#487).
 */}}
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "platformBootstrap.vaultTransit.address") "use" "nothing: the transit engine is the in-chart OpenBao at gibson.openbaoAddr, over TLS only") }}
 {{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "platformBootstrap.zitadel.issuer") "use" "no value. The platform-operator dials its own ZITADEL_URL, and the PlatformBootstrap CRD has no issuer field (gibson#933, ADR-0092)") }}
 apiVersion: gibson.zeroroot.ai/v1alpha1
 kind: PlatformBootstrap
@@ -264,7 +265,7 @@ spec:
     non-empty address and tokenRef.
   */}}
   vaultTransit:
-    address: {{ required "platformBootstrap.vaultTransit.address is required (Vault is structural infrastructure / one-code-path; set to the in-cluster Vault Service URL, typically http://gibson-workloads-vault.gibson.svc:8200)." (.Values.platformBootstrap.vaultTransit).address | quote }}
+    address: {{ include "gibson.openbaoAddr" . | quote }}
     tokenRef:
       name: {{ required "platformBootstrap.vaultTransit.tokenRef.name is required (Vault admin token Secret)." (((.Values.platformBootstrap.vaultTransit).tokenRef).name) | quote }}
       key: {{ (((.Values.platformBootstrap.vaultTransit).tokenRef).key) | default "VAULT_ADMIN_TOKEN" | quote }}

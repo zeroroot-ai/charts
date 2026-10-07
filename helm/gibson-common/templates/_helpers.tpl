@@ -584,6 +584,65 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+gibson.openbaoAddr: the one address of the in-chart OpenBao, always https
+(the listener serves only TLS). The OpenBao clients of every chart read it.
+*/}}
+{{- define "gibson.openbaoAddr" -}}
+{{- printf "https://%s-openbao.%s.svc:8200" .Release.Name .Release.Namespace -}}
+{{- end -}}
+
+{{/*
+gibson.openbaoTLSSecret: the Secret of the OpenBao listener certificate. Its
+key ca.crt is the CA that every OpenBao client trusts.
+*/}}
+{{- define "gibson.openbaoTLSSecret" -}}
+{{- printf "%s-openbao-tls" .Release.Name -}}
+{{- end -}}
+
+{{/*
+gibson.openbaoCADir: where a client pod mounts the OpenBao CA.
+*/}}
+{{- define "gibson.openbaoCADir" -}}
+/etc/gibson/openbao-ca
+{{- end -}}
+
+{{/*
+gibson.openbaoCAVolume: a volume that projects only the key ca.crt of the
+listener Secret, never its private key. Put it under `volumes:`.
+*/}}
+{{- define "gibson.openbaoCAVolume" -}}
+- name: openbao-ca
+  secret:
+    secretName: {{ include "gibson.openbaoTLSSecret" . }}
+    defaultMode: 0444
+    items:
+      - key: ca.crt
+        path: ca.crt
+{{- end -}}
+
+{{/*
+gibson.openbaoCAMount: the mount of gibson.openbaoCAVolume. Put it under
+`volumeMounts:` of each container that dials OpenBao.
+*/}}
+{{- define "gibson.openbaoCAMount" -}}
+- name: openbao-ca
+  mountPath: {{ include "gibson.openbaoCADir" . }}
+  readOnly: true
+{{- end -}}
+
+{{/*
+gibson.openbaoCAEnv: the env that makes each client trust the OpenBao CA. Go
+reads SSL_CERT_DIR and keeps the system roots of /etc/ssl/certs, and curl
+reads CURL_CA_BUNDLE. Put it under `env:`.
+*/}}
+{{- define "gibson.openbaoCAEnv" -}}
+- name: SSL_CERT_DIR
+  value: {{ printf "/etc/ssl/certs:%s" (include "gibson.openbaoCADir" .) | quote }}
+- name: CURL_CA_BUNDLE
+  value: {{ printf "%s/ca.crt" (include "gibson.openbaoCADir" .) | quote }}
+{{- end -}}
+
+{{/*
 =============================================================================
 Platform ServiceAccount names — the workload-attestation identity set.
 =============================================================================
@@ -795,16 +854,15 @@ tolerations:
   `empty(given)`, and `empty(false)` is TRUE. So `X | default true`
   returns "true" for BOTH an unset X and an explicit `X: false` — the
   knob renders as a knob, documents itself as a knob, and can never be
-  turned off. `openbao.config.tlsDisable | default true` meant an overlay
-  setting `tlsDisable: false` still rendered `tls_disable = true`, so the
-  secret store served plaintext while the operator believed TLS was on.
+  turned off. A knob of that shape once kept the secret store on
+  plaintext while the operator believed TLS was on.
 
   `kindIs "invalid"` is the only predicate that separates nil (unset)
   from false — the same idiom the pdb.yaml templates already use for
   their auto-on-when-replicas>1 gate.
 
   Usage — value position:
-    tls_disable = {{ include "gibson.trueUnlessSet" ((.Values.openbao.config).tlsDisable) }}
+    enabled: {{ include "gibson.trueUnlessSet" (((.Values.gibson.config).metrics).enabled) }}
   Usage — quoted env value:
     value: {{ include "gibson.trueUnlessSet" (...) | quote }}
   Usage — render gate:

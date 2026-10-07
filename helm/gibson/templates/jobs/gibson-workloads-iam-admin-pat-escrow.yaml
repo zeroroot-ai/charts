@@ -32,7 +32,7 @@ not be Healthy without it (hosted run 34249427078 and blocker 3 loop #13,
 gibson-workloads-0 volume, its pod at Init:0/6 on "secret gibson-master-key
 not found").
 */}}
-{{- $baoAddr := printf "http://%s-openbao:%v" .Release.Name ((index .Values "gibson-workloads" "openbao" "service").port | default 8200) }}
+{{- $baoAddr := include "gibson.openbaoAddr" . }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -123,6 +123,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       volumes:
+      {{- include "gibson.openbaoCAVolume" . | nindent 6 }}
       - name: tmp
         emptyDir: {}
       containers:
@@ -134,9 +135,11 @@ spec:
           capabilities:
             drop: ["ALL"]
         volumeMounts:
+        {{- include "gibson.openbaoCAMount" . | nindent 8 }}
         - name: tmp
           mountPath: /tmp
         env:
+        {{- include "gibson.openbaoCAEnv" . | nindent 8 }}
         # kubectl writes its discovery cache under $HOME; /tmp is the one
         # writable path.
         - name: HOME

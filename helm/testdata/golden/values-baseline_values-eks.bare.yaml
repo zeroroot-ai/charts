@@ -1381,9 +1381,13 @@ data:
   openbao.hcl: |
     ui = true
 
+    # TLS only, with no value that turns it off (ADR-0027). The certificate
+    # comes from the chart CA of templates/auth/openbao-tls.yaml.
     listener "tcp" {
-      address = "0.0.0.0:8200"
-      tls_disable = true
+      address         = "0.0.0.0:8200"
+      tls_cert_file   = "/etc/openbao/tls/tls.crt"
+      tls_key_file    = "/etc/openbao/tls/tls.key"
+      tls_min_version = "tls12"
     }
 
     storage "file" {
@@ -1407,8 +1411,8 @@ data:
       current_key    = "file:///etc/openbao/seal/openbao-seal-key"
     }
 
-    api_addr = "http://gibson-openbao:8200"
-    cluster_addr = "http://gibson-openbao:8201"
+    api_addr = "https://gibson-openbao:8200"
+    cluster_addr = "https://gibson-openbao:8201"
 ---
 # Source: gibson/charts/gibson-workloads/templates/auth/sa-identity-map.yaml
 apiVersion: v1
@@ -9127,10 +9131,11 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - name: http
+    - name: https
       port: 8200
-      targetPort: http
+      targetPort: https
       protocol: TCP
+      appProtocol: https
     - name: cluster
       port: 8201
       targetPort: cluster
@@ -10920,7 +10925,7 @@ spec:
             # component-cert issuer is a private CA in every profile, so
             # the env is unconditional.
             - name: SSL_CERT_DIR
-              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca:/etc/gibson/openbao-ca"
             - name: ZITADEL_URL
               value: "http://gibson-zitadel.gibson.svc.cluster.local:8080"
             - name: ZITADEL_EXTERNAL_DOMAIN
@@ -10946,7 +10951,7 @@ spec:
             - name: ZITADEL_SYSTEM_KEY_PATH
               value: "/etc/zitadel-system/private-key.pem"
             - name: VAULT_ADDR
-              value: "http://gibson-openbao.gibson.svc:8200"
+              value: "https://gibson-openbao.gibson.svc:8200"
             # Vault/OpenBao admin token via an OPTIONAL projected-Secret FILE,
             # NOT a fixed env var (deploy#971 / gibson#1000). On a from-zero
             # bringup OpenBao mints/writes this Secret later (it lives in
@@ -10960,6 +10965,9 @@ spec:
             - name: VAULT_TOKEN_PATH
               value: /etc/gibson/vault-token/VAULT_ADMIN_TOKEN
           volumeMounts:
+            - name: openbao-ca
+              mountPath: /etc/gibson/openbao-ca
+              readOnly: true
             # CA for the OpenFGA HTTP-listener cert (deploy#1382).
             - name: fga-http-ca
               mountPath: /etc/ssl/fga-ca
@@ -10977,6 +10985,13 @@ spec:
               mountPath: /etc/zitadel-system
               readOnly: true
       volumes:
+        - name: openbao-ca
+          secret:
+            secretName: gibson-openbao-tls
+            defaultMode: 0444
+            items:
+              - key: ca.crt
+                path: ca.crt
         # Only ca.crt is projected — the operator must never hold the
         # OpenFGA listener's private key (deploy#1382).
         - name: fga-http-ca
@@ -11604,7 +11619,7 @@ spec:
             # the component-cert issuer is a private CA in every profile,
             # so the env is unconditional.
             - name: SSL_CERT_DIR
-              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca:/etc/gibson/openbao-ca"
             # ADR-0093 decision 2: the gibson project each tenant org is
             # granted and whose four tenant roles the role sync reads. The
             # operator refuses to start without it. The platform-operator
@@ -11685,7 +11700,8 @@ spec:
             # GIBSON_VAULT_TRANSIT_KEY names the transit key the
             # operator uses for HMAC-SHA256 KEK derivation.
             - name: GIBSON_VAULT_ADDR
-              value: "http://gibson-openbao.gibson.svc:8200"
+              # The in-chart OpenBao, over TLS only (gibson.openbaoAddr).
+              value: "https://gibson-openbao.gibson.svc:8200"
             - name: GIBSON_VAULT_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -11788,6 +11804,9 @@ spec:
             - name: GIBSON_VAULT_JWKS_CA_PEM_PATH
               value: "/etc/spire-bundle/bundle.spiffe"
           volumeMounts:
+            - name: openbao-ca
+              mountPath: /etc/gibson/openbao-ca
+              readOnly: true
             # plans mount removed alongside the --plans-file arg above: the
             # monorepo operator bakes tiers in at build time.
             # System-tenant KEK mount (one-code-path: deploy#194 —
@@ -11825,6 +11844,13 @@ spec:
               mountPath: /etc/ssl/envoy-ca
               readOnly: true
       volumes:
+        - name: openbao-ca
+          secret:
+            secretName: gibson-openbao-tls
+            defaultMode: 0444
+            items:
+              - key: ca.crt
+                path: ca.crt
         # Only ca.crt is projected — the operator must never hold the
         # OpenFGA listener's private key (deploy#1382).
         - name: fga-http-ca
@@ -14714,6 +14740,11 @@ metadata:
   # 2026-09-02). Helm ignores these annotations and applies in one phase.
   annotations:
     argocd.argoproj.io/sync-wave: "-12"
+  # No Reloader annotation: a workload that can patch this StatefulSet can
+  # take it over (scripts/check-owner-credential-readers.py). OpenBao reads
+  # its listener certificate at start, so the certificate lives as long as
+  # its CA and renews a year before its end; any pod restart in that year
+  # loads the new one (templates/auth/openbao-tls.yaml).
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
@@ -14739,7 +14770,7 @@ spec:
         gibson.zeroroot.ai/datastore: openbao
         gibson.zeroroot.ai/kube-api: "true"
       annotations:
-        checksum/config: f8be2b221e62422b4f93c4481fd3d5e8f8b5a2230848ea135daca0ccf2d04f95
+        checksum/config: 49a08bef6b3e3932fc9110e517dae5e0faf71687e571974980a69a2e530598ae
         # Velero fs-backup skips the scratch volumes. scripts/check-velero-volume-excludes.sh.
         backup.velero.io/backup-volumes-excludes: "tmp,auto-init-tmp"
     spec:
@@ -14763,7 +14794,7 @@ spec:
             - server
             - -config=/etc/openbao/config/openbao.hcl
           ports:
-            - name: http
+            - name: https
               containerPort: 8200
               protocol: TCP
             - name: cluster
@@ -14771,9 +14802,11 @@ spec:
               protocol: TCP
           env:
             - name: BAO_ADDR
-              value: "http://127.0.0.1:8200"
+              value: "https://127.0.0.1:8200"
+            - name: BAO_CACERT
+              value: /etc/openbao/tls/ca.crt
             - name: BAO_API_ADDR
-              value: "http://gibson-openbao:8200"
+              value: "https://gibson-openbao:8200"
             - name: SKIP_CHOWN
               value: "true"
             - name: SKIP_SETCAP
@@ -14795,6 +14828,10 @@ spec:
             # Read-only, openbao container only: the sidecar never sees it.
             - name: seal-key
               mountPath: /etc/openbao/seal
+              readOnly: true
+            # The listener certificate (templates/auth/openbao-tls.yaml).
+            - name: tls
+              mountPath: /etc/openbao/tls
               readOnly: true
             # The root filesystem is read-only. The server writes scratch here.
             - name: tmp
@@ -14824,7 +14861,7 @@ spec:
           # not enough here. Measured on gibson exit-test-bank run 36922487157
           # (2026-10-01): every probe failed with
           #
-          #   Get "http://10.244.0.28:8200/v1/sys/health?...": context deadline
+          #   Get "<pod address>:8200/v1/sys/health?...": context deadline
           #   exceeded (Client.Timeout exceeded while awaiting headers)
           #
           # A deadline, not a refusal: the socket accepted and no header came
@@ -14843,16 +14880,16 @@ spec:
           livenessProbe:
             httpGet:
               path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
-              port: http
-              scheme: HTTP
+              port: https
+              scheme: HTTPS
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /v1/sys/health?standbyok=true&uninitcode=204
-              port: http
-              scheme: HTTP
+              port: https
+              scheme: HTTPS
             initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3
@@ -14919,7 +14956,7 @@ spec:
               # parallel test suites do (deploy#1732).
               TMPD="$(mktemp -d)"
               seed_checked=0; seed_written=0; seed_failed=0
-              BAO_ADDR_LOCAL="http://127.0.0.1:8200"
+              BAO_ADDR_LOCAL="https://127.0.0.1:8200"
               NAMESPACE="gibson"
               # The bringup keyring Secret and key, for log messages only. The
               # sidecar never reads the seal key: the openbao container mounts
@@ -16068,6 +16105,10 @@ spec:
             # seeded empty.
             - name: bringup-inputs
               mountPath: /etc/openbao/inputs
+            # The OpenBao CA only, never the key of the listener.
+            - name: openbao-ca
+              mountPath: /etc/gibson/openbao-ca
+              readOnly: true
             # The ready marker and mktemp write here. The root filesystem is read-only.
             - name: auto-init-tmp
               mountPath: /tmp
@@ -16086,7 +16127,14 @@ spec:
             timeoutSeconds: 3
           env:
             - name: BAO_ADDR
-              value: "http://127.0.0.1:8200"
+              value: "https://127.0.0.1:8200"
+            # The sidecar trusts the OpenBao CA: curl through CURL_CA_BUNDLE,
+            # bao through BAO_CACERT. kube_curl names its own CA, so the
+            # Kubernetes API calls are not affected.
+            - name: CURL_CA_BUNDLE
+              value: "/etc/gibson/openbao-ca/ca.crt"
+            - name: BAO_CACERT
+              value: "/etc/gibson/openbao-ca/ca.crt"
             # The root filesystem is read-only. A tool that writes to HOME
             # writes to the scratch volume.
             - name: HOME
@@ -16104,6 +16152,19 @@ spec:
             capabilities:
               drop: ["ALL"]
       volumes:
+        # The listener certificate (templates/auth/openbao-tls.yaml), for the
+        # openbao container only.
+        - name: tls
+          secret:
+            secretName: gibson-openbao-tls
+            defaultMode: 0440
+        - name: openbao-ca
+          secret:
+            secretName: gibson-openbao-tls
+            defaultMode: 0444
+            items:
+              - key: ca.crt
+                path: ca.crt
         - name: tmp
           emptyDir: {}
         - name: auto-init-tmp
@@ -16878,7 +16939,7 @@ spec:
             - name: GIBSON_DAEMON_VAULT_JWT_AUDIENCE
               value: "gibson-saas"
             - name: SSL_CERT_DIR
-              value: "/etc/ssl/certs:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/fga-ca:/etc/gibson/openbao-ca"
             # ----------------------------------------------------------------
             # Signup seam knob (deploy#1055, gibson#1094): the registration
             # rung, from the one value `registration` (gibson.registrationKnob).
@@ -16952,6 +17013,9 @@ spec:
               cpu: 1000m
               memory: 2Gi
           volumeMounts:
+            - name: openbao-ca
+              mountPath: /etc/gibson/openbao-ca
+              readOnly: true
             - name: config
               mountPath: /etc/gibson
               readOnly: true
@@ -17068,6 +17132,13 @@ spec:
                     app.kubernetes.io/component: gibson
                 topologyKey: kubernetes.io/hostname
       volumes:
+        - name: openbao-ca
+          secret:
+            secretName: gibson-openbao-tls
+            defaultMode: 0444
+            items:
+              - key: ca.crt
+                path: ca.crt
         - name: config
           configMap:
             name: gibson-gibson-workloads-config
@@ -17609,11 +17680,20 @@ spec:
       initContainers:
         - name: wait-for-vault
           image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+          volumeMounts:
+            - name: openbao-ca
+              mountPath: /etc/gibson/openbao-ca
+              readOnly: true
+          env:
+            - name: SSL_CERT_DIR
+              value: "/etc/ssl/certs:/etc/gibson/openbao-ca"
+            - name: CURL_CA_BUNDLE
+              value: "/etc/gibson/openbao-ca/ca.crt"
           command: ['sh', '-c']
           args:
             - |
               set -e
-              BAO_ADDR="http://gibson-openbao:8200"
+              BAO_ADDR="https://gibson-openbao.gibson.svc:8200"
               echo "Waiting for Vault at ${BAO_ADDR}/v1/sys/health ..."
               i=0
               while [ $i -lt 90 ]; do
@@ -17638,11 +17718,16 @@ spec:
       containers:
         - name: jwt-auth-init
           image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+          env:
+            - name: SSL_CERT_DIR
+              value: "/etc/ssl/certs:/etc/gibson/openbao-ca"
+            - name: CURL_CA_BUNDLE
+              value: "/etc/gibson/openbao-ca/ca.crt"
           command: ['sh', '-c']
           args:
             - |
               set -e
-              BAO_ADDR="http://gibson-openbao:8200"
+              BAO_ADDR="https://gibson-openbao.gibson.svc:8200"
               JWKS_URL="https://gibson-spiffe-oidc-discovery-provider.gibson.svc.cluster.local/keys"
               BOUND_ISSUER="https://gibson-spiffe-oidc-discovery-provider"
               # Read the Vault admin token from the projected Secret
@@ -17751,6 +17836,9 @@ spec:
 
               echo "=== openbao-jwt-auth-init: OK ==="
           volumeMounts:
+            - name: openbao-ca
+              mountPath: /etc/gibson/openbao-ca
+              readOnly: true
             # The script writes its JSON and PEM files here (ADR-0165: a
             # read-only root filesystem).
             - name: tmp
@@ -17781,6 +17869,13 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: openbao-ca
+          secret:
+            secretName: gibson-openbao-tls
+            defaultMode: 0444
+            items:
+              - key: ca.crt
+                path: ca.crt
         - name: tmp
           emptyDir: {}
         - name: openbao-admin-token
@@ -18902,6 +18997,78 @@ spec:
   issuerRef:
     kind: ClusterIssuer
     name: setec-webhook-selfsigned
+---
+# Source: gibson/charts/gibson-workloads/templates/auth/openbao-tls.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gibson-openbao-ca
+  namespace: gibson
+  annotations:
+    argocd.argoproj.io/sync-wave: "-13"
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: openbao-tls
+spec:
+  isCA: true
+  commonName: "gibson-openbao-ca"
+  secretName: gibson-openbao-ca
+  duration: 87600h
+  renewBefore: 8760h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: gibson-openbao-selfsigned
+    kind: Issuer
+    group: cert-manager.io
+---
+# Source: gibson/charts/gibson-workloads/templates/auth/openbao-tls.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gibson-openbao-tls
+  namespace: gibson
+  annotations:
+    argocd.argoproj.io/sync-wave: "-13"
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: openbao-tls
+spec:
+  secretName: gibson-openbao-tls
+  # As long as the CA. OpenBao reads the file at start and no workload may
+  # restart it on a change, so the renewal comes a year before the end and
+  # any pod restart in that year loads it.
+  duration: 87600h
+  renewBefore: 8760h
+  commonName: "gibson-openbao.gibson.svc"
+  dnsNames:
+    - "gibson-openbao"
+    - "gibson-openbao.gibson"
+    - "gibson-openbao.gibson.svc"
+    - "gibson-openbao.gibson.svc.cluster.local"
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: gibson-openbao-ca
+    kind: Issuer
+    group: cert-manager.io
 ---
 # Source: gibson/charts/gibson-workloads/templates/cert-manager/certificate.yaml
 apiVersion: cert-manager.io/v1
@@ -20563,7 +20730,14 @@ spec:
         - "setec-system"
   provider:
     vault:
-      server: "http://gibson-openbao.gibson.svc.cluster.local:8200"
+      server: "https://gibson-openbao.gibson.svc:8200"
+      # OpenBao serves only TLS. The store trusts the chart CA of the listener
+      # (templates/auth/openbao-tls.yaml) through its ca.crt.
+      caProvider:
+        type: Secret
+        name: "gibson-openbao-tls"
+        namespace: "gibson"
+        key: ca.crt
       path: "secret"
       version: "v2"
       auth:
@@ -21243,6 +21417,43 @@ metadata:
 spec:
   selfSigned: {}
 ---
+# Source: gibson/charts/gibson-workloads/templates/auth/openbao-tls.yaml
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: gibson-openbao-selfsigned
+  namespace: gibson
+  annotations:
+    argocd.argoproj.io/sync-wave: "-13"
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: openbao-tls
+spec:
+  selfSigned: {}
+---
+# Source: gibson/charts/gibson-workloads/templates/auth/openbao-tls.yaml
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: gibson-openbao-ca
+  namespace: gibson
+  annotations:
+    argocd.argoproj.io/sync-wave: "-13"
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: openbao-tls
+spec:
+  ca:
+    secretName: gibson-openbao-ca
+---
 # Source: gibson/charts/gibson-workloads/templates/cert-manager/cluster-issuer.yaml
 # CA-backed Issuer that signs end-entity certs (e.g., the Envoy edge cert,
 # the daemon metrics cert, the ext-authz health cert, the OpenFGA HTTP cert) with
@@ -21579,7 +21790,7 @@ spec:
       name: "gibson-fga-model"
       key: "model.json"
   vaultTransit:
-    address: "http://gibson-openbao.gibson.svc:8200"
+    address: "https://gibson-openbao.gibson.svc:8200"
     tokenRef:
       name: "gibson-openbao-keys"
       key: "VAULT_ADMIN_TOKEN"
@@ -23159,7 +23370,7 @@ spec:
           # Vault: standby + sealed-but-up returns 204 (livenessProbe pattern in
           # the Vault Deployment).  Accept either 200 or 204.
           code=$(curl -ksS -o /dev/null -w '%{http_code}' --max-time 10 \
-            "http://${OPENBAO_SVC}:${OPENBAO_PORT}/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204" || echo "000")
+            "https://${OPENBAO_SVC}:${OPENBAO_PORT}/v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204" || echo "000")
           case "$code" in
             200|204|429|473)
               echo "[svc-probe] openbao OK ($code; openbao returns 429=standby, 473=DR-standby, 204=sealed, 200=ready)"
@@ -25264,6 +25475,13 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       volumes:
+      - name: openbao-ca
+        secret:
+          secretName: gibson-openbao-tls
+          defaultMode: 0444
+          items:
+            - key: ca.crt
+              path: ca.crt
       - name: tmp
         emptyDir: {}
       containers:
@@ -25275,15 +25493,22 @@ spec:
           capabilities:
             drop: ["ALL"]
         volumeMounts:
+        - name: openbao-ca
+          mountPath: /etc/gibson/openbao-ca
+          readOnly: true
         - name: tmp
           mountPath: /tmp
         env:
+        - name: SSL_CERT_DIR
+          value: "/etc/ssl/certs:/etc/gibson/openbao-ca"
+        - name: CURL_CA_BUNDLE
+          value: "/etc/gibson/openbao-ca/ca.crt"
         # kubectl writes its discovery cache under $HOME; /tmp is the one
         # writable path.
         - name: HOME
           value: /tmp
         - name: BAO_ADDR
-          value: "http://gibson-openbao:8200"
+          value: "https://gibson-openbao.gibson.svc:8200"
         # The token of this Job alone, policy iam-admin-escrow: the three KV
         # keys below and nothing else. openbao-auto-init mints it.
         - name: VAULT_ADMIN_TOKEN
