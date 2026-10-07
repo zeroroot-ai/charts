@@ -41,6 +41,12 @@ def check(docs):
             bad.append("the iam-admin-pat ExternalSecret must use creationPolicy Owner: it is the one writer of that Secret (charts#407)")
         if KEY not in [x["remoteRef"]["key"] for x in pat[0]["spec"].get("data", [])]:
             bad.append(f"the iam-admin-pat ExternalSecret does not read {KEY}")
+        # The platform-operator reads the user id of iam-admin from this
+        # Secret (gibson#1047), so it never needs a machine key (ADR-0171).
+        props = {(x["remoteRef"]["key"], x["remoteRef"].get("property")) for x in pat[0]["spec"].get("data", [])}
+        tmpl = (pat[0]["spec"]["target"].get("template") or {}).get("data") or {}
+        if (KEY, "userId") not in props or "userId" not in tmpl:
+            bad.append(f"the iam-admin-pat ExternalSecret must read property userId of {KEY} and write the key userId: the platform-operator reads the iam-admin user id there")
     for d in docs:
         if d.get("kind") == "ConfigMap" and "zitadel" in d["metadata"]["name"]:
             for v in (d.get("data") or {}).values():
@@ -130,6 +136,14 @@ for planted in list(MINTED) + ["iam-admin-pat"]:
     mut = [d for d in copy.deepcopy(docs) if not (d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == planted)]
     if not any(planted in b for b in check(mut)):
         sys.exit(f"self-test broken: removing the {planted} ExternalSecret was not detected")
+# gibson#1047, planted: the ExternalSecret drops the user id.
+nouid = copy.deepcopy(docs)
+for d in nouid:
+    if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin-pat":
+        d["spec"]["data"] = [x for x in d["spec"]["data"] if x["remoteRef"].get("property") != "userId"]
+        d["spec"]["target"]["template"]["data"].pop("userId", None)
+if not any("userId" in b for b in check(nouid)):
+    sys.exit("self-test broken: an iam-admin-pat ExternalSecret with no userId was not detected")
 # The deadlock of 2026-09-08, planted: the ExternalSecret at wave 1.
 late = copy.deepcopy(docs)
 for d in late:
