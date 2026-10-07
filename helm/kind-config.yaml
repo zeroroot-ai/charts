@@ -114,6 +114,13 @@ nodes:
       # never one under /tmp.
       - hostPath: __KIND_PV_DIR__
         containerPath: /var/local-path-provisioner
+      # Each fleet node exposes /dev/kvm (ADR-0083, charts#413): every sandbox
+      # is a Firecracker machine. A kind node is a container, so the device of
+      # the host is mounted into it, and scripts/preflight-kvm.sh proves it
+      # before the install. A host with no /dev/kvm gets an empty directory
+      # at this path, and the preflight then stops the install.
+      - hostPath: /dev/kvm
+        containerPath: /dev/kvm
 
 # Networking configuration
 networking:

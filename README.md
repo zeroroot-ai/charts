@@ -24,6 +24,17 @@ a Cilium policy CRD is absent. On kind, start the cluster with
 `disableDefaultCNI: true` and install Cilium first, as `helm/kind-config.yaml`
 and the exit tests do. The chart ships no egress proxy and no service mesh.
 
+Each fleet node must expose `/dev/kvm` (ADR-0083). Every sandbox is a
+Firecracker machine, and the device plugin of setec hands `/dev/kvm` of the
+node to the launcher Pod. The script stops before it installs anything when a
+fleet node has no `/dev/kvm`. KVM comes from a metal node, or from an instance
+type with nested virtualization (on AWS: c8i, m8i, r8i or a metal type). The
+fleet is each amd64 node by default. A cluster that keeps its fleet on labeled
+nodes sets `FLEET_NODE_SELECTOR` to that label, for example
+`setec.zeroroot.ai/sandbox-host=true`. On kind, `helm/kind-config.yaml` mounts
+`/dev/kvm` of the host into the node. With the setec seam off (ADR-0087), the
+fleet is in another cluster, and the preflight checks no node here.
+
 On one local node (kind or k3d), add the `developer` rung. The baseline asks
 for the honest self-hosted floor, about 2.9 CPU of scheduling reservations,
 which a single local node cannot meet:
