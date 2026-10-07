@@ -4,8 +4,10 @@
 # For each tests/alerts/<name>.test.yaml it renders the umbrella with the
 # monitoring CRDs, takes the PrometheusRule <release>-<name>-alerts, writes its
 # groups to <name>.rules.yaml next to a copy of the test, and runs
-# `promtool test rules`. It fails when promtool is absent, when a test names a
-# rule object that the render does not hold, and when a test fails.
+# `promtool test rules`. A test whose rule object has another name states it
+# in a line `# rule: <object name>`. It fails when promtool is absent, when a
+# test names a rule object that the render does not hold, and when a test
+# fails.
 #
 #   check-alert-rules-test.sh             run every test
 #   check-alert-rules-test.sh --selftest  prove a broken rule fails its test
@@ -35,8 +37,9 @@ PY
 }
 
 run_one() { # <render file> <test file> <workdir> [sed expression applied to the rules]
-  local name; name="$(basename "$2" .test.yaml)"
-  rules "$1" "gibson-${name}-alerts" "$3/${name}.rules.yaml"
+  local name object; name="$(basename "$2" .test.yaml)"
+  object="$(sed -n 's/^# rule: *\([^ ]*\) *$/\1/p' "$2" | head -1)"
+  rules "$1" "${object:-gibson-${name}-alerts}" "$3/${name}.rules.yaml"
   [ -n "${4:-}" ] && sed -i "$4" "$3/${name}.rules.yaml"
   cp "$2" "$3/"
   (cd "$3" && promtool test rules "$(basename "$2")" >/dev/null 2>&1)
@@ -53,7 +56,13 @@ if [ "${1:-}" = "--selftest" ]; then
   if run_one "$work/render.yaml" tests/alerts/audit-export.test.yaml "$work/self" 's/> 3600/> 999999/'; then
     echo "SELFTEST FAIL: a lag rule with a moved threshold passed its test" >&2; exit 1
   fi
-  echo "  ✓ selftest: a rule with a moved threshold fails its promtool test"
+  # A test that names a rule object the render does not hold must fail.
+  mkdir "$work/named"
+  sed 's/^# rule: .*/# rule: gibson-no-such-rules/' tests/alerts/tenant-operator.test.yaml > "$work/named/tenant-operator.test.yaml"
+  if run_one "$work/render.yaml" "$work/named/tenant-operator.test.yaml" "$work/named" 2>/dev/null; then
+    echo "SELFTEST FAIL: a test that names an absent rule object passed" >&2; exit 1
+  fi
+  echo "  ✓ selftest: a rule with a moved threshold fails its promtool test, and a test that names an absent rule object fails"
   exit 0
 fi
 

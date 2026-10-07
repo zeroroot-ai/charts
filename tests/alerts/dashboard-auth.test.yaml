@@ -1,0 +1,43 @@
+# promtool unit test of the dashboard sign-in alerts (charts#405).
+# rule: gibson-dashboard-auth-rules
+# scripts/check-alert-rules-test.sh renders the rules to dashboard-auth.rules.yaml.
+rule_files:
+  - dashboard-auth.rules.yaml
+evaluation_interval: 1m
+tests:
+  # Sign-ins that fail for another reason do not fire the daemon rule.
+  - interval: 1m
+    input_series:
+      - series: 'dashboard_signin_total{outcome="error", error_reason="permission_denied", pod="dashboard-0"}'
+        values: '0x5 1x15'
+      - series: 'dashboard_signin_total{outcome="success", error_reason="_n/a", pod="dashboard-0"}'
+        values: '0+10x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: DashboardSignInDaemonUnreachable
+        exp_alerts: []
+  # One sign-in that cannot reach the daemon fires the rule at once.
+  - interval: 1m
+    input_series:
+      - series: 'dashboard_signin_total{outcome="error", error_reason="daemon_unavailable", pod="dashboard-0"}'
+        values: '0x5 1x15'
+      - series: 'dashboard_signin_total{outcome="success", error_reason="_n/a", pod="dashboard-0"}'
+        values: '0+10x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DashboardSignInDaemonUnreachable
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: DashboardSignInDaemonUnreachable
+        exp_alerts:
+          - exp_labels: {severity: page, component: dashboard-auth}
+            exp_annotations:
+              summary: "A sign-in failed because the dashboard cannot reach the daemon"
+              runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/dashboard-auth.md#dashboardsignindaemonunreachable"
+              description: |
+                A sign-in callback of the dashboard failed in the last 5
+                minutes because ListMyMemberships did not reach the daemon
+                (Unavailable, DeadlineExceeded, or a transport failure). The
+                person saw /login/error?reason=daemon_unavailable. Check the
+                daemon pods, Envoy, and the network policy between the
+                dashboard and the daemon.

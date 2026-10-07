@@ -9,6 +9,15 @@ More than one percent of sign-in attempts fail over five minutes.
 3. If the reason points at the daemon, check the daemon pod and the edge.
 4. If the reason points at Zitadel, check `kubectl -n gibson get pods -l app.kubernetes.io/name=zitadel`.
 
+## DashboardSignInDaemonUnreachable
+
+A sign-in failed because the membership lookup of the dashboard did not reach the daemon. The person saw `/login/error?reason=daemon_unavailable`.
+
+1. Check the daemon: `kubectl -n gibson get pods -l app.kubernetes.io/component=daemon`.
+2. Check Envoy: `kubectl -n gibson get pods -l app.kubernetes.io/component=envoy` and its log for the upstream of the daemon.
+3. Read the dashboard log for `ListMyMemberships` and the gRPC code (`Unavailable` or `DeadlineExceeded`).
+4. Check the Hubble flows between the dashboard and the daemon for a dropped flow: `hubble observe --from-label app.kubernetes.io/component=dashboard --verdict DROPPED`.
+
 ## DashboardFGAUnreachable
 
 The membership lookup of the dashboard fails because OpenFGA does not answer. Sign-in sends users to `/login/error`.

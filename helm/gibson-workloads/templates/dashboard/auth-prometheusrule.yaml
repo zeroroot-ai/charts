@@ -59,6 +59,30 @@ spec:
               the last 5 minutes. Check
               dashboard_login_error_total{reason} for the dominant
               reason.
+        - alert: DashboardSignInDaemonUnreachable
+          # Owner decision of 2026-10-05 (charts#405): a sign-in that fails
+          # because the dashboard cannot reach the daemon pages. The jwt
+          # callback of the dashboard records each failed sign-in with the
+          # reason of its membership resolution (auth.ts, membership.ts):
+          # daemon_unavailable is a transport failure, Unavailable or
+          # DeadlineExceeded from ListMyMemberships. One such sign-in
+          # fires the rule.
+          expr: |
+            sum(increase(dashboard_signin_total{outcome="error", error_reason="daemon_unavailable"}[5m])) > 0
+          for: 0m
+          labels:
+            severity: page
+            component: dashboard-auth
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/dashboard-auth.md#dashboardsignindaemonunreachable"
+            summary: "A sign-in failed because the dashboard cannot reach the daemon"
+            description: |
+              A sign-in callback of the dashboard failed in the last 5
+              minutes because ListMyMemberships did not reach the daemon
+              (Unavailable, DeadlineExceeded, or a transport failure). The
+              person saw /login/error?reason=daemon_unavailable. Check the
+              daemon pods, Envoy, and the network policy between the
+              dashboard and the daemon.
         - alert: DashboardFGAUnreachable
           expr: |
             increase(dashboard_membership_resolution_total{outcome="fga_error"}[1m]) > 0
