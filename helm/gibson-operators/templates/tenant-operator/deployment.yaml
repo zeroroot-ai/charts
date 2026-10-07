@@ -1,3 +1,4 @@
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "tenantOperator.daemonServiceAccountName") "use" "nothing: the daemon holds no Kubernetes client, and the connector operator ServiceAccount comes from connectorOperator.serviceAccount.name (gibson#664)") }}
 {{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "tenantOperator.daemonSpiffeID" "connectorOperator.daemonSpiffeID") "use" "the one value global.spire.trustDomain; each SPIFFE ID is built from it and a path (ADR-0164, charts#392)") }}
 {{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "tenantOperator.smtp") "use" "the one mail value global.email (hosted#223)") }}
 {{- /*
@@ -221,14 +222,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            # The daemon's ServiceAccount, the subject of the per-tenant
-            # RoleBinding to ClusterRole gibson-connector-creds (gibson#137).
-            # It is the workloads release's gibson.serviceAccount.name;
-            # scripts/check-daemon-sa-binding.py fails the render when the
-            # two disagree, because a wrong name is a 403 on every connector
-            # credential write.
-            - name: DAEMON_SERVICE_ACCOUNT_NAME
-              value: {{ .Values.tenantOperator.daemonServiceAccountName | quote }}
+            # The connector operator's ServiceAccount, the subject of the
+            # per-tenant RoleBinding to ClusterRole gibson-connector-creds
+            # (gibson#664). It is the name the connector-operator Deployment
+            # runs as; scripts/check-connector-creds-binding.py fails the render
+            # when the two disagree, because a wrong name is a 403 on every
+            # connector credential write.
+            - name: CONNECTOR_OPERATOR_SERVICE_ACCOUNT_NAME
+              value: {{ .Values.connectorOperator.serviceAccount.name | default "gibson-connector-operator" | quote }}
             # GIBSON_APP_URL — the PRODUCT-surface origin (app.<domain>) the
             # tenant-operator reads to build the two human-facing links it
             # emails: the tenant-member invitation accept-link and the new
