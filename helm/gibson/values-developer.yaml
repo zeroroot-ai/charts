@@ -215,7 +215,8 @@ platformPostgres:
 # every other request here makes room for.
 
 # One mail value for the daemon, the tenant-operator and Zitadel (hosted#223).
-# The host is the Mailpit Service of release "gibson" (gibson.mailpit.host).
+# The host is the Mailpit Service of this release, from the helper
+# gibson.mailpit.host, so a release with another name still reaches it.
 # Mailpit listens in plaintext, offers no STARTTLS, and accepts any sender with
 # no credential. The chart refuses plaintext with a credential, so this pair
 # cannot reach a cloud profile by a copy.
@@ -225,7 +226,7 @@ global:
     from: "no-reply@localhost.zeroroot.ai"
     fromName: "Gibson"
     smtp:
-      host: "gibson-mailpit"
+      host: '{{ include "gibson.mailpit.host" . }}'
       port: 1025
       tlsMode: "plaintext"
       credentials:
