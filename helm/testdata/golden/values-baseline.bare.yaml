@@ -18748,10 +18748,19 @@ spec:
                   CURRENT_PASSWORD=$(kubectl get secret -n "$NS" "$REDIS_SECRET" \
                     -o jsonpath="{.data.${REDIS_KEY}}" | base64 -d)
 
-                  # Read last-processed version from rotation-state Secret.
-                  LAST_VERSION=$(kubectl get secret -n "$NS" "$STATE_SECRET" \
-                    -o jsonpath='{.data.lastProcessedVersion}' 2>/dev/null \
-                    | base64 -d 2>/dev/null || echo "")
+                  # Read last-processed version from rotation-state Secret. Only
+                  # NotFound is the first boot. Any other error of the read
+                  # fails the job, so an API error during a rotation never
+                  # records the new password as done.
+                  if ! state_err=$(kubectl get secret -n "$NS" "$STATE_SECRET" -o name 2>&1 >/dev/null); then
+                    case "$state_err" in
+                      *NotFound*|*"not found"*) LAST_VERSION="" ;;
+                      *) echo "[rotation] FATAL: read the state Secret ${STATE_SECRET}: ${state_err}" >&2; exit 1 ;;
+                    esac
+                  else
+                    LAST_VERSION=$(kubectl get secret -n "$NS" "$STATE_SECRET" \
+                      -o jsonpath='{.data.lastProcessedVersion}' | base64 -d)
+                  fi
 
                   # First-boot registration: no rotation-state exists yet.
                   # Record the current version as baseline and exit without
@@ -18803,24 +18812,28 @@ spec:
                   # ACL SETUSER default [resetpass] ><password> in redis-stack.
                   # Both passwords go on stdin, never on an argv of kubectl
                   # or of redis-cli.
+                  # The container is named: the pod has two init containers, and
+                  # without -c kubectl writes a "Defaulted container" line.
+                  # Only stdout is the answer, and stderr goes to the job log.
                   redis_acl() {
-                    printf '%s\n%s\n' "$1" "$2" | kubectl exec -i -n "$NS" "$REDIS_POD" -- \
-                      sh -c 'read -r p; read -r n; REDISCLI_AUTH="$p" exec redis-cli --no-auth-warning ACL SETUSER default "$@" ">$n"' redis-cli ${3:-}
+                    printf '%s\n%s\n' "$1" "$2" | kubectl exec -i -n "$NS" "$REDIS_POD" -c redis-stack -- \
+                      sh -c 'IFS= read -r p; IFS= read -r n; REDISCLI_AUTH="$p" exec redis-cli --no-auth-warning ACL SETUSER default "$@" ">$n"' redis-cli ${3:-}
                   }
                   # redis_ping <password>: PONG when redis-stack accepts it.
                   redis_ping() {
-                    printf '%s\n' "$1" | kubectl exec -i -n "$NS" "$REDIS_POD" -- \
-                      sh -c 'read -r p; REDISCLI_AUTH="$p" exec redis-cli --no-auth-warning PING'
+                    printf '%s\n' "$1" | kubectl exec -i -n "$NS" "$REDIS_POD" -c redis-stack -- \
+                      sh -c 'IFS= read -r p; REDISCLI_AUTH="$p" exec redis-cli --no-auth-warning PING'
                   }
 
                   # 1. Both passwords work. The store still runs with the old one.
-                  if [ -n "$PREV_PASSWORD" ] && [ "$(redis_ping "$PREV_PASSWORD" 2>&1)" = PONG ]; then
-                    out=$(redis_acl "$PREV_PASSWORD" "$CURRENT_PASSWORD" 2>&1)
+                  if [ -n "$PREV_PASSWORD" ] && [ "$(redis_ping "$PREV_PASSWORD")" = PONG ]; then
+                    out=$(redis_acl "$PREV_PASSWORD" "$CURRENT_PASSWORD") \
+                      || { echo "[rotation] FATAL: the exec of ACL SETUSER into ${REDIS_POD} failed" >&2; exit 1; }
                     case "$out" in
                       OK) echo "[rotation] added the new password; the old and the new password both work" ;;
                       *) echo "[rotation] FATAL: ACL SETUSER with the old password answered: ${out}" >&2; exit 1 ;;
                     esac
-                  elif [ "$(redis_ping "$CURRENT_PASSWORD" 2>&1)" = PONG ]; then
+                  elif [ "$(redis_ping "$CURRENT_PASSWORD")" = PONG ]; then
                     # The store already runs with the new password only: it
                     # restarted after ESO wrote the Secret, or an earlier job
                     # stopped after step 3. The clients must restart now.
@@ -18854,7 +18867,8 @@ spec:
                   fi
 
                   # 3. The old password is refused.
-                  out=$(redis_acl "$CURRENT_PASSWORD" "$CURRENT_PASSWORD" resetpass 2>&1)
+                  out=$(redis_acl "$CURRENT_PASSWORD" "$CURRENT_PASSWORD" resetpass) \
+                    || { echo "[rotation] FATAL: the exec of ACL SETUSER resetpass into ${REDIS_POD} failed" >&2; exit 1; }
                   case "$out" in
                     OK) echo "[rotation] removed the old password; only the new password works" ;;
                     *) echo "[rotation] FATAL: ACL SETUSER resetpass answered: ${out}" >&2; exit 1 ;;

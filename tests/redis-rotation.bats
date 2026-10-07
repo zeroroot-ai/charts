@@ -41,6 +41,10 @@ case "$args" in
   *"get secret -n gibson gibson-redis-stack"*resourceVersion*) cat "$S/ver" ;;
   *"get secret -n gibson gibson-redis-stack -o jsonpath={.data."*) b64 "$(cat "$S/pw")" ;;
   *"get secret -n gibson gibson-redis-stack"*) exit 0 ;;
+  *"get secret -n gibson gibson-redis-rotation-state -o name"*)
+    if [ -n "${STATE_API_ERROR:-}" ]; then echo "Error from server (InternalError): etcdserver: request timed out" >&2; exit 1; fi
+    [ -f "$S/state_ver" ] || { echo 'Error from server (NotFound): secrets "gibson-redis-rotation-state" not found' >&2; exit 1; }
+    echo secret/gibson-redis-rotation-state ;;
   *"get secret -n gibson gibson-redis-rotation-state"*lastProcessedVersion*)
     [ -f "$S/state_ver" ] || exit 1; b64 "$(cat "$S/state_ver")" ;;
   *"get secret -n gibson gibson-redis-rotation-state"*lastKnownPassword*)
@@ -54,6 +58,9 @@ case "$args" in
     done ;;
   *"apply -f -"*) cat >/dev/null ;;
   *"exec -i"*)
+    # kubectl names the default container on stderr when -c is absent and
+    # the pod has init containers, as redis-stack does.
+    case "$args" in *" -c redis-stack "*) ;; *) echo 'Defaulted container "redis-stack" out of: redis-stack, own-data (init), init-acl (init)' >&2 ;; esac
     read -r login
     grep -qxF -- "$login" "$S/acl" || { echo "AUTH failed: WRONGPASS invalid username-password pair"; echo "NOAUTH Authentication required."; exit 0; }
     case "$args" in
@@ -156,4 +163,12 @@ run_job() { run env PATH="$S/bin:$PATH" S="$S" bash "$WORK/rotation.sh"; }
   [ "$status" -eq 0 ]
   [ ! -s "$S/restarts" ]
   [ "$(cat "$S/state_ver")" = 5 ]
+}
+
+@test "FAILING FIXTURE: an API error on the state read fails the job and records nothing" {
+  world new 2 old 1 old
+  STATE_API_ERROR=1 run env PATH="$S/bin:$PATH" S="$S" STATE_API_ERROR=1 bash "$WORK/rotation.sh"
+  [ "$status" -ne 0 ]
+  [ "$(cat "$S/state_ver")" = 1 ]
+  [ ! -s "$S/restarts" ]
 }
