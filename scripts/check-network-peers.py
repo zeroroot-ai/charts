@@ -56,7 +56,7 @@ def any_namespace(peer: dict, clusterwide: bool = False) -> bool:
 def any_bucket(host: str) -> bool:
     if host in S3_ANY or host == "*":
         return True
-    if not host.endswith("amazonaws.com"):
+    if host.split(".")[-2:] != ["amazonaws", "com"]:
         return False
     first = host.split(".", 1)[0]
     return "*" in first or first == "s3"
