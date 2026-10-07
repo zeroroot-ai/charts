@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.141.0](https://github.com/zeroroot-ai/charts/compare/v0.140.0...v0.141.0) (2026-10-07)
+
+
+### Features
+
+* **fga-init:** seed the signup_service tuple for the dashboard service identity ([#495](https://github.com/zeroroot-ai/charts/issues/495)) ([9ae8915](https://github.com/zeroroot-ai/charts/commit/9ae89156556628fd0bdb01553fe7294b3bb02d5b)), closes [#485](https://github.com/zeroroot-ai/charts/issues/485)
+
 ## [0.140.0](https://github.com/zeroroot-ai/charts/compare/v0.139.1...v0.140.0) (2026-10-07)
 
 
