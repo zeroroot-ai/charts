@@ -31,9 +31,9 @@ data:
 
     # Authentication via ACL file (deploy#518). The init-acl init container
     # writes /etc/redis-acl/users.acl at pod start from the current Secret.
-    # During password rotation the rotation CronJob (deploy#517) temporarily
-    # adds the previous password to the in-memory ACL so existing clients keep
-    # authenticating while they are being rolled.
+    # During a password rotation the rotation CronJob (deploy#517, ADR-0171)
+    # adds the NEW password to the in-memory ACL, restarts each client, and
+    # then removes the old password.
     aclfile /etc/redis-acl/users.acl
 
     # Data directory
@@ -133,9 +133,9 @@ spec:
             capabilities:
               drop: ["ALL"]
         # Writes /etc/redis-acl/users.acl from the current password Secret.
-        # Redis starts with this file; the rotation CronJob (deploy#517) adds
-        # the previous password in-memory during the rolling-restart window
-        # via `ACL SETUSER`, so it never appears on disk.
+        # Redis starts with this file. The rotation CronJob (deploy#517) adds
+        # the new password in memory with `ACL SETUSER` for the restart
+        # window, so no password of a rotation is written to disk.
         - name: init-acl
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           command: ['sh', '-c']
@@ -237,6 +237,10 @@ spec:
         # Exposes redis_up, redis_connected_clients, redis_commands_total, etc.
         # on :9121/metrics. Authenticates with REDIS_PASSWORD (same Secret as
         # the main container). Enable via redis.metrics.enabled=true.
+        # The exporter reads the password from its env at start. Nothing
+        # restarts redis-stack for a rotation (ADR-0171), so with metrics on,
+        # the exporter keeps the old password after step 3 of the rotation
+        # until the pod restarts, and RedisAuthenticationFailure fires.
         - name: redis-exporter
           image: "{{ default "oliver006/redis_exporter" ((((.Values.redis).metrics).exporter).repository) }}:{{ default "v1.63.0" ((((.Values.redis).metrics).exporter).tag) }}"
           imagePullPolicy: {{ default "IfNotPresent" ((((.Values.redis).metrics).exporter).pullPolicy) }}

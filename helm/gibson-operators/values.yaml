@@ -584,7 +584,8 @@ platformBootstrap:
 # rolling restarts of workloads with the
 # `secret.reloader.stakater.com/reload: "<csv>"` annotation. Required
 # for unattended-safe Secret rotation; deploy, the chart's
-# daemon / dashboard / redis-stack all carry the annotation.
+# daemon and dashboard carry the annotation. redis-stack does not: its
+# password rotation is the CronJob <release>-redis-rotation (ADR-0171).
 # Manifests at templates/reloader/reloader.yaml — namespace-scoped RBAC
 # (only watches + rolls workloads in tenantOperator.namespace).
 # -----------------------------------------------------------------------

@@ -87,8 +87,16 @@ no-pinned-addressing: ## No hostAliases, no pinned Envoy address, and no public 
 .PHONY: openbao-seed-inputor
 openbao-seed-inputor: ## The inputor seed kind takes the keyring value when present and the placeholder when not (charts#486)
 	@bats tests/openbao-seed-inputor.bats
+.PHONY: redis-rotation-test
+redis-rotation-test: ## The redis password rotation keeps the old password until each client restarted, and recovers when the store already has the new one (ADR-0171)
+	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
+	@$(MAKE) -s chart-deps >/dev/null
+	@bats tests/redis-rotation.bats
+
 .PHONY: openbao-seed-lifetime
 openbao-seed-lifetime: ## A seed key older than its lifetime gets a new generated value, and no other key changes (ADR-0171)
+	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
+	@$(MAKE) -s chart-deps >/dev/null
 	@bats tests/openbao-seed-lifetime.bats
 
 .PHONY: edge-extra-routes
