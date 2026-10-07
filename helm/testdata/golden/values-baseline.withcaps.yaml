@@ -2939,26 +2939,10 @@ data:
                             # The dashboard serves nothing under /assets.
                             - match: { prefix: "/assets/" }
                               route: { cluster: zitadel_upstream, timeout: 30s }
-                            # Closed billing tier's Stripe webhook receiver
-                            # (gibson#798/#800). Stripe POSTs here; routed to the
-                            # hosted gibson-billing-webhook workload, NOT the
-                            # dashboard (whose billing webhook is retired). On-prem
-                            # has no such workload — the cluster 503s, but on-prem
-                            # receives no Stripe webhooks, so the path is never hit.
-                            #
-                            # prefix_rewrite is REQUIRED: the receiver's mux serves
-                            # POST /webhook (+ GET /healthz) only — the public
-                            # /api/billing/webhook path is an edge-side convention.
-                            # Forwarding it verbatim 404s every Stripe delivery,
-                            # which Stripe reports as a failing endpoint while the
-                            # tenant's subscription_status never lands in
-                            # tenant_quotas. Ground truth: billing
-                            # cmd/billing-webhook/main.go.
-                            - match: { path: "/api/billing/webhook" }
-                              route:
-                                cluster: gibson_billing_webhook
-                                timeout: 30s
-                                prefix_rewrite: "/webhook"
+                            # envoy.extraRoutes (charts#375): one route for each
+                            # entry, an exact path, with its rate-limit class. A
+                            # component outside the core chart (the private
+                            # billing component) comes in only through this list.
                             # -------------------------------------------------------
                             # Signup submission bucket (deploy#1242). The signup
                             # Server Action POSTs to its page URL (/signup — Next.js
@@ -3496,24 +3480,6 @@ data:
                         socket_address:
                           address: "gibson-docs-svc"
                           port_value: 8080
-    
-        # gibson#798/#800 — the closed billing tier's Stripe webhook receiver.
-        # Plain HTTP/1.1 (Go net/http). Deployed only in hosted overlays
-        # (gibson-billing-webhook, gitops apps/manifests/gibson-workloads); on-prem
-        # has no such Service so STRICT_DNS yields no endpoints and the route 503s,
-        # which is fine — on-prem receives no Stripe webhooks.
-        - name: gibson_billing_webhook
-          type: STRICT_DNS
-          connect_timeout: 5s
-          load_assignment:
-            cluster_name: gibson_billing_webhook
-            endpoints:
-              - lb_endpoints:
-                  - endpoint:
-                      address:
-                        socket_address:
-                          address: "gibson-billing-webhook"
-                          port_value: 8090
     
         # gibson#623 — daemon's dedicated native-login bootstrap listener (:8085).
         # Plaintext HTTP/1.1: the endpoint is unauthenticated by design and serves
@@ -4929,8 +4895,6 @@ data:
           MachineKey:
             ExpirationDate: "2029-01-01T00:00:00Z"
             Type: 1
-          Pat:
-            ExpirationDate: "2029-01-01T00:00:00Z"
       Skip: false
     Machine:
       Identification:
@@ -4944,6 +4908,7 @@ data:
         - MemberType: System
           Roles:
           - SYSTEM_OWNER
+          - IAM_OWNER
         Path: /etc/zitadel-system-keys/system-bot-pub.pem
     TLS:
       Enabled: false
@@ -5530,31 +5495,18 @@ rules:
     resources: ["events"]
     verbs: ["create", "patch"]
 
-  # NO clusterspiffeids GRANT — deliberately removed, do not re-add
-  # without also constraining WHAT may be written.
-  #
-  # This ClusterRole used to hold cluster-wide
-  # get/list/watch/create/update/patch/delete on
-  # `spire.spiffe.io/clusterspiffeids`. A ClusterSPIFFEID maps a pod
-  # selector to a SPIFFE ID, so that grant let one compromised operator
-  # pod write its own CR mapping `spiffe://<td>/platform/daemon` onto its
-  # own pod and mint any platform identity in a single API call —
-  # bypassing the platform-identity admission policy entirely, since that
-  # policy governs pods and workloads, not ClusterSPIFFEIDs.
-  #
-  # It was also dead. `grep -rn "spire.spiffe.io\|ClusterSPIFFEID"` over
-  # zeroroot-ai/gibson returns nothing in Go or YAML: every
-  # ClusterSPIFFEID in this platform is rendered by
-  # gibson-workloads/templates/spire-server/clusterspiffeids.yaml, by
-  # Helm, not by the operator. controller-gen agrees — the generated
-  # operators/tenant/config/rbac/role.yaml has never contained it.
-  #
-  # If the per-tenant ClusterSPIFFEID design is ever built (the
-  # tenant-operator writing one CR per tenant with the literal tenant id),
-  # re-add it together with a ValidatingAdmissionPolicy on
-  # clusterspiffeids CREATE/UPDATE constraining the spiffeIDTemplate this
-  # operator may write to the `spiffe://<td>/tenant/` prefix. The grant
-  # without that constraint is a platform-identity minting primitive.
+  # ClusterSPIFFEIDs of plugin instances (gibson#815). The operator writes
+  # one for each (plugin, tenant): gibson-plugin-<vendor>-<tenant>, with the
+  # ID spiffe://<td>/plugin/<vendor>/<tenant>. A ClusterSPIFFEID maps a pod
+  # selector to a SPIFFE ID, so this grant alone could mint any platform
+  # identity. The admission policy gibson-tenant-operator-clusterspiffeid-scope
+  # (clusterspiffeid-scope-admission.yaml) holds each write of this operator
+  # to the plugin shape, and refuses a change to any other ClusterSPIFFEID.
+  # scripts/check-owner-credential-readers.py does not cover this kind; the
+  # policy and its Deny binding render unconditionally next to this rule.
+  - apiGroups: ["spire.spiffe.io"]
+    resources: ["clusterspiffeids"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
 
   # Per-tenant RoleBindings. The operator creates a RoleBinding in each
   # tenant namespace at provision time, scoped to the chart-defined
@@ -5571,14 +5523,39 @@ rules:
   # operator reference the named ClusterRole from a RoleBinding even
   # though the operator itself doesn't hold every verb in that
   # ClusterRole's rules. Scoped via resourceNames so the operator can
-  # bind ONLY these two ClusterRoles — not arbitrary cluster-admin etc.
+  # bind ONLY these three ClusterRoles — not arbitrary cluster-admin etc.
   # gibson-connector-creds is the daemon's Secret grant (gibson-workloads
   # connector-rbac.yaml); the operator binds it into each tenant namespace
   # so the daemon's Secret access is bounded to tenant namespaces.
+  # gibson-tenant-operator-plugin-namespace holds the rules of the operator
+  # in each tenant-<t>-plugins namespace (gibson#815).
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
-    resourceNames: ["gibson-tenant-operator-tenant-namespace", "gibson-connector-creds"]
+    resourceNames: ["gibson-tenant-operator-tenant-namespace", "gibson-connector-creds", "gibson-tenant-operator-plugin-namespace"]
     verbs: ["bind"]
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/plugin-namespace-cluster-role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gibson-tenant-operator-plugin-namespace
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/component: tenant-operator-plugin-namespace-rbac
+    app.kubernetes.io/part-of: gibson
+rules:
+  - apiGroups: ["apps"]
+    resources: [deployments]
+    verbs: [get, list, create, update, delete]
+  - apiGroups: [""]
+    resources: [serviceaccounts, configmaps]
+    verbs: [get, list, create, update, delete]
+  - apiGroups: ["networking.k8s.io"]
+    resources: [networkpolicies]
+    verbs: [get, list, create, update, delete]
+  - apiGroups: ["cilium.io"]
+    resources: [ciliumnetworkpolicies]
+    verbs: [get, list, create, update, delete]
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/tenant-namespace-cluster-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -11179,7 +11156,7 @@ spec:
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket"
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
-        secret.reloader.stakater.com/reload: "gibson-stripe-credentials,gibson-tenant-operator-vault"
+        secret.reloader.stakater.com/reload: "gibson-tenant-operator-vault"
     spec:
       
       imagePullSecrets:
@@ -11429,6 +11406,13 @@ spec:
             # connector credential write.
             - name: CONNECTOR_OPERATOR_SERVICE_ACCOUNT_NAME
               value: "gibson-connector-operator"
+            # The namespace of the gibson-velero release (ADR-0075, charts#424).
+            # A tenant delete first takes a last Velero Backup there, and the
+            # operator exits at start when this is empty. gibson-velero renders
+            # the Role that lets this ServiceAccount get and create Backups in
+            # that namespace (templates/tenant-operator-rbac.yaml).
+            - name: VELERO_NAMESPACE
+              value: "velero"
             # GIBSON_APP_URL — the PRODUCT-surface origin (app.<domain>) the
             # tenant-operator reads to build the two human-facing links it
             # emails: the tenant-member invitation accept-link and the new
@@ -11457,6 +11441,33 @@ spec:
             # fixed path platform/daemon.
             - name: GIBSON_DAEMON_SPIFFE_ID
               value: "spiffe://zeroroot.ai/platform/daemon"
+            # Per-tenant plugins (gibson#815). The operator deploys one
+            # instance of a catalog plugin for each tenant that enables it, in
+            # the namespace tenant-<t>-plugins, and writes its ClusterSPIFFEID
+            # spiffe://<td>/plugin/<vendor>/<tenant>. The operator exits when
+            # one of the four required values is empty.
+            #   PLUGIN_SPIRE_CLASS_NAME     the className of the SPIRE
+            #                               controller-manager, or SPIRE
+            #                               ignores the ClusterSPIFFEID.
+            #   PLUGIN_TRUST_DOMAIN         the trust domain of the install.
+            #   PLUGIN_GIBSON_URL           the edge origin; the plugin dials
+            #                               the daemon only through Envoy.
+            #   PLUGIN_WAIT_FOR_SPIRE_IMAGE the image of the init container
+            #                               that waits for the SPIRE socket.
+            #   PLUGIN_ENVOY_CA_FILE        the edge CA that the operator
+            #                               copies into each plugin namespace.
+            #                               Empty when the operator mounts no
+            #                               edge CA: the edge has a public cert.
+            - name: PLUGIN_SPIRE_CLASS_NAME
+              value: "gibson-gibson"
+            - name: PLUGIN_TRUST_DOMAIN
+              value: "zeroroot.ai"
+            - name: PLUGIN_GIBSON_URL
+              value: "https://api.localhost.zeroroot.ai"
+            - name: PLUGIN_WAIT_FOR_SPIRE_IMAGE
+              value: "ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
+            - name: PLUGIN_ENVOY_CA_FILE
+              value: "/etc/ssl/envoy-ca/envoy-ca.crt"
             # First-tenant seed (gibson#1496): on a self-hosted install with no
             # signup, the operator enqueues the first tenant over its SPIFFE
             # identity via EnqueueTenantProvisioning — the session-less path,
@@ -11533,11 +11544,6 @@ spec:
               value: "true"
             - name: ORPHAN_REAPER_GRACE_SECONDS
               value: "300"
-            - name: STRIPE_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: "gibson-stripe-credentials"
-                  key: STRIPE_SECRET_KEY
             - name: SMTP_HOST
               value: "gibson-mailpit"
             - name: SMTP_PORT
@@ -12108,7 +12114,7 @@ spec:
         # rotated. Reloader runs cluster-wide and watches the explicitly-
         # named Secrets below; when any of them changes, Reloader triggers
         # a rolling restart of this Deployment.
-        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-gibson-workloads-dashboard-secrets,gibson-stripe-credentials"
+        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-gibson-workloads-dashboard-secrets"
     spec:
       
       imagePullSecrets:
@@ -12294,14 +12300,6 @@ spec:
             limits:
               cpu: 100m
               memory: 64Mi
-        # one-code-path #203: wait-for-stripe-secrets blocks pod start
-        # until the Stripe Secrets (secret key + publishable key + webhook)
-        # are materialised. The STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY /
-        # STRIPE_WEBHOOK_SECRET env entries are required; an empty
-        # publishable key silently breaks the card-first Payment Element
-        # (dashboard#783), so we fail the pod at boot instead. Gated on the same
-        # value flags as the env entries: if you wired secretRefs in
-        # values, the Secrets MUST exist by pod-start.
         # Spec: canonical-service-identity Req 5 — resolve the readable SA
         # names in serviceAccounts.required against the gibson-sa-identity-map
         # ConfigMap (populated by the post-install Zitadel Job) into:
@@ -12631,13 +12629,6 @@ spec:
             - name: GIBSON_PUBLIC_URL
               value: "https://api.localhost.zeroroot.ai"
 
-            # PUBLIC_URL — required by the dashboard's env-validator.
-            # Public base URL of the dashboard (matches AUTH_URL in
-            # single-origin deploys). Used for Stripe checkout return_url,
-            # billing-portal success_url, transactional emails.
-            - name: PUBLIC_URL
-              value: "https://app.localhost.zeroroot.ai"
-
             # Neo4j connection URI for the dashboard knowledge-graph client.
             # Required — the dashboard Neo4j driver uses this at startup.
             - name: NEO4J_URI
@@ -12728,16 +12719,6 @@ spec:
                   key: captcha-secret-key
             - name: DASHBOARD_METRICS_ALLOWED_CIDRS
               value: "" 
-
-            # Stripe billing (spec stripe-billing-integration; CLAUDE.md
-            # tier-repricing). Wired from .Values.dashboard.billing.*.
-            # The dashboard runtime graceful-degrades to the "Pricing
-            # temporarily unavailable" placeholder on /pricing (R7.3) when
-            # STRIPE_SECRET_KEY / STRIPE_PRICE_* are unset. Setting
-            # paidTiersEnabled=true ALSO forces a startup-time check
-            # (instrumentation.ts → validateBillingConfig) that throws if
-            # any required var is missing; leave it false for free-tier-only
-            # deployments.
 
           # one-code-path #203: was `optional: true`. The chart renders
           # the dashboard-config ConfigMap unconditionally, so the
@@ -13034,7 +13015,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 44239e6dc5d7ea814dc15903687a4683972e2013f25adbf21accc64f4f1f9597
+        checksum/config: a39ba910f0185e2a9ada6158663707912d4b240ea777eaed56f48d8c1b0ef106
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -14621,7 +14602,7 @@ spec:
     metadata:
       annotations:
         secret.reloader.stakater.com/reload: gibson-zitadel-system-key
-        checksum/configmap: 5e26b524cfe261983e8710f7126e4fab596a3ea6d47a197a17e637e38f11bc10
+        checksum/configmap: b4e23c9a2bc26df5d0ab18e673c651d16a9eee8218176ad5ba9d7f9e7c957849
         checksum/secret-db-ssl-ca-crt: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         checksum/secret-zitadel-secrets: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
       labels:
@@ -16952,25 +16933,6 @@ spec:
             # Enforced at RENDER time by validateEntitlementsCoherence below,
             # not only by the umbrella's signup-seam.bats CI fixtures — the
             # dangerous overlay is the one this repo never sees (GHSA-455w).
-            # ----------------------------------------------------------------
-            # Billing-webhook shared secret (gibson#1230 / gibson#1270,
-            # deploy#1314). Authenticates TenantProvisioningService.
-            # SetTenantBillingActive — the ONLY writer of tenant_status.
-            # billing_active. The daemon fails CLOSED when this is empty
-            # (billing_webhook_auth.go), so paid signups queue at
-            # status='pending' and never provision until BOTH this daemon end
-            # AND the caller end (dashboard#1016) hold the same value.
-            #
-            # Gated on entitlementsRequired — the ONE condition under which the
-            # withhold bites (ListPendingTenantProvisioning only holds a paid
-            # pending row while billing_active is false when the deployment
-            # enforces entitlements). That keeps this a SaaS-profile-only hard
-            # dependency: self-hosted / OSS renders never reference the Secret,
-            # so their daemon boots with no billing backend. Where it IS
-            # rendered the ref is REQUIRED (no optional: true — one-code-path /
-            # deploy#203): the daemon waits for the ESO-delivered Secret rather
-            # than booting with an empty secret that silently refuses callers.
-            # The value is delivered, never baked.
             # ----------------------------------------------------------------
             # Setec sandbox wiring.
             #
@@ -20510,7 +20472,7 @@ spec:
     kind: ClusterSecretStore
   target:
     name: iam-admin-pat
-    creationPolicy: Orphan
+    creationPolicy: Owner
     template:
       engineVersion: v2
       type: Opaque
@@ -20791,35 +20753,6 @@ spec:
       # one key name, no prefix.
       remoteRef: { key: zitadel-masterkey, property: value }
 ---
-# Source: gibson/charts/gibson-workloads/templates/secrets/billing-webhook-secret.yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: gibson-billing-webhook-secret
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: secrets
-spec:
-  refreshInterval: 60s
-  secretStoreRef:
-    name: "gibson-secrets"
-    kind: ClusterSecretStore
-  target:
-    name: gibson-billing-webhook-secret
-    creationPolicy: Owner
-    template:
-      type: Opaque
-      data:
-        GIBSON_BILLING_WEBHOOK_SECRET: "{{ .billing_webhook_secret }}"
-  data:
-    - secretKey: billing_webhook_secret
-      remoteRef: { key: gibson-billing-webhook-secret, property: secret }
----
 # Source: gibson/charts/gibson-workloads/templates/secrets/cg-signing-key.yaml
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -20882,45 +20815,6 @@ spec:
   data:
     - secretKey: vault_admin_token
       remoteRef: { key: gibson-vault-admin-token, property: token }
----
-# Source: gibson/charts/gibson-workloads/templates/secrets/stripe-credentials.yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: gibson-stripe-credentials
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: secrets
-spec:
-  refreshInterval: 60s
-  secretStoreRef:
-    name: "gibson-secrets"
-    kind: ClusterSecretStore
-  target:
-    name: gibson-stripe-credentials
-    creationPolicy: Owner
-    template:
-      type: Opaque
-      data:
-        STRIPE_SECRET_KEY: "{{ .dashboard_stripe_secret_key }}"
-        STRIPE_WEBHOOK_SECRET: "{{ .dashboard_stripe_webhook_secret }}"
-        # Publishable key (pk_test_/pk_live_): NOT secret, but per-env (test vs
-        # live mode) so it must be runtime-injected — the signup page server
-        # component reads it and passes it to the inline Payment Element. The
-        # shared :main image can't bake a build-time NEXT_PUBLIC key (dashboard#783).
-        STRIPE_PUBLISHABLE_KEY: "{{ .dashboard_stripe_publishable_key }}"
-  data:
-    - secretKey: dashboard_stripe_secret_key
-      remoteRef: { key: gibson-stripe-credentials, property: secret_key }
-    - secretKey: dashboard_stripe_webhook_secret
-      remoteRef: { key: gibson-stripe-credentials, property: webhook_secret }
-    - secretKey: dashboard_stripe_publishable_key
-      remoteRef: { key: gibson-stripe-credentials, property: publishable_key }
 ---
 # Source: gibson/charts/gibson-workloads/templates/setec/disk-signing-externalsecret.yaml
 apiVersion: external-secrets.io/v1
@@ -22423,6 +22317,144 @@ spec:
   namespaceSelector:
     any: true
 ---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/clusterspiffeid-scope-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gibson-tenant-operator-clusterspiffeid-scope
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  # Every field access below is has()-guarded, so an evaluation error means a
+  # malformed policy. That must not turn into no control.
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["spire.spiffe.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["clusterspiffeids"]
+  matchConditions:
+    - name: tenant-operator
+      expression: request.userInfo.username == "system:serviceaccount:gibson:gibson-tenant-operator"
+  variables:
+    - name: obj
+      expression: "request.operation == 'DELETE' ? oldObject : object"
+    - name: labels
+      expression: >-
+        has(variables.obj.metadata.labels) ? variables.obj.metadata.labels : {}
+    - name: managed
+      expression: >-
+        'app.kubernetes.io/managed-by' in variables.labels
+          && variables.labels['app.kubernetes.io/managed-by'] == 'gibson-tenant-operator'
+    - name: oldManaged
+      expression: >-
+        request.operation == 'CREATE'
+          || (has(oldObject.metadata.labels)
+              && 'app.kubernetes.io/managed-by' in oldObject.metadata.labels
+              && oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'gibson-tenant-operator')
+    - name: v
+      expression: >-
+        'gibson.zeroroot.ai/plugin' in variables.labels ? variables.labels['gibson.zeroroot.ai/plugin'] : ''
+    - name: t
+      expression: >-
+        'gibson.zeroroot.ai/tenant' in variables.labels ? variables.labels['gibson.zeroroot.ai/tenant'] : ''
+    - name: pluginNs
+      expression: "'tenant-' + variables.t + '-plugins'"
+  validations:
+    - expression: variables.managed && variables.oldManaged
+      reason: Forbidden
+      message: >-
+        the tenant-operator writes only ClusterSPIFFEIDs labeled
+        app.kubernetes.io/managed-by=gibson-tenant-operator, and changes or
+        deletes only its own (gibson#815)
+    - expression: >-
+        variables.v.matches('^[a-z][a-z0-9-]{2,40}$')
+          && variables.t.matches('^[a-z0-9]([a-z0-9-]*[a-z0-9])?$') && size(variables.t) <= 48
+          && variables.obj.metadata.name == 'gibson-plugin-' + variables.v + '-' + variables.t
+      reason: Forbidden
+      message: >-
+        a plugin ClusterSPIFFEID is named gibson-plugin-<plugin>-<tenant>, from
+        its labels gibson.zeroroot.ai/plugin and gibson.zeroroot.ai/tenant
+    - expression: >-
+        request.operation == 'DELETE' || (
+          has(object.spec)
+          && has(object.spec.className) && object.spec.className == "gibson-gibson"
+          && has(object.spec.spiffeIDTemplate)
+          && object.spec.spiffeIDTemplate == "spiffe://zeroroot.ai/plugin/" + variables.v + '/' + variables.t
+          && has(object.spec.namespaceSelector) && has(object.spec.namespaceSelector.matchLabels)
+          && !has(object.spec.namespaceSelector.matchExpressions)
+          && object.spec.namespaceSelector.matchLabels == {'kubernetes.io/metadata.name': variables.pluginNs}
+          && has(object.spec.podSelector) && has(object.spec.podSelector.matchLabels)
+          && !has(object.spec.podSelector.matchExpressions)
+          && object.spec.podSelector.matchLabels == {'app.kubernetes.io/component': 'plugin', 'gibson.zeroroot.ai/plugin': variables.v}
+          && has(object.spec.workloadSelectorTemplates)
+          && object.spec.workloadSelectorTemplates == ['k8s:ns:' + variables.pluginNs, 'k8s:sa:gibson-plugin-' + variables.v])
+      reason: Forbidden
+      messageExpression: >-
+        'a plugin ClusterSPIFFEID of the tenant-operator must name the ID spiffe://zeroroot.ai/plugin/' +
+        variables.v + '/' + variables.t + ', the class gibson-gibson, and select only the plugin pod in ' +
+        variables.pluginNs + ' (gibson#815)'
+    - expression: >-
+        request.operation == 'DELETE' || (
+          has(object.spec)
+          && !has(object.spec.admin) && !has(object.spec.autoPopulateDNSNames)
+          && !has(object.spec.dnsNameTemplates) && !has(object.spec.downstream)
+          && !has(object.spec.fallback) && !has(object.spec.federatesWith)
+          && !has(object.spec.hint) && !has(object.spec.jwtTtl) && !has(object.spec.ttl))
+      reason: Forbidden
+      message: >-
+        a plugin ClusterSPIFFEID of the tenant-operator sets no DNS name,
+        federation, admin, downstream, fallback, hint or TTL field (gibson#815)
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/plugin-namespace-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gibson-tenant-plugin-workloads
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["jobs", "cronjobs"]
+  matchConditions:
+    - name: plugin-namespace
+      expression: request.namespace.matches('^tenant-.+-plugins$')
+  variables:
+    - name: user
+      expression: request.userInfo.username
+    - name: resource
+      expression: request.resource.resource
+    - name: gcUpdate
+      expression: >-
+        request.operation == 'UPDATE' && variables.user == "system:serviceaccount:kube-system:generic-garbage-collector"
+  validations:
+    - expression: >-
+        variables.gcUpdate
+          || (variables.resource == 'deployments' && variables.user == "system:serviceaccount:gibson:gibson-tenant-operator")
+          || (variables.resource == 'replicasets' && variables.user == 'system:serviceaccount:kube-system:deployment-controller')
+          || (variables.resource == 'pods' && variables.user == 'system:serviceaccount:kube-system:replicaset-controller')
+      reason: Forbidden
+      messageExpression: >-
+        'in a plugin namespace only the tenant-operator writes a Deployment, and only the built-in' +
+        ' controllers derive its ReplicaSet and pods; ' + variables.user + ' may not write ' +
+        variables.resource + ' in ' + request.namespace + ' (gibson#815)'
+---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/rolebinding-scope-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -22674,7 +22706,7 @@ spec:
           : 'default'
     - name: claimsPlatformIdentity
       expression: >-
-        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","platform-operator","envoy","openbao","plugin"]
+        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","platform-operator","envoy","openbao"]
           || variables.sa in ["gibson","gibson-ext-authz","gibson-dashboard","gibson-tenant-operator","gibson-connector-operator","gibson-platform-operator","gibson-envoy","gibson-ratelimit","gibson-openbao"]
   validations:
     - expression: >-
@@ -22747,7 +22779,7 @@ spec:
           : 'default'
     - name: claimsPlatformIdentity
       expression: >-
-        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","platform-operator","envoy","openbao","plugin"]
+        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","platform-operator","envoy","openbao"]
           || variables.sa in ["gibson","gibson-ext-authz","gibson-dashboard","gibson-tenant-operator","gibson-connector-operator","gibson-platform-operator","gibson-envoy","gibson-ratelimit","gibson-openbao"]
     # A restart-only UPDATE by Reloader: the pod template's spec and labels are
     # unchanged, only template annotations moved. Nothing new claims an
@@ -22775,6 +22807,30 @@ spec:
         ' issued to a workload written by the principal that manages this release. Add this' +
         ' principal to spire.identityAdmission.workloadCreators if it legitimately deploys' +
         ' Gibson, or drop the platform component label and ServiceAccount from the pod template.'
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/clusterspiffeid-scope-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gibson-tenant-operator-clusterspiffeid-scope
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  policyName: gibson-tenant-operator-clusterspiffeid-scope
+  validationActions: ["Deny"]
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/plugin-namespace-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gibson-tenant-plugin-workloads
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  policyName: gibson-tenant-plugin-workloads
+  validationActions: ["Deny"]
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/rolebinding-scope-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -23568,7 +23624,7 @@ rules:
   # whole window: hosted run 34271811189 (2026-09-08) sat 20 minutes on
   # "waiting for iam-admin" with the Secret present and this list naming
   # the PAT alone. The Job now refuses to wait on a Secret it may not read.
-  resourceNames: [iam-admin-pat, iam-admin, login-client]
+  resourceNames: [iam-admin, login-client]
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/02-bootstrap-secrets.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -25560,8 +25616,6 @@ spec:
                   key: masterkey
             - name: ZITADEL_FIRSTINSTANCE_MACHINEKEYPATH
               value: "/machinekey/sa.json"
-            - name: ZITADEL_FIRSTINSTANCE_PATPATH
-              value: "/machinekey/pat"
             - name: ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH
               value: "/login-client/pat"
             - name: ZITADEL_DATABASE_POSTGRES_AWAITINITIALCONN
@@ -25616,54 +25670,6 @@ spec:
               if [ -f /machinekey/sa.json ]; then
                 kubectl --namespace=gibson create secret generic iam-admin \
                   --from-file=iam-admin.json=/machinekey/sa.json \
-                  --dry-run=client --output=yaml | \
-                kubectl annotate --local --filename=- \
-                  helm.sh/resource-policy=keep \
-                  --output=yaml | \
-                kubectl label --local --filename=- \
-                  app.kubernetes.io/managed-by=Zitadel \
-                  app.kubernetes.io/name=zitadel \
-                  app.kubernetes.io/instance=gibson \
-                  --output=yaml | \
-                kubectl apply --filename=-;
-              fi;
-          env:
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-          volumeMounts:
-            - name: machinekey
-              mountPath: "/machinekey"
-              readOnly: true
-          resources:
-            {}
-        - name: zitadel-machine-pat
-          securityContext:
-              allowPrivilegeEscalation: false
-              capabilities:
-                drop:
-                - ALL
-              privileged: false
-              readOnlyRootFilesystem: true
-              runAsNonRoot: true
-              runAsUser: 1000
-              seccompProfile:
-                type: RuntimeDefault
-          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
-          imagePullPolicy: 'IfNotPresent'
-          command:
-            - sh
-            - -c
-            - |
-              until [ -n "$(kubectl --namespace=gibson get pod "${POD_NAME}" --output=jsonpath="{.status.containerStatuses[?(@.name=='zitadel-setup')].state.terminated}")" ]; do
-                echo 'waiting for zitadel-setup container to terminate';
-                sleep 5;
-              done &&
-              echo 'zitadel-setup container terminated' &&
-              if [ -f /machinekey/pat ]; then
-                kubectl --namespace=gibson create secret generic iam-admin-pat \
-                  --from-file=pat=/machinekey/pat \
                   --dry-run=client --output=yaml | \
                 kubectl annotate --local --filename=- \
                   helm.sh/resource-policy=keep \
@@ -25995,7 +26001,7 @@ spec:
           # #14, 2026-09-08: PlatformBootstrap SAIdentityMapReady=False
           # "Secret gibson/iam-admin not yet written", zitadel-login on
           # "secret login-client not found").
-          ENTRIES="iam-admin-pat:pat:gibson-zitadel-iam-admin-pat:pat iam-admin:iam-admin.json:gibson-zitadel-iam-admin-machinekey:machinekey login-client:pat:gibson-zitadel-login-client-pat:pat"
+          ENTRIES="iam-admin:iam-admin.json:gibson-zitadel-iam-admin-machinekey:machinekey login-client:pat:gibson-zitadel-login-client-pat:pat"
           for entry in $ENTRIES; do
             SECRET=${entry%%:*}; rest=${entry#*:}
             DATAKEY=${rest%%:*}; rest=${rest#*:}
