@@ -364,10 +364,10 @@ The validator only fires when `setec.enabled == true`. Kind/dev overlays
 that disable the Setec subchart entirely skip both rules — they never
 reach the SANDBOXED dispatch path.
 
-Real Sandbox-Pod placement onto sandbox-host nodes is NOT this chart's
-concern: it is driven by the runtimeAgent DaemonSet's node-capability
-labels (consumed by each RuntimeClass's own `scheduling.nodeSelector`) and,
-per-class, a SandboxClass CR's `spec.nodeSelector`
+Real Sandbox-Pod placement onto fleet nodes is NOT this chart's concern:
+each launcher Pod asks for the device resources of the setec device plugin,
+so it lands on a node that exposes /dev/kvm (ADR-0083), and, per-class, a
+SandboxClass CR's `spec.nodeSelector`
 (zeroroot-ai/setec api/v1alpha1). Neither of those has a matching
 Tolerations mechanism today — tracked as a known gap in
 zeroroot-ai/setec.
@@ -406,8 +406,8 @@ Sandboxes run untrusted code. Three things have to hold for that to be
 confined, and each of them is a values key that renders fine when wrong:
 
   (1) `setec.webhook.enabled` — with the admission webhook off, a
-      SandboxClass's allowedNetworkModes, the runc dev-only gate, and the
-      tenant-label check never run. The constraints still render; they
+      SandboxClass's allowedNetworkModes and the tenant-label check never
+      run. The constraints still render; they
       just do not bind.
   (2) `setec.netpol.reservedCIDRs` non-empty — this is the address space
       subtracted from every permissive egress rule the operator
@@ -434,13 +434,6 @@ confined, and each of them is a values key that renders fine when wrong:
       failurePolicy Fail (which (1) already requires) every Sandbox and
       SandboxClass write is rejected. That is the failure mode where the
       chart installs cleanly and nothing works.
-  (6) every SandboxClass names a backend that is ENABLED in
-      `setec.runtimes`. A disabled backend is not a degraded backend: no
-      RuntimeClass renders for it and the admission webhook rejects any
-      SandboxClass referencing it, so every launch into that class fails.
-      This one renders cleanly and is invisible until dispatch —
-      deploy#1105 was exactly this shape, with a kata-qemu SandboxClass
-      against a chart that shipped `runtimes.kata-qemu.enabled: false`.
 
 The vendored subchart enforces (2), (4) and (5) at render time as well,
 and the operator enforces (2) again at startup. Those three are kept here
@@ -460,7 +453,7 @@ Only fires when `setec.enabled == true`.
 {{- /* (1) Admission must be on, and fail-closed. */ -}}
 {{- $webhook := $setec.webhook | default dict -}}
 {{- if not $webhook.enabled -}}
-{{- fail "validateSetecContainment: setec.webhook.enabled must be true. Sandboxes run untrusted code; with the admission webhook off, a SandboxClass's allowedNetworkModes, the runc dev-only gate and the tenant-label check are advisory only — they render but never bind. Set setec.webhook.enabled=true (and keep failurePolicy=Fail), or set setec.enabled=false." -}}
+{{- fail "validateSetecContainment: setec.webhook.enabled must be true. Sandboxes run untrusted code; with the admission webhook off, a SandboxClass's allowedNetworkModes and the tenant-label check are advisory only — they render but never bind. Set setec.webhook.enabled=true (and keep failurePolicy=Fail), or set setec.enabled=false." -}}
 {{- end -}}
 {{- $fp := $webhook.failurePolicy | default "" -}}
 {{- if ne $fp "Fail" -}}
@@ -512,20 +505,6 @@ Only fires when `setec.enabled == true`.
 {{- end -}}
 {{- if has ($setec.namespace | default "setec-system") $sandboxNs -}}
 {{- fail (printf "validateSetecContainment: setec.sandboxNamespaces contains %q, which is setec.namespace — the namespace this chart installs the operator, the frontend and the node agents into. The baseline policy denies all traffic for every Pod in the namespaces it names, so listing the operator's own namespace would cut off the operator itself. Give Sandboxes a namespace of their own." ($setec.namespace | default "setec-system")) -}}
-{{- end -}}
-
-{{- /* (6) Every class must name a backend this cluster actually has. */ -}}
-{{- $runtimes := $setec.runtimes | default dict -}}
-{{- $enabledBackends := list -}}
-{{- range $name, $cfg := $runtimes -}}
-{{- if (default dict $cfg).enabled -}}{{- $enabledBackends = append $enabledBackends $name -}}{{- end -}}
-{{- end -}}
-{{- range $list -}}
-{{- $spec := .spec | default dict -}}
-{{- $backend := ($spec.runtime | default dict).backend | default "" -}}
-{{- if and $backend (not (has $backend $enabledBackends)) -}}
-{{- fail (printf "validateSetecContainment: SandboxClass %q names runtime.backend=%q, which is not enabled in setec.runtimes (enabled: %s). A disabled backend is not a slower backend — templates/runtime-classes.yaml renders no RuntimeClass for it and the admission webhook rejects every SandboxClass that references it, so each launch into this class fails at dispatch while the chart renders and installs cleanly. Set setec.runtimes.%s.enabled=true, or point the class at an enabled backend. deploy#1105." (.name | default "<unnamed>") $backend (join ", " (default (list "<none>") $enabledBackends)) $backend) -}}
-{{- end -}}
 {{- end -}}
 
 {{- end -}}
@@ -773,10 +752,8 @@ does not degrade: it takes untrusted tooling offline at the first tool call.
 
 `setec.enabled=false`, or the setec subchart on with
 `setec.frontend.enabled=false`, renders clean YAML. Every derived value (the
-address, the TLS serverName, the client cert) then points at a frontend that
-will not exist. The cert-manager Certificate and the ESO mirror in
-templates/setec/daemon-client-secret.yaml cannot resolve, and the daemon Pod
-stays Pending on a missing volume.
+address, the fleet SPIFFE ID) then points at a frontend that will not exist,
+and the daemon learns that at the first dispatch, not at the render.
 
 `gibson.sandbox.enabled` and `gibson.sandbox.setec.tenant` were deleted with
 the daemon settings they fed (gibson#756). The daemon sends the tenant in each
@@ -792,10 +769,28 @@ request. A values file that still sets either one fails here.
 {{- end -}}
 {{- $setec := .Values.setec | default dict -}}
 {{- if not $setec.enabled -}}
-{{- fail "validateSetecDispatch: the daemon requires setec.enabled=true. Its whole sandbox config — address, TLS serverName, the client keypair it mounts — is derived from the setec subchart's frontend, and with the subchart off none of it exists. An unreachable sandbox backend does not fall back to in-process execution; it denies the call, so this renders cleanly and takes untrusted tooling offline at the first invocation." -}}
+{{- fail "validateSetecDispatch: the daemon requires setec.enabled=true. Its sandbox config — the frontend address and the fleet SPIFFE ID — is derived from the setec subchart's frontend, and with the subchart off none of it exists. An unreachable sandbox backend does not fall back to in-process execution; it denies the call, so this renders cleanly and takes untrusted tooling offline at the first invocation. A fleet in another cluster is gibson.sandbox.setec.address and spiffeID with setec.enabled=false (ADR-0087), and that pair is not built yet." -}}
 {{- end -}}
 {{- $frontend := $setec.frontend | default dict -}}
 {{- if not $frontend.enabled -}}
-{{- fail "validateSetecDispatch: the daemon requires setec.frontend.enabled=true. The frontend IS the daemon's gRPC endpoint into setec — the operator alone serves no Launch RPC. With it off the daemon dials a Service that is never created, and templates/setec/daemon-client-secret.yaml has no source Secret to mirror, so the daemon Pod stays Pending on a volume that never appears." -}}
+{{- fail "validateSetecDispatch: the daemon requires setec.frontend.enabled=true. The frontend IS the daemon's gRPC endpoint into setec — the operator alone serves no Launch RPC. With it off the daemon dials a Service that is never created." -}}
+{{- end -}}
+{{- /* The namespace policy of the setec namespace admits the frontend gRPC
+       port from setec.systemPolicy.frontendCallers only (D76). A subchart
+       value cannot read .Release.Namespace, so the entry names the release
+       namespace as a literal; a daemon in another namespace would then be
+       denied at the first dispatch with no render error. */ -}}
+{{- $callers := (($setec.systemPolicy | default dict).frontendCallers) | default list -}}
+{{- $daemonCaller := false -}}
+{{- range $c := $callers -}}
+{{- if and (hasKey $c "namespace") (ne (toString $c.namespace) $.Release.Namespace) -}}
+{{- fail (printf "validateSetecDispatch: setec.systemPolicy.frontendCallers names namespace %q, and this release installs the daemon into %q. The setec namespace policy admits the frontend gRPC port from the listed Pods only, so the daemon of this release would be denied at the first dispatch. Set the entry to the release namespace." (toString $c.namespace) $.Release.Namespace) -}}
+{{- end -}}
+{{- if and (eq (toString $c.namespace) $.Release.Namespace) (eq (toString (dig "podLabels" "app.kubernetes.io/component" "" $c)) "daemon") -}}
+{{- $daemonCaller = true -}}
+{{- end -}}
+{{- end -}}
+{{- if not $daemonCaller -}}
+{{- fail (printf "validateSetecDispatch: setec.systemPolicy.frontendCallers has no entry for the daemon of this release ({namespace: %s, podLabels: {app.kubernetes.io/component: daemon}}). The setec namespace policy admits the frontend gRPC port from the listed Pods only (D76), so the daemon would be denied at the first dispatch." $.Release.Namespace) -}}
 {{- end -}}
 {{- end -}}

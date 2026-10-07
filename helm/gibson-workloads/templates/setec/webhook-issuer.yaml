@@ -17,9 +17,8 @@ chain: cert-manager stamps the issuing CA into the
 ValidatingWebhookConfiguration via the inject-ca-from annotation, so the
 API server trusts exactly this certificate and nothing else has to.
 
-This is deliberately NOT the path used for the Setec frontend's mTLS
-(templates/setec/frontend-tls.yaml), where client and server certs must
-chain to a common CA and the environment's real issuer is required.
+The setec frontend takes no certificate from cert-manager: its identity
+is an X509-SVID from the SPIRE Workload API (ADR-0142).
 */}}
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer

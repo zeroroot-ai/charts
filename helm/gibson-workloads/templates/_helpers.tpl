@@ -143,37 +143,13 @@ gibson.setecFrontendAddress — host:port the daemon dials.
 {{- end }}
 
 {{/*
-gibson.setecFrontendServerName — the TLS serverName the daemon verifies.
-
-Must be a name the frontend's server certificate actually carries. That cert
-is minted by templates/setec/frontend-tls.yaml with commonName
-`<frontend>.<ns>.svc` and dnsNames covering the short, two-label, `.svc` and
-`.svc.cluster.local` forms — the `.svc` form is used here because it is what
-setec's own round-trip test defaults to (gibson
-internal/engine/harness/setec_roundtrip_setec_test.go), so both callers
-verify the same name.
+gibson.setecFrontendSpiffeID — the SPIFFE ID of the in-chart setec frontend,
+the one server the daemon accepts on the dispatch leg (ADR-0142). It is the
+ID that templates/spire-server/clusterspiffeids.yaml registers for the
+frontend Pod, built from global.spire.trustDomain (ADR-0164).
 */}}
-{{- define "gibson.setecFrontendServerName" -}}
-{{- printf "%s.%s.svc" (include "gibson.setecFrontendName" .) (include "gibson.setecNamespace" .) -}}
-{{- end }}
-
-{{/*
-gibson.setecClientSecretName — the release-namespace Secret holding the
-daemon's client keypair plus the CA that signed the frontend's server cert.
-*/}}
-{{- define "gibson.setecClientSecretName" -}}
-{{- (.Values.gibson.sandbox.setec).clientSecretName | default "gibson-setec-client-tls" -}}
-{{- end }}
-
-{{/*
-gibson.setecMtlsMountPath — where that Secret is mounted in the daemon pod.
-A sibling of /etc/gibson, not a subpath of it: kubelet rejects a mount that
-targets a path already occupied by another volume, and the `config`
-ConfigMap already owns /etc/gibson (same reason /etc/gibson-kek is a
-sibling).
-*/}}
-{{- define "gibson.setecMtlsMountPath" -}}
-{{- (.Values.gibson.sandbox.setec).mtlsMountPath | default "/etc/gibson-setec-mtls" -}}
+{{- define "gibson.setecFrontendSpiffeID" -}}
+{{- printf "spiffe://%s/platform/setec-frontend" (include "gibson.trustDomain" .) -}}
 {{- end }}
 
 {{/*

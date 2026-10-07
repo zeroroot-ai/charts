@@ -821,22 +821,6 @@ spec:
             - name: master-kek
               mountPath: /etc/gibson-kek
               readOnly: true
-            {{- /* deploy#1106 — Setec client mTLS material.
-
-                   config.SandboxConfig.Validate() os.Stat()s cert_file,
-                   key_file and ca_file at daemon startup and refuses to
-                   boot when any is missing, so the mount is what makes
-                   the daemon bootable at all. Nothing was
-                   mounted before this: the chart carried the config seam
-                   (deploy#1175) and the SPIFFE env vars, and neither
-                   produced a file on disk.
-
-                   The Secret is the release-namespace mirror of the
-                   setec-namespace daemon client cert — see
-                   templates/setec/daemon-client-secret.yaml. */}}
-            - name: setec-client-tls
-              mountPath: {{ include "gibson.setecMtlsMountPath" . | quote }}
-              readOnly: true
             {{- /* deploy#201: SPIRE is REQUIRED — agent socket mount is
                    unconditional. */}}
             - name: spire-agent-socket
@@ -988,18 +972,6 @@ spec:
         - name: master-kek
           secret:
             secretName: gibson-master-key
-            defaultMode: 0o400
-        {{- /* deploy#1106 — Setec client mTLS keypair + the CA that signed
-               the frontend's server cert. Materialised in this namespace by
-               templates/setec/daemon-client-secret.yaml (cert-manager mints
-               it next to the frontend; ESO mirrors it here). NOT optional:
-               a daemon that boots without it fails config validation, which
-               is the correct direction — SANDBOXED dispatch silently
-               falling back to in-process execution is the outcome
-               exists to prevent. */}}
-        - name: setec-client-tls
-          secret:
-            secretName: {{ include "gibson.setecClientSecretName" . | quote }}
             defaultMode: 0o400
         {{- /* Spec security-hardening R20 — `gibson-daemon-metrics-tls`
                Secret backs the daemon's :9090 mTLS metrics listener. The

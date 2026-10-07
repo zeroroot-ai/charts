@@ -37,7 +37,7 @@ The health probe of the daemon reports the setec frontend as down for most of fi
 The sandbox health stays `degraded`: spot interruptions cancel detonations faster than the on-demand fallback replaces the nodes.
 
 1. Check the node churn: `kubectl get nodes -l setec.zeroroot.ai/sandbox-host=true`.
-2. To raise the on-demand cap, change `gibson-workloads.setec.spotEvictionFallback.onDemandMax` in the GitOps values through a pull request. Revert it when the spot pool recovers.
+2. To raise the on-demand share of the fleet node pool, change the node pool in the hosted substrate through a pull request. Revert it when the spot pool recovers.
 
 ## SandboxQuotaExceededRate
 

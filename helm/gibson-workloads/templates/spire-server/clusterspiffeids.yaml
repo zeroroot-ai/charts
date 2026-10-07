@@ -426,6 +426,40 @@ spec:
   namespace and ServiceAccount are pinned too. An entry with no workload is a
   free identity.
 */}}
+{{- if and .Values.setec.enabled .Values.setec.frontend.enabled }}
+{{- $setecNs := include "gibson.setecNamespace" . }}
+---
+# --- setec frontend (ADR-0142) ---
+# The gRPC frontend of the sandbox fleet serves its X509-SVID from the
+# Workload API (setec#175): setec has no PEM credential source. The daemon
+# dials with its own SVID and accepts this ID only
+# (gibson.setecFrontendSpiffeID, rendered into the daemon config as
+# sandbox.setec.spiffe_id). The frontend admits the daemon by the ID of
+# its SVID (setec.frontend.clients, spiffePath platform/daemon). The Pod
+# runs in the setec namespace under the ServiceAccount `<fullname>-frontend`
+# of the setec chart.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-setec-frontend
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/setec-frontend"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: setec
+      app.kubernetes.io/component: frontend
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $setecNs }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $setecNs }}"
+    - "k8s:sa:{{ printf "%s-frontend" (include "gibson.setecFullname" .) }}"
+{{- end }}
+
 {{- if (.Values.gibson.e2eRunner).enabled }}
 ---
 apiVersion: spire.spiffe.io/v1alpha1

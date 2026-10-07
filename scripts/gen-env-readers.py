@@ -56,7 +56,7 @@ SERVICES: dict[str, dict] = {
                   "artifact": "src/lib/env-readers.json"},
     "setec": {"repo": "setec", "lang": "go",
               "images": ["setec", "setec-frontend", "setec-node-agent",
-                         "setec-runtime-agent", "setec-installer", "setec-keepalive"]},
+                         "setec-launcher", "setec-disk-builder", "setec-device-plugin"]},
     "docs-site": {"repo": "docs-site", "lang": "sh", "images": ["docs-site"]},
 }
 

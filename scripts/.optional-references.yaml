@@ -29,8 +29,6 @@ cases:
   : PlatformBootstrap writes gibson-master-key later in the bringup; a required mount deadlocks the waves. The operator reads the KEK lazily and requeues (deploy#971).
   ? helm/gibson-workloads/templates/_helpers.tpl default {{- $issuer := (.Values.certManager.envoyEdge).issuer | default "" -}}
   : An empty issuer means the edge needs no private CA; the helper returns false.
-  ? helm/gibson-workloads/templates/_validators.tpl default {{- $backend := ($spec.runtime | default dict).backend | default "" -}}
-  : The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
   helm/gibson-workloads/templates/_validators.tpl default {{- $fp := $webhook.failurePolicy | default "" -}}: The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
   ? helm/gibson-workloads/templates/_validators.tpl default {{- $kmsKeyId := $aws.kms_key_id | default ($aws.secret_arn | default "") -}}
   : The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.

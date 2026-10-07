@@ -559,56 +559,39 @@ gibson:
     enabled: false
 
   # ---------------------------------------------------------------------------
-  # Setec sandbox dispatch (deploy#1175)
+  # Setec sandbox dispatch (deploy#1175, ADR-0142)
   # ---------------------------------------------------------------------------
   # sandbox configures the daemon's SANDBOXED-tool execution backend: tool
-  # calls are dispatched into Setec microVM sandboxes over gRPC instead of the
-  # local/Redis-queue paths. templates/gibson/configmap.yaml renders this under
-  # a `with .Values.gibson.sandbox` guard into the daemon config's
-  # `sandbox:` block, which the daemon unmarshals into config.SandboxConfig
-  # (gibson internal/infra/config/sandbox.go) and gates dispatch on at startup
-  # (internal/server/daemon/harness_init.go — d.config.Sandbox.Enabled).
+  # calls are dispatched into setec microVM sandboxes over gRPC.
+  # templates/gibson/configmap.yaml renders this block into the daemon
+  # config's `sandbox:` block, which the daemon unmarshals into
+  # config.SandboxConfig (gibson internal/infra/config/sandbox.go).
   #
-  # Until deploy#1175 this key was defined in NO values file, so the `with`
-  # was a silent no-op: the daemon never learned Setec's address/tenant/mTLS
-  # and SANDBOXED dispatch was dead even where the Setec stack was up (staging).
-  # This default defines the seam so it is discoverable and overridable; it
-  # ships DISABLED because kind cannot run microVMs and prod keeps Setec off.
-  #
-  # WHICH TRUST ROOT OWNS daemon→setec — RESOLVED (deploy#1106)
-  #
-  # cert-manager, file-based, the same chain that already signs the frontend's
-  # serving cert. Not SPIRE. deploy#1175 left this open and the chart carried
-  # both answers at once: config.SandboxConfig's mTLS is FILE-based
-  # (cert_file/key_file/ca_file, os.Stat-validated at startup) while
-  # templates/gibson/statefulset.yaml set SETEC_FRONTEND_ADDRESS and
-  # SETEC_MTLS_SPIFFE_ID describing a SPIFFE-workload-API scheme — and mounted
-  # no Secret for either. The SPIFFE env vars were read by NO gibson code;
-  # they are deleted.
-  #
-  # The decision was not a coin flip. Neither end implements SPIFFE on this
-  # leg: setec's frontend takes --tls-cert/--tls-key/--tls-client-ca file
-  # paths, and gibson's adapter builds a component.TLSConfig and hands it to
-  # credentials.NewTLS. Picking SPIFFE meant new code in setec (an OSS repo)
-  # for a leg places no tenancy boundary on — setec is
-  # tenancy-unaware; the boundary it owns is untrusted-code execution.
-  #
-  # AN OVERLAY SETS NOTHING HERE. The daemon always dials setec, and it
-  # sends the tenant in each request (D5, gibson#756). The address, the TLS serverName and the three cert paths are all
-  # derived from `setec.*` in templates/_helpers.tpl, because restating them
-  # is a chance to disagree with the subchart and a disagreement produces no
-  # render error — only a dial timeout or a handshake failure at the first
-  # sandboxed tool call, hours later, in gibson's logs, looking like a setec
-  # fault. Each field below still accepts an explicit override for an
-  # out-of-chart frontend.
+  # The daemon always dials setec and sends the tenant in each request (D5,
+  # gibson#756): there is no enabled switch and no fixed tenant. It dials with
+  # its own SVID from the SPIRE Workload API and accepts only the SPIFFE ID
+  # of the fleet (ADR-0142, gibson#756 item 11); no certificate file is read
+  # on this leg. The address and the fleet ID are DERIVED from `setec.*` and
+  # global.spire.trustDomain in templates/_helpers.tpl, because restating
+  # them is a chance to disagree with the subchart and a disagreement
+  # produces no render error — only a dial timeout or a handshake failure
+  # at the first sandboxed tool call, hours later, in gibson's logs, looking
+  # like a setec fault. Each field below still accepts an explicit override
+  # for a fleet this chart does not install (setec.enabled=false, ADR-0087).
   #
   # gibson.validateSetecDispatch rejects a render without a running
   # in-chart frontend.
   sandbox:
     setec:
-      # address is the in-cluster Setec frontend, host:port. Empty derives
+      # address is the setec frontend, host:port. Empty derives
       # <frontend>.<setec-namespace>.svc.cluster.local:<port> from setec.*.
       address: ""
+      # spiffeID is the SPIFFE ID of the fleet frontend, the one server the
+      # daemon accepts on this leg. Empty derives
+      # spiffe://<global.spire.trustDomain>/platform/setec-frontend, the ID
+      # that templates/spire-server/clusterspiffeids.yaml registers for the
+      # in-chart frontend. Set it only for a fleet in another trust domain.
+      spiffeID: ""
       # callTimeout bounds a single sandboxed tool call. Go duration string;
       # the daemon defaults empty to 5m.
       callTimeout: "5m"
@@ -617,31 +600,6 @@ gibson:
       # empty class defers to the cluster default and can silently downgrade
       # isolation, so the daemon defaults empty to `tool`.
       sandboxClass: "tool"
-      # clientSecretName is the release-namespace Secret the StatefulSet
-      # mounts. Materialised by templates/setec/daemon-client-secret.yaml —
-      # cert-manager mints setec-daemon-client-tls next to the frontend and
-      # ESO's kubernetes provider mirrors it here, because cert-manager
-      # cannot write a Secret across namespaces and a namespaced Issuer
-      # cannot sign across them either.
-      clientSecretName: "gibson-setec-client-tls"
-      # certRefreshInterval is how often ESO re-reads the source Secret.
-      # The cert is 90d with renewBefore 15d, so this only has to be small
-      # against fifteen days.
-      certRefreshInterval: "1h"
-      # mtlsMountPath is where that Secret lands in the daemon pod. A
-      # SIBLING of /etc/gibson, not a subpath: kubelet rejects a mount whose
-      # target is already occupied by another volume, and the `config`
-      # ConfigMap owns /etc/gibson (same reason the KEK is at
-      # /etc/gibson-kek).
-      mtlsMountPath: "/etc/gibson-setec-mtls"
-      # mtls paths and serverName. Empty derives them from mtlsMountPath and
-      # the frontend certificate's SANs; set them only for a frontend this
-      # chart does not provision.
-      mtls:
-        certFile: ""
-        keyFile: ""
-        caFile: ""
-        serverName: ""
 
   # ---------------------------------------------------------------------------
   # Provider catalogue hot-reload (spec: gibson#296)
@@ -2982,19 +2940,14 @@ reservedNames:
 # occupies it) — an always-on bill for what is supposed to be an idle-cost
 # pool. THEREFORE these MUST stay empty: the operator runs on the general
 # workload pool (matching the subchart's own documented default — "The
-# operator itself does not need Kata-capable Nodes"). Real Sandbox Pod
-# placement onto sandbox-host nodes is driven by two mechanisms that are NOT
-# this value:
-#   1. setec's chart templates/runtime-classes.yaml renders a
-#      `scheduling.nodeSelector: setec.zeroroot.ai/runtime.<backend>=true`
-#      requirement on each RuntimeClass; that label is written by the
-#      runtimeAgent DaemonSet (tolerates every taint, runs cluster-wide) once
-#      it probes KVM/Kata capability on a node.
-#   2. A cluster administrator's SandboxClass CR (api/v1alpha1 in
-#      zeroroot-ai/setec) sets `spec.nodeSelector` to additionally require
-#      `setec.zeroroot.ai/sandbox-host=true` on Sandboxes in that class — this
-#      chart does not render a default SandboxClass (setec.defaultClass.enabled
-#      is false); an operator provisions one out of band or via a future task.
+# operator itself does not need KVM nodes"). Real Sandbox Pod placement onto
+# fleet nodes is driven by two mechanisms that are NOT this value:
+#   1. Each launcher Pod asks for the device resources setec.zeroroot.ai/kvm
+#      and setec.zeroroot.ai/tun of the device plugin (setec#187), so the
+#      scheduler places it on a node that exposes /dev/kvm (ADR-0083).
+#   2. A SandboxClass (setec.sandboxClasses below) sets `spec.nodeSelector`
+#      to additionally require `setec.zeroroot.ai/sandbox-host=true` on the
+#      Sandboxes in that class.
 #
 # KNOWN GAP (tracked in zeroroot-ai/setec): neither
 # mechanism above adds a Pod-level `tolerations` entry, and SandboxClassSpec
@@ -3004,9 +2957,10 @@ reservedNames:
 # sufficient for an end-to-end Sandbox round-trip on staging until setec adds
 # Toleration support.
 setec:
-  # enabled flips the Setec subchart on. Production default is true so a
-  # fresh helm install brings up the SANDBOXED dispatch path. Kind/dev
-  # overlays that don't exercise SANDBOXED dispatch may set this to false.
+  # enabled flips the Setec subchart on. The daemon always dials a setec
+  # frontend (ADR-0142), so the seam selects whose fleet runs, never whether
+  # one runs (ADR-0087): off means the fleet is in another cluster and
+  # gibson.sandbox.setec.address names it.
   enabled: true
 
   # fullnameOverride pins the Setec subchart's object names to the CANONICAL
@@ -3014,240 +2968,110 @@ setec:
   # instead of the release-derived `<release>-setec` (`gibson-setec-…`).
   # The canonical name is baked into every consumer: setec's own dev env +
   # docs (`setec-frontend.setec-system.svc`), gibson's setec round-trip e2e
-  # (e2e-setec-roundtrip.yml asserts `svc setec-frontend` and the Go test
-  # defaults its TLS serverName to `setec-frontend.setec-system.svc`), the
-  # arc-runner RBAC in gitops envs/staging/manifests/arc-runners/rbac.yaml,
   # and this repo's setec runbooks (deploy#1084).
   fullnameOverride: "setec"
 
-  # kubectl image for the subchart's pre-upgrade runtime-check hook Job. The
-  # vendored chart's default (docker.io/bitnami/kubectl:1.29) was retired
-  # with the Bitnami public catalog and no longer pulls — the failed PreSync
-  # hook takes down the whole gibson Argo sync (deploy#1113). Pin the public
-  # org mirror every other kubectl-running pod in this chart already uses.
-  kubectl:
-    image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
-
-  # Operator + runtime-agent images: the vendored chart defaults both tags to
-  # .Chart.AppVersion, which setec CI has not always published (setec#131 —
-  # only main/sha tags exist), so a fresh install ImagePullBackOffs. Digest-
-  # pinned per deploy#789, same pattern as frontend.image below (deploy#1115).
-  #
-  # The chart renders two flags onto the operator that arrive with #157:
-  #   --reserved-cidrs     the address space no Sandbox may reach
-  #   --sandbox-resolvers  the DNS servers Sandbox Pods query
-  # A third, --namespace-baseline-deny (the reconcile-time namespace-wide
-  # default deny covering a namespace the chart could not enumerate at
-  # install time), also arrives with #157 but defaults to true in the
-  # binary, so the chart leaves it unset rather than restating the default.
-  # The operator parses its flags strictly: it exits at startup on an
-  # unrecognised flag rather than ignoring it, so a digest predating those
-  # flags does not merely miss the behaviour — it crashloops.
-  #
-  # Pinned to setec v0.109.0. Three breaking releases are folded in here, and
-  # the pin must not move backwards past any of them:
-  #
-  # v0.107.0 (setec#157) implemented --namespace-baseline-deny and the
-  # host-scoped egress allow-list, which are the flags rendered above.
-  # NetworkMode stopped accepting `full`, Network.mode began defaulting to
-  # `none` rather than unrestricted egress, and `defaultClass` was replaced
-  # by `sandboxClasses`. Unrestricted-by-default was the defect.
-  #
-  # v0.108.0 (setec#163-#166) adds the two ValidatingAdmissionPolicies that
-  # make the namespace default-deny load-bearing rather than decorative:
-  # sandboxHostGuard denies hostNetwork/hostPID/hostIPC/hostPath/hostPort
-  # and privileged Pods in Sandbox namespaces (a hostNetwork Pod runs in the
-  # node's network namespace, where NetworkPolicy is not enforced at all, so
-  # the baseline selects it and confines nothing), and runtimeAgent.nodeGuard
-  # constrains what the runtime-agent's ServiceAccount may write to a Node.
-  # Both need Kubernetes 1.30+; the chart's kubeVersion floor moved to match.
-  #
-  # v0.109.0 (0005/0007, setec#187-#194) adds the portable node
-  # installer DaemonSet, the Phase 3 snapshot/pre-warm/session-checkpoint
-  # machinery (all OFF by default), and THREE new images the old pin set did
-  # not cover: setec-node-agent (nodeAgent DaemonSet), setec-installer
-  # (installer DaemonSet), and setec-guest-agent. Only the first two are
-  # pulled by this chart (nodeAgent.image, installer.image below);
-  # setec-guest-agent is a payload BAKED INTO guest rootfs images, not a
-  # workload this chart deploys, so it carries no chart-level digest pin.
-  # The installer is disabled in the staging/prod overlays (kata node-prep is
-  # kata-deploy/baked-AMI owned there — deploy#1083); its default-on posture
-  # is for self-hosted/plain clusters.
-  #
-  # v0.113.0 (setec#373, deploy#1756) adds SandboxClass.spec.requests, the
-  # scheduler reservation declared separately from the Sandbox's limits. The
-  # OPERATOR is what writes min(request, limit) onto the Pod, so the image pin
-  # and the vendored chart (the setec chart, whose CRD carries the field)
-  # move together: a 0.113.0 CRD over a 0.111.0 operator accepts the block
-  # and ignores it, and an idle bank member reserves its whole limit again.
-  # The setec images follow the setec chart version above, by hand: no
-  # version-link fans a setec release into this file. A chart ahead of its
-  # operator image hands the operator a flag it does not know and it
-  # crash-loops at boot (0.115.0's --session-keepalive-image against the
-  # sha-cc37bdb operator, gibson run 35472500731). Bump the six pins with
-  # the chart: setec, runtime-agent, node-agent, installer, frontend,
-  # keepalive. Digests from
+  # ---------------------------------------------------------------------
+  # IMAGES (six). The setec images follow the setec chart version in
+  # Chart.yaml, by hand: no version-link fans a setec release into this
+  # file. A chart ahead of its operator image hands the operator a flag it
+  # does not know and it crash-loops at boot (0.115.0, gibson run
+  # 35472500731). Move the chart and the six pins together: setec,
+  # setec-launcher, setec-disk-builder, setec-device-plugin,
+  # setec-node-agent, setec-frontend. Digests from
   #   gh api orgs/zeroroot-ai/packages/container/<pkg>/versions
   # for the entry tagged v<chart version>.
+  #
+  # setec has one isolation backend since v0.121.0 (setec#198, ADR-0166):
+  # each Sandbox is a Firecracker machine in a launcher Pod that is not
+  # privileged. The runtime classes, the node installer, the runtime agent
+  # and the keepalive image of the older backends are gone with it.
+  # ---------------------------------------------------------------------
   image:
     repository: ghcr.io/zeroroot-ai/setec
-    tag: "v0.120.0@sha256:fefbcfb2888f949dbcedbb95016ce9e926a664bc6c384cad4af4ad836e58e310"
-  # sessionKeepalive is the image the operator injects into a session
-  # Sandbox with no spec.command (setec#7). It is an operator argument, not
-  # a container in this chart, so the render-based image guards never see
-  # it: pin it here by digest like the others.
-  sessionKeepalive:
-    image:
-      repository: ghcr.io/zeroroot-ai/setec-keepalive
-      tag: "v0.120.0@sha256:69d8e81a4a81eeebd3452ea3753d25d3164a307258e45285c44b4c77457123e1"
-  runtimeAgent:
-    image:
-      repository: ghcr.io/zeroroot-ai/setec-runtime-agent
-      tag: "v0.120.0@sha256:e528420b1cfdb3bedb10c8c7fa4166a08c46e837f2df0a00c8b7fbe4f49c69b4"
-    # Published runtime-agent images are amd64-only (setec#132): without this
-    # constraint the tolerate-everything DaemonSet ImagePullBackOffs forever
-    # on arm64 (Graviton system) nodes and the release never converges. Drop
-    # once multi-arch images ship. Arch-excluded nodes can't host Kata
-    # sandboxes anyway, so the operator's capability view loses nothing.
-    nodeSelector:
-      kubernetes.io/arch: amd64
+    tag: "v0.126.0@sha256:bffd1a4f5228510d0061571179856a864d52d41b6cee86c34ff215c9a15f88c6"
 
-  # nodeAgent — the DaemonSet that manages the devicemapper thin-pool,
-  # samples fill state, and (with Phase 3 on) runs the snapshot/checkpoint
-  # node-side workers. Ships DISABLED by default (nodeAgent.enabled=false in
-  # the subchart) and stays off in every overlay here — the Phase 3 features
-  # it backs (snapshots, pre-warm pools, session checkpoints) are all opt-in
-  # and none are enabled in this batch. Digest-pinned regardless so an
-  # overlay that later flips it on inherits an immutable ref rather than a
-  # floating .Chart.AppVersion tag. New image at v0.109.0.
-  # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/setec-node-agent/versions
+  # launcher is the one runtime. The launcher image holds Firecracker, the
+  # guest kernel and the guest agent. The disk builder runs as a Job in the
+  # operator namespace before the first launcher Pod of an image digest and
+  # pushes the signed disk to diskRepo; each launcher Pod mounts that disk as
+  # an image volume (Kubernetes 1.35 or later), so the kubelet pulls it with
+  # the image credentials of the node.
+  launcher:
+    image:
+      repository: ghcr.io/zeroroot-ai/setec-launcher
+      tag: "v0.126.0@sha256:ce9ec3058354c19b9f4ed5fb6eb39086ede51ceb13d31f97adcebbc334f1da0f"
+    # diskRepo is the registry repository of the signed image disks.
+    # REQUIRED, and install-specific: the setec chart fails the render when
+    # it is empty. The install reads it from substrate.env (SETEC_DISK_REPO,
+    # scripts/baseline-up.sh); a hosted environment sets it in its overlay.
+    diskRepo: ""
+    diskBuilder:
+      image:
+        repository: ghcr.io/zeroroot-ai/setec-disk-builder
+        tag: "v0.126.0@sha256:347e0008fb781d472b030c28d643ced8b2dcdcbbad6dd5f11b0aef1dc4848b02"
+      # signingSecret names the Secret in the setec namespace that holds the
+      # base64 ed25519 seed (key `seed`) that signs each disk. The seed is
+      # the keyring member SETEC_DISK_SIGNING_SEED (scripts/keyring.sh): the
+      # bringup writes it into bringup-keyring, the OpenBao seeder stores it
+      # at secret/data/setec-disk-signing (files/openbao-seed-keys.txt), and
+      # templates/setec/disk-signing-externalsecret.yaml renders it here.
+      signingSecret: "setec-disk-signing"
+      # publicKeys are the base64 ed25519 public keys of the seed. Each
+      # launcher refuses a disk that none of them signed. REQUIRED: the
+      # setec chart fails the render when the list is empty. The install
+      # derives the key from the keyring seed (scripts/baseline-up.sh) and
+      # sets it; list two while the seed rotates.
+      publicKeys: []
+
+  # devicePlugin offers /dev/kvm and /dev/net/tun of each fleet node to the
+  # launcher Pods as the resources setec.zeroroot.ai/kvm and
+  # setec.zeroroot.ai/tun (setec#187), so a launcher Pod is not privileged.
+  # Each fleet node must expose /dev/kvm (ADR-0083).
+  devicePlugin:
+    image:
+      repository: ghcr.io/zeroroot-ai/setec-device-plugin
+      tag: "v0.126.0@sha256:46d5d2b6393e88e6c2d418c36fa018fdff7f817da1240e3ef5268809151f97c9"
+
+  # nodeAgent — the DaemonSet that snapshots, restores, pauses and resumes
+  # the Firecracker machine of each launcher Pod on its node. Ships DISABLED
+  # by default (nodeAgent.enabled=false in the subchart) and stays off here:
+  # snapshots and the warm pool are opt-in. Digest-pinned regardless so an
+  # overlay that flips it on inherits an immutable ref rather than a
+  # floating .Chart.AppVersion tag.
   nodeAgent:
     image:
       repository: ghcr.io/zeroroot-ai/setec-node-agent
-      tag: "v0.120.0@sha256:32699d014ac834fdbe0a55640473dabff24fb2538026a7fb088431d8566a4868"
+      tag: "v0.126.0@sha256:931ab4d0927a8f26a01fb42f75b3d05051130e2e964f63f9d052e5acd0333de6"
 
-  # installer — the portable node-prep DaemonSet (setec#187). It
-  # lays the bundled Kata+Firecracker release onto any x86 KVM node and
-  # provisions the containerd devmapper thin-pool. The subchart defaults it
-  # ON (self-hosted/plain clusters have no other node-prep path), but the
-  # staging/prod overlays DISABLE it: there Kata node-prep is owned by
-  # kata-deploy + the baked AMI (deploy#1083), and two owners of node-prep
-  # conflict. The installer is idempotent and ownership-aware, but disabling
-  # it explicitly there keeps the ownership boundary legible. Digest-pinned;
-  # new image at v0.109.0.
-  # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/setec-installer/versions
-  installer:
-    # Deliberate base default, matching the subchart's own default (deploy#1445):
-    # ON wherever no other node-prep owner exists (kind/self-hosted). The AWS
-    # overlays set false — there node-prep is owned by kata-deploy + the baked
-    # AMI (deploy#1083) and two owners conflict. Documented one-code-path
-    # exception: this gates a node-prep MECHANISM with two mutually exclusive
-    # owners, not an optional service.
-    enabled: true
-    image:
-      repository: ghcr.io/zeroroot-ai/setec-installer
-      tag: "v0.120.0@sha256:af2e14587bc1d33dc4c4fd40ae7e66cd570b4608b8d2f5c63cc2a9f6e7005528"
+  # credentials: setec has one credential source, the SPIFFE Workload API
+  # (ADR-0142). The frontend serves its X509-SVID from the socket and the
+  # daemon dials with its own SVID; no PEM file exists on either end. The
+  # socket is the one the SPIRE agent of this chart exposes on each node
+  # (spire.agent, hostPath /run/spire/agent-sockets). The trust domain is
+  # global.spire.trustDomain, which the subchart reads (ADR-0164).
+  credentials:
+    spiffe:
+      socketPath: /run/spire/agent-sockets/spire-agent.sock
 
-  # ---------------------------------------------------------------------
-  # ISOLATION BACKENDS (deploy#1105)
-  #
-  # runtimes declares which isolation backends this cluster has. A backend
-  # that is not enabled here does not exist as far as setec is concerned:
-  # no RuntimeClass is rendered for it (templates/runtime-classes.yaml
-  # ranges over enabled+install) and the admission webhook REJECTS any
-  # SandboxClass naming it. So a disabled backend is not a slow path — it
-  # is a launch that never happens.
-  #
-  # Three backends are enabled: the two microVM backends, and gvisor
-  # (userspace kernel) for the `agent` SandboxClass below. runc (namespaces
-  # only) stays off: it is weaker than each of them, and nothing here needs it.
-  #
-  # WHY kata-qemu IS ON
-  #
-  # The subchart ships it disabled, and until deploy#1105 this chart took
-  # that default. The consequence was invisible at render time and fatal at
-  # dispatch: staging got a kata-fc RuntimeClass and nothing else, while
-  # gibson's e2e-setec-roundtrip creates a `backend: kata-qemu` SandboxClass
-  # — kata-fc is the flaky one under load (setec#86), so kata-qemu is the
-  # backend the round-trip deliberately asks for. The webhook rejected the
-  # class, and the failure read as a setec bug rather than a values gap.
-  # It also made eks/gibson/karpenter.tf's stated
-  # assumption ("the setec Helm chart already renders its own
-  # kata-fc/kata-qemu RuntimeClass objects") false for half of it.
-  #
-  # Enabling a backend is not the same as using one: the SandboxClasses
-  # below still name kata-fc, and defaults.runtime.backend below is still
-  # kata-fc. This makes kata-qemu AVAILABLE to a class that asks for it.
-  #
-  # NODE SIDE — kata-deploy 3.2.0 (karpenter.tf) installs the shim set
-  # "clh dragonball fc qemu …", so the qemu handler is already on every
-  # setec-metal node; it does NOT need a second kata-deploy rollout. It
-  # also runs with CREATE_RUNTIMECLASSES=false and the manifest Terraform
-  # fetches (kata-deploy/base/kata-deploy.yaml) carries no RuntimeClass
-  # document at all, so there is no Helm-vs-Terraform ownership fight over
-  # the objects rendered here. The RuntimeClass schedules via
-  # setec.zeroroot.ai/runtime.kata-qemu=true, which the runtime-agent
-  # DaemonSet writes when it probes a node and finds the handler.
-  #
-  # ON THE `overhead` MATCH, WHICH DOES NOT APPLY HERE: Kubernetes'
-  # RuntimeClass admission rejects a Pod whose .spec.overhead differs from
-  # the RuntimeClass's .overhead.podFixed — but ONLY when the RuntimeClass
-  # declares one, and setec's runtime-classes.yaml declares none (verified
-  # against the vendored template and setec upstream at v0.108.0). The
-  # operator stamps defaultOverhead onto the Pod and admission leaves it
-  # alone. defaultOverhead is therefore a scheduling reservation only, and
-  # kata-qemu's is stated equal to kata-fc's because the chart default is,
-  # not because QEMU is as cheap as Firecracker — revisit if metal nodes
-  # start evicting.
-  # scheduling.tolerations (setec v0.111.0, setec#306) are published on the
-  # rendered RuntimeClass and injected by the RuntimeClass admission
-  # controller into every Pod naming it — including per-run SandboxClasses
-  # gibson's e2e-setec-roundtrip harness creates, which no other chart value
-  # can reach. Required here: the setec-metal Karpenter NodePool
-  # (eks/gibson/karpenter.tf, gibson#696) is tainted
-  # setec.zeroroot.ai/sandbox-host=true:NoSchedule to keep everything but
-  # sandbox work off ~$4/hr metal, and without a
-  # matching toleration the RuntimeClass nodeSelector steers the Sandbox Pod
-  # at a node it is then forbidden to land on — it waits forever. Both
-  # backends need it: both kata shims are installed on setec-metal and both
-  # NodePool labels are declared (runtimes.kata-fc/kata-qemu.enabled above).
-  # value MUST be the quoted string "true" — Toleration.value is a string
-  # field and an unquoted YAML boolean is rejected by the API server.
-  runtimes:
-    kata-fc:
-      enabled: true
-      scheduling:
-        tolerations:
-          - key: setec.zeroroot.ai/sandbox-host
-            operator: Equal
-            value: "true"
-            effect: NoSchedule
-    kata-qemu:
-      enabled: true
-      scheduling:
-        tolerations:
-          - key: setec.zeroroot.ai/sandbox-host
-            operator: Equal
-            value: "true"
-            effect: NoSchedule
-    # gvisor — the AGENT posture (epic gibson#1593). User-space kernel
-    # (handler runsc): contains a code-execution escape without KVM, so it
-    # runs on ordinary nodes — no bare-metal/nested-virt tax the kata
-    # backends need. Default backend for the `agent` SandboxClass below.
-    gvisor:
-      enabled: true
-      scheduling:
-        tolerations:
-          - key: setec.zeroroot.ai/sandbox-host
-            operator: Equal
-            value: "true"
-            effect: NoSchedule
+  # systemPolicy is the network policy of the setec namespace, rendered by
+  # the subchart (D76): one default deny for every Pod of the namespace and
+  # one allow for each component. frontendCallers are the only Pods that
+  # reach the frontend gRPC port: the daemon of this release. The entry
+  # names the release namespace as a literal, because a subchart value
+  # cannot read .Release.Namespace; gibson.validateSetecDispatch fails the
+  # render when the entry and the release namespace disagree.
+  systemPolicy:
+    frontendCallers:
+      - namespace: gibson
+        podLabels:
+          app.kubernetes.io/component: daemon
 
   # ---------------------------------------------------------------------
   # SANDBOX CONTAINMENT
   #
-  # Sandboxes run untrusted code. The three keys below decide whether that
-  # is confined, and every one of them renders fine when wrong — so
+  # Sandboxes run untrusted code. The keys below decide whether that is
+  # confined, and every one of them renders fine when wrong — so
   # gibson.validateSetecContainment in templates/_validators.tpl fails the
   # render rather than letting a quiet flip through.
   # ---------------------------------------------------------------------
@@ -3295,8 +3119,8 @@ setec:
       - 8.8.8.8
 
   # webhook turns on the validating admission webhook. Without it a
-  # SandboxClass's allowedNetworkModes, the runc dev-only gate and the
-  # tenant-label check render but never bind.
+  # SandboxClass's allowedNetworkModes and the tenant-label check render
+  # but never bind.
   #
   # failurePolicy stays Fail: Ignore admits a Sandbox unchecked exactly
   # when the operator is unreachable, which is when a bypass matters. The
@@ -3319,7 +3143,8 @@ setec:
 
   # sandboxClasses are the classes tenants launch against. A Sandbox that
   # names no class resolves to the one marked default, and a Sandbox that
-  # declares no spec.network inherits that class's defaultNetworkMode.
+  # declares no spec.network inherits that class's defaultNetworkMode. No
+  # class names a backend: the launcher is the one runtime (ADR-0166).
   sandboxClasses:
     enabled: true
     classes:
@@ -3328,8 +3153,6 @@ setec:
       # product) and nothing inside reservedCIDRs.
       - name: tool
         spec:
-          runtime:
-            backend: kata-fc
           maxResources:
             vcpu: 8
             memory: 16Gi
@@ -3347,8 +3170,6 @@ setec:
       # a stated reason, never as a default.
       - name: connector
         spec:
-          runtime:
-            backend: kata-fc
           maxResources:
             vcpu: 4
             memory: 8Gi
@@ -3359,13 +3180,10 @@ setec:
           egressExemptCIDRs: []
 
       # agent — the coding-agent posture (epic gibson#1593), and the class
-      # an always-on bank member runs in (gibson#1706). Runs a
-      # coding agent that executes arbitrary tool code. Backend gvisor by
-      # owner decision: real escape containment at container cost, no
-      # metal. Raise a tenant tier to kata-fc later by overriding this
-      # backend. external-only + reservedCIDRs = open web (the model
-      # providers, the sign-in flow) but nothing in private space or
-      # another tenant.
+      # an always-on bank member runs in (gibson#1706). Runs a coding agent
+      # that executes arbitrary tool code. external-only + reservedCIDRs =
+      # open web (the model providers, the sign-in flow) but nothing in
+      # private space or another tenant.
       #
       # A member stays up for weeks and idles most of that time, so it
       # RESERVES a small slice of a node and bursts to its ceiling:
@@ -3382,8 +3200,6 @@ setec:
       # (helm/gibson/values-baseline.yaml) restates the class list.
       - name: agent
         spec:
-          runtime:
-            backend: gvisor
           requests:
             cpu: 250m
             memory: 768Mi
@@ -3397,8 +3213,12 @@ setec:
             - none
           egressExemptCIDRs: []
 
-  # sandboxNamespaces names the namespaces Sandboxes run in. It is one
-  # decision with two effects, both rendered by the subchart:
+  # sandboxNamespaces names the namespaces that hold Sandboxes made by a
+  # route other than the frontend. The frontend makes one namespace for each
+  # pair of enrolled client and tenant on the first call of the pair
+  # (setec#207), with the host guard, the default deny and its two
+  # RoleBindings. Naming a namespace here is one decision with two effects,
+  # both rendered by the subchart:
   #
   #   1. A namespace-wide default-deny NetworkPolicy — podSelector: {},
   #      every Pod, not only labelled Sandbox Pods. The per-Sandbox
@@ -3412,7 +3232,7 @@ setec:
   #      `pods: create` is a cluster-admin path on its own. Reads stay
   #      cluster-wide for the controller-runtime cache.
   #
-  # An empty list now fails the render (see rbac below), so this is not a
+  # An empty list fails the render (see rbac below), so this is not a
   # value that can be quietly left unset.
   #
   # WHY A DEDICATED NAMESPACE, AND NOT THE GIBSON TENANT NAMESPACE
@@ -3429,11 +3249,6 @@ setec:
   # gibson's job, not the sandbox namespace's.
   #
   # The namespace itself is rendered by templates/setec/sandbox-namespace.yaml.
-  #
-  # Placement into this namespace is fixed-routing: frontend.sandboxNamespace
-  # below (setec#158, v0.110.0) renders --sandbox-namespace so every Sandbox
-  # the frontend creates lands here. A Sandbox aimed at a namespace not
-  # listed here gets Forbidden on the Pod create — loud and fail-closed.
   sandboxNamespaces:
     - setec-sandboxes
 
@@ -3449,65 +3264,34 @@ setec:
 
   # multiTenancy stays off (the subchart default is false; stated here for
   # the record). It makes the operator reject a Sandbox whose NAMESPACE does
-  # not carry a per-tenant label. Sandboxes share one namespace by design —
-  # see the note above — so that namespace carries no per-tenant
-  # label, and turning this on would reject every Sandbox rather than
-  # confine anything. Tenant scoping is the frontend's mTLS peer identity,
-  # not a namespace label.
+  # not carry a per-tenant label. The frontend scopes each Sandbox by the
+  # pair of client and tenant in its own namespace, so the label check
+  # would reject every Sandbox rather than confine anything.
   multiTenancy:
     enabled: false
 
   # namespace both feeds the subchart (where its Deployment/Service/SA
-  # render) and lets THIS chart's templates (templates/setec/frontend-tls.yaml)
-  # target the same namespace. Matches the subchart default.
+  # render) and lets THIS chart's templates (templates/setec/) target the
+  # same namespace. Matches the subchart default.
   namespace: "setec-system"
   # The umbrella owns the namespace: nothing else creates setec-system in an
   # Argo-managed env (Argo's CreateNamespace only covers the destination
   # namespace, `gibson`), so the subchart's Namespace object must render.
   createNamespace: true
 
-  # tier names the operating mode. Only "production" is supported; "demo"
-  # is rejected at render time by gibson.validateSetecTier (deprecated on
-  # arrival per design deviation: a single real-KVM tier on spot bare-metal
-  # is cheap enough — the user explicitly accepted ~$200-300/mo for AWS
-  # spot bare-metal — and a stub-mode tier would weaken NFR-S1).
+  # tier names the operating mode, read by the daemon as the metrics label
+  # GIBSON_SETEC_TIER. Only "production" is supported; "demo" is rejected
+  # at render time by gibson.validateSetecTier.
   tier: production
 
-  # kvm.required removed 2026-05-10 along with the daemon-side
-  # GIBSON_SETEC_KVM_REQUIRED gate. KVM device-plugin scheduling is
-  # configured directly on Setec's subchart values (e.g. via
-  # setec.frontend.resources.requests."devices.kubevirt.io/kvm") if
-  # operators want the constraint.
-
-  # nodeSelector / tolerations MUST stay empty — see the COST GUARD note
-  # above. They map onto the Setec operator Deployment's own Pod spec, not
-  # onto Sandbox Pods, and pinning the operator to the tainted sandbox-host
-  # taint would keep the scale-to-zero metal NodePool permanently alive.
+  # nodeSelector / tolerations MUST stay empty. They map onto the Setec
+  # operator Deployment's own Pod spec, not onto Sandbox Pods, and pinning
+  # the operator to the tainted sandbox-host taint would keep the
+  # scale-to-zero metal NodePool permanently alive.
   # gibson.validateSetecTier fails the render if either is set non-empty.
   nodeSelector: {}
 
   tolerations: []
-
-  # spotEvictionFallback controls the cluster-autoscaler 1:5 on-demand
-  # fallback ratio per design §"EKS sandbox-host node-group spec".
-  # AWS sends a 2-minute spot-interruption notice. The
-  # aws-node-termination-handler on the node reads it from the instance
-  # metadata and cordons and drains the node. The chart runs no handler of
-  # its own (charts#394).
-  spotEvictionFallback:
-    # enabled toggles the aws-node-termination-handler DaemonSet (Task 47)
-    # and the cluster-autoscaler priority-expander config (Task 50).
-    enabled: true
-    # onDemandRatio is the steady-state on-demand:spot ratio the cluster
-    # autoscaler targets once spot-pool size > 5. 0.2 == 1:5.
-    onDemandRatio: 0.2
-    # onDemandMin is the always-on baseline. The first sandbox-host node
-    # is always on-demand so a single spot eviction is never user-visible.
-    onDemandMin: 1
-    # onDemandMax caps the on-demand ASG so an eviction storm cannot run
-    # away on cost. docs/runbooks/alerts/sandbox.md (SandboxSpotEvictionStorm)
-    # says when to raise it.
-    onDemandMax: 2
 
   # frontendService overrides the in-cluster service name the daemon uses
   # to dial Setec. Defaults match the upstream Setec chart's
@@ -3521,69 +3305,24 @@ setec:
     # frontend.servicePort default.
     port: 50051
 
-  # Setec quota removed 2026-05-10 (operator decision: unlimited usage).
-  # The maxConcurrentDetonations / maxDetonationsPerHour caps and the
-  # GIBSON_SETEC_MAX_CONCURRENT_DETONATIONS env var were dropped along
-  # with the entire core/gibson/internal/sandbox/quota package.
-
-  # Subchart override — passed to the Setec subchart's values via the
-  # parent's matching `setec:` key (standard Helm subchart convention).
-  # Keep minimal: pin the frontend image and replicas; pass through
-  # nodeSelector/tolerations from above (already at the top level of the
-  # `setec:` block, which the subchart inherits). The Setec chart owns
-  # its own defaults for runtime classes, runtimes ConfigMap, daemonsets,
-  # etc.
-  #
-  # frontend.enabled defaults to FALSE so overlays opt in per environment
-  # (staging flipped it on in gitops envs/staging/values.yaml, deploy#1084).
-  # When enabled, the mTLS Secrets named below are materialised by the
-  # cert-manager Certificates in templates/setec/frontend-tls.yaml.
+  # frontend is the gRPC SandboxService the daemon dials. It is on: the
+  # daemon always dials a frontend (ADR-0142), and
+  # gibson.validateSetecDispatch fails a render with it off. Its identity
+  # is the SVID that templates/spire-server/clusterspiffeids.yaml registers
+  # for it (spiffe://<trust domain>/platform/setec-frontend); the daemon
+  # accepts no other server on this leg.
   frontend:
-    enabled: false
+    enabled: true
     replicas: 1
     image:
       repository: ghcr.io/zeroroot-ai/setec-frontend
-      # deploy#789: digest-pinned for staging/prod immutability.
-      # frontend.enabled=false in every overlay (no sandbox-host nodes at the
-      # floor tier), so this never renders today — but the staging/prod values
-      # surface must still carry an immutable ref. Pinned to the same
-      # v0.113.0 release build as the operator and runtime-agent above, so
-      # the setec images never skew across a breaking release.
-      # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/setec-frontend/versions
-      tag: "v0.120.0@sha256:dc858250cab7e3f01f6a19b62d553ebe5d3f111fe191787eeac6bb710609bb2a"
+      tag: "v0.126.0@sha256:17fa719fe3ea696b3337c27d5d391b2ae685297f42614f2360b1cbfbe7b3fa21"
       pullPolicy: IfNotPresent
-    # sandboxNamespace (setec#158, chart v0.110.0) renders --sandbox-namespace
-    # onto the frontend: every Sandbox lands in this one fixed namespace
-    # instead of the per-tenant label resolution (which never matched — the
-    # frontend's label key is setec.zeroroot.ai/tenant while gibson's
-    # tenant-operator writes gibson.zeroroot.ai/tenant, so CreateSandbox
-    # always failed). Correct here : the frontend's only caller
-    # is the single trusted gibson platform, and setec is tenancy-unaware.
-    # MUST name a namespace listed in sandboxNamespaces above (the subchart
-    # fails the render otherwise); mutually exclusive with
-    # tenantNamespaceLabel.
-    sandboxNamespace: setec-sandboxes
-    # tlsCertSecretName / tlsClientCASecretName MUST be non-empty when
-    # frontend.enabled=true (the subchart hard-fails render otherwise).
-    # Both Secrets are materialised in the setec namespace by the
-    # cert-manager Certificates in templates/setec/frontend-tls.yaml
-    # (deploy#1084).
-    #
-    # tlsClientCASecretName deliberately points at the SAME Secret as the
-    # server cert: cert-manager writes the issuing CA into the secret's
-    # `ca.crt` key — the only key the frontend reads from its tls-ca
-    # mount — and the client certs it verifies (e.g.
-    # `setec-frontend-client-tls`, fetched by gibson's e2e-setec-roundtrip
-    # job) are signed by that same CA. Reusing the server Secret avoids
-    # mounting the CA *private key* Secret into the frontend pod.
-    tlsCertSecretName: "setec-frontend-tls"
-    tlsClientCASecretName: "setec-frontend-tls"
     # clients enrolls each Gibson cluster that may call the frontend
-    # (setec#233). The frontend refuses a caller whose certificate carries no
+    # (setec#233). The frontend refuses a caller whose SVID carries no
     # listed SPIFFE ID. spiffePath, not a full ID: the setec chart builds
     # spiffe://<global.spire.trustDomain>/<path>, so the ID follows the trust
-    # domain of the install (ADR-0164). The daemon client certificate
-    # (templates/setec/frontend-tls.yaml) carries the same ID as a URI SAN.
+    # domain of the install (ADR-0164). It is the ID of the daemon SVID.
     clients:
       - name: gibson
         spiffePath: platform/daemon

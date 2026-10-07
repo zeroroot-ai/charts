@@ -15,7 +15,7 @@ on a loaded 2-core runner /v1/sys/health did not answer inside it:
 A deadline, not a refusal. ESO's ClusterSecretStore is a sync hook, it could
 not build a client against an OpenBao that would not answer, Argo spent its
 five retries on that one task, and nothing behind it — the daemon included —
-was ever created. Three gibson exit tests failed at "Stand up the setec+gvisor
+was ever created. Three gibson exit tests failed at "Stand up the setec
 cluster" with no further detail (gibson exit-test-bank run 36922487157).
 
 So: every probe states its timeout. An explicit 1 is a fine answer. The point

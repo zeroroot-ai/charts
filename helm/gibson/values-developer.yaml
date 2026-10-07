@@ -119,9 +119,9 @@ gibson-workloads:
   # Two tenants stand on the runner during the loop: the bringup's
   # tenant-primary and the one the exit test seeds. The budget guard counts
   # both. staging and production raise this tier in their environment values.
-  # setec — enabled in the sanctioned baseline profile (gvisor). Its operator
-  # (2 replicas for fail-closed admission), frontend and runtime-agent add
-  # ~305m / ~296Mi of REQUESTS the 2-core node cannot spare. Shrink the
+  # setec — enabled in the sanctioned baseline profile. Its operator
+  # (2 replicas for fail-closed admission) and frontend add REQUESTS the
+  # 2-core node cannot spare. Shrink the
   # scheduling reservations only; every pod still bursts to its limit, and a
   # sandbox's own resources come from the SandboxClass, not these.
   setec:
@@ -135,11 +135,6 @@ gibson-workloads:
         requests:
           cpu: 10m
           memory: 40Mi
-    runtimeAgent:
-      resources:
-        requests:
-          cpu: 5m
-          memory: 24Mi
 
 # The Zitadel login UI (umbrella key `zitadel.login`, a vendored subchart). It
 # gained a request in charts 0.135.0, where it had shipped `resources: {}` — no

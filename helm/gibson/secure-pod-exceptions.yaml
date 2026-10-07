@@ -19,6 +19,16 @@
 # chart renders no such pod. `created_by` names the rendered workload that
 # creates it. The guard fails when no render has that workload.
 runtime:
+  setec-launcher-net-admin:
+    rule: restricted
+    created_by: Deployment/setec-system/setec
+    reason: >-
+      Each sandbox is a Firecracker machine in a launcher Pod that the setec
+      operator creates at run time (ADR-0166). The launcher holds the one
+      capability NET_ADMIN for the tap device of the machine and asks for
+      /dev/kvm and /dev/net/tun as device resources, so it is not privileged
+      and mounts no host path (D46, ADR-0165 rule 1). The entry covers rule 1
+      only.
   catalog-connector-image:
     rule: image
     created_by: Deployment/gibson/gibson-connector-operator
@@ -33,18 +43,21 @@ pods:
   'Namespace/setec-system namespace-label':
     digest: c00f8736a37861fe
     reason: "Expected exception of ADR-0165: the setec node agent mounts host paths, so its namespace cannot enforce the restricted level."
-  'DaemonSet/setec-system/setec-runtime-agent network':
-    digest: 3afb0a06194f151f
-    reason: "The setec chart renders this pod in its own namespace and owns the policies of that namespace. The default deny of the release covers the release namespace only."
   'Deployment/setec-system/setec network':
-    digest: 3afb0a06194f151f
+    digest: 8e5fbbdfc80276c6
     reason: "The setec chart renders this pod in its own namespace and owns the policies of that namespace. The default deny of the release covers the release namespace only."
   'Deployment/setec-system/setec-frontend network':
-    digest: 3afb0a06194f151f
-    reason: "The setec chart renders this pod in its own namespace and owns the policies of that namespace. The default deny of the release covers the release namespace only."
-  'Job/setec-system/setec-preupgrade-runtime-check network':
-    digest: 3afb0a06194f151f
-    reason: "The setec chart renders this pod in its own namespace and owns the policies of that namespace. The default deny of the release covers the release namespace only."
+    digest: 8e5fbbdfc80276c6
+    reason: "The setec chart renders this pod in its own namespace and owns the policies of that namespace (D76): the frontend takes gRPC from the daemon of the release only."
+  'DaemonSet/setec-system/setec-device-plugin network':
+    digest: 8e5fbbdfc80276c6
+    reason: "The setec chart renders this pod in its own namespace and owns the policies of that namespace (D76): the device plugin talks to the kubelet over a unix socket and gets no network allow."
+  'DaemonSet/setec-system/setec-device-plugin restricted':
+    digest: 911a247752dfc384
+    reason: "Expected exception of ADR-0165: the KVM device plugin registers with the kubelet over the host device-plugins socket and opens /dev/kvm and /dev/net/tun of the node, so it runs as root with two host paths. It drops every capability and is not privileged; the launcher Pods it serves are not privileged (ADR-0166)."
+  'Deployment/setec-system/setec-frontend restricted':
+    digest: 1d5154f773b7fa50
+    reason: "Expected exception of ADR-0165: the frontend reads its X509-SVID from the SPIRE agent socket on the node (ADR-0142), a host path, the same way the SPIRE CSI driver of the release namespace does."
   'Pod/gibson/gibson-server-test-connection network':
     digest: 8e5fbbdfc80276c6
     reason: "An upstream SPIRE helm test pod. The upstream chart takes no pod labels for it, so the default deny of the release isolates it."
@@ -81,9 +94,6 @@ pods:
   'DaemonSet/gibson/node-agent restricted':
     digest: d6fc811bbe059e20
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
-  'DaemonSet/setec-system/setec-runtime-agent restricted':
-    digest: a09dad21976b3d3f
-    reason: "Expected exception of ADR-0165: the setec node agent installs the runtime on the node and mounts host paths."
   'Pod/gibson/gibson-openfga-test-connection restricted':
     digest: 964949eb904251bb
     reason: "An upstream OpenFGA helm test pod. The chart sets no security context for it and has no value for one."

@@ -265,35 +265,19 @@ gibson-workloads:
   ingress:
     enabled: false
   # ---------------------------------------------------------------------------
-  # Setec sandbox runtime — the SANCTIONED kind profile. There is
-  # exactly ONE sanctioned kind shape and this is it: setec ON, gvisor the one
-  # backend. gvisor is a userspace kernel (runsc) — real escape containment, no
-  # /dev/kvm and no metal nodes, ~40MiB overhead. EKS runs the high-assurance
-  # kata profile instead (values-eks.yaml). There is no setec-off variant.
+  # Setec sandbox runtime — the SANCTIONED profile. There is exactly ONE
+  # sanctioned shape and this is it: setec ON, the launcher the one runtime
+  # (ADR-0166). Each sandbox is a Firecracker machine in a launcher Pod that
+  # is not privileged; the device plugin hands /dev/kvm to it, so each fleet
+  # node must expose /dev/kvm (ADR-0083). There is no setec-off variant.
   #
-  # NODE PREP: gvisor needs the runsc binary + a containerd runtime handler on
-  # the node. Unlike kata, the setec installer does NOT lay gvisor down, so the
-  # bring-up does it (scripts/baseline-up.sh: install runsc + a containerd
-  # config drop-in registering runsc under the containerd 2.x plugin path
-  # `io.containerd.cri.v1.runtime`). installer.enabled is therefore false —
-  # there is no kata payload to lay.
+  # INSTALL INPUTS: setec.launcher.diskRepo and
+  # setec.launcher.diskBuilder.publicKeys are install-specific and have no
+  # default. scripts/baseline-up.sh sets them from substrate.env
+  # (SETEC_DISK_REPO) and from the keyring seed SETEC_DISK_SIGNING_SEED; the
+  # golden render takes them from helm/testdata/render-inputs/gibson.yaml.
   setec:
     enabled: true
-    # Kata node-prep DaemonSet — OFF. gvisor is the only backend and its
-    # node-prep is done by the bring-up, not this installer.
-    installer:
-      enabled: false
-    # The gRPC frontend the daemon dials to launch sandboxes (mTLS on :50051).
-    # Required for tool and platform-agent dispatch. TLS secret names default
-    # to setec-frontend-tls (minted by templates/setec/frontend-tls.yaml).
-    frontend:
-      enabled: true
-    # The runtime-agent must READ the node's containerd config to verify runsc
-    # before it advertises setec.zeroroot.ai/runtime.gvisor=true. Mount it
-    # read-only; without this the node stays gvisor=false and no Sandbox
-    # schedules.
-    runtimeAgent:
-      mountContainerdConfig: true
     webhook:
       enabled: true
       failurePolicy: Fail
@@ -302,19 +286,6 @@ gibson-workloads:
         issuerRef:
           kind: ClusterIssuer
           name: setec-webhook-selfsigned
-    # gvisor is the default and only enabled microVM-alternative backend.
-    defaults:
-      runtime:
-        backend: gvisor
-    runtimes:
-      kata-fc:
-        enabled: false
-      kata-qemu:
-        enabled: false
-      gvisor:
-        enabled: true
-      runc:
-        enabled: true
     netpol:
       reservedCIDRs:
         - 10.0.0.0/8
@@ -324,11 +295,6 @@ gibson-workloads:
         - 100.64.0.0/10
         - 127.0.0.0/8
         - 224.0.0.0/4
-        # IPv6: a reserved prefix subtracts only from a block of its own
-        # family, so a list with no IPv6 entry leaves every IPv6
-        # destination unrestricted. setec 0.115.0 refuses to render
-        # without one. This list overrides the subchart's whole list, so
-        # the entries live here too.
         - "::1/128"
         - fc00::/7
         - fe80::/10
@@ -341,8 +307,6 @@ gibson-workloads:
       classes:
         - name: tool
           spec:
-            runtime:
-              backend: gvisor
             maxResources:
               vcpu: 4
               memory: 8Gi
@@ -354,8 +318,6 @@ gibson-workloads:
             default: true
         - name: connector
           spec:
-            runtime:
-              backend: gvisor
             maxResources:
               vcpu: 4
               memory: 8Gi
@@ -363,30 +325,8 @@ gibson-workloads:
             allowedNetworkModes:
               - egress-allow-list
               - none
-        # agent: the class a platform-agent launch names, and the
-        # class an always-on bank member runs in (gibson#1706).
-        #
-        # A member stays up for weeks and idles most of that time, so it
-        # RESERVES a small slice of the node and bursts to its ceiling. The
-        # two halves come from two places:
-        #   requests      the reservation, a chart value (this block).
-        #                 setec 0.113.0+ writes min(request, limit) onto the
-        #                 Pod, so the class can only ever lower what the
-        #                 scheduler sets aside. Unset keeps requests = limits.
-        #   maxResources  the ceiling a Sandbox may ask for. The actual limit
-        #                 is the Sandbox's own spec.resources, which the daemon
-        #                 sends on Launch from the claude manifest (gibson#1717,
-        #                 2 vCPU / 4Gi). defaultResources is NOT that limit:
-        #                 setec reads it for the warm-pool template only.
-        #
-        # Two idle members cost 0.5 vCPU / 1.5Gi of reservation. The vendored
-        # SandboxClass CRD must carry spec.requests (setec 0.113.0+), or the
-        # API server prunes the block and the reservation silently becomes the
-        # limit.
         - name: agent
           spec:
-            runtime:
-              backend: gvisor
             requests:
               cpu: 250m
               memory: 768Mi

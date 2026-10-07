@@ -307,7 +307,6 @@ data:
 
 
     {{- $sbx := .Values.gibson.sandbox }}
-    {{- $mtlsDir := include "gibson.setecMtlsMountPath" . }}
     # sandbox: the Setec connection details, and the ONLY surface the daemon
     # reads them from (config.SandboxConfig, gibson
     # internal/infra/config/sandbox.go). Per-tool registration (the old
@@ -316,17 +315,21 @@ data:
     # each names the shared gibson-executor image and selects a parser by
     # GIBSON_TOOL_NAME. The runtime catalog refresher was removed (gibson#1641).
     #
-    # address / server_name / the three mTLS paths are DERIVED, not restated
-    # (deploy#1106): they have to agree with where the setec subchart puts
-    # the frontend, what SANs its certificate carries, and where the
-    # StatefulSet mounts the keypair, and a disagreement produces no render
-    # error — just a dial timeout or a handshake failure at the first
-    # sandboxed tool call. The daemon always dials setec (D5, gibson#756):
-    # there is no enabled switch, and the daemon sends the tenant in each
-    # request, so no fixed tenant is configured.
+    # address and spiffe_id are DERIVED, not restated (deploy#1106,
+    # ADR-0142): they have to agree with where the setec subchart puts the
+    # frontend and with the SPIFFE ID this chart registers for it, and a
+    # disagreement produces no render error — just a dial timeout or a
+    # handshake failure at the first sandboxed tool call. The daemon always
+    # dials setec (D5, gibson#756): there is no enabled switch, and the
+    # daemon sends the tenant in each request, so no fixed tenant is
+    # configured.
     sandbox:
       setec:
         address: {{ $sbx.setec.address | default (include "gibson.setecFrontendAddress" .) | quote }}
+        # spiffe_id: the fleet frontend is the one server the daemon accepts.
+        # The daemon dials with its own SVID from the Workload API (gibson
+        # internal/server/daemon/sandboxed_setec_adapter.go).
+        spiffe_id: {{ $sbx.setec.spiffeID | default (include "gibson.setecFrontendSpiffeID" .) | quote }}
         call_timeout: {{ $sbx.setec.callTimeout | default "5m" | quote }}
         {{- with $sbx.setec.sandboxClass }}
         sandbox_class: {{ . | quote }}
@@ -339,14 +342,3 @@ data:
         # agent workload can carry a different isolation posture.
         agent_sandbox_class: {{ . | quote }}
         {{- end }}
-        # File-based mTLS is what the daemon adapter implements — it builds a
-        # component.TLSConfig and hands it to credentials.NewTLS. It does not
-        # speak the SPIFFE Workload API on this leg, and the frontend does not
-        # serve an SVID, so the cert-manager chain that already signs the
-        # frontend's server cert is the trust root for both directions.
-        mtls:
-          enabled: true
-          cert_file: {{ $sbx.setec.mtls.certFile | default (printf "%s/tls.crt" $mtlsDir) | quote }}
-          key_file: {{ $sbx.setec.mtls.keyFile | default (printf "%s/tls.key" $mtlsDir) | quote }}
-          ca_file: {{ $sbx.setec.mtls.caFile | default (printf "%s/ca.crt" $mtlsDir) | quote }}
-          server_name: {{ $sbx.setec.mtls.serverName | default (include "gibson.setecFrontendServerName" .) | quote }}

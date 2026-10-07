@@ -80,10 +80,10 @@ kind: Namespace
 metadata:
   name: setec-system
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 ---
@@ -144,10 +144,10 @@ metadata:
   name: setec-sandbox-baseline-deny
   namespace: setec-sandboxes
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     setec.zeroroot.ai/managed-by: setec-operator
@@ -188,10 +188,10 @@ metadata:
   name: setec
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 spec:
@@ -403,27 +403,12 @@ metadata:
   name: setec-frontend
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
----
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/runtime-agent-rbac.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: setec-runtime-agent
-  namespace: setec-system
-  labels:
-    helm.sh/chart: setec-0.115.0
-    app.kubernetes.io/name: setec
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: runtime-agent
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/serviceaccount.yaml
 apiVersion: v1
@@ -432,10 +417,10 @@ metadata:
   name: setec
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 ---
@@ -586,20 +571,6 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ratelimit
 automountServiceAccountToken: false
----
-# Source: gibson/charts/gibson-workloads/templates/setec/daemon-client-secret.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: gibson-setec-cert-reader
-  namespace: setec-system
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: setec-cert-bridge
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/00-helm-test-serviceaccount.yaml
 apiVersion: v1
@@ -1380,58 +1351,6 @@ data:
           concurrent_missions: 0
           concurrent_agents: 0
           concurrent_connectors: 0
----
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/runtimes-configmap.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: setec-runtimes
-  namespace: setec-system
-  labels:
-    helm.sh/chart: setec-0.115.0
-    app.kubernetes.io/name: setec
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: runtimes-config
-data:
-  # runtimes.yaml is consumed by the operator (--runtimes-config) and the
-  # runtime-agent DaemonSet. Its schema matches internal/runtime/config.go:
-  # RuntimeConfig{Runtimes map[string]BackendConfig, Defaults DefaultsConfig}.
-  runtimes.yaml: |
-    runtimes:
-      gvisor:
-        enabled: true
-        runtimeClassName: "gvisor"
-        install: true
-        defaultOverhead:
-          cpu: 50m
-          memory: 40Mi
-      kata-fc:
-        enabled: false
-        runtimeClassName: "kata-fc"
-        install: true
-        defaultOverhead:
-          cpu: 250m
-          memory: 128Mi
-      kata-qemu:
-        enabled: false
-        runtimeClassName: "kata-qemu"
-        install: true
-        defaultOverhead:
-          cpu: 250m
-          memory: 128Mi
-      runc:
-        enabled: true
-        runtimeClassName: "runc"
-        install: true
-        devOnly: true
-    defaults:
-      runtime:
-        backend: "gvisor"
-        probeInterval: "5m"
-        nodeCapabilitiesMode: "probe"
 ---
 # Source: gibson/charts/gibson-workloads/templates/auth/openbao-deployment.yaml
 apiVersion: v1
@@ -4035,17 +3954,21 @@ data:
     # each names the shared gibson-executor image and selects a parser by
     # GIBSON_TOOL_NAME. The runtime catalog refresher was removed (gibson#1641).
     #
-    # address / server_name / the three mTLS paths are DERIVED, not restated
-    # (deploy#1106): they have to agree with where the setec subchart puts
-    # the frontend, what SANs its certificate carries, and where the
-    # StatefulSet mounts the keypair, and a disagreement produces no render
-    # error — just a dial timeout or a handshake failure at the first
-    # sandboxed tool call. An overlay sets enabled + tenant.
+    # address and spiffe_id are DERIVED, not restated (deploy#1106,
+    # ADR-0142): they have to agree with where the setec subchart puts the
+    # frontend and with the SPIFFE ID this chart registers for it, and a
+    # disagreement produces no render error — just a dial timeout or a
+    # handshake failure at the first sandboxed tool call. The daemon always
+    # dials setec (D5, gibson#756): there is no enabled switch, and the
+    # daemon sends the tenant in each request, so no fixed tenant is
+    # configured.
     sandbox:
-      enabled: true
       setec:
         address: "setec-frontend.setec-system.svc.cluster.local:50051"
-        tenant: "primary"
+        # spiffe_id: the fleet frontend is the one server the daemon accepts.
+        # The daemon dials with its own SVID from the Workload API (gibson
+        # internal/server/daemon/sandboxed_setec_adapter.go).
+        spiffe_id: "spiffe://zeroroot.ai/platform/setec-frontend"
         call_timeout: "5m"
         sandbox_class: "tool"
         # agent_sandbox_class: the class an ephemeral platform-agent launch
@@ -4054,17 +3977,6 @@ data:
         # class. Separate from sandbox_class (tool/catalog dispatch) so the
         # agent workload can carry a different isolation posture.
         agent_sandbox_class: "agent"
-        # File-based mTLS is what the daemon adapter implements — it builds a
-        # component.TLSConfig and hands it to credentials.NewTLS. It does not
-        # speak the SPIFFE Workload API on this leg, and the frontend does not
-        # serve an SVID, so the cert-manager chain that already signs the
-        # frontend's server cert is the trust root for both directions.
-        mtls:
-          enabled: true
-          cert_file: "/etc/gibson-setec-mtls/tls.crt"
-          key_file: "/etc/gibson-setec-mtls/tls.key"
-          ca_file: "/etc/gibson-setec-mtls/ca.crt"
-          server_name: "setec-frontend.setec-system.svc"
 ---
 # Source: gibson/charts/gibson-workloads/templates/gibson/provider-catalogue-cm.yaml
 apiVersion: v1
@@ -5705,10 +5617,10 @@ kind: ClusterRole
 metadata:
   name: setec-manager
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 rules:
@@ -5764,18 +5676,6 @@ rules:
       - get
       - list
       - watch
-  # watch is not optional alongside list: the manager's cache establishes a
-  # WATCH for every typed object the controller reads, so without it the
-  # RuntimeClass informer retries forever and logs
-  # `Failed to watch *v1.RuntimeClass ... forbidden` on a loop (setec#230).
-  - apiGroups:
-      - node.k8s.io
-    resources:
-      - runtimeclasses
-    verbs:
-      - get
-      - list
-      - watch
   - apiGroups:
       - setec.zeroroot.ai
     resources:
@@ -5811,7 +5711,7 @@ rules:
       - get
       - list
       - watch
-  # ADR-0005 invariant gate: the class controller stamps the loud
+  # docs/design/isolation.md invariant gate: the class controller stamps the loud
   # UnverifiedRestoresAllowed condition on the class status.
   - apiGroups:
       - setec.zeroroot.ai
@@ -5856,10 +5756,10 @@ kind: ClusterRole
 metadata:
   name: setec-frontend
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 rules:
@@ -5867,14 +5767,45 @@ rules:
   # Sandboxes (Attach + stream heartbeats) so the operator's idle
   # eviction can tell an active session from an abandoned one, and
   # flips spec.desiredState to Running when an Exec arrives for a
-  # paused or suspended session (ADR-0008 auto-resume). Both are
+  # paused or suspended session (docs/design/lifecycles.md auto-resume). Both are
   # narrow merge patches; the frontend never writes status.
   - apiGroups: ["setec.zeroroot.ai"]
     resources: [sandboxes]
     verbs: [create, delete, get, list, patch, watch]
+  # read: Suspend checks that the class of a session has checkpoints
+  # (setec#193).
+  - apiGroups: ["setec.zeroroot.ai"]
+    resources: [sandboxclasses]
+    verbs: [get, list, watch]
+  # Fork, Keep and Snapshot wait for the Snapshot they asked for, Pin
+  # writes spec.pinned of a kept Snapshot, Snapshot records the command of
+  # its source on it, and a review launch or a launch from_snapshot reads
+  # it (setec#195, setec#196, setec#242). The admission webhook holds the
+  # pin limit.
+  - apiGroups: ["setec.zeroroot.ai"]
+    resources: [snapshots]
+    verbs: [get, list, watch, patch]
   - apiGroups: [""]
     resources: [namespaces]
     verbs: [get, list, watch]
+  # The namespace of each pair of client and tenant (setec#207). The
+  # frontend makes it on the first call of the pair, with two
+  # RoleBindings in it. The ValidatingAdmissionPolicy -frontend-scope
+  # limits both writes: a namespace only with the sandbox labels and the
+  # sbx- prefix, a RoleBinding only in such a namespace and only of the
+  # two roles below.
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [create]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: [rolebindings]
+    verbs: [create]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: [clusterroles]
+    verbs: [bind]
+    resourceNames:
+      - setec-sandbox-namespace
+      - setec-frontend-exec
   # Reads stay cluster-wide: the frontend resolves a Sandbox to its Pod
   # and streams that Pod's log. Neither verb enters a container.
   - apiGroups: [""]
@@ -5887,10 +5818,10 @@ kind: ClusterRole
 metadata:
   name: setec-frontend-exec
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 rules:
@@ -5898,63 +5829,16 @@ rules:
     resources: [pods/exec]
     verbs: [create]
 ---
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/runtime-agent-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: setec-runtime-agent
-  labels:
-    helm.sh/chart: setec-0.115.0
-    app.kubernetes.io/name: setec
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: runtime-agent
-rules:
-  # The runtime-agent reads the node it runs on and writes the
-  # setec.zeroroot.ai/runtime.<backend>=true|false labels the operator's
-  # node affinity selects on, plus the setec.zeroroot.ai/runtime-probe
-  # annotation carrying the probe detail.
-  #
-  # RBAC cannot restrict WHICH labels a client may set, nor WHICH node it
-  # may set them on: neither key scoping nor "the object named by the
-  # caller's own node" is representable in the RBAC policy language. A
-  # DaemonSet also shares one ServiceAccount across every node, so there is
-  # no per-node credential to bind resourceNames to.
-  #
-  # The narrowing therefore lives in admission, not here. The
-  # ValidatingAdmissionPolicy in runtime-agent-node-guard.yaml holds this
-  # ServiceAccount to the setec.zeroroot.ai/runtime.* label prefix and the
-  # one probe annotation, rejects any other change to the object, and —
-  # on clusters that bind node identity into ServiceAccount tokens —
-  # rejects a write aimed at a node other than the agent's own.
-  #
-  # nodes/status is deliberately NOT granted (GHSA-p8f8-3qpw-7h93). The
-  # agent used to publish its probe detail as a SetecRuntimes node
-  # condition, which required nodes/status: patch cluster-wide — a verb
-  # whose holder can rewrite any node's allocatable capacity and readiness
-  # conditions, on every node, and so degrade or halt scheduling
-  # cluster-wide. Nothing read the condition back. The detail is an
-  # annotation now and the grant is gone.
-  - apiGroups: [""]
-    resources: ["nodes"]
-    verbs: ["get", "list", "watch", "patch"]
-  # Emit events on nodes for probe failures.
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["create", "patch"]
----
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/sandbox-namespace-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: setec-sandbox-namespace
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 rules:
@@ -5980,7 +5864,7 @@ rules:
       - delete
       - patch
       - update
-  # Session lifecycle (ADR-0006/0007): the durable workspace PVC is
+  # Session lifecycle (docs/design/lifecycles.md and docs/design/storage.md): the durable workspace PVC is
   # created before the session Pod and deleted (wiped) at teardown.
   - apiGroups:
       - ""
@@ -7392,10 +7276,10 @@ kind: ClusterRoleBinding
 metadata:
   name: setec-manager
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 roleRef:
@@ -7413,10 +7297,10 @@ kind: ClusterRoleBinding
 metadata:
   name: setec-frontend
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 roleRef:
@@ -7426,28 +7310,6 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: setec-frontend
-    namespace: setec-system
----
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/runtime-agent-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: setec-runtime-agent
-  labels:
-    helm.sh/chart: setec-0.115.0
-    app.kubernetes.io/name: setec
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: runtime-agent
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: setec-runtime-agent
-subjects:
-  - kind: ServiceAccount
-    name: setec-runtime-agent
     namespace: setec-system
 ---
 # Source: gibson/charts/gibson-workloads/templates/auth/openbao-deployment.yaml
@@ -7994,6 +7856,24 @@ rules:
     resources: ["leases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
+# Source: gibson/charts/gibson-workloads/charts/setec/templates/disk-builder-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: setec-disk-builder
+  namespace: setec-system
+  labels:
+    helm.sh/chart: setec-0.126.0
+    app.kubernetes.io/name: setec
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: setec
+rules:
+  - apiGroups: ["batch"]
+    resources: [jobs]
+    verbs: [get, create]
+---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/leader-election-rbac.yaml
 # controller-runtime leader election holds a single Lease in the operator's
 # own namespace. leaderElect defaults true (values.yaml), and deployment.yaml
@@ -8009,10 +7889,10 @@ metadata:
   name: setec-leader-election
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 rules:
@@ -8293,50 +8173,6 @@ rules:
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["get", "list"]
----
-# Source: gibson/charts/gibson-workloads/templates/setec/daemon-client-secret.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: gibson-setec-cert-reader
-  namespace: setec-system
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: setec-cert-bridge
-rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames:
-      - setec-daemon-client-tls
-    verbs: ["get", "list", "watch"]
----
-# Source: gibson/charts/gibson-workloads/templates/setec/daemon-client-secret.yaml
-# The External Secrets controller logs in to this store by minting a token
-# for $readerSA. The controller's own ClusterRole no longer grants
-# `create serviceaccounts/token` cluster-wide (scripts/vendor-operator-rbac.py
-# REMOVED_RULES), so this Role grants that one name, in this namespace, to
-# the controller's ServiceAccount.
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: gibson-setec-cert-reader-token
-  namespace: setec-system
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: setec-cert-bridge
-rules:
-  - apiGroups: [""]
-    resources: ["serviceaccounts/token"]
-    resourceNames: ["gibson-setec-cert-reader"]
-    verbs: ["create"]
 ---
 # Source: gibson/charts/openfga/templates/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -8653,6 +8489,28 @@ subjects:
     name: gibson-tenant-operator
     namespace: gibson
 ---
+# Source: gibson/charts/gibson-workloads/charts/setec/templates/disk-builder-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: setec-disk-builder
+  namespace: setec-system
+  labels:
+    helm.sh/chart: setec-0.126.0
+    app.kubernetes.io/name: setec
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: setec
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: setec-disk-builder
+subjects:
+  - kind: ServiceAccount
+    name: setec
+    namespace: setec-system
+---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/frontend.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -8660,10 +8518,10 @@ metadata:
   name: setec-frontend-exec
   namespace: setec-sandboxes
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 roleRef:
@@ -8682,10 +8540,10 @@ metadata:
   name: setec-leader-election
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 roleRef:
@@ -8704,10 +8562,10 @@ metadata:
   name: setec-sandbox-namespace
   namespace: setec-sandboxes
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 roleRef:
@@ -8883,50 +8741,6 @@ roleRef:
   kind: Role
   apiGroup: rbac.authorization.k8s.io
   name: gibson-gibson-workloads-active-session-backfill
----
-# Source: gibson/charts/gibson-workloads/templates/setec/daemon-client-secret.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: gibson-setec-cert-reader
-  namespace: setec-system
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: setec-cert-bridge
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: gibson-setec-cert-reader
-subjects:
-  - kind: ServiceAccount
-    name: gibson-setec-cert-reader
-    namespace: setec-system
----
-# Source: gibson/charts/gibson-workloads/templates/setec/daemon-client-secret.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: gibson-setec-cert-reader-token
-  namespace: setec-system
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: setec-cert-bridge
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: gibson-setec-cert-reader-token
-subjects:
-  - kind: ServiceAccount
-    name: external-secrets
-    namespace: gibson
 ---
 # Source: gibson/charts/openfga/templates/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -9365,10 +9179,10 @@ metadata:
   name: setec-frontend
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     app.kubernetes.io/component: frontend
@@ -9394,10 +9208,10 @@ metadata:
   name: setec-webhook
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     app.kubernetes.io/component: webhook
@@ -9406,7 +9220,7 @@ spec:
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
     # Scope to the operator Pod only — the webhook server runs there. Without
-    # this, the selectorLabels (name+instance) also match the runtime-agent /
+    # this, the selectorLabels (name+instance) also match the device plugin /
     # frontend / node-agent Pods, so the Service load-balances admission
     # requests onto Pods that don't serve :9443 → intermittent 502s.
     app.kubernetes.io/component: operator
@@ -9898,170 +9712,85 @@ spec:
     app.kubernetes.io/instance: gibson
     app.kubernetes.io/component: start
 ---
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/runtime-agent-daemonset.yaml
+# Source: gibson/charts/gibson-workloads/charts/setec/templates/device-plugin-daemonset.yaml
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: setec-runtime-agent
+  name: setec-device-plugin
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: runtime-agent
+    app.kubernetes.io/component: device-plugin
 spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: setec
       app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: runtime-agent
+      app.kubernetes.io/component: device-plugin
   template:
     metadata:
       labels:
         app.kubernetes.io/name: setec
         app.kubernetes.io/instance: gibson
-        app.kubernetes.io/component: runtime-agent
+        app.kubernetes.io/component: device-plugin
     spec:
-      serviceAccountName: setec-runtime-agent
-      hostPID: false
+      automountServiceAccountToken: false
+      enableServiceLinks: false
       hostNetwork: false
+      hostPID: false
       hostIPC: false
-      # Pod-level identity. The image is distroless-nonroot and already
-      # carries USER 65532:65532, so this changes no runtime behaviour —
-      # what it changes is who checks. runAsNonRoot: true makes the kubelet
-      # refuse to start the Pod if a future image (a rebuild on a different
-      # base, a mirror substitution) ships a root entrypoint, instead of
-      # quietly running the agent as root against the API server
-      # (GHSA-p8f8-3qpw-7h93).
+      priorityClassName: system-node-critical
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 65532
-        runAsGroup: 65532
-        fsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
-      # tolerations default to matching every taint: the runtime-agent
-      # needs to run on every node the operator might schedule a Sandbox
-      # onto, and a node it never probed looks uncapable. Values-driven so
-      # a cluster that keeps Sandboxes off, say, control-plane or
-      # infrastructure nodes can stop placing the agent there too — the
-      # capability view only has to cover nodes that can actually host a
-      # Sandbox.
       tolerations:
         - operator: Exists
       nodeSelector:
         kubernetes.io/arch: amd64
+        kubernetes.io/os: linux
       containers:
-        - name: runtime-agent
-          image: "ghcr.io/zeroroot-ai/setec-runtime-agent:v0.115.0@sha256:4c2909643c20880aaa7cac1d5c08f18755b3225c7e1ba637888af4d73246f9b7"
+        - name: device-plugin
+          image: "ghcr.io/zeroroot-ai/setec-device-plugin:v0.126.0@sha256:46d5d2b6393e88e6c2d418c36fa018fdff7f817da1240e3ef5268809151f97c9"
           imagePullPolicy: IfNotPresent
           args:
-            - --runtimes-config=/etc/setec/runtimes.yaml
-            - --node-name=$(NODE_NAME)
-            - --metrics-addr=:8080
-          env:
-            - name: NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
-          ports:
-            - name: metrics
-              containerPort: 8080
-              protocol: TCP
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: metrics
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 3
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: metrics
-            initialDelaySeconds: 15
-            periodSeconds: 30
-            timeoutSeconds: 5
-            failureThreshold: 3
-          resources:
-            limits:
-              cpu: 100m
-              memory: 128Mi
-            requests:
-              cpu: 10m
-              memory: 32Mi
+            - --count=110
           securityContext:
-            # Host mounts are read-only but we still drop every capability
-            # we don't need. The probes do not require elevated privileges:
-            # every one of them is an os.Stat against a read-only mount
-            # (see internal/runtimeagent/probe/detector_linux.go), and no
-            # probe opens /dev/kvm or executes a subprocess.
+            # Root, to write its socket into the kubelet directory, which
+            # root owns. No capability and no privilege.
+            runAsUser: 0
+            runAsNonRoot: false
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65532
-            runAsGroup: 65532
-            seccompProfile:
-              type: RuntimeDefault
             capabilities:
-              drop:
-                - ALL
+              drop: ["ALL"]
+          resources:
+            limits:
+              memory: 32Mi
+            requests:
+              cpu: 10m
+              memory: 16Mi
           volumeMounts:
-            - name: runtimes-config
-              mountPath: /etc/setec/runtimes.yaml
-              subPath: runtimes.yaml
-              readOnly: true
-            - name: host-dev
+            - name: device-plugins
+              mountPath: /var/lib/kubelet/device-plugins
+            # Not at /dev: the container runtime mounts the termination log
+            # into /dev of the container, which fails on a read-only /dev.
+            - name: dev
               mountPath: /host/dev
               readOnly: true
-            - name: host-sys-module
-              mountPath: /host/sys/module
-              readOnly: true
-            - name: host-usr-bin
-              mountPath: /host/usr/bin
-              readOnly: true
-            - name: host-usr-local-bin
-              mountPath: /host/usr/local/bin
-              readOnly: true
-            - name: host-etc-containerd
-              mountPath: /host/etc/containerd
-              readOnly: true
-            - name: host-extra-containerd-0
-              mountPath: /host/opt/kata/containerd
-              readOnly: true
       volumes:
-        - name: runtimes-config
-          configMap:
-            name: setec-runtimes
-            items:
-              - key: runtimes.yaml
-                path: runtimes.yaml
-        - name: host-dev
+        - name: device-plugins
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+            type: Directory
+        - name: dev
           hostPath:
             path: /dev
-        - name: host-sys-module
-          hostPath:
-            path: /sys/module
-        - name: host-usr-bin
-          hostPath:
-            path: /usr/bin
-        - name: host-usr-local-bin
-          hostPath:
-            path: /usr/local/bin
-            type: DirectoryOrCreate
-        - name: host-etc-containerd
-          hostPath:
-            path: /etc/containerd
-            type: DirectoryOrCreate
-        - name: host-extra-containerd-0
-          hostPath:
-            path: "/opt/kata/containerd"
-            type: DirectoryOrCreate
-      terminationGracePeriodSeconds: 10
+            type: Directory
 ---
 # Source: gibson/charts/spire/charts/spiffe-csi-driver/templates/daemonset.yaml
 apiVersion: apps/v1
@@ -12240,10 +11969,10 @@ metadata:
   name: setec
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 spec:
@@ -12257,7 +11986,7 @@ spec:
       labels:
         app.kubernetes.io/name: setec
         app.kubernetes.io/instance: gibson
-        # Distinguish the operator Pod from the other components (runtime-agent,
+        # Distinguish the operator Pod from the other components (device plugin,
         # frontend, node-agent) which all share name/instance selector labels
         # but carry their own component label. Additive only — not part of the
         # immutable Deployment selector.
@@ -12270,19 +11999,21 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/setec:v0.115.0@sha256:dc8b7a0b251f575f07cb52e94ac59c2243b122ee587b918d62557ae2e00a117d"
+          image: "ghcr.io/zeroroot-ai/setec:v0.126.0@sha256:bffd1a4f5228510d0061571179856a864d52d41b6cee86c34ff215c9a15f88c6"
           imagePullPolicy: IfNotPresent
           args:
             - --metrics-bind-address=:8080
             - --health-probe-bind-address=:8081
             - --leader-elect=true
-            - --runtimes-config=/etc/setec/runtimes.yaml
-            - --runtime-class-name=kata-fc
-            - --node-selector-label=katacontainers.io/kata-runtime
             - --webhook-enabled
             - --reserved-cidrs=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10,127.0.0.0/8,224.0.0.0/4,::1/128,fc00::/7,fe80::/10,ff00::/8
             - --sandbox-resolvers=1.1.1.1,8.8.8.8
-            - --session-keepalive-image=ghcr.io/zeroroot-ai/setec-keepalive:v0.115.0@sha256:ba885d4bb9c45355ebdc8064740ad2506b25c986b2ce8ca8272abe4b1d544e33
+            - --launcher-image=ghcr.io/zeroroot-ai/setec-launcher:v0.126.0@sha256:ce9ec3058354c19b9f4ed5fb6eb39086ede51ceb13d31f97adcebbc334f1da0f
+            - --disk-repo=registry.example.com/setec-disks
+            - --disk-builder-image=ghcr.io/zeroroot-ai/setec-disk-builder:v0.126.0@sha256:347e0008fb781d472b030c28d643ced8b2dcdcbbad6dd5f11b0aef1dc4848b02
+            - --disk-signing-secret=setec-disk-signing
+            - --operator-namespace=setec-system
+            - --disk-public-key=ExAmPlEpUbLiCkEy0000000000000000000000000000=
           ports:
             - name: metrics
               containerPort: 8080
@@ -12322,10 +12053,6 @@ spec:
             runAsNonRoot: true
             runAsUser: 65532
           volumeMounts:
-            - name: runtimes-config
-              mountPath: /etc/setec/runtimes.yaml
-              subPath: runtimes.yaml
-              readOnly: true
             # controller-runtime's webhook server reads tls.crt/tls.key from
             # this dir (it does not self-generate). Without it --webhook-enabled
             # fails closed and rejects every Sandbox. cert-manager (or the e2e
@@ -12334,12 +12061,6 @@ spec:
               mountPath: /tmp/k8s-webhook-server/serving-certs
               readOnly: true
       volumes:
-        - name: runtimes-config
-          configMap:
-            name: setec-runtimes
-            items:
-              - key: runtimes.yaml
-                path: runtimes.yaml
         - name: webhook-certs
           secret:
             secretName: setec-webhook-cert
@@ -12352,10 +12073,10 @@ metadata:
   name: setec-frontend
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     app.kubernetes.io/component: frontend
@@ -12380,15 +12101,17 @@ spec:
           type: RuntimeDefault
       containers:
         - name: frontend
-          image: "ghcr.io/zeroroot-ai/setec-frontend:v0.115.0@sha256:645c0d16b98ca7561710dae9a69af941e6d7c8cb129c8e1cd033a524389d100e"
+          image: "ghcr.io/zeroroot-ai/setec-frontend:v0.126.0@sha256:17fa719fe3ea696b3337c27d5d391b2ae685297f42614f2360b1cbfbe7b3fa21"
           imagePullPolicy: IfNotPresent
           args:
             - --listen-addr=:50051
             - --metrics-addr=:9091
-            - --sandbox-namespace=setec-sandboxes
-            - --tls-cert=/etc/setec/tls/tls.crt
-            - --tls-key=/etc/setec/tls/tls.key
-            - --tls-client-ca=/etc/setec/tls-ca/ca.crt
+            - --client=gibson=spiffe://zeroroot.ai/platform/daemon
+            # The RoleBindings of each pair namespace that the frontend
+            # makes: Pod writes for the operator, exec for the frontend.
+            - --pair-namespace-grant=setec-sandbox-namespace=setec-system/setec
+            - --pair-namespace-grant=setec-frontend-exec=setec-system/setec-frontend
+            - --spiffe-socket=/run/spire/agent-sockets/spire-agent.sock
           ports:
             - name: grpc
               containerPort: 50051
@@ -12412,19 +12135,14 @@ spec:
             runAsNonRoot: true
             runAsUser: 65532
           volumeMounts:
-            - name: tls
-              mountPath: /etc/setec/tls
-              readOnly: true
-            - name: tls-ca
-              mountPath: /etc/setec/tls-ca
+            - name: spiffe-workload-api
+              mountPath: /run/spire/agent-sockets
               readOnly: true
       volumes:
-        - name: tls
-          secret:
-            secretName: setec-frontend-tls
-        - name: tls-ca
-          secret:
-            secretName: setec-frontend-tls
+        - name: spiffe-workload-api
+          hostPath:
+            path: /run/spire/agent-sockets
+            type: Directory
 ---
 # Source: gibson/charts/gibson-workloads/templates/dashboard/deployment.yaml
 apiVersion: apps/v1
@@ -15251,7 +14969,7 @@ spec:
           # build a client against an OpenBao that would not answer, Argo spent
           # its five retries on that one task, and every resource behind it —
           # the daemon included — was never created. Three gibson exit tests
-          # failed at "Stand up the setec+gvisor cluster" for three days with no
+          # failed at "Stand up the setec cluster" for three days with no
           # further detail.
           #
           # The whole bringup waits on this one endpoint, so it gets the longest
@@ -15435,6 +15153,7 @@ spec:
               gibson-stripe-credentials publishable_key:inputor:stripe-publishable-key:pk_test_placeholder secret_key:inputor:stripe-secret-key:sk_test_placeholder webhook_secret:inputor:stripe-webhook-secret:whsec_placeholder
               ses-smtp-credentials username:input:smtp-username password:input:smtp-password
               gibson-vault-admin-token token:svctoken
+              setec-disk-signing seed:input:setec-disk-signing-seed
               
               '
               # Token rotates; re-read at use time.
@@ -16567,6 +16286,10 @@ spec:
                 path: stripe-publishable-key
               - key: stripe-webhook-secret
                 path: stripe-webhook-secret
+              # The sandbox disk signing seed (ADR-0166): the keyring member
+              # SETEC_DISK_SIGNING_SEED, seeded to secret/data/setec-disk-signing.
+              - key: setec-disk-signing-seed
+                path: setec-disk-signing-seed
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -16832,7 +16555,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "tmp,spire-agent-socket"
-        checksum/config: 1832e16ab3431b10b5d6eb587e2d1816e220d1c88460138b49a964a9e3c343e4
+        checksum/config: 7bcbf81f6640c8f2bb47f32c3f4439a1c668b1ca2de86b34f325cb4336ffd149
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). Consumer envFrom
         # resolution is frozen for the pod's lifetime; Reloader watches the
         # named Secrets and triggers a rolling restart when any changes.
@@ -17434,9 +17157,6 @@ spec:
             - name: master-kek
               mountPath: /etc/gibson-kek
               readOnly: true
-            - name: setec-client-tls
-              mountPath: "/etc/gibson-setec-mtls"
-              readOnly: true
             - name: spire-agent-socket
               mountPath: /run/spire/sockets
               readOnly: true
@@ -17575,10 +17295,6 @@ spec:
         - name: master-kek
           secret:
             secretName: gibson-master-key
-            defaultMode: 0o400
-        - name: setec-client-tls
-          secret:
-            secretName: "gibson-setec-client-tls"
             defaultMode: 0o400
         - name: metrics-tls
           secret:
@@ -19321,10 +19037,10 @@ metadata:
   name: setec-webhook-cert
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 spec:
@@ -19549,156 +19265,42 @@ spec:
     kind: "Issuer"
     group: "cert-manager.io"
 ---
-# Source: gibson/charts/gibson-workloads/templates/setec/frontend-tls.yaml
-# Setec-local root CA, minted by the cluster-scoped selfsigned-bootstrap
-# issuer (templates/cert-manager/cluster-issuer.yaml). Lives in the setec
-# namespace so the namespaced Issuer below can sign the frontend certs there.
-apiVersion: cert-manager.io/v1
-kind: Certificate
+# Source: gibson/charts/gibson-workloads/charts/setec/templates/system-namespace-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
 metadata:
-  name: setec-frontend-ca
-  namespace: setec-system
+  name: setec-setec-system-default-deny
   labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
+    helm.sh/chart: setec-0.126.0
+    app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: setec-frontend-tls
+    app.kubernetes.io/part-of: setec
 spec:
-  isCA: true
-  commonName: "Setec Frontend CA"
-  secretName: setec-frontend-ca
-  duration: 87600h   # 10 years
-  renewBefore: 8760h # 1 year
-  privateKey:
-    algorithm: ECDSA
-    size: 256
-  issuerRef:
-    name: selfsigned-bootstrap
-    kind: ClusterIssuer
-    group: cert-manager.io
----
-# Source: gibson/charts/gibson-workloads/templates/setec/frontend-tls.yaml
-# Frontend server certificate → Secret setec-frontend-tls (tls.crt/tls.key/
-# ca.crt). Mounted by the frontend as BOTH its listener keypair and (via
-# ca.crt) its client-verification CA — see values.yaml setec.frontend notes.
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: setec-frontend-tls
-  namespace: setec-system
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: setec-frontend-tls
-spec:
-  secretName: "setec-frontend-tls"
-  duration: 2160h    # 90d
-  renewBefore: 360h  # 15d
-  commonName: "setec-frontend.setec-system.svc"
-  dnsNames:
-    - "setec-frontend"
-    - "setec-frontend.setec-system"
-    - "setec-frontend.setec-system.svc"
-    - "setec-frontend.setec-system.svc.cluster.local"
-  privateKey:
-    algorithm: ECDSA
-    size: 256
-  usages:
-    - server auth
-  issuerRef:
-    name: "setec-frontend-ca"
-    kind: "Issuer"
-    group: "cert-manager.io"
----
-# Source: gibson/charts/gibson-workloads/templates/setec/frontend-tls.yaml
-# Client certificate for frontend callers → Secret setec-frontend-client-tls.
-# gibson's e2e-setec-roundtrip workflow reads tls.crt/tls.key/ca.crt from it
-# (SETEC_FRONTEND_CERT_SECRET); ca.crt doubles as the trust root the caller
-# verifies the frontend's server cert against (same CA signs both).
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: setec-frontend-client-tls
-  namespace: setec-system
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: setec-frontend-tls
-spec:
-  secretName: setec-frontend-client-tls
-  duration: 2160h    # 90d
-  renewBefore: 360h  # 15d
-  commonName: "setec-frontend-client"
-  privateKey:
-    algorithm: ECDSA
-    size: 256
-  usages:
-    - client auth
-  issuerRef:
-    name: "setec-frontend-ca"
-    kind: "Issuer"
-    group: "cert-manager.io"
----
-# Source: gibson/charts/gibson-workloads/templates/setec/frontend-tls.yaml
-# Client certificate for the GIBSON DAEMON → Secret setec-daemon-client-tls
-# (deploy#1106). Same CA as the two certs above, which is the whole point:
-# the frontend verifies clients against ca.crt from setec-frontend-tls, and
-# the daemon verifies the frontend against the same ca.crt, so one root
-# closes both directions.
-#
-# WHY THIS CA AND NOT A SPIRE SVID. The daemon holds a SPIFFE workload SVID
-# and uses it everywhere else, so a SPIFFE identity on this leg is the shape
-# you would expect and it is not what is here. Neither end implements it:
-# setec's frontend takes `--tls-cert/--tls-key/--tls-client-ca` file paths
-# and knows nothing about the Workload API or URI SANs, and gibson's setec
-# adapter builds a file-based component.TLSConfig and hands it to
-# credentials.NewTLS. Choosing SPIFFE would mean a spiffe-helper sidecar or
-# csi-driver-spiffe on the frontend plus a SPIRE trust-bundle client CA — new
-# code in setec, an OSS repo, for a leg that does not place a
-# tenancy boundary on (setec is tenancy-unaware; the boundary it owns is
-# untrusted-code execution). The cert-manager chain already authenticates the
-# frontend's only other caller. It authenticates this one too.
-#
-# A SEPARATE cert from setec-frontend-client-tls, not a reuse: that Secret is
-# the e2e round-trip's credential and its RBAC grant is written by name in
-# gitops envs/staging/manifests/arc-runners/rbac.yaml. Sharing one keypair
-# between a CI job and the daemon would put the daemon's client identity in
-# the runner's blast radius and make either one's revocation the other's
-# outage.
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: setec-daemon-client-tls
-  namespace: setec-system
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: setec-frontend-tls
-spec:
-  secretName: setec-daemon-client-tls
-  duration: 2160h    # 90d
-  renewBefore: 360h  # 15d
-  commonName: "gibson-daemon"
-  privateKey:
-    algorithm: ECDSA
-    size: 256
-  usages:
-    - client auth
-  issuerRef:
-    name: "setec-frontend-ca"
-    kind: "Issuer"
-    group: "cert-manager.io"
+  description: "Each Pod of the namespace setec-system denies all traffic, except DNS."
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: setec-system
+  enableDefaultDeny:
+    ingress: true
+    egress: true
+  ingress:
+    - {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
 ---
 # Source: gibson/templates/network-policies.yaml
 apiVersion: cilium.io/v2
@@ -19738,6 +19340,90 @@ spec:
           rules:
             dns:
               - matchPattern: "*"
+---
+# Source: gibson/charts/gibson-workloads/charts/setec/templates/system-namespace-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: setec-operator
+  namespace: setec-system
+  labels:
+    helm.sh/chart: setec-0.126.0
+    app.kubernetes.io/name: setec
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: setec
+spec:
+  description: "The operator reaches the API server and the node agents, and takes webhook calls and scrapes."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: setec
+      app.kubernetes.io/component: operator
+  egress:
+    - toEntities:
+        - kube-apiserver
+  ingress:
+    - fromEntities:
+        - kube-apiserver
+        - remote-node
+        - host
+      toPorts:
+        - ports:
+            - port: "9443"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: prometheus
+          matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+---
+# Source: gibson/charts/gibson-workloads/charts/setec/templates/system-namespace-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: setec-frontend
+  namespace: setec-system
+  labels:
+    helm.sh/chart: setec-0.126.0
+    app.kubernetes.io/name: setec
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: setec
+spec:
+  description: "The frontend takes gRPC from its callers only and reaches the API server."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: setec
+      app.kubernetes.io/component: frontend
+  egress:
+    - toEntities:
+        - kube-apiserver
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gibson
+            app.kubernetes.io/component: daemon
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: prometheus
+          matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
+      toPorts:
+        - ports:
+            - port: "9091"
+              protocol: TCP
 ---
 # Source: gibson/templates/network-policies.yaml
 apiVersion: cilium.io/v2
@@ -20697,6 +20383,41 @@ spec:
     - "k8s:ns:gibson"
     - "k8s:sa:gibson-gibson-workloads-helm-test"
 ---
+# Source: gibson/charts/gibson-workloads/templates/spire-server/clusterspiffeids.yaml
+# --- setec frontend (ADR-0142) ---
+# The gRPC frontend of the sandbox fleet serves its X509-SVID from the
+# Workload API (setec#175): setec has no PEM credential source. The daemon
+# dials with its own SVID and accepts this ID only
+# (gibson.setecFrontendSpiffeID, rendered into the daemon config as
+# sandbox.setec.spiffe_id). The frontend admits the daemon by the ID of
+# its SVID (setec.frontend.clients, spiffePath platform/daemon). The Pod
+# runs in the setec namespace under the ServiceAccount `<fullname>-frontend`
+# of the setec chart.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-setec-frontend
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.148.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: "gibson-gibson"
+  spiffeIDTemplate: "spiffe://zeroroot.ai/platform/setec-frontend"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: setec
+      app.kubernetes.io/component: frontend
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: setec-system
+  workloadSelectorTemplates:
+    - "k8s:ns:setec-system"
+    - "k8s:sa:setec-frontend"
+---
 # Source: gibson/charts/spire/charts/spire-server/templates/controller-manager-cluster-ids.yaml
 apiVersion: spire.spiffe.io/v1alpha1
 kind: ClusterSPIFFEID
@@ -20805,36 +20526,6 @@ spec:
           serviceAccountRef:
             name: "external-secrets"
             namespace: "gibson"
----
-# Source: gibson/charts/gibson-workloads/templates/setec/daemon-client-secret.yaml
-# ESO's kubernetes provider talks to the API server as $readerSA, so the
-# $readerSA Role at the top of this file is the whole of what this store can see. caProvider reads the
-# kube-root-ca.crt ConfigMap that every namespace carries.
-apiVersion: external-secrets.io/v1
-kind: ClusterSecretStore
-metadata:
-  name: gibson-cross-ns-setec
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: setec-cert-bridge
-spec:
-  provider:
-    kubernetes:
-      remoteNamespace: setec-system
-      server:
-        caProvider:
-          type: ConfigMap
-          name: kube-root-ca.crt
-          key: ca.crt
-          namespace: gibson
-      auth:
-        serviceAccount:
-          name: gibson-setec-cert-reader
-          namespace: setec-system
 ---
 # Source: gibson/charts/gibson-workloads/templates/dashboard/secret.yaml
 apiVersion: external-secrets.io/v1
@@ -21344,50 +21035,32 @@ spec:
     - secretKey: dashboard_stripe_publishable_key
       remoteRef: { key: gibson-stripe-credentials, property: publishable_key }
 ---
-# Source: gibson/charts/gibson-workloads/templates/setec/daemon-client-secret.yaml
-# The mirror. Key names are preserved verbatim (tls.crt / tls.key / ca.crt)
-# because the daemon's config points at <mountPath>/<key> and the
-# StatefulSet projects the Secret with no subPath — see
-# gibson.setecMtlsMountPath.
+# Source: gibson/charts/gibson-workloads/templates/setec/disk-signing-externalsecret.yaml
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: gibson-setec-client-tls
-  namespace: gibson
+  name: "setec-disk-signing"
+  namespace: setec-system
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
     app.kubernetes.io/version: "0.148.3"
     app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: setec-cert-bridge
+    app.kubernetes.io/component: setec-disk-builder
 spec:
-  refreshInterval: "1h"
+  refreshInterval: 60s
   secretStoreRef:
-    name: gibson-cross-ns-setec
     kind: ClusterSecretStore
+    name: gibson-secrets
   target:
-    name: gibson-setec-client-tls
+    name: "setec-disk-signing"
     creationPolicy: Owner
-    template:
-      type: kubernetes.io/tls
   data:
-    - secretKey: tls.crt
+    - secretKey: seed
       remoteRef:
-        key: setec-daemon-client-tls
-        property: tls.crt
-    - secretKey: tls.key
-      remoteRef:
-        key: setec-daemon-client-tls
-        property: tls.key
-    # ca.crt is the setec frontend CA. cert-manager writes it into every
-    # Secret its CA-backed issuers produce, which is what lets the daemon
-    # verify the frontend's server cert from the same Secret it presents
-    # its own client cert out of.
-    - secretKey: ca.crt
-      remoteRef:
-        key: setec-daemon-client-tls
-        property: ca.crt
+        key: setec-disk-signing
+        property: seed
 ---
 # Source: gibson/templates/externalsecrets/dashboard-postgres-credentials.yaml
 apiVersion: external-secrets.io/v1
@@ -21686,23 +21359,6 @@ spec:
   ca:
     secretName: gibson-selfsigned-ca
 ---
-# Source: gibson/charts/gibson-workloads/templates/setec/frontend-tls.yaml
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: setec-frontend-ca
-  namespace: setec-system
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.148.3"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: setec-frontend-tls
-spec:
-  ca:
-    secretName: setec-frontend-ca
----
 # Source: gibson/charts/cert-manager/templates/webhook-mutating-webhook.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
@@ -21895,10 +21551,10 @@ kind: MutatingWebhookConfiguration
 metadata:
   name: setec-mutating-sandboxclass
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     app.kubernetes.io/component: webhook
@@ -22624,11 +22280,10 @@ spec:
               >5m, which means the in-daemon eviction handler is
               cancelling detonations in response to AWS spot-interruption
               notices faster than the on-demand fallback ASG can
-              backfill. Mitigation: open a GitOps PR raising
-              `setec.spotEvictionFallback.onDemandMax` (current cap is 2);
-              wait for ArgoCD sync (≤5 min); revert once the spot pool
-              recovers. Escalate to the EKS sister-spec owner if
-              sustained >24h.
+              backfill. Mitigation: raise the on-demand share of the
+              fleet node pool in the hosted substrate; revert once the
+              spot pool recovers. Escalate to the EKS sister-spec owner
+              if sustained >24h.
 
         # R4.4: per-tenant quota-exceeded rate elevated.
         # The alert uses the sum across tenants intentionally — a
@@ -22685,53 +22340,6 @@ spec:
               per-pod fuse only. Per-client quotas (signup, login) are NOT being
               enforced. Check gibson-ratelimit pods, the SPIFFE mTLS sidecar,
               and gibson-redis-stack.
----
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/runtime-classes.yaml
-apiVersion: node.k8s.io/v1
-kind: RuntimeClass
-metadata:
-  name: gvisor
-  labels:
-    helm.sh/chart: setec-0.115.0
-    app.kubernetes.io/name: setec
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: runtime-class
-    setec.zeroroot.ai/runtime: "gvisor"
-handler: runsc
-overhead:
-  podFixed:
-    cpu: 50m
-    memory: 40Mi
-scheduling:
-  nodeSelector:
-    setec.zeroroot.ai/runtime.gvisor: "true"
-  tolerations:
-    - effect: NoSchedule
-      key: setec.zeroroot.ai/sandbox-host
-      operator: Equal
-      value: "true"
----
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/runtime-classes.yaml
-apiVersion: node.k8s.io/v1
-kind: RuntimeClass
-metadata:
-  name: runc
-  labels:
-    helm.sh/chart: setec-0.115.0
-    app.kubernetes.io/name: setec
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: runtime-class
-    setec.zeroroot.ai/runtime: "runc"
-handler: runc
-scheduling:
-  nodeSelector:
-    setec.zeroroot.ai/runtime.runc: "true"
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -22905,125 +22513,63 @@ spec:
         'the tenant-operator writes RoleBindings in tenant namespaces only, and ' +
         request.namespace + ' is not one'
 ---
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/runtime-agent-node-guard.yaml
-# Node-write guard for the runtime-agent ServiceAccount
-# (GHSA-p8f8-3qpw-7h93).
-#
-# WHY RBAC IS NOT ENOUGH
-#
-# The agent has to write two things onto a Node: the
-# setec.zeroroot.ai/runtime.<backend> labels the operator's node affinity
-# selects on, and the setec.zeroroot.ai/runtime-probe annotation carrying
-# the probe detail. The smallest RBAC rule that permits either is
-# `nodes: patch`, and RBAC has no way to say WHICH keys or WHICH node —
-# resourceNames cannot express "the node this Pod runs on", and a
-# DaemonSet shares one ServiceAccount across every node, so there is no
-# per-node credential to scope. `nodes: patch` therefore hands every agent
-# in the cluster the ability to rewrite any node's spec (taints,
-# unschedulable) and any node's labels — including the very capability
-# labels the operator trusts to decide where a Sandbox runs, and which it
-# has no independent way to verify.
-#
-# WHAT THIS POLICY ADDS
-#
-# Admission can express what RBAC cannot: it sees the old object and the
-# new one, and it sees who is asking. The two validations below hold the
-# agent to the keys it is supposed to own, and to the node it is supposed
-# to own them on.
-#
-# matchConditions scopes every rule to the runtime-agent's ServiceAccount.
-# Nothing here constrains the kubelet, the cloud controller manager, the
-# cluster autoscaler or an administrator; a policy that did would be an
-# outage, not a control.
+# Source: gibson/charts/gibson-workloads/charts/setec/templates/frontend-scope-policy.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
-  name: setec-runtime-agent-node-guard
+  name: setec-frontend-scope
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: runtime-agent
 spec:
   failurePolicy: Fail
   matchConstraints:
     resourceRules:
       - apiGroups: [""]
         apiVersions: ["v1"]
-        operations: ["UPDATE"]
-        resources: ["nodes"]
+        operations: ["CREATE"]
+        resources: ["namespaces"]
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["rolebindings"]
   matchConditions:
-    # has() before the comparison is not defensive noise: a matchCondition
-    # that ERRORS is resolved by failurePolicy, and failurePolicy here is
-    # Fail. An expression that could error on an unexpected request shape
-    # would therefore reject Node updates from the kubelet — every node in
-    # the cluster, immediately. The guard makes the condition total.
-    - name: only-the-runtime-agent
-      expression: >-
-        has(request.userInfo) && has(request.userInfo.username)
-        && request.userInfo.username ==
-        'system:serviceaccount:setec-system:setec-runtime-agent'
-  variables:
-    - name: setecLabel
-      expression: "'setec.zeroroot.ai/runtime.'"
-    - name: probeAnnotation
-      expression: "'setec.zeroroot.ai/runtime-probe'"
-    - name: oldLabels
-      expression: "has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}"
-    - name: newLabels
-      expression: "has(object.metadata.labels) ? object.metadata.labels : {}"
-    - name: oldAnnotations
-      expression: "has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}"
-    - name: newAnnotations
-      expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
+    - name: the-frontend-only
+      expression: request.userInfo.username == "system:serviceaccount:setec-system:setec-frontend"
   validations:
-    # 1. Only the agent's own keys may differ.
-    #
-    # Both directions are checked. Scanning only the new object would miss
-    # a DELETED key, and deleting kubernetes.io/hostname or a topology
-    # label is as disruptive as forging one.
     - expression: >-
-        variables.newLabels.all(k, k.startsWith(variables.setecLabel)
-          || (k in variables.oldLabels && variables.oldLabels[k] == variables.newLabels[k]))
-        && variables.oldLabels.all(k, k.startsWith(variables.setecLabel)
-          || (k in variables.newLabels && variables.newLabels[k] == variables.oldLabels[k]))
-        && variables.newAnnotations.all(k, k == variables.probeAnnotation
-          || (k in variables.oldAnnotations && variables.oldAnnotations[k] == variables.newAnnotations[k]))
-        && variables.oldAnnotations.all(k, k == variables.probeAnnotation
-          || (k in variables.newAnnotations && variables.newAnnotations[k] == variables.oldAnnotations[k]))
-        && object.spec == oldObject.spec
+        request.kind.kind != 'Namespace' || (
+          object.metadata.name.startsWith('sbx-')
+          && has(object.metadata.labels)
+          && 'setec.zeroroot.ai/sandbox-namespace' in object.metadata.labels
+          && object.metadata.labels['setec.zeroroot.ai/sandbox-namespace'] == 'true'
+          && 'setec.zeroroot.ai/client' in object.metadata.labels
+          && 'setec.zeroroot.ai/tenant' in object.metadata.labels)
       reason: Forbidden
       message: >-
-        the Setec runtime-agent may only add, change or remove Node labels
-        prefixed setec.zeroroot.ai/runtime. and the
-        setec.zeroroot.ai/runtime-probe annotation. Every other label,
-        annotation and the whole of spec must be left as it was.
-    # 2. The agent may only write the node it runs on.
-    #
-    # authentication.kubernetes.io/node-name is added to the request's user
-    # info by the API server when the ServiceAccount token carries a node
-    # binding (Kubernetes 1.31+, ServiceAccountTokenPodNodeInfo). It comes
-    # from the token, not from anything the Pod can set, so an agent cannot
-    # claim to be on a node it is not.
-    #
-    # requireNodeIdentity is off (the default): the claim is enforced when
-    # the cluster supplies it and skipped when it does not, so installing
-    # this chart on a cluster that predates the feature does not break the
-    # agent. On such a cluster validation 1 still holds — an agent is
-    # confined to the setec keys, just not to one node's copy of them.
-    # Turn requireNodeIdentity on once every node is on 1.31+.
+        the setec frontend may create only a pair namespace: a name that
+        starts with sbx- and the sandbox, client and tenant labels.
     - expression: >-
-        !has(request.userInfo.extra)
-        || !('authentication.kubernetes.io/node-name' in request.userInfo.extra)
-        || request.userInfo.extra['authentication.kubernetes.io/node-name'].all(n,
-          n == object.metadata.name)
+        request.kind.kind != 'RoleBinding' || (
+          namespaceObject != null && has(namespaceObject.metadata.labels)
+          && 'setec.zeroroot.ai/sandbox-namespace' in namespaceObject.metadata.labels
+          && namespaceObject.metadata.labels['setec.zeroroot.ai/sandbox-namespace'] == 'true'
+          && object.roleRef.kind == 'ClusterRole'
+          && size(object.subjects) == 1
+          && object.subjects[0].kind == 'ServiceAccount'
+          && object.subjects[0].namespace == "setec-system"
+          && ((object.roleRef.name == "setec-sandbox-namespace"
+               && object.subjects[0].name == "setec")
+              || (object.roleRef.name == "setec-frontend-exec"
+               && object.subjects[0].name == "setec-frontend")))
       reason: Forbidden
       message: >-
-        the Setec runtime-agent may only write the Node it runs on. This request
-        came from an agent whose token is bound to a different node.
+        the setec frontend may bind only the two roles of a pair namespace,
+        each to its own ServiceAccount, and only in a sandbox namespace.
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/sandbox-namespace-host-guard.yaml
 # Host-access guard for Sandbox namespaces (setec#159).
@@ -23047,7 +22593,7 @@ spec:
 # PSA `baseline` denies exactly this set — and also denies adding
 # capabilities outside the container-runtime default set. Sandbox Pods add
 # NET_ADMIN (see internal/podspec/builder.go: raw-socket network tooling
-# genuinely needs it, and per ADR-0052 the containment boundary for
+# genuinely needs it, and per docs/design/threat-model.md the containment boundary for
 # untrusted execution is the microVM, not the container capability set).
 # Labelling a Sandbox namespace `pod-security.kubernetes.io/enforce=baseline`
 # would therefore reject the operator's own Pods. This policy applies the
@@ -23072,10 +22618,10 @@ kind: ValidatingAdmissionPolicy
 metadata:
   name: setec-sandbox-host-guard
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     setec.zeroroot.ai/managed-by: setec-operator
@@ -23306,26 +22852,22 @@ spec:
   policyName: gibson-tenant-operator-rolebinding-scope
   validationActions: ["Deny"]
 ---
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/runtime-agent-node-guard.yaml
+# Source: gibson/charts/gibson-workloads/charts/setec/templates/frontend-scope-policy.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
-  name: setec-runtime-agent-node-guard
+  name: setec-frontend-scope
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: runtime-agent
 spec:
-  policyName: setec-runtime-agent-node-guard
+  policyName: setec-frontend-scope
   validationActions:
     - Deny
-  # No matchResources narrowing: Nodes are cluster-scoped, and the policy's
-  # matchConditions already restricts it to one ServiceAccount.
-  matchResources: {}
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/sandbox-namespace-host-guard.yaml
 # The binding is what scopes the policy to Sandbox namespaces. The policy
@@ -23346,10 +22888,10 @@ kind: ValidatingAdmissionPolicyBinding
 metadata:
   name: setec-sandbox-host-guard
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     setec.zeroroot.ai/managed-by: setec-operator
@@ -23364,6 +22906,32 @@ spec:
           operator: In
           values:
             - "setec-sandboxes"
+---
+# Source: gibson/charts/gibson-workloads/charts/setec/templates/sandbox-namespace-host-guard.yaml
+# The namespaces that the frontend makes for each pair of client and
+# tenant (setec#207). Selected by label: the frontend sets the label at
+# create, the frontend-scope policy refuses a namespace without it, and
+# the frontend has no verb that changes the labels of a namespace later.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: setec-sandbox-host-guard-pairs
+  labels:
+    helm.sh/chart: setec-0.126.0
+    app.kubernetes.io/name: setec
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: setec
+    setec.zeroroot.ai/managed-by: setec-operator
+spec:
+  policyName: setec-sandbox-host-guard
+  validationActions:
+    - Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        setec.zeroroot.ai/sandbox-namespace: "true"
 ---
 # Source: gibson/charts/gibson-workloads/templates/spire-server/platform-identity-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -23705,10 +23273,10 @@ kind: ValidatingWebhookConfiguration
 metadata:
   name: setec-validating-sandboxclass
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     app.kubernetes.io/component: webhook
@@ -23738,10 +23306,10 @@ kind: ValidatingWebhookConfiguration
 metadata:
   name: setec-validating-webhook
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
   annotations:
@@ -23798,25 +23366,6 @@ webhooks:
         operations: ["CREATE", "UPDATE"]
         resources: ["clusterspiffeids"]
     sideEffects: None
----
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/hooks/pre-upgrade-runtime-check.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: setec-preupgrade-runtime-check
-  namespace: setec-system
-  labels:
-    helm.sh/chart: setec-0.115.0
-    app.kubernetes.io/name: setec
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: preupgrade-hook
-  annotations:
-    "helm.sh/hook": pre-upgrade
-    "helm.sh/hook-weight": "-10"
-    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/02-bootstrap-secrets.yaml
 apiVersion: v1
@@ -23910,95 +23459,6 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation
 automountServiceAccountToken: false
 ---
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/hooks/pre-upgrade-runtime-check.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: setec-preupgrade-runtime-check
-  namespace: setec-system
-  labels:
-    helm.sh/chart: setec-0.115.0
-    app.kubernetes.io/name: setec
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: preupgrade-hook
-  annotations:
-    "helm.sh/hook": pre-upgrade
-    "helm.sh/hook-weight": "-10"
-    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
-data:
-  # Space-separated list of backend names that are enabled AFTER this upgrade.
-  enabled-backends: gvisor runc
-  check.sh: |
-    #!/bin/sh
-    set -u
-    enabled="${ENABLED_BACKENDS:-}"
-    echo "pre-upgrade runtime check: enabled backends after upgrade: [${enabled# }]"
-    # List SandboxClass names, then inspect each one.
-    names="$(kubectl get sandboxclasses.setec.zeroroot.ai -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)"
-    if [ -z "${names}" ]; then
-      echo "pre-upgrade runtime check: no SandboxClass objects found; nothing to warn about."
-      exit 0
-    fi
-    warnings=0
-    for name in ${names}; do
-      # Prefer the new spec.runtime.backend field; fall back to the legacy spec.vmm value.
-      backend="$(kubectl get sandboxclass.setec.zeroroot.ai "${name}" -o jsonpath='{.spec.runtime.backend}' 2>/dev/null || true)"
-      if [ -z "${backend}" ]; then
-        vmm="$(kubectl get sandboxclass.setec.zeroroot.ai "${name}" -o jsonpath='{.spec.vmm}' 2>/dev/null || true)"
-        case "${vmm}" in
-          firecracker|Firecracker) backend="kata-fc" ;;
-          qemu|QEMU)               backend="kata-qemu" ;;
-          "")                       backend="" ;;
-          *)                        backend="${vmm}" ;;
-        esac
-      fi
-      if [ -z "${backend}" ]; then
-        continue
-      fi
-      # Check membership in the space-padded enabled list.
-      case " ${enabled} " in
-        *" ${backend} "*)
-          # Backend still enabled — no warning.
-          ;;
-        *)
-          echo "warning: SandboxClass ${name} references backend ${backend} which is being disabled in this upgrade."
-          warnings=$((warnings + 1))
-          ;;
-      esac
-    done
-    if [ "${warnings}" -gt 0 ]; then
-      echo "pre-upgrade runtime check: ${warnings} SandboxClass object(s) reference soon-to-be-disabled backends. Review and re-point them after the upgrade; existing Running Sandboxes are NOT affected by this hook."
-    else
-      echo "pre-upgrade runtime check: all existing SandboxClass objects reference backends that remain enabled."
-    fi
-    # Warn-only — always exit success.
-    exit 0
----
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/hooks/pre-upgrade-runtime-check.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: setec-preupgrade-runtime-check
-  labels:
-    helm.sh/chart: setec-0.115.0
-    app.kubernetes.io/name: setec
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: preupgrade-hook
-  annotations:
-    "helm.sh/hook": pre-upgrade
-    "helm.sh/hook-weight": "-10"
-    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
-rules:
-  - apiGroups: ["setec.zeroroot.ai"]
-    resources: ["sandboxclasses"]
-    verbs: ["get", "list"]
----
 # Source: gibson/templates/jobs/gibson-workloads-first-admin.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -24039,32 +23499,6 @@ rules:
   - apiGroups: ["gibson.zeroroot.ai"]
     resources: ["tenantmembers"]
     verbs: ["get", "list", "patch", "create"]
----
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/hooks/pre-upgrade-runtime-check.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: setec-preupgrade-runtime-check
-  labels:
-    helm.sh/chart: setec-0.115.0
-    app.kubernetes.io/name: setec
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: preupgrade-hook
-  annotations:
-    "helm.sh/hook": pre-upgrade
-    "helm.sh/hook-weight": "-10"
-    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: setec-preupgrade-runtime-check
-subjects:
-  - kind: ServiceAccount
-    name: setec-preupgrade-runtime-check
-    namespace: setec-system
 ---
 # Source: gibson/templates/jobs/gibson-workloads-first-admin.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -25850,77 +25284,6 @@ spec:
           type: RuntimeDefault
   restartPolicy: Never
 ---
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/hooks/pre-upgrade-runtime-check.yaml
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: setec-preupgrade-runtime-check
-  namespace: setec-system
-  labels:
-    helm.sh/chart: setec-0.115.0
-    app.kubernetes.io/name: setec
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: preupgrade-hook
-  annotations:
-    "helm.sh/hook": pre-upgrade
-    "helm.sh/hook-weight": "0"
-    "helm.sh/hook-delete-policy": hook-succeeded,hook-failed,before-hook-creation
-spec:
-  ttlSecondsAfterFinished: 60
-  backoffLimit: 3
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: setec
-        app.kubernetes.io/instance: gibson
-        app.kubernetes.io/component: preupgrade-hook
-    spec:
-      serviceAccountName: setec-preupgrade-runtime-check
-      restartPolicy: Never
-      securityContext:
-        runAsNonRoot: true
-        seccompProfile:
-          type: RuntimeDefault
-      containers:
-        - name: runtime-check
-          image: "ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48"
-          command: ["/bin/sh", "/scripts/check.sh"]
-          env:
-            - name: ENABLED_BACKENDS
-              valueFrom:
-                configMapKeyRef:
-                  name: setec-preupgrade-runtime-check
-                  key: enabled-backends
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsUser: 65532
-            capabilities:
-              drop:
-                - ALL
-          volumeMounts:
-            - name: scripts
-              mountPath: /scripts
-              readOnly: true
-          resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 200m
-              memory: 128Mi
-      volumes:
-        - name: scripts
-          configMap:
-            name: setec-preupgrade-runtime-check
-            items:
-              - key: check.sh
-                path: check.sh
-                mode: 0755
----
 # Source: gibson/charts/openfga/templates/job.yaml
 apiVersion: batch/v1
 kind: Job
@@ -27499,10 +26862,10 @@ kind: SandboxClass
 metadata:
   name: tool
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
   annotations:
@@ -27526,8 +26889,6 @@ spec:
   maxResources:
     memory: 8Gi
     vcpu: 4
-  runtime:
-    backend: gvisor
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/sandboxclass-default.yaml
 apiVersion: setec.zeroroot.ai/v1alpha1
@@ -27535,10 +26896,10 @@ kind: SandboxClass
 metadata:
   name: connector
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
   annotations:
@@ -27560,8 +26921,6 @@ spec:
   maxResources:
     memory: 8Gi
     vcpu: 4
-  runtime:
-    backend: gvisor
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/sandboxclass-default.yaml
 apiVersion: setec.zeroroot.ai/v1alpha1
@@ -27569,10 +26928,10 @@ kind: SandboxClass
 metadata:
   name: agent
   labels:
-    helm.sh/chart: setec-0.115.0
+    helm.sh/chart: setec-0.126.0
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.115.0"
+    app.kubernetes.io/version: "v0.126.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
   annotations:
@@ -27599,8 +26958,6 @@ spec:
   requests:
     cpu: 250m
     memory: 768Mi
-  runtime:
-    backend: gvisor
 ---
 # Source: gibson/templates/postgres/platform-postgres-cluster.yaml
 apiVersion: postgresql.cnpg.io/v1

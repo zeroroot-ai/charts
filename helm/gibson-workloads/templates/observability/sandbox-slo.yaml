@@ -165,11 +165,10 @@ spec:
               >5m, which means the in-daemon eviction handler is
               cancelling detonations in response to AWS spot-interruption
               notices faster than the on-demand fallback ASG can
-              backfill. Mitigation: open a GitOps PR raising
-              `setec.spotEvictionFallback.onDemandMax` (current cap is 2);
-              wait for ArgoCD sync (≤5 min); revert once the spot pool
-              recovers. Escalate to the EKS sister-spec owner if
-              sustained >24h.
+              backfill. Mitigation: raise the on-demand share of the
+              fleet node pool in the hosted substrate; revert once the
+              spot pool recovers. Escalate to the EKS sister-spec owner
+              if sustained >24h.
 
         # R4.4: per-tenant quota-exceeded rate elevated.
         # The alert uses the sum across tenants intentionally — a

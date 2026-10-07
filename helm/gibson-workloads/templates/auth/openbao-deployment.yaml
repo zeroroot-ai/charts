@@ -339,7 +339,7 @@ spec:
           # build a client against an OpenBao that would not answer, Argo spent
           # its five retries on that one task, and every resource behind it —
           # the daemon included — was never created. Three gibson exit tests
-          # failed at "Stand up the setec+gvisor cluster" for three days with no
+          # failed at "Stand up the setec cluster" for three days with no
           # further detail.
           #
           # The whole bringup waits on this one endpoint, so it gets the longest
@@ -1582,6 +1582,10 @@ spec:
                 path: stripe-publishable-key
               - key: stripe-webhook-secret
                 path: stripe-webhook-secret
+              # The sandbox disk signing seed (ADR-0166): the keyring member
+              # SETEC_DISK_SIGNING_SEED, seeded to secret/data/setec-disk-signing.
+              - key: setec-disk-signing-seed
+                path: setec-disk-signing-seed
   volumeClaimTemplates:
     {{- if .Values.openbao.persistence.enabled }}
     - metadata:

@@ -9,9 +9,10 @@
 #
 # It installs onto the CURRENT kube context: the cluster is stage 1 and is
 # not this script's job. On kind, `make recreate ENV=kind` is the bringup
-# verb that creates the cluster, runs the gVisor node prep and then installs
-# the platform (deploy#1737). An operator on another cluster brings
-# a cluster that already carries the stage 1 rows.
+# verb that creates the cluster and then installs the platform (deploy#1737).
+# An operator on another cluster brings a cluster that already carries the
+# stage 1 rows: each fleet node exposes /dev/kvm (ADR-0083), and a registry
+# holds the signed sandbox disks (SETEC_DISK_REPO in substrate.env).
 #
 # Usage:
 #   scripts/baseline-up.sh                 # use the current kube context
@@ -438,6 +439,21 @@ BUCKET_ARGS=(
   --set "platformPostgres.backup.endpointURL=${BUCKET_ENDPOINT}"
 )
 
+# The sandbox disks (ADR-0166). The setec disk builder pushes one signed disk
+# for each image digest to SETEC_DISK_REPO (stage 0 names the registry), and
+# each launcher checks the signature with the public key of the keyring seed
+# SETEC_DISK_SIGNING_SEED. The seed itself reaches the cluster through
+# keyring-to-cluster.sh above, the OpenBao seeder and an ExternalSecret; the
+# public key is derived here from the same member, so the two never disagree.
+SETEC_DISK_REPO="$(substrate_get SETEC_DISK_REPO)"
+[ -n "$SETEC_DISK_REPO" ] || { echo "FATAL: ${SUBSTRATE_ENV} has no SETEC_DISK_REPO: the registry repository of the signed sandbox disks (ADR-0166)" >&2; exit 1; }
+SETEC_DISK_PUBLIC_KEY="$("$(dirname "$0")/setec-disk-public-key.sh" "$KEYRING_FILE")"
+log "setec disks: ${SETEC_DISK_REPO}, signed by the keyring seed (public key sha256:$(printf '%s' "$SETEC_DISK_PUBLIC_KEY" | sha256sum | cut -c1-16))"
+SETEC_ARGS=(
+  --set-string "gibson-workloads.setec.launcher.diskRepo=${SETEC_DISK_REPO}"
+  --set-string "gibson-workloads.setec.launcher.diskBuilder.publicKeys[0]=${SETEC_DISK_PUBLIC_KEY}"
+)
+
 log "phase 1b — velero (its own release, namespace velero)"
 mapfile -t VELERO_CHART < <(chart_args gibson-velero)
 helm upgrade --install velero "${VELERO_CHART[@]}" \
@@ -471,6 +487,7 @@ helm upgrade --install "$RELEASE" "${GIBSON_CHART[@]}" \
   ${RUNG_FILE:+-f "$RUNG_FILE"} \
   "${EXTRA_VALUES_ARGS[@]}" \
   "${BUCKET_ARGS[@]}" \
+  "${SETEC_ARGS[@]}" \
   "${TRUST_DOMAIN_ARGS[@]}" \
   --set-json "gibson-workloads.spire.identityAdmission.workloadCreators=[\"${PRINCIPAL}\"]" \
   --set "global.networkPolicy.apiServerCIDRs={${API_CIDRS}}" \

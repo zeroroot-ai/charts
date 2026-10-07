@@ -107,9 +107,9 @@ IMAGE_SERVICE = {
     "setec": "setec",
     "setec-frontend": "setec",
     "setec-node-agent": "setec",
-    "setec-runtime-agent": "setec",
-    "setec-installer": "setec",
-    "setec-keepalive": "setec",
+    "setec-launcher": "setec",
+    "setec-disk-builder": "setec",
+    "setec-device-plugin": "setec",
     "docs-site": "docs-site",
 }
 # First-party images built from a fork, so no reader set of ours governs them.
