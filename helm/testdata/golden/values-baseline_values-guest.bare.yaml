@@ -21001,6 +21001,9 @@ spec:
           # "Secret gibson/iam-admin not yet written", zitadel-login on
           # "secret login-client not found").
           ENTRIES="iam-admin:iam-admin.json:gibson-zitadel-iam-admin-machinekey:machinekey login-client:pat:gibson-zitadel-login-client-pat:pat"
+          # The store key that the platform-operator rotates (ADR-0171). This
+          # hook writes it only when the store holds no value.
+          OPERATOR_ROTATED="gibson-zitadel-login-client-pat"
           for entry in $ENTRIES; do
             SECRET=${entry%%:*}; rest=${entry#*:}
             DATAKEY=${rest%%:*}; rest=${rest#*:}
@@ -21017,14 +21020,19 @@ spec:
               404) have="" ;;
               *) echo "ERROR: read secret/$KEY returned HTTP $code: $(cat /tmp/kv.json)"; exit 1 ;;
             esac
-            # A value in the store is never written over. The store is the
-            # source of each value after the first escrow: the platform-operator
-            # rotates the login-client token there (ADR-0171), and a restore
-            # brings the value back there. Writing the Secret value over it
-            # would undo a rotation whenever this hook runs before ESO has
-            # refreshed the Secret.
-            if [ -n "$have" ]; then
-              echo "ESCROWED already: secret/$KEY holds a value; the store is its source"
+            # The store is the source of a key the platform-operator rotates
+            # there (ADR-0171). A value in the store is never written over for
+            # such a key: writing the Secret value over it would undo a
+            # rotation whenever this hook runs before ESO has refreshed the
+            # Secret.
+            if [ -n "$have" ] && [ "$KEY" = "$OPERATOR_ROTATED" ]; then
+              echo "ESCROWED already: secret/$KEY holds a value, and the platform-operator rotates it in the store"
+              continue
+            fi
+            # The restore path: the store holds the value and the Secret
+            # does not exist yet.
+            if [ -n "$have" ] && ! kubectl -n "$NS" get secret "$SECRET" >/dev/null 2>&1; then
+              echo "ESCROWED already: secret/$KEY is in the store and Secret $SECRET is not yet materialised (restore path)"
               continue
             fi
             # A Secret this ServiceAccount may not read looks exactly like one
@@ -21040,6 +21048,10 @@ spec:
             done
             VALUE=$(kubectl -n "$NS" get secret "$SECRET" -o json | jq -r --arg k "$DATAKEY" '.data[$k] // empty' | base64 -d)
             [ -n "$VALUE" ] || { echo "ERROR: $SECRET never appeared or its $DATAKEY is empty"; exit 1; }
+            if [ "$have" = "$VALUE" ]; then
+              echo "ESCROWED already: secret/$KEY matches Secret $SECRET"
+              continue
+            fi
             code=$(curl -sS -o /tmp/kv.json -w '%{http_code}' -X POST \
               -H "X-Vault-Token: $VAULT_ADMIN_TOKEN" -H "Content-Type: application/json" \
               -d "$(jq -nc --arg p "$PROP" --arg v "$VALUE" '{data: {($p): $v}}')" "$BAO_ADDR/v1/secret/data/$KEY")
