@@ -1005,10 +1005,9 @@ dashboard:
   # platformPostgres tier helpers.
   postgres:
     enabled: true
-    # password is sourced from DASHBOARD_DB_PASSWORD in the Secret
-    # gibson.dbSecrets.name names, "<fullname>-db-secrets". The literal
-    # gibson-db-secrets no longer exists: its one key was an ext-authz DSN
-    # nothing read (charts#294).
+    # password is sourced from the platformPostgres password Secret
+    # (gibson-platform-postgres-credentials), the role gibson_platform.
+    # The dashboard has no Postgres role of its own (charts#524).
     # NOTE: sslmode is hardcoded `require` in chart templates (Spec
     # first-deploy-unblock-and-ha R7); no sslMode/sslmode knob here.
     maxConns: 10
@@ -3458,8 +3457,6 @@ bootstrap:
     # Both already-existing entries originally targeted the deleted spire-
     # and platform-postgresql subcharts; the names are kept for backwards
     # compat with prod overlays that already reference them.
-    - key: dashboard_postgres_password
-      generator: "rand32"
     - key: tenant_admin_postgres_password
       generator: "rand32"
     - key: zitadel_postgres_password

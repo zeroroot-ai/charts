@@ -2,8 +2,8 @@
 ext_authz Deployment.
 
 Sole authorization-decision service for the platform. Called synchronously by
-Envoy ExtAuthz for every authenticated RPC; mints Capability Grant JWTs for
-tool dispatch; validates API keys for the Envoy Lua filter. ≥2 replicas so
+Envoy ExtAuthz for every authenticated RPC; verifies the Capability Grant
+JWTs that the daemon signs; validates API keys for the Envoy Lua filter. ≥2 replicas so
 that ext_authz unavailability never single-points the gateway.
 
 PodSecurityContext: distroless nonroot UID, read-only root filesystem, all
@@ -12,9 +12,6 @@ container has no shell and no writable filesystem outside the explicit
 emptyDir for /tmp.
 
 Mounts:
-  - Grant key    → /etc/ext-authz/grant-key/ from gibson-extauthz-grant-key
-                   (this chart, see secret.yaml). Holds current.pem + current.kid
-                   and optional previous.pem/previous.kid for key rotation.
   - RPC registry → /etc/gibson/registry.yaml from either:
       (a) an init container that `oras pull`s the private gibson registry
           artifact (oci://{{ .Values.sdk.registry }}:{{ .Values.sdk.version }})
@@ -444,9 +441,6 @@ spec:
                    legacyHmacEnabled toggle was a transitional shim and is
                    removed in spec helm-eks-readiness-and-pg-split Phase 6. */}}
           volumeMounts:
-            - name: grant-key
-              mountPath: /etc/ext-authz/grant-key
-              readOnly: true
             {{- if and .Values.sdk.bypassRegistryValidation .Values.sdk.embeddedRegistry }}
             # Air-gapped only: the registry comes from a mounted ConfigMap. In
             # the default daemon-fetch path (deploy#852) there is no registry
@@ -525,10 +519,6 @@ spec:
           resources:
             {{- toYaml .Values.extAuthz.resources | nindent 12 }}
       volumes:
-        - name: grant-key
-          secret:
-            secretName: gibson-extauthz-grant-key
-            defaultMode: 0400
         # sa-identity-map volume removed from ext-authz: the binary does
         # not read it, and mounting it inside /etc/gibson collides with the
         # registry mount (OCI runtime: read-only file system). The daemon

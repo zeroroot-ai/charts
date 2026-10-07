@@ -13690,9 +13690,6 @@ spec:
             - name: EXT_AUTHZ_ENVOY_SVID
               value: "spiffe://zeroroot.ai/platform/envoy"
           volumeMounts:
-            - name: grant-key
-              mountPath: /etc/ext-authz/grant-key
-              readOnly: true
             # NOTE: sa-identity-map ConfigMap is NOT mounted on ext-authz.
             # The ext-authz binary does not consume it — only the daemon
             # (core/gibson identityresolver) does, for log enrichment.
@@ -13766,10 +13763,6 @@ spec:
               cpu: 100m
               memory: 128Mi
       volumes:
-        - name: grant-key
-          secret:
-            secretName: gibson-extauthz-grant-key
-            defaultMode: 0400
         # sa-identity-map volume removed from ext-authz: the binary does
         # not read it, and mounting it inside /etc/gibson collides with the
         # registry mount (OCI runtime: read-only file system). The daemon
@@ -14978,7 +14971,6 @@ spec:
               #                  set-initial-password -Xyz` reads that as an option (exit
               #                  64, blocker 3 loops #16/#18). scripts/check-seed-passwords.sh
               #                  refuses password:rand.
-              #   ecpem:<name>   the private key of transit key <name> (ecdsa-p256), PEM
               #   rsapem:<name>  the private key of transit key <name> (rsa-2048), PEM
               #   rsapub:<name>  the public key of transit key <name> (rsa-2048), PEM
               #   literal:<v>    the literal value <v>
@@ -15000,7 +14992,6 @@ spec:
               # gibson-platform-operator-vault Secret. Everything else is generated once
               # and kept, so an upgrade never rotates a credential under a workload.
               gibson-gibson-platform-postgres-password password:pw
-              gibson-dashboard-postgres-password password:pw
               gibson-tenant-admin-postgres-password password:pw
               gibson-zitadel-postgres-password password:pw
               gibson-openfga-postgres-password password:pw
@@ -15008,11 +14999,8 @@ spec:
               gibson-neo4j-password password:pw
               gibson-redis-password password:pw
               zitadel-masterkey value:rand
-              gibson-billing-webhook-secret secret:rand
               gibson-dashboard-session-secrets auth_secret:rand server_actions_key:randb64
               gibson-cg-signing-key key:rand kid:rand8
-              gibson-extauthz-grant-current pem:ecpem:extauthz-grant-current kid:rand8
-              gibson-extauthz-grant-previous pem:ecpem:extauthz-grant-previous kid:rand8
               gibson-zitadel-system-bot-key private_key:rsapem:zitadel-system-bot public_key:rsapub:zitadel-system-bot
               ghcr-pull-secret pat:input:ghcr-pull-token
               gibson-dashboard-auth-hardening captcha_secret_key:empty email_resend_api_key:empty
@@ -15598,7 +15586,6 @@ spec:
                   randb64) gen_rand_b64 32 ;;
                   rand8)   gen_rand 8 ;;
                   pw)      gen_pw 43 ;;
-                  ecpem)   transit_private_pem "$1" "$3" ecdsa-p256 ;;
                   rsapem)  transit_private_pem "$1" "$3" rsa-2048 ;;
                   rsapub)  transit_public_pem "$1" "$3" rsa-2048 ;;
                   literal) printf '%s' "$3" ;;
@@ -20364,44 +20351,6 @@ spec:
     - secretKey: captcha_secret_key
       remoteRef: { key: gibson-dashboard-auth-hardening, property: captcha_secret_key }
 ---
-# Source: gibson/charts/gibson-workloads/templates/ext-authz/secret.yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: gibson-extauthz-grant-key
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: ext-authz
-spec:
-  refreshInterval: 60s
-  secretStoreRef:
-    name: "gibson-secrets"
-    kind: ClusterSecretStore
-  target:
-    name: gibson-extauthz-grant-key
-    creationPolicy: Owner
-    template:
-      type: Opaque
-      data:
-        current.pem: "{{ .current_pem }}"
-        current.kid: "{{ .current_kid }}"
-        previous.pem: "{{ .previous_pem }}"
-        previous.kid: "{{ .previous_kid }}"
-  data:
-    - secretKey: current_pem
-      remoteRef: { key: gibson-extauthz-grant-current, property: pem }
-    - secretKey: current_kid
-      remoteRef: { key: gibson-extauthz-grant-current, property: kid }
-    - secretKey: previous_pem
-      remoteRef: { key: gibson-extauthz-grant-previous, property: pem }
-    - secretKey: previous_kid
-      remoteRef: { key: gibson-extauthz-grant-previous, property: kid }
----
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/iam-admin-pat-externalsecret.yaml
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -20515,8 +20464,8 @@ spec:
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/missing-secrets.yaml
 # gibson-workloads-db-secrets — referenced by gibson daemon for tenant
-# admin DB password, dashboard DB password, neo4j admin password, and the
-# SPIRE datastore password (Aurora/RDS spire role; deploy#572).
+# admin DB password, neo4j admin password, and the SPIRE datastore password
+# (Aurora/RDS spire role; deploy#572).
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -20539,13 +20488,10 @@ spec:
     template:
       type: Opaque
       data:
-        DASHBOARD_DB_PASSWORD: "{{ .dashboard_password }}"
         NEO4J_PASSWORD: "{{ .neo4j_password }}"
         TENANT_POSTGRES_ADMIN_PASSWORD: "{{ .tenant_admin_password }}"
         SPIRE_DB_PASSWORD: "{{ .spire_password }}"
   data:
-    - secretKey: dashboard_password
-      remoteRef: { key: gibson-dashboard-postgres-password, property: password }
     - secretKey: neo4j_password
       remoteRef: { key: gibson-neo4j-password, property: password }
     - secretKey: tenant_admin_password
@@ -20795,36 +20741,6 @@ spec:
       remoteRef:
         key: setec-disk-signing
         property: seed
----
-# Source: gibson/templates/externalsecrets/dashboard-postgres-credentials.yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  # Deterministic cold-bringup ordering (deploy#820): this ExternalSecret is
-  # STANDING infrastructure — it owns its target Secret for the life of the
-  # install (creationPolicy: Owner), so it must NOT be an Argo hook: hook
-  # lifecycle (BeforeHookCreation deletes, operation-retry cleanup) deletes the
-  # ExternalSecret and cascade-deletes the owned Secret out from under running
-  # workloads (observed live on staging, 2026-06-11). A regular resource at an
-  # early sync-wave (-8, after the store at -10, before the zitadel init chain
-  # at -6/-4/-3) gives the same cold-sync ordering with a durable object.
-  annotations:
-    argocd.argoproj.io/sync-wave: "-8"
-  name: dashboard-postgres-credentials
-  namespace: gibson
-spec:
-  data:
-  - remoteRef:
-      key: gibson-dashboard-postgres-password
-      property: password
-    secretKey: password
-  refreshInterval: 60s
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: gibson-secrets
-  target:
-    creationPolicy: Owner
-    name: dashboard-postgres-credentials
 ---
 # Source: gibson/templates/externalsecrets/gibson-neo4j-auth.yaml
 apiVersion: external-secrets.io/v1
@@ -21434,8 +21350,6 @@ spec:
     databases:
       - name: "gibson_platform"
         owner: "gibson_platform"
-      - name: "dashboard"
-        owner: "dashboard"
       - name: "tenant_admin"
         owner: "tenant_admin"
       - name: "zitadel"
@@ -25188,7 +25102,7 @@ metadata:
   name: gibson-workloads-postgres-setup
   namespace: gibson
   annotations:
-    # gitops#297: this role-creating job (gibson_platform/dashboard/tenant_admin
+    # gitops#297: this role-creating job (gibson_platform/tenant_admin
     # roles + DBs, pg_trgm seed, tenant_neo4j_endpoints registry) MUST run
     # BEFORE anything that logs in with those roles — the zitadel-init Sync hook
     # at wave -4 and every DB-consuming service. As a post-install/PostSync hook
@@ -25278,11 +25192,6 @@ spec:
             secretKeyRef:
               name: gibson-platform-postgres-credentials
               key: password
-        - name: PGSETUP_PW_DASHBOARD
-          valueFrom:
-            secretKeyRef:
-              name: dashboard-postgres-credentials
-              key: password
         - name: PGSETUP_PW_TENANT_ADMIN
           valueFrom:
             secretKeyRef:
@@ -25329,7 +25238,6 @@ spec:
             echo "[$1] setup complete"
           }
           setup "gibson_platform" "gibson_platform" "LOGIN" PGSETUP_PW_GIBSON_PLATFORM
-          setup "dashboard" "dashboard" "LOGIN" PGSETUP_PW_DASHBOARD
           setup "tenant_admin" "tenant_admin" "LOGIN CREATEDB CREATEROLE" PGSETUP_PW_TENANT_ADMIN
           # gitops#101: per-tenant databases need pg_trgm for the
           # missions_name_trgm_idx GIN index in migration 003. CREATE DATABASE copies
