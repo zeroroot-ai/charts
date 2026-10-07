@@ -775,7 +775,7 @@ request. A values file that still sets either one fails here.
        runs. Off means that the endpoint names a fleet outside this cluster.
        An empty endpoint, or one that names the in-chart frontend, names no
        fleet: the daemon would dial a Service that is never created. */ -}}
-{{- $addr := toString ((($sbx.setec | default dict).address) | default "") -}}
+{{- $addr := toString (dig "setec" "address" "" $sbx) -}}
 {{- if not $addr -}}
 {{- fail "validateSetecDispatch: setec.enabled=false and gibson.sandbox.setec.address is empty. The setec seam selects whose fleet runs, never whether one runs (ADR-0087). Set gibson.sandbox.setec.address (and spiffeID) to the frontend of the fleet outside this cluster, or set setec.enabled=true." -}}
 {{- end -}}
