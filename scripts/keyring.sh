@@ -13,7 +13,6 @@
 #
 #   OPENBAO_SEAL_KEY=<base64 of 32 random bytes, 44 chars>
 #   VELERO_REPO_PASSWORD=<base64 of 32 random bytes, 44 chars>
-#   CNPG_BACKUP_KEY=<base64 of 32 random bytes, 44 chars>
 #   BUCKET_ACCESS_KEY=<20 chars, A-Z0-9>
 #   BUCKET_SECRET_KEY=<base64 of 30 random bytes, 40 chars>
 #   SMTP_PASSWORD=<at least 20 chars, no whitespace>
@@ -21,7 +20,7 @@
 #   DNS_ACCESS_KEY=<the access key id of the DNS credential, or empty>
 #   DNS_SECRET_KEY=<its secret access key, or empty>
 #
-# The first three are always generated here. The next three are the shape
+# The first two are always generated here. The next three are the shape
 # of an AWS access key pair and of a relay password: on kind `generate`
 # makes them up and stage 0 configures MinIO and Mailpit with them; on AWS
 # stage 0 gets them from Terraform and passes them to `generate` in a
@@ -84,7 +83,6 @@ MEMBERS=(
   OPENBAO_SEAL_KEY:b64:32
   VELERO_REPO_PASSWORD:b64:32
   SETEC_DISK_SIGNING_SEED:b64:32
-  CNPG_BACKUP_KEY:b64:32
   BUCKET_ACCESS_KEY:alnum:20
   BUCKET_SECRET_KEY:b64:30
   SMTP_PASSWORD:opaque:20
