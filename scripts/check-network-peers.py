@@ -4,14 +4,13 @@
 The check reads each golden render and fails on:
 
   1. an ingress peer (fromEndpoints) that selects pods by pod labels in any
-     namespace: it matches `io.kubernetes.pod.namespace` with `Exists` and
-     names no namespace label (`io.cilium.k8s.namespace.labels.*`). The
-     person who creates a pod chooses its labels, so a pod label alone in
-     any namespace is not proof of the caller,
-  2. an egress rule with toFQDNs or toCIDR that opens no port, or an
-     egress-fqdn rule that opens more than its own ports,
-  3. an object-store host pattern that matches each bucket of S3 (a "*"
-     in the bucket label), or the bare S3 endpoints that serve each bucket.
+     namespace: it matches `io.kubernetes.pod.namespace` with `Exists`, or
+     it sits in a clusterwide policy and names no namespace, and it names no
+     namespace label (`io.cilium.k8s.namespace.labels.*`),
+  2. an egress rule with toFQDNs or toCIDR that opens no fixed port, and a
+     toFQDNs entry with no host,
+  3. a host that reaches each bucket of S3: "*", a name under amazonaws.com
+     whose first label has a "*", or the shared S3 hosts (first label "s3").
 
 scripts/.network-peers-exemptions.txt names an ingress peer that another chart
 must narrow, keyed by the policy name and a label of the peer, with its
@@ -43,11 +42,24 @@ def rules(doc: dict) -> list[dict]:
     return ([doc["spec"]] if doc.get("spec") else []) + list(doc.get("specs") or [])
 
 
-def any_namespace(peer: dict) -> bool:
+def any_namespace(peer: dict, clusterwide: bool = False) -> bool:
     keys = [norm(k) for k in (peer.get("matchLabels") or {})]
+    exprs = [norm(e.get("key", "")) for e in peer.get("matchExpressions") or []]
     exists = any(norm(e.get("key", "")) == NS_KEY and e.get("operator") == "Exists"
                  for e in peer.get("matchExpressions") or [])
+    names_ns = NS_KEY in keys or any(k.startswith(NS_LABELS) for k in keys + exprs)
+    if clusterwide:
+        return not names_ns or (exists and NS_KEY not in keys and not any(k.startswith(NS_LABELS) for k in keys))
     return exists and NS_KEY not in keys and not any(k.startswith(NS_LABELS) for k in keys)
+
+
+def any_bucket(host: str) -> bool:
+    if host in S3_ANY or host == "*":
+        return True
+    if not host.endswith("amazonaws.com"):
+        return False
+    first = host.split(".", 1)[0]
+    return "*" in first or first == "s3"
 
 
 def load_exempt(root: str) -> dict[tuple[str, str], str]:
@@ -72,7 +84,7 @@ def judge(docs: list, exempt: dict | None = None, used: set | None = None) -> li
         for r in rules(d):
             for i in r.get("ingress") or []:
                 for peer in i.get("fromEndpoints") or []:
-                    if any_namespace(peer):
+                    if any_namespace(peer, d.get("kind") == "CiliumClusterwideNetworkPolicy"):
                         hit = [k for k in exempt if k[0] == name and
                                k[1] in {f"{kk}={vv}" for kk, vv in (peer.get("matchLabels") or {}).items()}]
                         if hit:
@@ -89,7 +101,9 @@ def judge(docs: list, exempt: dict | None = None, used: set | None = None) -> li
                                " opens no fixed port")
                 for f in e.get("toFQDNs") or []:
                     host = f.get("matchName") or f.get("matchPattern") or ""
-                    if host in S3_ANY:
+                    if not host:
+                        bad.append(f"{name}: a toFQDNs entry names no host: {f}")
+                    elif any_bucket(host):
                         bad.append(f"{name}: {host} reaches each bucket of S3, not the buckets of the install")
     return bad
 
@@ -137,16 +151,30 @@ def selftest() -> int:
                       "toPorts": [{"ports": [{"port": "1", "endPort": 65535, "protocol": "TCP"}]}]}])),
         ("a CIDR rule with no port", cnp(egress=[{"toCIDR": ["10.0.0.1/32"]}])),
         ("each bucket of S3", cnp(egress=[{"toFQDNs": [{"matchPattern": "*.s3.amazonaws.com"}], "toPorts": https}])),
+        ("each bucket of a region", cnp(egress=[{"toFQDNs": [{"matchPattern": "*.s3.us-east-1.amazonaws.com"}],
+                                                 "toPorts": https}])),
+        ("the shared regional S3 host", cnp(egress=[{"toFQDNs": [{"matchName": "s3.us-east-1.amazonaws.com"}],
+                                                     "toPorts": https}])),
+        ("each host", cnp(egress=[{"toFQDNs": [{"matchPattern": "*"}], "toPorts": https}])),
+        ("an FQDN entry with no host", cnp(egress=[{"toFQDNs": [{}], "toPorts": https}])),
+        ("a clusterwide peer with no namespace",
+         dict(cnp(ingress=[{"fromEndpoints": [{"matchLabels": {"app": "x"}}]}]),
+              kind="CiliumClusterwideNetworkPolicy")),
     )
     wide = failing[0][1]
     if judge([wide], {("p", "app.kubernetes.io/name=cloudnative-pg"): "r"}):
         print("SELFTEST FAIL: an exempt peer must pass")
         return 1
+    used: set = set()
+    judge([good[0]], {("p", "app=gone"): "r"}, used)
+    if used:
+        print("SELFTEST FAIL: an exemption that matches no finding must stay unused, so audit() reports it stale")
+        return 1
     for what, doc in failing:
         if len(judge([doc])) != 1:
             print(f"SELFTEST FAIL: {what} must give one finding, got {judge([doc])}")
             return 1
-    print("  ✓ selftest: a pod label from any namespace, an FQDN or CIDR rule with no fixed port, and each bucket of S3 fail")
+    print("  ✓ selftest: a pod label from any namespace, an FQDN or CIDR rule with no fixed port, and each bucket of S3 fail; a stale exemption is reported")
     return 0
 
 

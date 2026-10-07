@@ -45,12 +45,12 @@ only.
 {{- $sts := list (dict "matchName" "sts.amazonaws.com" "ports" $https) (dict "matchPattern" "sts.*.amazonaws.com" "ports" $https) -}}
 
 {{- /* The SMTP relay of global.email, for zitadel and the tenant-operator. */ -}}
+{{- /* gibson.email resolves the host through tpl, as every mail reader does. */ -}}
 {{- $smtp := list -}}
-{{- $email := (.Values.global).email | default dict -}}
-{{- if eq ($email.provider | default "") "smtp" -}}
-{{- $mail := $email.smtp | default dict -}}
+{{- $mail := include "gibson.email" . | fromJson -}}
+{{- if eq $mail.provider "smtp" -}}
 {{- with include "gibson.externalHost" $mail.host -}}
-{{- $smtp = append $smtp (include "gibson.egressHostEntry" (dict "host" . "port" ($mail.port | default 587)) | fromYaml) -}}
+{{- $smtp = append $smtp (include "gibson.egressHostEntry" (dict "host" . "port" $mail.port) | fromYaml) -}}
 {{- end -}}
 {{- end -}}
 
@@ -127,6 +127,9 @@ only.
 {{- end -}}
 {{- else -}}
 {{- range $b := $buckets | uniq -}}
+{{- if contains "." $b -}}
+{{- fail (printf "the bucket %q has a dot in its name. S3 serves such a bucket only on the shared regional host, which reaches each bucket of S3, so the object-store egress group cannot name it alone. Use a bucket name with no dot." $b) -}}
+{{- end -}}
 {{- $obj = append $obj (dict "matchName" (printf "%s.s3.amazonaws.com" $b) "ports" $https) -}}
 {{- $obj = append $obj (dict "matchPattern" (printf "%s.s3.*.amazonaws.com" $b) "ports" $https) -}}
 {{- end -}}
