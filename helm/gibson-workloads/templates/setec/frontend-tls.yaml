@@ -172,11 +172,11 @@ spec:
 #
 # WHY THIS CA AND NOT A SPIRE SVID. The daemon holds a SPIFFE workload SVID
 # and uses it everywhere else, so a SPIFFE identity on this leg is the shape
-# you would expect and it is not what is here. Neither end implements it:
-# setec's frontend takes `--tls-cert/--tls-key/--tls-client-ca` file paths
-# and knows nothing about the Workload API or URI SANs, and gibson's setec
-# adapter builds a file-based component.TLSConfig and hands it to
-# credentials.NewTLS. Choosing SPIFFE would mean a spiffe-helper sidecar or
+# you would expect and it is not what is here. In file mode setec's frontend
+# takes `--tls-cert/--tls-key/--tls-client-ca` file paths and admits a client
+# by the SPIFFE ID in the URI SAN of its certificate (setec#233), so this
+# certificate carries the daemon ID. Gibson's setec adapter builds a
+# file-based component.TLSConfig and hands it to credentials.NewTLS. Choosing SPIFFE would mean a spiffe-helper sidecar or
 # csi-driver-spiffe on the frontend plus a SPIRE trust-bundle client CA — new
 # code in setec, an OSS repo, for a leg that does not place a
 # tenancy boundary on (setec is tenancy-unaware; the boundary it owns is
@@ -202,6 +202,11 @@ spec:
   duration: 2160h    # 90d
   renewBefore: 360h  # 15d
   commonName: "gibson-daemon"
+  # The frontend admits an enrolled client by the SPIFFE ID in its URI SAN
+  # (setec.frontend.clients, setec#233). The ID is the one of the daemon
+  # SVID, built from the trust domain of the install (ADR-0164).
+  uris:
+    - {{ printf "spiffe://%s/platform/daemon" (include "gibson.trustDomain" .) | quote }}
   privateKey:
     algorithm: ECDSA
     size: 256
