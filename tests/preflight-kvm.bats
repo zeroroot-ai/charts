@@ -9,7 +9,7 @@ setup() {
   export STUB_DIR="$BATS_TEST_TMPDIR"
   export KUBECTL="$ROOT/tests/kvm-kubectl-stub.sh"
   export POLL_SECONDS=0 KVM_TIMEOUT=2
-  export STUB_NODES='' STUB_PHASE=Succeeded STUB_LOGS=kvm-present STUB_BAD_NODE=''
+  export STUB_NODES='' STUB_PHASE=Succeeded STUB_LOGS=kvm-present STUB_BAD_NODE='' STUB_STUCK_NODE=''
   unset FLEET_NODE_SELECTOR
   printf 'gibson-workloads:\n  setec:\n    enabled: false\n' > "$STUB_DIR/seam-off.yaml"
   printf 'gibson-workloads:\n  setec:\n    enabled: true\n' > "$STUB_DIR/seam-on.yaml"
@@ -40,11 +40,37 @@ setup() {
   [[ "$output" == *"nested virtualization"* ]]
 }
 
-@test "a probe that succeeds with no kvm-present line fails" {
+@test "a probe that succeeds with no answer fails, and does not claim the device is absent" {
   export STUB_NODES='node-a\n' STUB_LOGS=''
   run "$SCRIPT"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"has no /dev/kvm"* ]]
+  [[ "$output" == *"did not run to an answer (phase Succeeded"* ]]
+  [[ "$output" != *"/dev/kvm"* ]]
+}
+
+@test "a probe Pod that does not run names its phase and events, and does not name KVM" {
+  export STUB_NODES='node-a\n' STUB_STUCK_NODE=node-a
+  run "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"did not run to an answer (phase Pending"* ]]
+  [[ "$output" == *"Failed: Error: ErrImagePull"* ]]
+  [[ "$output" == *"hostPath"* ]]
+  [[ "$output" != *"/dev/kvm"* ]]
+  [[ "$output" != *"KVM"* ]]
+  [[ "$output" != *"metal"* ]]
+}
+
+@test "the default fleet is the node selector of the device plugin DaemonSet" {
+  export STUB_NODES='node-a\n'
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB_DIR/selector")" = "kubernetes.io/arch=amd64,kubernetes.io/os=linux" ]
+}
+
+@test "no fleet node names the pool that scales from zero" {
+  run "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"scales from zero"* ]]
 }
 
 @test "the first bad node of two fails the preflight" {
