@@ -4,8 +4,9 @@ signing (unified-identity-and-authorization Phase H/8.2, Reqs 5.1, 13.3).
 
 deploy#223 (one-code-path epic): OpenBao is STRUCTURAL. The in-chart
 OpenBao StatefulSet, Service and ServiceAccount render unconditionally on
-every install. `openbao.image.repository`, `openbao.image.tag` and
-`openbao.service.port` are `required` and fail the render when empty.
+every install. `openbao.image.repository` and `openbao.image.tag` are
+`required` and fail the render when empty. The Service listens on 8200 over
+TLS only (templates/auth/openbao-tls.yaml).
 
 deploy#365 (openbao-storage-durability): OpenBao always runs the `file`
 storage backend at /etc/openbao/data, backed by the StatefulSet PVC. The
@@ -86,7 +87,7 @@ reach the daemon through the secrets broker.
 */}}
 {{- $openbaoRepo := .Values.openbao.image.repository | required "openbao.image.repository is REQUIRED (OpenBao is structural — see deploy#223). Set it in values.yaml or the env's gitops Application's helm.values block." }}
 {{- $openbaoTag := .Values.openbao.image.tag | required "openbao.image.tag is REQUIRED (OpenBao is structural — see deploy#223). Pin to a specific OpenBao version (e.g. \"2.5.3\")." }}
-{{- $openbaoPort := .Values.openbao.service.port | required "openbao.service.port is REQUIRED (OpenBao is structural — see deploy#223). Typical value: 8200." }}
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "openbao.service.port" "dataPlane.openbao.addr") "use" "nothing: OpenBao listens on 8200 over TLS, at gibson.openbaoAddr") }}
 {{- /* The cert-manager Vault issuer adds two consumer tokens (the approle init Job and the ESO generators). */}}
 {{- $cmVault := (((.Values.certManager).issuers).vault).enabled }}
 {{- /* / deploy#1731: the bringup keyring Secret. Both names are
@@ -1660,10 +1661,11 @@ metadata:
 spec:
   type: {{ .Values.openbao.service.type | default "ClusterIP" }}
   ports:
-    - name: http
-      port: {{ $openbaoPort }}
-      targetPort: http
+    - name: https
+      port: 8200
+      targetPort: https
       protocol: TCP
+      appProtocol: https
     - name: cluster
       port: 8201
       targetPort: cluster

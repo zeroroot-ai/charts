@@ -194,7 +194,6 @@ spec:
               drop:
                 - ALL
           env:
-            {{- include "gibson.openbaoCAEnv" . | nindent 12 }}
             - name: OPERATOR_NAMESPACE
               valueFrom:
                 fieldRef:
@@ -483,9 +482,9 @@ spec:
             # so the env is unconditional.
             - name: SSL_CERT_DIR
             {{- if .Values.envoy.tls.secretName }}
-              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca:{{ include "gibson.openbaoCADir" . }}"
             {{- else }}
-              value: "/etc/ssl/certs:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/fga-ca:{{ include "gibson.openbaoCADir" . }}"
             {{- end }}
             # ADR-0093 decision 2: the gibson project each tenant org is
             # granted and whose four tenant roles the role sync reads. The

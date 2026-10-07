@@ -272,7 +272,6 @@ spec:
               containerPort: {{ .Values.gibson.service.authzRegistry.port | default 8086 }}
               protocol: TCP
           env:
-            {{- include "gibson.openbaoCAEnv" . | nindent 12 }}
             # the daemon reads FGA store_id + model_id from env
             # vars instead of calling the Kubernetes API to GET the
             # gibson-fga-config ConfigMap. The gibson-fga-init Job writes
@@ -651,9 +650,9 @@ spec:
                   zero-mount-paths assertion on letsencrypt profiles. */}}
             - name: SSL_CERT_DIR
             {{- if eq (include "gibson.envoyEdge.caRequired" .) "true" }}
-              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca:{{ include "gibson.openbaoCADir" . }}"
             {{- else }}
-              value: "/etc/ssl/certs:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/fga-ca:{{ include "gibson.openbaoCADir" . }}"
             {{- end }}
             {{- /*
               The tool-runner's Zitadel service-account credentials

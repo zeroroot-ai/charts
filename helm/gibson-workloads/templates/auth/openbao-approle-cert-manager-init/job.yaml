@@ -54,7 +54,6 @@ wait-for-vault initContainer.
 */}}
 {{- if (((.Values.certManager).issuers).vault).enabled }}
 {{- $vi := .Values.certManager.issuers.vault }}
-{{- $openbaoPort := .Values.openbao.service.port | required "openbao.service.port is REQUIRED for openbao-approle-cert-manager-init Job (deploy#351). Typical value: 8200." -}}
 {{- $auth := $vi.auth | default dict }}
 {{- $aAuth := $auth.appRole | default dict }}
 {{- /* The approle mount, the PKI mount and the PKI role. The policies of
