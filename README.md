@@ -70,7 +70,7 @@ a condition, and `make seam-conditions` fails on one.
 | External Secrets | `gibson` | `externalSecrets.enabled` | The cluster runs its own External Secrets Operator. |
 | external-dns | `gibson` | `externalDns.enabled` | The cluster runs its own external-dns. |
 | CloudNativePG | `gibson` | `cnpg.enabled` | The cluster runs its own CloudNativePG operator. |
-| setec | `gibson-workloads` | `setec.enabled` | `gibson.sandbox.setec.address` names a fleet outside this cluster. The render refuses an empty address and the address of the in-chart frontend. |
+| setec | `gibson-workloads` | `setec.enabled` | `gibson.sandbox.setec.address` names a fleet outside this cluster. The render refuses an empty address, the address of the in-chart frontend, and an empty `spiffeID`. |
 
 `values-guest.yaml` turns the four operator seams off. The monitoring CRDs of
 `gibson-crds` are the monitoring seam (`prometheus-operator-crds.enabled`).

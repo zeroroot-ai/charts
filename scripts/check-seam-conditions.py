@@ -16,8 +16,8 @@ The check reads each helm/*/Chart.yaml and fails when:
 
 The setec seam (ADR-0087) is off when gibson.sandbox.setec.address names a
 fleet outside this cluster. The check renders the umbrella with the seam off
-three times. An empty address and the address of the in-chart frontend must
-fail in validateSetecDispatch. An outside address must render, and the daemon
+four times. An empty address, the address of the in-chart frontend, and an
+empty spiffeID must fail in validateSetecDispatch. An outside address must render, and the daemon
 config must carry it.
 
   check-seam-conditions.py             exit 1 on a finding
@@ -111,21 +111,22 @@ def chart_findings(charts):
 OUTSIDE_ADDRESS = "setec.fleet.example.com:443"
 OUTSIDE_SPIFFE_ID = "spiffe://fleet.example.com/platform/setec-frontend"
 
-# (case name, address, expect the render to pass)
+# (case name, address, spiffeID, expect the render to pass)
 SETEC_CASES = [
-    ("no endpoint", "", False),
-    ("the in-chart frontend", "setec-frontend.setec-system.svc.cluster.local:50051", False),
-    ("a fleet outside this cluster", OUTSIDE_ADDRESS, True),
+    ("no endpoint", "", OUTSIDE_SPIFFE_ID, False),
+    ("the in-chart frontend", "setec-frontend.setec-system.svc.cluster.local:50051", OUTSIDE_SPIFFE_ID, False),
+    ("an outside fleet with no spiffeID", OUTSIDE_ADDRESS, "", False),
+    ("a fleet outside this cluster", OUTSIDE_ADDRESS, OUTSIDE_SPIFFE_ID, True),
 ]
 
 
-def render_setec_off(root, address):
+def render_setec_off(root, address, spiffe_id):
     cmd = ["helm", "template", "gibson", os.path.join(root, "helm", "gibson"),
            "-f", os.path.join(root, "helm", "gibson", "values-baseline.yaml"),
            "-f", os.path.join(root, "helm", "testdata", "render-inputs", "gibson.yaml"),
            "--namespace", "gibson", "--set", f"{SETEC_OFF}=false",
            "--set-string", f"{SETEC_ADDRESS}={address}",
-           "--set-string", f"{SETEC_SPIFFE_ID}={OUTSIDE_SPIFFE_ID}"]
+           "--set-string", f"{SETEC_SPIFFE_ID}={spiffe_id}"]
     p = subprocess.run(cmd, capture_output=True, text=True, check=False)
     return p.returncode, p.stdout, p.stderr
 
@@ -214,14 +215,14 @@ def main():
         print("FAIL: no Chart.yaml with dependencies found; the check read nothing")
         return 1
     findings = chart_findings(charts)
-    for case, address, want_pass in SETEC_CASES:
-        findings += render_findings(case, address, want_pass, *render_setec_off(ROOT, address))
+    for case, address, spiffe_id, want_pass in SETEC_CASES:
+        findings += render_findings(case, address, want_pass, *render_setec_off(ROOT, address, spiffe_id))
     for f in findings:
         print(f"FAIL: {f}")
     if findings:
         return 1
     print(f"  ✓ seam-conditions: {len(SEAMS)} named seams, each defaults to true; with setec off "
-          "the render refuses no endpoint and the in-chart frontend, and renders an outside fleet")
+          "the render refuses no endpoint, the in-chart frontend and no spiffeID, and renders an outside fleet")
     return 0
 
 

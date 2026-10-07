@@ -779,6 +779,9 @@ request. A values file that still sets either one fails here.
 {{- if not $addr -}}
 {{- fail "validateSetecDispatch: setec.enabled=false and gibson.sandbox.setec.address is empty. The setec seam selects whose fleet runs, never whether one runs (ADR-0087). Set gibson.sandbox.setec.address (and spiffeID) to the frontend of the fleet outside this cluster, or set setec.enabled=true." -}}
 {{- end -}}
+{{- if not (dig "setec" "spiffeID" "" $sbx) -}}
+{{- fail "validateSetecDispatch: setec.enabled=false and gibson.sandbox.setec.spiffeID is empty. An empty spiffeID derives the ID of the in-chart frontend, and a fleet outside this cluster never has it, so the first dial would fail. Set gibson.sandbox.setec.spiffeID to the SPIFFE ID of the outside frontend." -}}
+{{- end -}}
 {{- $host := index (splitList ":" $addr) 0 -}}
 {{- $name := include "gibson.setecFrontendName" . -}}
 {{- $ns := include "gibson.setecNamespace" . -}}
