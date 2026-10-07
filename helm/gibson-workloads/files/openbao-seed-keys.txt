@@ -36,6 +36,9 @@
 #                  the literal <v> (charts#486). A test-mode placeholder stays
 #                  only while the keyring member is empty.
 #   svctoken       the platform service token the sidecar minted
+#   prev:<prop>    the value <prop> had before the last rotation of the key
+#                  (ADR-0171), empty before the first one. A consumer that
+#                  accepts the old and the new value reads both.
 #
 # A property that is PRESENT is never overwritten, with two exceptions:
 # `input`, `inputjson` and `inputor` follow the keyring (a non-empty keyring value that
@@ -51,7 +54,7 @@ gibson-openfga-postgres-password password:pw
 gibson-spire-postgres-password password:pw
 gibson-redis-password password:pw @720h
 zitadel-masterkey value:rand
-gibson-dashboard-session-secrets auth_secret:rand server_actions_key:randb64
+gibson-dashboard-session-secrets auth_secret:rand auth_secret_previous:prev:auth_secret server_actions_key:randb64 @720h
 gibson-cg-signing-key key:rand kid:rand8
 # The verify-only slots of the CG signing key set. Empty in steady state; the
 # sidecar fills and clears them during a rotation (cg_key_rotate, ADR-0171).
