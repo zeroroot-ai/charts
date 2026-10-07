@@ -21615,8 +21615,14 @@ spec:
           # because the backup did not complete, by reason: read_namespace,
           # audit, create, read, backup_failed, timeout. One such pass pages:
           # the tenant is not deleted and nothing else says so.
+          # The producer creates a label set at its first failure, so the
+          # series starts at 1 and increase() sees no rise. The second term
+          # fires on a series that did not exist one window ago (charts#507).
           expr: |
             sum(increase(gibson_tenant_operator_final_backup_failures_total[15m])) > 0
+              or
+            sum(gibson_tenant_operator_final_backup_failures_total
+              unless gibson_tenant_operator_final_backup_failures_total offset 15m) > 0
           for: 0m
           labels:
             severity: page
@@ -21734,8 +21740,14 @@ spec:
           # daemon_unavailable is a transport failure, Unavailable or
           # DeadlineExceeded from ListMyMemberships. One such sign-in
           # fires the rule.
+          # The producer creates a label set at its first failure, so the
+          # series starts at 1 and increase() sees no rise. The second term
+          # fires on a series that did not exist one window ago (charts#507).
           expr: |
             sum(increase(dashboard_signin_total{outcome="error", error_reason="daemon_unavailable"}[5m])) > 0
+              or
+            sum(dashboard_signin_total{outcome="error", error_reason="daemon_unavailable"}
+              unless dashboard_signin_total{outcome="error", error_reason="daemon_unavailable"} offset 5m) > 0
           for: 0m
           labels:
             severity: page
