@@ -19315,16 +19315,6 @@ specs:
                 protocol: TCP
               - port: "8000"
                 protocol: TCP
-      - fromEndpoints:
-          - matchLabels:
-              app.kubernetes.io/name: cloudnative-pg
-            matchExpressions:
-              - key: k8s:io.kubernetes.pod.namespace
-                operator: Exists
-        toPorts:
-          - ports:
-              - port: "8000"
-                protocol: TCP
   - description: "The clients of the postgres data store reach it."
     endpointSelector:
       matchLabels:
@@ -19569,18 +19559,35 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "Pods of the object-store egress group reach only these host names."
+  description: "Pods of the object-store egress group reach only these host names, on their ports."
   endpointSelector:
     matchLabels:
       gibson.zeroroot.ai/egress-fqdn: object-store
   egress:
     - toFQDNs:
-        - matchName: s3.amazonaws.com
-        - matchPattern: '*.s3.amazonaws.com'
-        - matchPattern: s3.*.amazonaws.com
-        - matchPattern: '*.s3.*.amazonaws.com'
+        - matchName: example-durable-bucket.s3.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
+        - matchPattern: example-durable-bucket.s3.*.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
         - matchName: sts.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
         - matchPattern: sts.*.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
 ---
 # Source: gibson/templates/network-policies.yaml
 apiVersion: cilium.io/v2
@@ -19609,6 +19616,41 @@ spec:
               operator: NotIn
               values:
                 - gibson
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-daemon-tenant-callers
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-daemon-tenant-callers
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "The belief trainer of each tenant namespace reaches the daemon on the gRPC port only."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: daemon
+      gibson.zeroroot.ai/net-role: platform
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.cilium.k8s.namespace.labels.gibson.zeroroot.ai/managed-by: tenant-operator
+            app.kubernetes.io/component: belief-trainer
+            gibson.zeroroot.ai/managed-by: tenant-operator
+          matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
 ---
 # Source: gibson/templates/network-policies.yaml
 apiVersion: cilium.io/v2
