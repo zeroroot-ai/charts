@@ -1,10 +1,12 @@
 {{/*
 iam-admin-pat-escrow — copy what the Zitadel setup Job minted into OpenBao.
 
-The Zitadel setup Job mints THREE Secrets on the first instance and writes
+The Zitadel setup Job mints TWO Secrets on the first instance and writes
 only the Kubernetes objects: iam-admin (the IAM_OWNER machine key,
-iam-admin.json), iam-admin-pat (its PAT) and login-client (the login
-client's PAT). A restore brings back the OpenBao volume and no Secret, so
+iam-admin.json) and login-client (the login client's PAT). The IAM admin PAT
+is no longer one of them: the platform-operator mints it with its System API
+key and writes it to OpenBao itself, and the ExternalSecret iam-admin-pat is
+its one writer (charts#407, gibson#794). A restore brings back the OpenBao volume and no Secret, so
 all three must live in OpenBao to survive one. This Job waits for each
 minted Secret, compares it with its key in the store, and writes it when
 absent or different. The ExternalSecrets in gibson-workloads
@@ -65,7 +67,7 @@ rules:
   # whole window: hosted run 34271811189 (2026-09-08) sat 20 minutes on
   # "waiting for iam-admin" with the Secret present and this list naming
   # the PAT alone. The Job now refuses to wait on a Secret it may not read.
-  resourceNames: [iam-admin-pat, iam-admin, login-client]
+  resourceNames: [iam-admin, login-client]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -163,7 +165,7 @@ spec:
           # #14, 2026-09-08: PlatformBootstrap SAIdentityMapReady=False
           # "Secret gibson/iam-admin not yet written", zitadel-login on
           # "secret login-client not found").
-          ENTRIES="iam-admin-pat:pat:gibson-zitadel-iam-admin-pat:pat iam-admin:iam-admin.json:gibson-zitadel-iam-admin-machinekey:machinekey login-client:pat:gibson-zitadel-login-client-pat:pat"
+          ENTRIES="iam-admin:iam-admin.json:gibson-zitadel-iam-admin-machinekey:machinekey login-client:pat:gibson-zitadel-login-client-pat:pat"
           for entry in $ENTRIES; do
             SECRET=${entry%%:*}; rest=${entry#*:}
             DATAKEY=${rest%%:*}; rest=${rest#*:}

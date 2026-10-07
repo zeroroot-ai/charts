@@ -25,9 +25,12 @@ WHAT IT CHECKS
      rule against spec.oidcClients[], so a template that hard-codes a role
      the values file does not carries the same failure.
   3. helm/gibson/values.yaml, zitadel...SystemAPIUsers: exactly one entry,
-     named gibson-system-bot, holding exactly ["SYSTEM_OWNER"]. This is the
-     one bootstrap identity ADR-0093 decision 5 allows to hold instance
-     ownership. A second entry, a renamed entry, or an added role fails.
+     named gibson-system-bot, holding exactly ["SYSTEM_OWNER", "IAM_OWNER"].
+     This is the one bootstrap identity ADR-0093 decision 5 allows to hold
+     instance ownership. IAM_OWNER lets the platform-operator mint the first
+     IAM admin PAT itself (charts#407, gibson#794), so the Zitadel setup Job
+     no longer writes it. A second entry, a renamed entry, or another role
+     fails.
   4. helm/gibson-workloads/templates/fga-init/job.yaml: the hard-coded
      REQUIRED= allowlist that the fga-init Job seeds the `platform_operator`
      FGA relation for is exactly {gibson-iam-admin, gibson-tenant-operator}.
@@ -64,7 +67,7 @@ INSTANCE_ADMIN_ROLES = {
 BOOTSTRAP_OIDC_CLIENT_NAMES: set[str] = set()
 
 EXPECTED_SYSTEM_API_USER = "gibson-system-bot"
-EXPECTED_SYSTEM_API_ROLES = ["SYSTEM_OWNER"]
+EXPECTED_SYSTEM_API_ROLES = ["SYSTEM_OWNER", "IAM_OWNER"]
 
 EXPECTED_PLATFORM_OPERATOR_SAS = {"gibson-iam-admin", "gibson-tenant-operator"}
 
@@ -225,12 +228,13 @@ def selftest() -> int:
 
     # Rule 3: SystemAPIUsers bootstrap identity.
     sysusers_cases = {
-        "clean": ([{"gibson-system-bot": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER"]}]}}], True),
+        "clean": ([{"gibson-system-bot": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER", "IAM_OWNER"]}]}}], True),
         "second_entry": ([
-            {"gibson-system-bot": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER"]}]}},
+            {"gibson-system-bot": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER", "IAM_OWNER"]}]}},
             {"gibson-side-door": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER"]}]}},
         ], False),
-        "extra_role": ([{"gibson-system-bot": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER", "IAM_OWNER"]}]}}], False),
+        "extra_role": ([{"gibson-system-bot": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER", "IAM_OWNER", "IAM_END_USER_IMPERSONATOR"]}]}}], False),
+        "missing_role": ([{"gibson-system-bot": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER"]}]}}], False),
         "renamed": ([{"gibson-renamed-bot": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER"]}]}}], False),
     }
     with tempfile.TemporaryDirectory() as d:
