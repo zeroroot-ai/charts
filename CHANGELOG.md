@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.140.0](https://github.com/zeroroot-ai/charts/compare/v0.139.1...v0.140.0) (2026-10-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* an overlay that sets one of the three old mail blocks fails the render. Set global.email instead (worked example in helm/gibson/values.yaml).
+
+### Features
+
+* end-phase integration of charts ([#492](https://github.com/zeroroot-ai/charts/issues/492)) ([992a7cf](https://github.com/zeroroot-ai/charts/commit/992a7cfd1a456ad87f7bf8815904c4c6377c5137))
+
 ## [0.139.1](https://github.com/zeroroot-ai/charts/compare/v0.139.0...v0.139.1) (2026-10-06)
 
 
