@@ -11,7 +11,8 @@ store that `spec.secretStoreRef` names:
   - a SecretStore must be in the same namespace as the ExternalSecret,
   - a ClusterSecretStore must be in the render, and one entry of its
     `spec.conditions` must admit the namespace of the ExternalSecret, by
-    `namespaces`, by `namespaceRegexes`, or by `namespaceSelector.matchLabels`
+    `namespaces`, by `namespaceRegexes` (unanchored, as Go regexp.MatchString
+    matches), or by `namespaceSelector.matchLabels`
     against a Namespace object of the same render.
 
 A ClusterSecretStore with no conditions serves every namespace. The platform
@@ -39,7 +40,7 @@ def ns_of(doc: dict) -> str:
 def admits(cond: dict, ns: str, ns_labels: dict) -> bool:
     if ns in (cond.get("namespaces") or []):
         return True
-    if any(re.fullmatch(r, ns) for r in (cond.get("namespaceRegexes") or [])):
+    if any(re.search(r, ns) for r in (cond.get("namespaceRegexes") or [])):
         return True
     sel = (cond.get("namespaceSelector") or {}).get("matchLabels")
     if sel and ns in ns_labels and all(ns_labels[ns].get(k) == v for k, v in sel.items()):
@@ -104,6 +105,9 @@ def selftest() -> int:
         ("a store that lists two namespaces", [store(conds=[{"namespaces": ["gibson", "setec-system"]}]),
                                                es("gibson"), es("setec-system")]),
         ("a regex that matches", [store(conds=[{"namespaceRegexes": ["setec-.*"]}]), es("setec-system")]),
+        # External Secrets matches a regex unanchored (Go regexp.MatchString).
+        ("an unanchored regex that matches inside the name",
+         [store(conds=[{"namespaceRegexes": ["setec"]}]), es("x-setec-system")]),
         ("a selector that matches a rendered Namespace",
          [store(conds=[{"namespaceSelector": {"matchLabels": {"a": "b"}}}]), es("x"),
           {"kind": "Namespace", "metadata": {"name": "x", "labels": {"a": "b"}}}]),
@@ -117,7 +121,7 @@ def selftest() -> int:
     failing = (
         # The charts#504 shape: the setec ExternalSecret outside a store that serves gibson only.
         ("an ExternalSecret outside the store namespaces", [store(conds=gibson), es("setec-system")]),
-        ("a regex that does not match", [store(conds=[{"namespaceRegexes": ["gibson"]}]), es("gibson-x")]),
+        ("a regex that does not match", [store(conds=[{"namespaceRegexes": ["^gibson$"]}]), es("gibson-x")]),
         ("a selector with no matching Namespace",
          [store(conds=[{"namespaceSelector": {"matchLabels": {"a": "b"}}}]), es("x")]),
         ("a ClusterSecretStore with no conditions", [store(), es("gibson")]),
