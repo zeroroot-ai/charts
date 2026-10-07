@@ -15295,6 +15295,35 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
+  name: gibson-metrics-scraper-tls
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: metrics-scraper-tls
+spec:
+  secretName: gibson-metrics-scraper-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: metrics-scraper
+  usages:
+    - digital signature
+    - client auth
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: "selfsigned-ca"
+    kind: "Issuer"
+    group: "cert-manager.io"
+---
+# Source: gibson/charts/gibson-workloads/templates/cert-manager/component-certificates.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
   name: gibson-openfga-http-tls
   namespace: gibson
   labels:
@@ -17495,6 +17524,30 @@ spec:
       - name: "spire"
         owner: "spire"
 ---
+# Source: gibson/charts/gibson-workloads/templates/envoy/podmonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: gibson-envoy
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: envoy
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gibson-workloads
+      app.kubernetes.io/instance: gibson
+      app.kubernetes.io/component: envoy
+  podMetricsEndpoints:
+    - port: admin
+      path: /stats/prometheus
+      interval: 30s
+---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -17963,279 +18016,6 @@ spec:
               credential that changed, a lock mode or lock days that the
               bucket policy refuses, or a store that does not answer.
 ---
-# Source: gibson/charts/gibson-workloads/templates/observability/plugin-rotation-propagation-rule.yaml
-# PrometheusRule for the plugin rotation-propagation SLO defined in
-# spec plugin-runtime Requirement 10.6.
-#
-# SLO: end-to-end propagation latency from operator action (rotate a secret in
-# the dashboard) to plugin observation (cache invalidated) MUST meet a
-# 5-second p95 over a 10-minute rolling window.
-#
-# Companion script: tests/plugin/rotation-monitor.sh in zeroroot-ai/hosted
-# emits gibson_plugin_rotation_propagation_seconds samples on a CronJob
-# cadence; this rule alerts on p95 budget burn.
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-metadata:
-  name: gibson-plugin-rotation-propagation
-  labels:
-    app.kubernetes.io/name: gibson-plugin-runtime
-    app.kubernetes.io/component: plugin-rotation-slo
-    spec: plugin-runtime
-    requirement: "10.6"
-spec:
-  groups:
-    # ----------------------------------------------------------------------
-    # SLO recording rules — referenced by the alerts below and by the
-    # plugin runtime Grafana dashboard.
-    #
-    # The histogram is emitted by the plugin SDK metrics package at
-    # core/sdk/plugin/metrics/metrics.go.  Cardinality is bounded by the
-    # plugin label (manifest.metadata.name); install_id is intentionally
-    # absent from the histogram per the cardinality discipline in the
-    # package doc.
-    # ----------------------------------------------------------------------
-    - name: plugin-rotation-slos
-      interval: 30s
-      rules:
-        - record: slo:plugin_rotation_propagation_p95_seconds
-          expr: |
-            histogram_quantile(
-              0.95,
-              sum(rate(gibson_plugin_rotation_propagation_seconds_bucket[10m])) by (le, plugin)
-            )
-        - record: slo:plugin_rotation_propagation_p99_seconds
-          expr: |
-            histogram_quantile(
-              0.99,
-              sum(rate(gibson_plugin_rotation_propagation_seconds_bucket[10m])) by (le, plugin)
-            )
-
-    # ----------------------------------------------------------------------
-    # Alerts — page when the 10-minute rolling p95 exceeds the 5-second
-    # SLO.  The synthetic monitor CronJob runs hourly so the histogram
-    # contains a low-rate stream of samples; the 10m window matches the
-    # NFR Performance requirement and the requirement-10.6 SLO budget.
-    # ----------------------------------------------------------------------
-    - name: plugin-rotation-alerts
-      rules:
-        - alert: PluginRotationPropagationP95HighSlo
-          expr: |
-            slo:plugin_rotation_propagation_p95_seconds > 5
-          for: 10m
-          labels:
-            severity: page
-            component: plugin-runtime
-            slo: rotation-propagation
-            spec: plugin-runtime
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/plugin-rotation.md#pluginrotationpropagationp95highslo"
-            summary: "Plugin {{ $labels.plugin }} rotation-propagation p95 above 5s SLO"
-            description: |
-              The 10-minute p95 of gibson_plugin_rotation_propagation_seconds
-              for plugin {{ $labels.plugin }} has exceeded the 5-second SLO
-              for at least 10 minutes (Requirement 10.6).
-
-              Investigate:
-                - secrets-broker rotation event emission latency
-                  (gibson_secrets_rotation_emit_seconds);
-                - daemon-side component callback stream backlog
-                  (gibson_component_callback_lag_seconds);
-                - plugin event subscriber goroutine health
-                  (gibson_plugin_state{plugin="{{ $labels.plugin }}"}).
-
-              Synthetic monitor:
-                tests/plugin/rotation-monitor.sh in zeroroot-ai/hosted
-              emits one sample per CronJob run; correlate with that
-              monitor's logs for the failing rotation tag.
-
-        - alert: PluginRotationPropagationNoSamples
-          # If the synthetic monitor stops emitting samples for two
-          # consecutive scheduling windows we cannot observe the SLO at
-          # all.  Page so the on-call investigates the monitor itself.
-          expr: |
-            absent_over_time(
-              gibson_plugin_rotation_propagation_seconds_count[2h]
-            ) == 1
-          for: 30m
-          labels:
-            severity: warning
-            component: plugin-runtime
-            slo: rotation-propagation
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/plugin-rotation.md#pluginrotationpropagationnosamples"
-            summary: "No rotation-propagation samples observed in the last 2h"
-            description: |
-              The plugin rotation-propagation synthetic monitor has not
-              produced a sample in the past 2 hours.  Either the CronJob
-              has stopped scheduling, the monitor's test plugin is down,
-              or the metrics scrape is failing.
-
-              Check:
-                - kubectl get cronjob gibson-plugin-rotation-monitor
-                - kubectl logs -l app=gibson-plugin-rotation-monitor
-                  --tail=200
-                - Prometheus target health for the monitor pod.
----
-# Source: gibson/charts/gibson-workloads/templates/observability/sandbox-slo.yaml
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-metadata:
-  name: gibson-gibson-workloads-sandbox-slo
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: sandbox-slo
-  annotations:
-    gibson.zeroroot.ai/spec: setec-sandbox-prod-default
-spec:
-  groups:
-    - name: gibson.sandbox.slo
-      interval: 30s
-      rules:
-        # ---- Recording rules: SLI inputs --------------------------------
-        # Cold-start vs warm-start split via the `cold_start` label
-        # emitted by the daemon's dispatch-duration histogram (Task 52,
-        # daemon-side).
-        - record: gibson:sandbox_dispatch_duration_seconds:p95_5m
-          expr: |
-            histogram_quantile(0.95,
-              sum by (le, cold_start) (
-                rate(gibson_sandbox_dispatch_duration_seconds_bucket[5m])
-              ))
-        - record: gibson:sandbox_dispatch_duration_seconds:p99_5m
-          expr: |
-            histogram_quantile(0.99,
-              sum by (le) (
-                rate(gibson_sandbox_dispatch_duration_seconds_bucket[5m])
-              ))
-
-        # ---- Alerts: SLO violations -------------------------------------
-        # NFR-P1: cold-start p95 = 500ms.
-        - alert: SandboxColdStartLatencyHigh
-          expr: |
-            gibson:sandbox_dispatch_duration_seconds:p95_5m{cold_start="true"} > 0.5
-          for: 10m
-          labels:
-            severity: warning
-            slo: cold_start_p95_500ms
-            component: setec-sandbox
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxcoldstartlatencyhigh"
-            summary: "Setec cold-start p95 above 500ms (SLI breach)"
-            description: |
-              The 5-minute p95 latency of cold-start SANDBOXED dispatches
-              has been above 500ms for 10 minutes. Cold starts launch a
-              fresh microVM; sustained breach usually means Setec's
-              snapshot pre-warm pool is exhausted or the bare-metal
-              sandbox-host node is at CPU saturation.
-
-        # NFR-P2: warm-start p95 = 100ms.
-        - alert: SandboxWarmStartLatencyHigh
-          expr: |
-            gibson:sandbox_dispatch_duration_seconds:p95_5m{cold_start="false"} > 0.1
-          for: 10m
-          labels:
-            severity: warning
-            slo: warm_start_p95_100ms
-            component: setec-sandbox
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxwarmstartlatencyhigh"
-            summary: "Setec warm-start p95 above 100ms (SLI breach)"
-            description: |
-              The 5-minute p95 latency of warm-start SANDBOXED
-              dispatches (re-using a pre-warmed microVM from the snapshot
-              pool) has been above 100ms for 10 minutes. Likely causes:
-              snapshot-pool starvation, KVM contention, or a Setec
-              frontend slowdown.
-
-        # R10.3: 99% of SANDBOXED dispatches < 10s.
-        - alert: SandboxDispatchSLOBreach
-          expr: |
-            gibson:sandbox_dispatch_duration_seconds:p99_5m > 10
-          for: 5m
-          labels:
-            severity: critical
-            slo: dispatch_p99_10s
-            component: setec-sandbox
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxdispatchslobreach"
-            summary: "99th-percentile SANDBOXED dispatch above 10s SLO"
-            description: |
-              At least 1% of SANDBOXED dispatches are taking longer than
-              10 seconds end-to-end. This is the hard user-facing SLO;
-              a sustained breach blocks UNTRUSTED-content missions for
-              users.
-
-        # R5.3: sandbox unavailable for >5m.
-        - alert: SandboxUnavailable
-          expr: |
-            avg_over_time(gibson_sandbox_health{status="up"}[5m]) < 0.5
-          for: 5m
-          labels:
-            severity: critical
-            component: setec-sandbox
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxunavailable"
-            summary: "Setec sandbox unavailable for >5m — SANDBOXED dispatch failing closed"
-            description: |
-              The daemon's 30s health probe has reported the Setec
-              frontend unreachable for the majority of the last 5
-              minutes. UNTRUSTED-content missions are failing closed with
-              `sandbox_unavailable`; trusted-content missions continue.
-
-        # NFR-R1 + Scenario 4: spot-eviction storm signal.
-        # health=degraded for >5m means the eviction handler in
-        # core/gibson/internal/sandbox/eviction has been cancelling
-        # in-flight detonations (the gauge flip, NOT a Setec frontend
-        # outage). Sustained degraded means too many spot evictions
-        # in flight.
-        - alert: SandboxSpotEvictionStorm
-          expr: |
-            avg_over_time(gibson_sandbox_health{status="degraded"}[5m]) > 0.5
-          for: 5m
-          labels:
-            severity: warning
-            component: setec-sandbox
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxspotevictionstorm"
-            summary: "Sustained spot-eviction churn — consider raising on-demand fallback cap"
-            description: |
-              The sandbox health gauge has been in `degraded` state for
-              >5m, which means the in-daemon eviction handler is
-              cancelling detonations in response to AWS spot-interruption
-              notices faster than the on-demand fallback ASG can
-              backfill. Mitigation: raise the on-demand share of the
-              fleet node pool in the hosted substrate; revert once the
-              spot pool recovers. Escalate to the EKS sister-spec owner
-              if sustained >24h.
-
-        # R4.4: per-tenant quota-exceeded rate elevated.
-        # The alert uses the sum across tenants intentionally — a
-        # per-tenant alert would create cardinality + alert-storm
-        # problems. Operators triage which tenant via the dashboard
-        # panel keyed off gibson_sandbox_detonation_total{outcome=
-        # "quota_exceeded"}.
-        - alert: SandboxQuotaExceededRate
-          expr: |
-            sum(rate(gibson_sandbox_detonation_total{outcome="quota_exceeded"}[5m])) > 0.1
-          for: 15m
-          labels:
-            severity: warning
-            component: setec-sandbox
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxquotaexceededrate"
-            summary: "Setec quota_exceeded rejections elevated across tenants"
-            description: |
-              SANDBOXED dispatches are being rejected with
-              `quota_exceeded` at a sustained rate above 0.1/sec for 15m.
-              Likely a single tenant driving traffic past the per-tenant
-              cap. The runbook shows the query by tenant.
----
 # Source: gibson/charts/gibson-workloads/templates/ratelimit/alertrule.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -18291,29 +18071,25 @@ spec:
       interval: 60s
       scheme: http
 ---
-# Source: gibson/charts/gibson-workloads/templates/envoy/servicemonitor.yaml
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/servicemonitor.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: gibson-envoy
+  name: gibson-tenant-operator
   namespace: gibson
   labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: envoy
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/component: tenant-operator
+    app.kubernetes.io/part-of: gibson
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/name: gibson-workloads
-      app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: envoy
+      app.kubernetes.io/name: gibson-tenant-operator
   endpoints:
-    - port: admin
-      path: /stats/prometheus
-      interval: 30s
+    - port: metrics
+      path: /metrics
+      interval: 60s
+      scheme: http
 ---
 # Source: gibson/charts/gibson-workloads/templates/ext-authz/servicemonitor.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -18377,6 +18153,14 @@ spec:
           secret:
             name: gibson-daemon-metrics-tls
             key: ca.crt
+        # The listener requires a client cert (charts#515).
+        cert:
+          secret:
+            name: gibson-metrics-scraper-tls
+            key: tls.crt
+        keySecret:
+          name: gibson-metrics-scraper-tls
+          key: tls.key
 ---
 # Source: gibson/charts/gibson-workloads/templates/observability/tenant-neo4j-servicemonitor.yaml
 apiVersion: monitoring.coreos.com/v1

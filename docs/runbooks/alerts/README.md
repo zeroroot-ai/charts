@@ -9,12 +9,10 @@ The commands in these pages read the cluster. They change nothing. A fix goes th
 | [tenant-operator.md](tenant-operator.md) | The tenant-operator |
 | [dashboard-auth.md](dashboard-auth.md) | Sign-in through the dashboard |
 | [redis.md](redis.md) | redis-stack |
-| [sandbox.md](sandbox.md) | Sandbox dispatch through setec |
 | [ext-authz.md](ext-authz.md) | The Redis dependency of ext-authz |
 | [audit.md](audit.md) | The audit write of the daemon |
 | [audit-export.md](audit-export.md) | The audit export to the durable bucket |
 | [ratelimit.md](ratelimit.md) | The per-client quota of the edge |
-| [plugin-rotation.md](plugin-rotation.md) | Secret rotation to plugins |
 | [connector-operator.md](connector-operator.md) | Connector grants that outlive their connector |
 
 In the commands, `gibson` is the release namespace. Use your own namespace if it is different.

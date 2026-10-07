@@ -19012,6 +19012,35 @@ spec:
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
+  name: gibson-metrics-scraper-tls
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: metrics-scraper-tls
+spec:
+  secretName: gibson-metrics-scraper-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: metrics-scraper
+  usages:
+    - digital signature
+    - client auth
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: "selfsigned-ca"
+    kind: "Issuer"
+    group: "cert-manager.io"
+---
+# Source: gibson/charts/gibson-workloads/templates/cert-manager/component-certificates.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
   name: gibson-openfga-http-tls
   namespace: gibson
   labels:
