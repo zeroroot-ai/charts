@@ -9975,6 +9975,7 @@ spec:
         app.kubernetes.io/managed-by: Helm
         helm.sh/chart: cert-manager-v1.21.1
         gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/metrics-port: "9402"
         gibson.zeroroot.ai/net-role: system
       annotations:
         prometheus.io/path: "/metrics"
@@ -10047,6 +10048,7 @@ spec:
         helm.sh/chart: cert-manager-v1.21.1
         gibson.zeroroot.ai/egress-fqdn: cert-manager
         gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/metrics-port: "9402"
         gibson.zeroroot.ai/net-role: system
       annotations:
         prometheus.io/path: "/metrics"
@@ -10138,6 +10140,7 @@ spec:
         helm.sh/chart: cert-manager-v1.21.1
         gibson.zeroroot.ai/ingress-control-plane: "true"
         gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/metrics-port: "9402"
         gibson.zeroroot.ai/net-role: system
       annotations:
         prometheus.io/path: "/metrics"
@@ -10239,6 +10242,7 @@ spec:
         gibson.zeroroot.ai/client-postgres: "true"
         gibson.zeroroot.ai/ingress-control-plane: "true"
         gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/metrics-port: "8080"
         gibson.zeroroot.ai/net-role: system
     spec:
       containers:
@@ -10449,6 +10453,7 @@ spec:
         app.kubernetes.io/version: "v2.10.0"
         app.kubernetes.io/managed-by: Helm
         gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/metrics-port: "8080"
         gibson.zeroroot.ai/net-role: system
     spec:
       serviceAccountName: external-secrets-cert-controller
@@ -10528,6 +10533,7 @@ spec:
         app.kubernetes.io/managed-by: Helm
         gibson.zeroroot.ai/client-openbao: "true"
         gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/metrics-port: "8080"
         gibson.zeroroot.ai/net-role: system
     spec:
       serviceAccountName: external-secrets
@@ -10591,6 +10597,7 @@ spec:
         app.kubernetes.io/managed-by: Helm
         gibson.zeroroot.ai/ingress-control-plane: "true"
         gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/metrics-port: "8080"
         gibson.zeroroot.ai/net-role: system
     spec:
       hostNetwork: false
@@ -10673,6 +10680,7 @@ spec:
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/egress-namespaces: "true"
         gibson.zeroroot.ai/ingress-control-plane: "true"
+        gibson.zeroroot.ai/metrics-port: "8080"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -10848,6 +10856,7 @@ spec:
         gibson.zeroroot.ai/client-postgres: "true"
         gibson.zeroroot.ai/client-openbao: "true"
         gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/metrics-port: "8080"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -11060,6 +11069,7 @@ spec:
         app.kubernetes.io/component: reloader
         gibson.zeroroot.ai/net-role: system
         gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/metrics-port: "9090"
     spec:
       serviceAccountName: reloader
       
@@ -11163,6 +11173,7 @@ spec:
         gibson.zeroroot.ai/egress-fqdn: tenant-operator
         gibson.zeroroot.ai/egress-namespaces: "true"
         gibson.zeroroot.ai/ingress-control-plane: "true"
+        gibson.zeroroot.ai/metrics-port: "8080"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -12997,6 +13008,7 @@ spec:
         app.kubernetes.io/component: envoy
         gibson.zeroroot.ai/net-role: platform
         gibson.zeroroot.ai/ingress-edge: "true"
+        gibson.zeroroot.ai/metrics-port: "9901"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -13837,6 +13849,7 @@ spec:
         app.kubernetes.io/component: ratelimit
         gibson.zeroroot.ai/net-role: platform
         gibson.zeroroot.ai/client-redis: "true"
+        gibson.zeroroot.ai/metrics-port: "9090"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -16413,6 +16426,7 @@ spec:
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/egress-internet: "true"
         gibson.zeroroot.ai/egress-namespaces: "true"
+        gibson.zeroroot.ai/metrics-port: "9090"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -19780,46 +19794,72 @@ metadata:
     app.kubernetes.io/component: network-metrics
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
-spec:
-  description: "The cluster scrapers reach the metrics ports."
-  endpointSelector:
-    matchExpressions:
-      - key: gibson.zeroroot.ai/net-role
-        operator: Exists
-  ingress:
-    - fromEndpoints:
-        - matchLabels:
-            app.kubernetes.io/name: prometheus
-          matchExpressions:
-            - key: k8s:io.kubernetes.pod.namespace
-              operator: Exists
-        - matchLabels:
-            app: grafana-agent
-          matchExpressions:
-            - key: k8s:io.kubernetes.pod.namespace
-              operator: Exists
-      toPorts:
-        - ports:
-            - port: "2112"
-              protocol: TCP
-            - port: "3000"
-              protocol: TCP
-            - port: "7979"
-              protocol: TCP
-            - port: "8008"
-              protocol: TCP
-            - port: "8080"
-              protocol: TCP
-            - port: "9090"
-              protocol: TCP
-            - port: "9187"
-              protocol: TCP
-            - port: "9402"
-              protocol: TCP
-            - port: "9901"
-              protocol: TCP
-            - port: "9002"
-              protocol: TCP
+specs:
+  - description: "The cluster scraper reaches the metrics port 8080 of the pods that serve metrics there."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/metrics-port: "8080"
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: "monitoring"
+              app.kubernetes.io/name: prometheus
+        toPorts:
+          - ports:
+              - port: "8080"
+                protocol: TCP
+  - description: "The cluster scraper reaches the metrics port 9090 of the pods that serve metrics there."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/metrics-port: "9090"
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: "monitoring"
+              app.kubernetes.io/name: prometheus
+        toPorts:
+          - ports:
+              - port: "9090"
+                protocol: TCP
+  - description: "The cluster scraper reaches the metrics port 9187 of the pods that serve metrics there."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/metrics-port: "9187"
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: "monitoring"
+              app.kubernetes.io/name: prometheus
+        toPorts:
+          - ports:
+              - port: "9187"
+                protocol: TCP
+  - description: "The cluster scraper reaches the metrics port 9402 of the pods that serve metrics there."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/metrics-port: "9402"
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: "monitoring"
+              app.kubernetes.io/name: prometheus
+        toPorts:
+          - ports:
+              - port: "9402"
+                protocol: TCP
+  - description: "The cluster scraper reaches the metrics port 9901 of the pods that serve metrics there."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/metrics-port: "9901"
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: "monitoring"
+              app.kubernetes.io/name: prometheus
+        toPorts:
+          - ports:
+              - port: "9901"
+                protocol: TCP
 ---
 # Source: gibson/templates/postgres/platform-postgres-cluster.yaml
 apiVersion: postgresql.cnpg.io/v1
@@ -19869,6 +19909,7 @@ spec:
       gibson.zeroroot.ai/client-postgres: "true"
       gibson.zeroroot.ai/kube-api: "true"
       gibson.zeroroot.ai/egress-fqdn: object-store
+      gibson.zeroroot.ai/metrics-port: "9187"
   instances: 3
   # A primary roll promotes a replica first, then restarts the old primary as
   # a replica. `restart` would take the primary down before anything else.

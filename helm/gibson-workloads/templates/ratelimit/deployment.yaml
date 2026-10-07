@@ -33,7 +33,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: ratelimit
-        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "redis")) | nindent 8 }}
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "redis") "metricsPort" 9090) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
