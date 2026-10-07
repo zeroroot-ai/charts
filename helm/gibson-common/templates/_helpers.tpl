@@ -1225,6 +1225,8 @@ the PlatformBootstrap (Zitadel) read it; nothing else names a mail transport.
                   credential). Zitadel gets no SMTP provider.
             smtp  all three send through smtp.host.
   from, fromName  the sender. fromName is required with smtp (Zitadel).
+  smtp.host       a host name, or a template that renders one, for example
+                  '{{ include "gibson.mailpit.host" . }}' for the in-chart sink.
   smtp.tlsMode    starttls (587), implicit (465) or plaintext.
   smtp.credentials.source
             secretStore  the ExternalSecret <release>-email-smtp reads
@@ -1246,7 +1248,7 @@ password, or is empty.
 {{- if eq $provider "smtp" -}}
 {{- $s := required "global.email.smtp is required when global.email.provider is smtp." $e.smtp -}}
 {{- $_ := set $out "fromName" (required "global.email.fromName is required when global.email.provider is smtp: Zitadel names the sender." $e.fromName) -}}
-{{- $_ := set $out "host" (required "global.email.smtp.host is required when global.email.provider is smtp." $s.host) -}}
+{{- $_ := set $out "host" (tpl (required "global.email.smtp.host is required when global.email.provider is smtp." $s.host) .) -}}
 {{- $_ := set $out "port" (toString (required "global.email.smtp.port is required when global.email.provider is smtp." $s.port)) -}}
 {{- $mode := required "global.email.smtp.tlsMode is required: starttls, implicit or plaintext." $s.tlsMode -}}
 {{- if not (has $mode (list "starttls" "implicit" "plaintext")) -}}
