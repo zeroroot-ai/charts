@@ -114,16 +114,6 @@ tenantOperator:
   # global.email of the umbrella (hosted#223). tenantOperator.smtp was
   # deleted, and setting it fails the render.
   # Billing controls.
-  # stripeAPIBaseURL: when set, routes all Stripe API calls to the given
-  # base URL instead of api.stripe.com. Use with the gibson-workloads
-  # stripe-mock service in kind (stripeMock.enabled: true). Leave empty
-  # in production.
-  billing:
-    # The Stripe mode guard is the dashboard's, not the operator's: both read
-    # the same key out of the same Secret, and only the dashboard compares its
-    # prefix to a declared mode. See dashboard.billing.stripeExpectedMode in
-    # gibson-workloads.
-    stripeAPIBaseURL: ""
   # devMode was deleted in deploy#205 (one-code-path epic): the operator
   # binary boots identically in every environment. Capability misses always
   # fail-fast — there is no longer a per-environment bypass.

@@ -91,34 +91,9 @@ serviceAccounts:
 # -----------------------------------------------------------------------------
 # These can be provided via .env file or directly in values
 secrets:
-  # Stripe credentials (STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET).
-  # Surfaced as the `gibson-stripe-credentials` Secret in the gibson namespace
-  # via templates/secrets/stripe-credentials.yaml.
-  #
-  # Default path: ExternalSecret pulling both keys from
-  # `gibson-secrets-backend` properties `dashboard_stripe_secret_key` and
-  # `dashboard_stripe_webhook_secret` in the configured ClusterSecretStore.
-  # The store is OpenBao on every profile (ADR-0014).
-  #
-  # Per memory `feedback_no_service_is_optional`, Stripe is structural —
-  # no `enabled: false` toggle. ExternalSecret is the one shape; the
-  # backing store decides whether the value is a real key (prod) or a
-  # loud stub (kind dev). See deploy#272, #288 deploy.
+  # No Stripe and no billing webhook Secret (charts#375, ADR-0060): billing is
+  # one private component in the private overlay, and it brings its own.
 
-  # (The stripe.existingSecret switch was deleted, charts#407: the
-  # ExternalSecret is the one writer of the Secret.)
-
-  # Shared HMAC secret gating TenantProvisioningService.SetTenantBillingActive
-  # (gibson#1230 / gibson#1270, deploy#1314). Surfaced as the
-  # `gibson-billing-webhook-secret` Secret (key GIBSON_BILLING_WEBHOOK_SECRET),
-  # read by the daemon and by whichever workload calls the billing-active RPC
-  # (dashboard#1016). The daemon fails CLOSED without it, so in an
-  # entitlements-required environment paid signups never provision.
-  #
-  # Structural like Stripe — one shape (ExternalSecret); the backing store
-  # decides whether the value is real (prod: AWS SM, terraform-generated) or a
-  # generated stub (kind: kind-bootstrap fixture). A self-hosted operator puts
-  # the value into OpenBao (ADR-0014, charts#407).
   # OpenBao admin token used by tenant-operator for data-plane KEK/transit
   # operations. Surfaced as the `gibson-openbao-keys` Secret by the
   # ExternalSecret that reads `gibson-vault-admin-token`, property `token`,
@@ -204,6 +179,17 @@ gibson:
       secretAccessKeySecret:
         name: "bringup-keyring"
         key: "bucket-secret-key"
+  # The neutral connection points (ADR-0060, charts#375). Empty in the core
+  # chart; the private overlay that ships the billing component sets them.
+  #   signupStepUrl            GIBSON_SIGNUP_STEP_URL: the external signup step
+  #   signupStepCompleterPath  the SPIFFE path (under the trust domain) of the
+  #                            only caller that may complete a signup step
+  #   tenantActivationPath     the SPIFFE path of the only caller that may
+  #                            activate a tenant
+  connectionPoints:
+    signupStepUrl: ""
+    signupStepCompleterPath: ""
+    tenantActivationPath: ""
 
   # Dispatch policy gate defaults.
   # Spec setec-sandbox-prod-default Task 35 / R3.1.
@@ -920,49 +906,21 @@ dashboard:
     metrics:
       allowedCIDRs: ""                 # DASHBOARD_METRICS_ALLOWED_CIDRS
 
-  # ---------------------------------------------------------------------------
-  # Stripe billing configuration (spec: stripe-billing-integration)
-  # ---------------------------------------------------------------------------
-  # The Stripe secrets come from OpenBao through an ExternalSecret
-  # (ADR-0014): the gibson-stripe-credentials Secret above.
-  #
-  # To enable paid-tier checkout flows, set paidTiersEnabled: true AND
-  # configure all STRIPE_PRICE_* env vars via the price ID fields below.
-  # Prices are obtained from the Stripe Dashboard or stripe-bootstrap.ts.
-  #
-  # The dashboard will throw at pod startup if:
-  #   - paidTiersEnabled=true AND any required env var is missing, OR
-  #   - NODE_ENV=production AND STRIPE_SECRET_KEY starts with sk_test_
-  billing:
-    # Master switch — set false to operate in free/solo-only mode.
-    # Safe default: existing deployments without billing config are unaffected.
-    paidTiersEnabled: false           # DASHBOARD_BILLING_PAID_TIERS_ENABLED
-
-    # Card-first-signup Stripe mode guard (dashboard#767). REQUIRED when
-    # paidTiersEnabled — "test" (staging, dummy cards) or "live" (prod,
-    # real cards). Empty here; overlays that enable paid tiers must set
-    # it (instrumentation.ts fails closed if it disagrees with the key).
-    stripeExpectedMode: ""            # STRIPE_EXPECTED_MODE
-
-    # Stripe Customer Portal configuration ID (bpc_...).
-    # Created by: npx ts-node scripts/stripe-bootstrap.ts --test  (test mode)
-    #             npx ts-node scripts/stripe-bootstrap.ts --live  (live mode)
-    portalConfigurationId: ""         # STRIPE_PORTAL_CONFIGURATION_ID
-
-    # ESO-mounted Stripe secret key ref.
-    # AWS SM path: gibson/{env}/dashboard/stripe-secret-key
-    # stripeSecretKeySecretRef points to the ExternalSecret / SecretStore
-    # that mounts STRIPE_SECRET_KEY into the pod.
-    stripeSecretKeySecretRef: ""      # (ESO ref — not the key value)
-
-    # ESO-mounted Stripe webhook signing secret ref.
-    # AWS SM path: gibson/{env}/dashboard/stripe-webhook-secret
-    stripeWebhookSecretSecretRef: ""  # (ESO ref — not the key value)
-
-    # Per-plan Stripe price IDs are no longer pinned here. The dashboard
-    # resolves them at runtime by stable lookup_key (gibson_<tier>_monthly_usd,
-    # declared per plan in plans.yaml), identical across every Stripe account
-    # and test/live mode (dashboard#872). No per-env price_xxx IDs in git.
+  # The account link of the billing component (ADR-0060, charts#375). The
+  # dashboard shows it when both are set. Both or neither: half a pair fails
+  # the render. The dashboard holds no Stripe client (dashboard#256).
+  accountLink:
+    url: ""     # DASHBOARD_ACCOUNT_URL
+    label: ""   # DASHBOARD_ACCOUNT_LINK_LABEL
+  # The texts of the signup step of the billing component (charts#375). All
+  # six or none; empty (the default) shows no step.
+  signupStep:
+    title: ""
+    text: ""
+    buttonLabel: ""
+    waitingText: ""
+    failureText: ""
+    retryLabel: ""
 
   # No billing email is configured here, and none was ever sent from here.
   # This block used to point at dashboard.auth.email, which dashboard#181
@@ -1096,7 +1054,7 @@ ingress:
 # docs-svc — core optional-by-toggle docs surface (/ deploy#1034).
 #
 # Component taxonomy: Core, optional-by-toggle. Ships in BOTH self-hosted
-# and SaaS (unlike billing/www-svc which are SaaS-only). Default-on: an
+# and SaaS (unlike billing, which is SaaS-only). Default-on: an
 # online self-hosted operator may disable the bundled docs and the dashboard
 # will link to publicFallbackUrl instead.
 #
@@ -1494,6 +1452,18 @@ envoy:
   logLevel: info
 
   # ---------------------------------------------------------------------------
+  # Extra edge routes (charts#375): empty in the core chart. A private overlay
+  # adds the components it ships, one entry each, every field stated:
+  #   - path: /api/billing/webhook
+  #     rewrite: /webhook
+  #     service: gibson-billing-webhook
+  #     port: 8090
+  #     rateLimitClass: catch-all
+  #     auth: signed-request
+  # See templates/envoy/configmap.yaml for the fields and the two auth modes.
+  extraRoutes: []
+
+  # ---------------------------------------------------------------------------
   # Edge rate limiting (deploy#1189).
   #
   # Before this existed, `grep -E 'ratelimit|rate_limit|connection_limit'` over
@@ -1834,21 +1804,6 @@ neo4j:
 # references (deploy#1032).
 # -----------------------------------------------------------------------------
 
-stripeMock:
-  enabled: false
-
-  image:
-    repository: ghcr.io/zeroroot-ai/mirror/stripe-mock
-    tag: "v0.200.0@sha256:037b48935aad08cff2f692d3b62770437b9d17a4315ed44b3774ff5e4de68d78"
-    pullPolicy: IfNotPresent
-
-  resources:
-    requests:
-      cpu: 10m
-      memory: 32Mi
-    limits:
-      cpu: 100m
-      memory: 64Mi
 
 # mailpit: kind dev-only delivering SMTP sink (signup-email-delivery, the
 # deploy companion to gibson#1228 / dashboard#991).

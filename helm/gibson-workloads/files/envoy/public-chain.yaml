@@ -294,26 +294,28 @@ item whose `-` and whose filter_chain_match the CALLER writes.
                         # The dashboard serves nothing under /assets.
                         - match: { prefix: "/assets/" }
                           route: { cluster: zitadel_upstream, timeout: 30s }
-                        # Closed billing tier's Stripe webhook receiver
-                        # (gibson#798/#800). Stripe POSTs here; routed to the
-                        # hosted gibson-billing-webhook workload, NOT the
-                        # dashboard (whose billing webhook is retired). On-prem
-                        # has no such workload — the cluster 503s, but on-prem
-                        # receives no Stripe webhooks, so the path is never hit.
-                        #
-                        # prefix_rewrite is REQUIRED: the receiver's mux serves
-                        # POST /webhook (+ GET /healthz) only — the public
-                        # /api/billing/webhook path is an edge-side convention.
-                        # Forwarding it verbatim 404s every Stripe delivery,
-                        # which Stripe reports as a failing endpoint while the
-                        # tenant's subscription_status never lands in
-                        # tenant_quotas. Ground truth: billing
-                        # cmd/billing-webhook/main.go.
-                        - match: { path: "/api/billing/webhook" }
+                        # envoy.extraRoutes (charts#375): one route for each
+                        # entry, an exact path, with its rate-limit class. A
+                        # component outside the core chart (the private
+                        # billing component) comes in only through this list.
+{{- range .extraRoutes }}
+                        # extra route: auth {{ .auth }}
+                        - match: { path: {{ .path | quote }} }
                           route:
-                            cluster: gibson_billing_webhook
+                            cluster: {{ .cluster }}
                             timeout: 30s
-                            prefix_rewrite: "/webhook"
+                            {{- if .rewrite }}
+                            prefix_rewrite: {{ .rewrite | quote }}
+                            {{- end }}
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: {{ .descriptor }}
+                                  - masked_remote_address:
+                                      v4_prefix_mask_len: 32
+                                      v6_prefix_mask_len: 64
+{{- end }}
                         # -------------------------------------------------------
                         # Signup submission bucket (deploy#1242). The signup
                         # Server Action POSTs to its page URL (/signup — Next.js

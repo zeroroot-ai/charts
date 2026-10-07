@@ -27,15 +27,6 @@ names from here. certManager.issuers.vault.path has the form
 {{- end -}}
 
 {{/*
-stripe-mock host — dev-only stub that replaces api.stripe.com in kind so
-the tenant-operator readyz Stripe probe passes without a live Stripe key.
-Disabled in production overlays (stripeMock.enabled: false).
-*/}}
-{{- define "gibson.stripeMock.host" -}}
-{{- printf "%s-stripe-mock" .Release.Name }}
-{{- end }}
-
-{{/*
 Capability-Grant JWT signing key Secret name (GHSA-3957, gibson#1288).
 
 Release-prefixed: nothing outside this chart
@@ -47,33 +38,6 @@ releases in one namespace from colliding.
 {{- printf "%s-cg-signing-key" (include "gibson.fullname" .) }}
 {{- end }}
 
-{{/*
-Stripe credentials Secret name.
-
-This name is the default `dashboard.billing.stripeSecretKeySecretRef` resolves
-to in templates/dashboard/deployment.yaml, and it is consumed by that
-Deployment's wait-for-stripe-secrets init container and its STRIPE_SECRET_KEY /
-STRIPE_WEBHOOK_SECRET env entries.
-
-Do NOT prefix with .Release.Name — the value in dashboard.billing.*SecretRef
-is the literal Secret name and is intentionally environment-stable.
-*/}}
-{{- define "gibson.stripeSecrets.name" -}}
-gibson-stripe-credentials
-{{- end }}
-
-{{/*
-Billing-webhook shared-secret Secret name (deploy#1314).
-
-Materialised by templates/secrets/billing-webhook-secret.yaml with the single
-key GIBSON_BILLING_WEBHOOK_SECRET. Both ends of the SetTenantBillingActive hop
-reference it by this literal name — the daemon StatefulSet's secretKeyRef and,
-once dashboard#1016 is decided, the caller workload — so it is intentionally
-NOT release-prefixed and environment-stable, exactly like the Stripe Secret.
-*/}}
-{{- define "gibson.billingWebhookSecret.name" -}}
-gibson-billing-webhook-secret
-{{- end }}
 
 {{/*
 gibson.envoyEdge.caRequired — TRUE when consumers must mount the Envoy

@@ -46,21 +46,12 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
         {{- /*
-          The operator reads STRIPE_API_KEY from this Secret into env, captured
-          at pod start, and main.go fails closed at boot if the key disagrees
-          with STRIPE_EXPECTED_MODE. Rotating the Secret without a roll leaves
-          the operator on the old key with no signal at all. Reloader watches
-          the named Secret and rolls this Deployment when it changes, so the
-          roll is declarative rather than a kubectl restart at rotation time
-          (deploy#1144).
-        */}}
-        {{- /*
           The operator also reads its OpenBao token into env at pod start.
           The openbao-auto-init sidecar re-mints it into
           gibson-tenant-operator-vault when it expires, and Reloader rolls
           this Deployment when that Secret changes.
         */}}
-        secret.reloader.stakater.com/reload: {{ printf "%s,gibson-tenant-operator-vault" ((((.Values.tenantOperator).billing).stripeSecretKeySecretRef) | default "gibson-stripe-credentials") | quote }}
+        secret.reloader.stakater.com/reload: "gibson-tenant-operator-vault"
     spec:
       {{- include "gibson.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: gibson-tenant-operator
@@ -380,37 +371,6 @@ spec:
             - name: ORPHAN_REAPER_GRACE_SECONDS
               value: {{ .Values.tenantOperator.orphanReaper.gracePeriodSeconds | default 300 | quote }}
             {{- /*
-              Stripe API key — REQUIRED at boot per one-code-path
-              (tenant-operator#95). The operator's CreateStripeCustomer +
-              UpdateStripeSubscription saga steps cannot run without it;
-              main.go exits 1 if STRIPE_API_KEY is unset. The chart
-              never gates on a Stripe toggle.
-
-              Sourced from the same Secret the dashboard reads
-              (`gibson-stripe-credentials` in kind dev; an ESO-managed
-              copy of the prod live key in EKS overlays). The underlying
-              Secret key is STRIPE_SECRET_KEY (the env-var name the
-              dashboard expects); tenant-operator's main.go reads it
-              from STRIPE_API_KEY, so we project the same value under
-              that name here.
-            */}}
-            - name: STRIPE_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ (((.Values.tenantOperator).billing).stripeSecretKeySecretRef) | default "gibson-stripe-credentials" | quote }}
-                  key: STRIPE_SECRET_KEY
-            {{- /*
-              STRIPE_EXPECTED_MODE is NOT injected here. The operator reads
-              STRIPE_API_KEY and never compares its prefix to a declared mode:
-              operators/tenant/cmd/main.go has no such check, so the variable
-              asserted a control that did not exist. The guard that does exist
-              is the dashboard's, in src/lib/billing/stripe.ts
-              (validateBillingConfig), which reads the SAME one Stripe key out
-              of the same Secret and throws at boot when the key prefix and
-              dashboard.billing.stripeExpectedMode disagree. One key, one
-              assertion, in the process that holds the guard.
-            */}}
-            {{- /*
               SMTP env block — REQUIRED at boot per one-code-path
               (tenant-operator#95). main.go exits 1 if SMTP_HOST is unset.
 
@@ -472,15 +432,6 @@ spec:
             {{- end }}
             - name: SMTP_FROM
               value: {{ $mail.from | quote }}
-            {{- with (((.Values.tenantOperator).billing).stripeAPIBaseURL) }}
-            # DEV ONLY — redirects all Stripe API calls to the in-cluster
-            # stripe-mock server (deployed by the gibson-workloads chart when
-            # stripeMock.enabled=true). Allows the readyz Stripe probe and
-            # billing saga steps to work without a live Stripe key.
-            # Production overlays must NOT set this.
-            - name: STRIPE_API_BASE_URL
-              value: {{ . | quote }}
-            {{- end }}
             {{- /*
             Zitadel env block.
 

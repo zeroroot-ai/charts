@@ -325,15 +325,9 @@ spec:
 
 
 def renders() -> list[list[dict]]:
-    """The owner-credential guard's renders, plus the baseline with both Stripe
-    Secret refs set, so the dashboard's wait-for-stripe-secrets reads render."""
-    billing = ocr.helm([
-        "gibson", "helm/gibson", "--namespace", ocr.NS,
-        "-f", "helm/testdata/render-inputs/gibson.yaml", "-f", "helm/gibson/values-baseline.yaml",
-        "--set", "gibson-workloads.dashboard.billing.stripeSecretKeySecretRef=gibson-stripe-credentials",
-        "--set", "gibson-workloads.dashboard.billing.stripeWebhookSecretSecretRef=gibson-stripe-webhook",
-    ])
-    return ocr.renders() + [billing]
+    """The owner-credential guard's renders. The dashboard reads no Stripe
+    Secret any more (charts#375), so no extra billing render is needed."""
+    return ocr.renders()
 
 
 def selftest() -> int:

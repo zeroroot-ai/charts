@@ -46,16 +46,7 @@ spec:
         # rotated. Reloader runs cluster-wide and watches the explicitly-
         # named Secrets below; when any of them changes, Reloader triggers
         # a rolling restart of this Deployment.
-        {{- /*
-          gibson-stripe-credentials is in this list because the dashboard reads
-          STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY / STRIPE_WEBHOOK_SECRET
-          from it into env, captured at pod start. Rotating the Secret without
-          a roll leaves the pod verifying against the old signing secret, and
-          the only symptom is a rejected webhook — so the roll has to be
-          declarative here rather than a kubectl restart at rotation time
-          (deploy#1144).
-        */}}
-        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,{{ include "gibson.dashboardSecrets.name" . }},{{ (((.Values.dashboard.billing).stripeSecretKeySecretRef)) | default "gibson-stripe-credentials" }}"
+        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,{{ include "gibson.dashboardSecrets.name" . }}"
     spec:
       {{- include "gibson.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ .Values.dashboard.serviceAccount.name | default "gibson-dashboard" }}
@@ -208,88 +199,6 @@ spec:
             limits:
               cpu: 100m
               memory: 64Mi
-        # one-code-path #203: wait-for-stripe-secrets blocks pod start
-        # until the Stripe Secrets (secret key + publishable key + webhook)
-        # are materialised. The STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY /
-        # STRIPE_WEBHOOK_SECRET env entries are required; an empty
-        # publishable key silently breaks the card-first Payment Element
-        # (dashboard#783), so we fail the pod at boot instead. Gated on the same
-        # value flags as the env entries: if you wired secretRefs in
-        # values, the Secrets MUST exist by pod-start.
-        {{- with .Values.dashboard.billing }}
-        {{- if or .stripeSecretKeySecretRef .stripeWebhookSecretSecretRef }}
-        - name: wait-for-stripe-secrets
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
-          command: ['/bin/bash', '-c']
-          args:
-            - |
-              set -eu
-              ns={{ $.Release.Namespace | quote }}
-              {{- if .stripeSecretKeySecretRef }}
-              secret_name={{ .stripeSecretKeySecretRef | quote }}
-              echo "[wait-for-stripe-secrets] waiting for Secret ${ns}/${secret_name} key=STRIPE_SECRET_KEY..."
-              for i in $(seq 1 30); do
-                if kubectl get secret -n "${ns}" "${secret_name}" \
-                    -o jsonpath='{.data.STRIPE_SECRET_KEY}' 2>/dev/null \
-                    | base64 -d 2>/dev/null | grep -q .; then
-                  echo "[wait-for-stripe-secrets] STRIPE_SECRET_KEY ok"
-                  break
-                fi
-                if [ $i -eq 30 ]; then
-                  echo "[wait-for-stripe-secrets] timed out after 60s waiting for ${secret_name}.STRIPE_SECRET_KEY. Its ExternalSecret writes it from OpenBao. Check: kubectl get externalsecret,secret -n ${ns}" >&2
-                  exit 1
-                fi
-                sleep 2
-              done
-              echo "[wait-for-stripe-secrets] waiting for Secret ${ns}/${secret_name} key=STRIPE_PUBLISHABLE_KEY..."
-              for i in $(seq 1 30); do
-                if kubectl get secret -n "${ns}" "${secret_name}" \
-                    -o jsonpath='{.data.STRIPE_PUBLISHABLE_KEY}' 2>/dev/null \
-                    | base64 -d 2>/dev/null | grep -q .; then
-                  echo "[wait-for-stripe-secrets] STRIPE_PUBLISHABLE_KEY ok"
-                  break
-                fi
-                if [ $i -eq 30 ]; then
-                  echo "[wait-for-stripe-secrets] timed out after 60s waiting for ${secret_name}.STRIPE_PUBLISHABLE_KEY (powers the card-first signup Payment Element — dashboard#783)" >&2
-                  exit 1
-                fi
-                sleep 2
-              done
-              {{- end }}
-              {{- if .stripeWebhookSecretSecretRef }}
-              webhook_name={{ .stripeWebhookSecretSecretRef | quote }}
-              echo "[wait-for-stripe-secrets] waiting for Secret ${ns}/${webhook_name} key=STRIPE_WEBHOOK_SECRET..."
-              for i in $(seq 1 30); do
-                if kubectl get secret -n "${ns}" "${webhook_name}" \
-                    -o jsonpath='{.data.STRIPE_WEBHOOK_SECRET}' 2>/dev/null \
-                    | base64 -d 2>/dev/null | grep -q .; then
-                  echo "[wait-for-stripe-secrets] STRIPE_WEBHOOK_SECRET ok"
-                  exit 0
-                fi
-                if [ $i -eq 30 ]; then
-                  echo "[wait-for-stripe-secrets] timed out after 60s waiting for ${webhook_name}.STRIPE_WEBHOOK_SECRET" >&2
-                  exit 1
-                fi
-                sleep 2
-              done
-              {{- end }}
-              exit 0
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 1001
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
-        {{- end }}
-        {{- end }}
         # Spec: canonical-service-identity Req 5 — resolve the readable SA
         # names in serviceAccounts.required against the gibson-sa-identity-map
         # ConfigMap (populated by the post-install Zitadel Job) into:
@@ -631,13 +540,6 @@ spec:
             - name: GIBSON_PUBLIC_URL
               value: {{ .Values.dashboard.gibsonPlatformPublicUrl | default (include "gibson.apiOrigin" .) | quote }}
 
-            # PUBLIC_URL — required by the dashboard's env-validator.
-            # Public base URL of the dashboard (matches AUTH_URL in
-            # single-origin deploys). Used for Stripe checkout return_url,
-            # billing-portal success_url, transactional emails.
-            - name: PUBLIC_URL
-              value: {{ .Values.dashboard.authUrl | default (include "gibson.externalOrigin" .) | quote }}
-
             # Neo4j connection URI for the dashboard knowledge-graph client.
             # Required — the dashboard Neo4j driver uses this at startup.
             - name: NEO4J_URI
@@ -761,15 +663,6 @@ spec:
               value: {{ .metrics.allowedCIDRs | default "" | quote }} {{/* allowlist-silent-default: empty disables CIDR filtering (cluster-internal only). */}}
             {{- end }}
 
-            # Stripe billing (spec stripe-billing-integration; CLAUDE.md
-            # tier-repricing). Wired from .Values.dashboard.billing.*.
-            # The dashboard runtime graceful-degrades to the "Pricing
-            # temporarily unavailable" placeholder on /pricing (R7.3) when
-            # STRIPE_SECRET_KEY / STRIPE_PRICE_* are unset. Setting
-            # paidTiersEnabled=true ALSO forces a startup-time check
-            # (instrumentation.ts → validateBillingConfig) that throws if
-            # any required var is missing; leave it false for free-tier-only
-            # deployments.
             {{- /*
               HSTS is a real-cert concern. Behind a self-signed edge (kind /
               self-hosted before a trusted cert), emitting Strict-Transport-Security
@@ -782,64 +675,45 @@ spec:
             - name: DASHBOARD_HSTS_DISABLED
               value: "1"
             {{- end }}
-            {{- with .Values.dashboard.billing }}
-            {{- if .paidTiersEnabled }}
-            - name: DASHBOARD_BILLING_PAID_TIERS_ENABLED
-              value: "true"
-            {{- /*
-              Card-first-signup Stripe mode guard (dashboard#767). REQUIRED
-              whenever paid tiers are on — no silent default (one-code-path
-). "test" on staging (dummy cards only), "live" in
-              prod (real cards). instrumentation.ts fails closed at boot if
-              this disagrees with the Stripe key prefix.
-            */}}
-            - name: STRIPE_EXPECTED_MODE
-              value: {{ required "dashboard.billing.stripeExpectedMode is REQUIRED when paidTiersEnabled (epic card-first-signup / dashboard#767): set to \"test\" (staging) or \"live\" (prod)." .stripeExpectedMode | quote }}
+            {{- /* The account link of the billing component (ADR-0060,
+                   charts#375). Both keys or neither: the dashboard stops at
+                   boot on half a pair, so the render fails first. The
+                   dashboard reads no Stripe value and no PUBLIC_URL
+                   (dashboard#256). */}}
+            {{- with .Values.dashboard.accountLink }}
+            {{- if or .url .label }}
+            {{- if not (and .url .label) }}
+            {{- fail "dashboard.accountLink.url and dashboard.accountLink.label are set together or not at all (charts#375)" }}
             {{- end }}
-            {{- /* STRIPE_ALLOW_TEST_KEY removed (card-first-signup / dashboard#767):
-                   the explicit STRIPE_EXPECTED_MODE guard supersedes the
-                   NODE_ENV-inferred check that allowTestKey used to suppress.
-                   Staging declares stripeExpectedMode: test directly. */}}
-            {{- if .portalConfigurationId }}
-            - name: STRIPE_PORTAL_CONFIGURATION_ID
-              value: {{ .portalConfigurationId | quote }}
+            - name: DASHBOARD_ACCOUNT_URL
+              value: {{ .url | quote }}
+            - name: DASHBOARD_ACCOUNT_LINK_LABEL
+              value: {{ .label | quote }}
             {{- end }}
-            {{- /* STRIPE_PRICE_* env vars retired (dashboard#872): the dashboard
-                   resolves price IDs at runtime by stable lookup_key
-                   (gibson_<tier>_monthly_usd), so no per-env price IDs are
-                   injected. plans.yaml carries the lookupKey per plan. */ -}}
-            {{- if .stripeSecretKeySecretRef }}
-            # The gibson-stripe-credentials ExternalSecret writes this Secret
-            # from OpenBao (ADR-0014). Nothing creates it by hand.
-            #
-            # one-code-path #203: previously `optional: true` with a
-            # "runtime graceful-degrades" comment. ONE deployment shape:
-            # if you wired a stripeSecretKeySecretRef in values, the
-            # Secret MUST exist by pod-start. The wait-for-stripe-secrets
-            # init container above blocks pod start until both Stripe
-            # keys are populated.
-            - name: STRIPE_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .stripeSecretKeySecretRef | quote }}
-                  key: STRIPE_SECRET_KEY
-            # STRIPE_PUBLISHABLE_KEY (pk_test_/pk_live_): runtime-injected so the
-            # signup server component can hand it to the inline Payment Element.
-            # Same Secret as the secret key; not NEXT_PUBLIC (build-time would
-            # bake the wrong mode into the shared :main image — dashboard#783).
-            - name: STRIPE_PUBLISHABLE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .stripeSecretKeySecretRef | quote }}
-                  key: STRIPE_PUBLISHABLE_KEY
             {{- end }}
-            {{- if .stripeWebhookSecretSecretRef }}
-            - name: STRIPE_WEBHOOK_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .stripeWebhookSecretSecretRef | quote }}
-                  key: STRIPE_WEBHOOK_SECRET
+            {{- /* The texts of the signup step of the billing component
+                   (ADR-0060, charts#375). All six or none: the dashboard
+                   stops at boot on a partial group. */}}
+            {{- $st := .Values.dashboard.signupStep | default dict }}
+            {{- $stKeys := list "title" "text" "buttonLabel" "waitingText" "failureText" "retryLabel" }}
+            {{- $stSet := 0 }}
+            {{- range $k := $stKeys }}{{- if get $st $k }}{{- $stSet = add1 $stSet }}{{- end }}{{- end }}
+            {{- if and (gt $stSet 0) (lt $stSet 6) }}
+            {{- fail "dashboard.signupStep: set all six texts or none (title, text, buttonLabel, waitingText, failureText, retryLabel) (charts#375)" }}
             {{- end }}
+            {{- if eq $stSet 6 }}
+            - name: DASHBOARD_SIGNUP_STEP_TITLE
+              value: {{ $st.title | quote }}
+            - name: DASHBOARD_SIGNUP_STEP_TEXT
+              value: {{ $st.text | quote }}
+            - name: DASHBOARD_SIGNUP_STEP_BUTTON_LABEL
+              value: {{ $st.buttonLabel | quote }}
+            - name: DASHBOARD_SIGNUP_STEP_WAITING_TEXT
+              value: {{ $st.waitingText | quote }}
+            - name: DASHBOARD_SIGNUP_STEP_FAILURE_TEXT
+              value: {{ $st.failureText | quote }}
+            - name: DASHBOARD_SIGNUP_STEP_RETRY_LABEL
+              value: {{ $st.retryLabel | quote }}
             {{- end }}
 
           # one-code-path #203: was `optional: true`. The chart renders

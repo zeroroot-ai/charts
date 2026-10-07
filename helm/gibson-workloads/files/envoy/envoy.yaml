@@ -1434,23 +1434,21 @@ static_resources:
                       address: "gibson-docs-svc"
                       port_value: 8080
 
-    # gibson#798/#800 — the closed billing tier's Stripe webhook receiver.
-    # Plain HTTP/1.1 (Go net/http). Deployed only in hosted overlays
-    # (gibson-billing-webhook, gitops apps/manifests/gibson-workloads); on-prem
-    # has no such Service so STRICT_DNS yields no endpoints and the route 503s,
-    # which is fine — on-prem receives no Stripe webhooks.
-    - name: gibson_billing_webhook
+{{- range .extraRoutes }}
+    # envoy.extraRoutes entry {{ .path }} (charts#375).
+    - name: {{ .cluster }}
       type: STRICT_DNS
       connect_timeout: 5s
       load_assignment:
-        cluster_name: gibson_billing_webhook
+        cluster_name: {{ .cluster }}
         endpoints:
           - lb_endpoints:
               - endpoint:
                   address:
                     socket_address:
-                      address: "gibson-billing-webhook"
-                      port_value: 8090
+                      address: {{ .service | quote }}
+                      port_value: {{ .port }}
+{{- end }}
 
     # gibson#623 — daemon's dedicated native-login bootstrap listener (:8085).
     # Plaintext HTTP/1.1: the endpoint is unauthenticated by design and serves

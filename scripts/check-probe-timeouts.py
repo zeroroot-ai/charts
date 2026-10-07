@@ -34,7 +34,7 @@ WHY THE RENDER AND NOT THE TEMPLATES
 
 A probe inside an `{{- if }}` is invisible to a grep over the templates, and
 every probe in this chart that was missing a timeout sat behind one. The render
-is the baseline profile with mailpit and stripe-mock switched on,
+is the baseline profile with mailpit switched on,
 which is the smallest render that contains every probe-bearing workload.
 
 VENDORED CHARTS
@@ -79,12 +79,11 @@ RENDER = [
     "-f", "helm/gibson/values-baseline.yaml",
     "-f", "helm/testdata/render-inputs/gibson.yaml",
     "--namespace", "gibson",
-    # The probe-bearing workloads the baseline leaves off. Without these two
-    # the render contains no mailpit or stripe-mock probe at all. The chart
-    # renders no plugin pod: the tenant-operator deploys each plugin instance
-    # (gibson#815).
+    # The probe-bearing workload the baseline leaves off. Without it the
+    # render contains no mailpit probe at all. The chart renders no plugin pod
+    # (the tenant-operator deploys each plugin instance, gibson#815) and no
+    # stripe-mock (billing is a private component, charts#375).
     "--set", "gibson-workloads.mailpit.enabled=true",
-    "--set", "gibson-workloads.stripeMock.enabled=true",
 ]
 
 
