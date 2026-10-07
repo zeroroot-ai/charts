@@ -12,7 +12,7 @@ A host in the cluster (a name with no dot, or a name under .svc or
   zitadel          The SMTP relay of global.email when its provider is smtp.
                    The ZITADEL chart gives the login UI the same labels.
   tenant-operator  The SMTP relay of global.email when its provider is smtp,
-                   an external Vault, an external JWKS URL, an external
+                   an external JWKS URL, an external
                    tenant Postgres, and AWS KMS and STS when
                    gibson-operators.kms.keyARN is set.
   cert-manager     The ACME directory of Let's Encrypt and, for the http01
@@ -60,7 +60,7 @@ only.
 {{- /* tenant-operator */ -}}
 {{- $to := $smtp -}}
 {{- $dp := $ops.dataPlane | default dict -}}
-{{- $urls := list (($dp.vault | default dict).addr) (((($ops.vault | default dict).jwtAuth | default dict)).spireOidcJwksURL) -}}
+{{- $urls := list (((($ops.vault | default dict).jwtAuth | default dict)).spireOidcJwksURL) -}}
 {{- range $u := $urls -}}
 {{- with include "gibson.externalHost" $u -}}
 {{- $to = append $to (include "gibson.egressHostEntry" (dict "host" . "port" (include "gibson.urlPort" $u)) | fromYaml) -}}

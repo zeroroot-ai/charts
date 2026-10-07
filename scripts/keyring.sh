@@ -13,7 +13,7 @@
 #
 #   OPENBAO_SEAL_KEY=<base64 of 32 random bytes, 44 chars>
 #   VELERO_REPO_PASSWORD=<base64 of 32 random bytes, 44 chars>
-#   CNPG_BACKUP_KEY=<base64 of 32 random bytes, 44 chars>
+#   SETEC_DISK_SIGNING_SEED=<base64 of 32 random bytes, 44 chars>
 #   BUCKET_ACCESS_KEY=<20 chars, A-Z0-9>
 #   BUCKET_SECRET_KEY=<base64 of 30 random bytes, 40 chars>
 #   SMTP_PASSWORD=<at least 20 chars, no whitespace>
@@ -84,7 +84,6 @@ MEMBERS=(
   OPENBAO_SEAL_KEY:b64:32
   VELERO_REPO_PASSWORD:b64:32
   SETEC_DISK_SIGNING_SEED:b64:32
-  CNPG_BACKUP_KEY:b64:32
   BUCKET_ACCESS_KEY:alnum:20
   BUCKET_SECRET_KEY:b64:30
   SMTP_PASSWORD:opaque:20

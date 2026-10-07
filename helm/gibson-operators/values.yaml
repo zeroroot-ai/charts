@@ -212,11 +212,9 @@ platformOperator:
     enabled: false
     minAvailable: 1
   # Vault / OpenBao wiring (deploy#449 — regression from platform-operator#45).
-  # vaultAddr: REQUIRED — set to the Vault/OpenBao Service URL.
   # vaultTokenSecretRef: Secret that holds the admin token; key VAULT_ADMIN_TOKEN
   # is the canonical key written by the kind-bootstrap ESO ExternalSecret and the
   # prod ESO backend.
-  vaultAddr: ""  # REQUIRED — fails chart render when empty (see template | required)
   vaultTokenSecretRef:
     name: gibson-openbao-keys
     key: VAULT_ADMIN_TOKEN
@@ -427,15 +425,14 @@ vault:
 # Vault is non-negotiable (one-code-path: deploy#197). The operator dials
 # Vault on every Tenant reconcile to provision the per-tenant secrets
 # namespace; without it, the daemon's secrets broker cannot resolve any
-# tenant credential at runtime. `dataPlane.vault.addr` is REQUIRED — the
-# chart fails render when it is empty. The legacy `.enabled` toggle was
-# deleted: there is no longer an "off" state.
+# tenant credential at runtime. The operator dials the in-chart OpenBao at
+# gibson.openbaoAddr, over TLS only; there is no address value. The legacy
+# `.enabled` toggle was deleted: there is no longer an "off" state.
 dataPlane:
   postgres:
     host: ""
     admin_database: postgres
   vault:
-    addr: ""
     transitKey: "master-kek"
     # No token knob: the operator reads its own token from
     # gibson-tenant-operator-vault, which the openbao-auto-init sidecar mints
@@ -524,7 +521,6 @@ platformBootstrap:
   # creates the master-kek key at this address. Overlays MUST supply
   # `address` and `tokenRef.name`; chart render fails LOUD otherwise.
   vaultTransit:
-    address: ""        # e.g. http://gibson-workloads-vault.gibson.svc:8200
     tokenRef:
       name: ""         # Secret holding the Vault admin token
       key: "VAULT_ADMIN_TOKEN"

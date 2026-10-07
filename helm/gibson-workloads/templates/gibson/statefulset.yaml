@@ -650,9 +650,9 @@ spec:
                   zero-mount-paths assertion on letsencrypt profiles. */}}
             - name: SSL_CERT_DIR
             {{- if eq (include "gibson.envoyEdge.caRequired" .) "true" }}
-              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca:{{ include "gibson.openbaoCADir" . }}"
             {{- else }}
-              value: "/etc/ssl/certs:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/fga-ca:{{ include "gibson.openbaoCADir" . }}"
             {{- end }}
             {{- /*
               The tool-runner's Zitadel service-account credentials
@@ -777,6 +777,7 @@ spec:
           resources:
             {{- toYaml .Values.gibson.resources | nindent 12 }}
           volumeMounts:
+            {{- include "gibson.openbaoCAMount" . | nindent 12 }}
             - name: config
               mountPath: /etc/gibson
               readOnly: true
@@ -896,6 +897,7 @@ spec:
       {{- /* Spec 3 §3 R8 — HA topology spread + anti-affinity. */}}
       {{- include "gibson.spread" (dict "ctx" . "component" "gibson") | nindent 6 }}
       volumes:
+        {{- include "gibson.openbaoCAVolume" . | nindent 8 }}
         - name: config
           configMap:
             name: {{ include "gibson.fullname" . }}-config

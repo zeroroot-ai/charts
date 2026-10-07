@@ -105,6 +105,12 @@ def check(docs):
         for secret in MINTED:
             if secret not in readable and "*" not in readable:
                 bad.append(f"the Role {sa!r} does not let the escrow Job get Secret {secret}: it would wait its whole window on a Secret that is there")
+        # ADR-0171: the platform-operator rotates the login-client token in
+        # the store. The hook must never write the setup Secret value over a
+        # stored value of that key, or a hook that runs before ESO refreshes
+        # the Secret undoes the rotation.
+        if 'OPERATOR_ROTATED="gibson-zitadel-login-client-pat"' not in script or '[ "$KEY" = "$OPERATOR_ROTATED" ]' not in script:
+            bad.append("the escrow Job must never write over the stored login-client token, which the platform-operator rotates (ADR-0171)")
         if "restore path" not in script:
             bad.append("the escrow Job must consult the store BEFORE waiting for the Secret: on a restore the Secret is materialised at wave 1, after this hook, and waiting for it deadlocks the sync")
     # The network half (D76): the Cilium policies select pods by label, so
@@ -131,6 +137,14 @@ for d in late:
         d["metadata"].setdefault("annotations", {})["argocd.argoproj.io/sync-wave"] = "1"
 if not any("BEFORE wave 0" in b for b in check(late)):
     sys.exit("self-test broken: the ExternalSecret at wave 1 (the restore deadlock) was not detected")
+# ADR-0171, planted: an escrow Job that writes over the rotated login-client token.
+over = copy.deepcopy(docs)
+for d in over:
+    if d.get("kind") == "Job" and d["spec"]["template"]["metadata"].get("labels", {}).get("app.kubernetes.io/component") == "iam-admin-pat-escrow":
+        for c in d["spec"]["template"]["spec"]["containers"]:
+            c["args"] = [a.replace('[ "$KEY" = "$OPERATOR_ROTATED" ]', 'false') for a in c.get("args", [])]
+if not any("rotates (ADR-0171)" in b for b in check(over)):
+    sys.exit("self-test broken: an escrow Job that writes over the rotated login-client token was not detected")
 # The stall of run 34271811189, planted: the Role naming the PAT alone.
 narrow = copy.deepcopy(docs)
 for d in narrow:

@@ -4,8 +4,9 @@ signing (unified-identity-and-authorization Phase H/8.2, Reqs 5.1, 13.3).
 
 deploy#223 (one-code-path epic): OpenBao is STRUCTURAL. The in-chart
 OpenBao StatefulSet, Service and ServiceAccount render unconditionally on
-every install. `openbao.image.repository`, `openbao.image.tag` and
-`openbao.service.port` are `required` and fail the render when empty.
+every install. `openbao.image.repository` and `openbao.image.tag` are
+`required` and fail the render when empty. The Service listens on 8200 over
+TLS only (templates/auth/openbao-tls.yaml).
 
 deploy#365 (openbao-storage-durability): OpenBao always runs the `file`
 storage backend at /etc/openbao/data, backed by the StatefulSet PVC. The
@@ -86,7 +87,7 @@ reach the daemon through the secrets broker.
 */}}
 {{- $openbaoRepo := .Values.openbao.image.repository | required "openbao.image.repository is REQUIRED (OpenBao is structural — see deploy#223). Set it in values.yaml or the env's gitops Application's helm.values block." }}
 {{- $openbaoTag := .Values.openbao.image.tag | required "openbao.image.tag is REQUIRED (OpenBao is structural — see deploy#223). Pin to a specific OpenBao version (e.g. \"2.5.3\")." }}
-{{- $openbaoPort := .Values.openbao.service.port | required "openbao.service.port is REQUIRED (OpenBao is structural — see deploy#223). Typical value: 8200." }}
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "openbao.service.port" "dataPlane.openbao.addr") "use" "nothing: OpenBao listens on 8200 over TLS, at gibson.openbaoAddr") }}
 {{- /* The cert-manager Vault issuer adds two consumer tokens (the approle init Job and the ESO generators). */}}
 {{- $cmVault := (((.Values.certManager).issuers).vault).enabled }}
 {{- /* / deploy#1731: the bringup keyring Secret. Both names are
@@ -129,13 +130,13 @@ data:
   openbao.hcl: |
     ui = true
 
+    # TLS only, with no value that turns it off (ADR-0027). The certificate
+    # comes from the chart CA of templates/auth/openbao-tls.yaml.
     listener "tcp" {
-      address = "0.0.0.0:8200"
-      {{- /* deploy#1220: `| default true` swallowed an explicit
-             `tlsDisable: false` (sprig's empty(false) is true), so the
-             knob could never turn TLS on and OpenBao served plaintext.
-             gibson.trueUnlessSet separates unset from false. */}}
-      tls_disable = {{ include "gibson.trueUnlessSet" ((.Values.openbao.config).tlsDisable) }}
+      address         = "0.0.0.0:8200"
+      tls_cert_file   = "/etc/openbao/tls/tls.crt"
+      tls_key_file    = "/etc/openbao/tls/tls.key"
+      tls_min_version = "tls12"
     }
 
     storage "file" {
@@ -201,8 +202,8 @@ data:
       current_key    = "file:///etc/openbao/seal/openbao-seal-key"
     }
 
-    api_addr = "http://{{ .Release.Name }}-openbao:8200"
-    cluster_addr = "http://{{ .Release.Name }}-openbao:8201"
+    api_addr = "https://{{ .Release.Name }}-openbao:8200"
+    cluster_addr = "https://{{ .Release.Name }}-openbao:8201"
 {{- /* The config above writes `storage "file"`: every pod holds its own data
        directory. Two pods are two secret stores behind one Service, so a
        write lands on one and the next read can reach the other. The prod
@@ -228,9 +229,16 @@ metadata:
   # Without this, the store reports InvalidProviderConfig at -10, Argo fails
   # the wave, and the first cold recreate deadlocks (measured, kind
   # 2026-09-02). Helm ignores these annotations and applies in one phase.
+  {{- end }}
+  {{- if (.Values.externalSecrets).preSyncBringup }}
   annotations:
     argocd.argoproj.io/sync-wave: "-12"
   {{- end }}
+  # No Reloader annotation: a workload that can patch this StatefulSet can
+  # take it over (scripts/check-owner-credential-readers.py). OpenBao reads
+  # its listener certificate at start, so the certificate lives as long as
+  # its CA and renews a year before its end; any pod restart in that year
+  # loads the new one (templates/auth/openbao-tls.yaml).
   labels:
     {{- include "gibson.labels" . | nindent 4 }}
     app.kubernetes.io/component: openbao
@@ -272,7 +280,7 @@ spec:
             - server
             - -config=/etc/openbao/config/openbao.hcl
           ports:
-            - name: http
+            - name: https
               containerPort: 8200
               protocol: TCP
             - name: cluster
@@ -280,9 +288,11 @@ spec:
               protocol: TCP
           env:
             - name: BAO_ADDR
-              value: "http://127.0.0.1:8200"
+              value: "https://127.0.0.1:8200"
+            - name: BAO_CACERT
+              value: /etc/openbao/tls/ca.crt
             - name: BAO_API_ADDR
-              value: "http://{{ .Release.Name }}-openbao:8200"
+              value: "https://{{ .Release.Name }}-openbao:8200"
             - name: SKIP_CHOWN
               value: "true"
             - name: SKIP_SETCAP
@@ -299,6 +309,10 @@ spec:
             # Read-only, openbao container only: the sidecar never sees it.
             - name: seal-key
               mountPath: /etc/openbao/seal
+              readOnly: true
+            # The listener certificate (templates/auth/openbao-tls.yaml).
+            - name: tls
+              mountPath: /etc/openbao/tls
               readOnly: true
             # The root filesystem is read-only. The server writes scratch here.
             - name: tmp
@@ -328,7 +342,7 @@ spec:
           # not enough here. Measured on gibson exit-test-bank run 36922487157
           # (2026-10-01): every probe failed with
           #
-          #   Get "http://10.244.0.28:8200/v1/sys/health?...": context deadline
+          #   Get "<pod address>:8200/v1/sys/health?...": context deadline
           #   exceeded (Client.Timeout exceeded while awaiting headers)
           #
           # A deadline, not a refusal: the socket accepted and no header came
@@ -347,16 +361,16 @@ spec:
           livenessProbe:
             httpGet:
               path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
-              port: http
-              scheme: HTTP
+              port: https
+              scheme: HTTPS
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
           readinessProbe:
             httpGet:
               path: /v1/sys/health?standbyok=true&uninitcode=204
-              port: http
-              scheme: HTTP
+              port: https
+              scheme: HTTPS
             initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3
@@ -423,7 +437,7 @@ spec:
               # parallel test suites do (deploy#1732).
               TMPD="$(mktemp -d)"
               seed_checked=0; seed_written=0; seed_failed=0
-              BAO_ADDR_LOCAL="http://127.0.0.1:8200"
+              BAO_ADDR_LOCAL="https://127.0.0.1:8200"
               NAMESPACE="{{ .Release.Namespace }}"
               # The bringup keyring Secret and key, for log messages only. The
               # sidecar never reads the seal key: the openbao container mounts
@@ -1211,6 +1225,9 @@ spec:
                 #                            platformBootstrap.vaultTransit.keyName
                 #   secret/data/gibson-zitadel-iam-admin-pat
                 #                            the admin token it mints (gibson#794)
+                #   secret/data/gibson-zitadel-login-client-pat
+                #                            the login-client token it rotates
+                #                            (ADR-0171)
                 # lookup-self and renew-self come with the default policy.
                 vault_write_policy "$tok" "$PLATFORM_POLICY" \
                   '{{- include "gibson.openbaoPolicy.platformOperator" . | nindent 14 }}' || return 1
@@ -1499,6 +1516,8 @@ spec:
             # seeded empty.
             - name: bringup-inputs
               mountPath: /etc/openbao/inputs
+            # The OpenBao CA only, never the key of the listener.
+            {{- include "gibson.openbaoCAMount" . | nindent 12 }}
             # The ready marker and mktemp write here. The root filesystem is read-only.
             - name: auto-init-tmp
               mountPath: /tmp
@@ -1517,7 +1536,14 @@ spec:
             timeoutSeconds: 3
           env:
             - name: BAO_ADDR
-              value: "http://127.0.0.1:8200"
+              value: "https://127.0.0.1:8200"
+            # The sidecar trusts the OpenBao CA: curl through CURL_CA_BUNDLE,
+            # bao through BAO_CACERT. kube_curl names its own CA, so the
+            # Kubernetes API calls are not affected.
+            - name: CURL_CA_BUNDLE
+              value: {{ printf "%s/ca.crt" (include "gibson.openbaoCADir" .) | quote }}
+            - name: BAO_CACERT
+              value: {{ printf "%s/ca.crt" (include "gibson.openbaoCADir" .) | quote }}
             # The root filesystem is read-only. A tool that writes to HOME
             # writes to the scratch volume.
             - name: HOME
@@ -1535,6 +1561,13 @@ spec:
             capabilities:
               drop: ["ALL"]
       volumes:
+        # The listener certificate (templates/auth/openbao-tls.yaml), for the
+        # openbao container only.
+        - name: tls
+          secret:
+            secretName: {{ include "gibson.openbaoTLSSecret" . }}
+            defaultMode: 0440
+        {{- include "gibson.openbaoCAVolume" . | nindent 8 }}
         - name: tmp
           emptyDir: {}
         - name: auto-init-tmp
@@ -1632,10 +1665,11 @@ metadata:
 spec:
   type: {{ .Values.openbao.service.type | default "ClusterIP" }}
   ports:
-    - name: http
-      port: {{ $openbaoPort }}
-      targetPort: http
+    - name: https
+      port: 8200
+      targetPort: https
       protocol: TCP
+      appProtocol: https
     - name: cluster
       port: 8201
       targetPort: cluster

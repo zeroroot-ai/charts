@@ -26,9 +26,6 @@ the migration history; the literal path string is on that ADR's
 deny-list so it MUST NOT appear here.
 
 Required values when enabled:
-  - certManager.issuers.vault.server                  — Vault server URL
-                                                        (default: in-chart
-                                                        Vault Service)
   - certManager.issuers.vault.path                    — PKI mount path
                                                         (e.g. pki_int/sign/gibson)
   - certManager.issuers.vault.auth.appRole.path       — Vault approle mount
@@ -47,7 +44,8 @@ Required values when enabled:
 */}}
 {{- if (((.Values.certManager).issuers).vault).enabled }}
 {{- $vi := .Values.certManager.issuers.vault }}
-{{- $server := default (printf "http://%s-vault.%s.svc.cluster.local:8200" .Release.Name .Release.Namespace) $vi.server }}
+{{- $server := include "gibson.openbaoAddr" . }}
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "certManager.issuers.vault.server") "use" "nothing: the issuer dials the in-chart OpenBao at gibson.openbaoAddr") }}
 {{- $path := required "certManager.issuers.vault.path is required when vault issuer is enabled (e.g. pki_int/sign/gibson)" $vi.path }}
 {{- $auth := $vi.auth | default dict }}
 {{- $aAuth := $auth.appRole | default dict }}
@@ -67,6 +65,11 @@ metadata:
 spec:
   vault:
     server: {{ $server | quote }}
+    # OpenBao serves only TLS. cert-manager reads the CA of the listener from
+    # this Secret, in the namespace where the in-chart cert-manager runs.
+    caBundleSecretRef:
+      name: {{ include "gibson.openbaoTLSSecret" . | quote }}
+      key: ca.crt
     path: {{ $path | quote }}
     auth:
       appRole:

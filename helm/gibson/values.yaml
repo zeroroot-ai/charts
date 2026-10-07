@@ -1304,8 +1304,14 @@ zitadel:
     # zitadel-login-branding ConfigMap, the brand source the platform-operator
     # applies. Reloader rolls this Deployment when the brand changes and
     # leaves it alone otherwise.
+    #
+    # The login-client Secret holds the token of the login-client machine
+    # user. The platform-operator rotates it (ADR-0171): a new token reaches
+    # the Secret through ESO, Reloader restarts the login UI, and the operator
+    # removes the old token 10 minutes later.
     annotations:
       configmap.reloader.stakater.com/reload: "zitadel-login-branding"
+      secret.reloader.stakater.com/reload: "login-client"
     configMap:
       annotations:
         helm.sh/hook: null

@@ -2067,7 +2067,6 @@ certManager:
       # full migration history; that ADR also lists the literal path
       # string in the deny-list so it MUST NOT appear here.
       enabled: false
-      server: ""     # Defaults to the in-chart OpenBao Service when empty.
       path: ""       # OpenBao PKI sign mount path, e.g. pki_int/sign/gibson
       auth:
         appRole:
@@ -2152,20 +2151,9 @@ openbao:
     # No devMode and no devRootToken (deploy#1732): no profile mints a literal
     # root token. The openbao-auto-init sidecar revokes the initial root on
     # every profile and gets back in with its own ServiceAccount (role
-    # openbao-seeder). The only knobs here are the listener and the seal.
-    # NOT YET WIRED FOR PROD — leaving this true means OpenBao serves plaintext
-    # HTTP, including in staging and prod (neither overlay sets it). Flipping it
-    # is NOT a one-line change and is deliberately not done here (deploy#1195):
-    # a server-side TLS listener with every client still dialling `http://`
-    # is a total platform outage, and the client addresses live in four places
-    # at once — this chart, gibson-operators' values (3 files), the umbrella's
-    # ci/values-*.yaml, and all three gitops env overlays. It also needs a
-    # cert-manager Certificate for the openbao Service DNS names, a CA bundle
-    # mounted into every caller, the readiness/liveness probes moved to HTTPS,
-    # and `api_addr`/`cluster_addr` switched to https. That is a coordinated
-    # cutover that must be validated on a live cluster, not a values default.
-    # Tracked separately.
-    tlsDisable: true
+    # openbao-seeder). The listener serves only TLS, from the chart CA of
+    # templates/auth/openbao-tls.yaml; no value turns TLS off, and the deleted
+    # key openbao.config.tlsDisable fails the render (ADR-0027).
 
     # deploy#1195: OpenBao audit device. `bao audit enable` was never called in
     # any environment, so every secret read — every per-tenant KEK derivation,
@@ -2246,9 +2234,10 @@ openbao:
       cpu: 200m
       memory: 256Mi
 
+  # The Service listens on 8200 over TLS only (gibson.openbaoAddr); the port
+  # is not a value.
   service:
     type: ClusterIP
-    port: 8200
 
   # JWT auth method config used by the tenant-operator (per-tenant role
   # for plugin workloads) and at runtime by the daemon authenticating
@@ -2707,10 +2696,6 @@ dataPlane:
   # dataPlane.openbao) and is retained only as a values-shape anchor for
   # future workloads-side bindings.
   openbao:
-    # addr — the OpenBao HTTP API endpoint reachable from operator + daemon.
-    # Example: "http://gibson-openbao.gibson.svc:8200"
-    addr: ""
-
     # transitKey — name of the transit key the operator uses for
     # per-tenant KEK derivation via HMAC-SHA256. The chart's vault-
     # transit-bootstrap Job creates the key on post-install/upgrade.

@@ -1,3 +1,4 @@
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "platformOperator.vaultAddr") "use" "nothing: the operator dials the in-chart OpenBao at gibson.openbaoAddr, over TLS only") }}
 {{- /*
   platform-operator is structural infrastructure (one-code-path /
   deploy#188). The previous outer `.Values.platformOperator.enabled`
@@ -112,9 +113,9 @@ spec:
             # the env is unconditional.
             - name: SSL_CERT_DIR
             {{- if .Values.envoy.tls.secretName }}
-              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca:{{ include "gibson.openbaoCADir" . }}"
             {{- else }}
-              value: "/etc/ssl/certs:/etc/ssl/fga-ca"
+              value: "/etc/ssl/certs:/etc/ssl/fga-ca:{{ include "gibson.openbaoCADir" . }}"
             {{- end }}
             {{- /*
               Zitadel addressing (ADR-0092, gibson#223). The operator connects
@@ -159,7 +160,7 @@ spec:
               Vault→OpenBao migration (/ deploy#431).
             */}}
             - name: VAULT_ADDR
-              value: {{ required "platformOperator.vaultAddr is required — set to the OpenBao/Vault Service URL (e.g. http://gibson-workloads-openbao.<ns>.svc:8200)" .Values.platformOperator.vaultAddr | quote }}
+              value: {{ include "gibson.openbaoAddr" . | quote }}
             # Vault/OpenBao admin token via an OPTIONAL projected-Secret FILE,
             # NOT a fixed env var (deploy#971 / gibson#1000). On a from-zero
             # bringup OpenBao mints/writes this Secret later (it lives in
@@ -173,6 +174,7 @@ spec:
             - name: VAULT_TOKEN_PATH
               value: /etc/gibson/vault-token/VAULT_ADMIN_TOKEN
           volumeMounts:
+            {{- include "gibson.openbaoCAMount" . | nindent 12 }}
             # CA for the OpenFGA HTTP-listener cert (deploy#1382).
             - name: fga-http-ca
               mountPath: /etc/ssl/fga-ca
@@ -192,6 +194,7 @@ spec:
               mountPath: /etc/zitadel-system
               readOnly: true
       volumes:
+        {{- include "gibson.openbaoCAVolume" . | nindent 8 }}
         # Only ca.crt is projected — the operator must never hold the
         # OpenFGA listener's private key (deploy#1382).
         - name: fga-http-ca
