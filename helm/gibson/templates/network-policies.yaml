@@ -93,6 +93,11 @@ spec:
         - matchLabels:
             {{ $role }}: platform
 {{- /* name, ports, extra ingress rules for the store pods, extra egress rules for the store pods */}}
+{{- $cnpgInChart := (.Values.cnpg | default dict).enabled }}
+{{- $cnpgNs := ((.Values.global).networkPolicy | default dict).cnpgOperatorNamespace }}
+{{- if and (not $cnpgInChart) (not $cnpgNs) }}
+{{- fail "global.networkPolicy.cnpgOperatorNamespace is required when cnpg.enabled is false: the Postgres rule admits the CloudNativePG operator of the cluster from that namespace only" }}
+{{- end }}
 {{- $esoNs := ((((index .Values "gibson-workloads" | default dict).externalSecrets | default dict).clusterSecretStore | default dict).serviceAccount | default dict).namespace | default $ns }}
 {{- $stores := list
   (dict "name" "postgres" "ports" (list 5432 8000))
@@ -127,17 +132,16 @@ specs:
               - port: {{ $p | quote }}
                 protocol: TCP
               {{- end }}
-      {{- if eq $s.name "postgres" }}
+      {{- if and (eq $s.name "postgres") (not $cnpgInChart) }}
       {{- /* On a guest cluster the CloudNativePG operator of the cluster runs
              in its own namespace and reads the instance status on :8000
-             (charts#369). On the other profiles the operator of this chart
-             has the client label. */}}
+             (charts#369). The rule names that one namespace. On the other
+             profiles the operator of this chart has the client label, and
+             this rule does not render. */}}
       - fromEndpoints:
           - matchLabels:
+              k8s:io.kubernetes.pod.namespace: {{ $cnpgNs | quote }}
               app.kubernetes.io/name: cloudnative-pg
-            matchExpressions:
-              - key: k8s:io.kubernetes.pod.namespace
-                operator: Exists
         toPorts:
           - ports:
               - port: "8000"
@@ -267,17 +271,9 @@ spec:
 {{- /* One policy for each egress host group with at least one host. The
        DNS rule of the default deny lets Cilium see each lookup, so it
        learns the addresses of these names. A value that names a host by
-       its IP address gives a /32 CIDR (the MinIO of the kind rungs). */}}
+       its IP address gives a /32 CIDR (the MinIO of the kind rungs). Each
+       host opens only its own ports (_egress-fqdn.tpl). */}}
 {{- range $group, $hosts := include "gibson.egressFqdnGroups" . | fromYaml }}
-{{- $names := list }}
-{{- $cidrs := list }}
-{{- range $h := $hosts }}
-{{- if $h.cidr }}
-{{- $cidrs = append $cidrs $h.cidr }}
-{{- else }}
-{{- $names = append $names $h }}
-{{- end }}
-{{- end }}
 {{- if $hosts }}
 ---
 apiVersion: cilium.io/v2
@@ -291,18 +287,22 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "Pods of the {{ $group }} egress group reach only these host names."
+  description: "Pods of the {{ $group }} egress group reach only these host names, on their ports."
   endpointSelector:
     matchLabels:
       gibson.zeroroot.ai/egress-fqdn: {{ $group }}
   egress:
-    {{- if $names }}
-    - toFQDNs:
-        {{- toYaml $names | nindent 8 }}
-    {{- end }}
-    {{- if $cidrs }}
+    {{- range $h := $hosts }}
+    {{- if $h.cidr }}
     - toCIDR:
-        {{- toYaml ($cidrs | uniq) | nindent 8 }}
+        - {{ $h.cidr }}
+    {{- else }}
+    - toFQDNs:
+        - {{ toYaml (omit $h "ports") | nindent 10 | trim }}
+    {{- end }}
+      toPorts:
+        - ports:
+            {{- toYaml $h.ports | nindent 12 }}
     {{- end }}
 {{- end }}
 {{- end }}

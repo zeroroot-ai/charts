@@ -15550,10 +15550,8 @@ specs:
                 protocol: TCP
       - fromEndpoints:
           - matchLabels:
+              k8s:io.kubernetes.pod.namespace: "cnpg-system"
               app.kubernetes.io/name: cloudnative-pg
-            matchExpressions:
-              - key: k8s:io.kubernetes.pod.namespace
-                operator: Exists
         toPorts:
           - ports:
               - port: "8000"
@@ -15810,18 +15808,35 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "Pods of the object-store egress group reach only these host names."
+  description: "Pods of the object-store egress group reach only these host names, on their ports."
   endpointSelector:
     matchLabels:
       gibson.zeroroot.ai/egress-fqdn: object-store
   egress:
     - toFQDNs:
-        - matchName: s3.amazonaws.com
-        - matchPattern: '*.s3.amazonaws.com'
-        - matchPattern: s3.*.amazonaws.com
-        - matchPattern: '*.s3.*.amazonaws.com'
+        - matchName: example-durable-bucket.s3.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
+        - matchPattern: example-durable-bucket.s3.*.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
         - matchName: sts.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
         - matchPattern: sts.*.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
 ---
 # Source: gibson/templates/network-policies.yaml
 apiVersion: cilium.io/v2

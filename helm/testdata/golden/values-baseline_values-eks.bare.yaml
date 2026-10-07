@@ -19272,16 +19272,6 @@ specs:
                 protocol: TCP
               - port: "8000"
                 protocol: TCP
-      - fromEndpoints:
-          - matchLabels:
-              app.kubernetes.io/name: cloudnative-pg
-            matchExpressions:
-              - key: k8s:io.kubernetes.pod.namespace
-                operator: Exists
-        toPorts:
-          - ports:
-              - port: "8000"
-                protocol: TCP
   - description: "The clients of the postgres data store reach it."
     endpointSelector:
       matchLabels:
@@ -19526,21 +19516,73 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "Pods of the cert-manager egress group reach only these host names."
+  description: "Pods of the cert-manager egress group reach only these host names, on their ports."
   endpointSelector:
     matchLabels:
       gibson.zeroroot.ai/egress-fqdn: cert-manager
   egress:
     - toFQDNs:
         - matchName: acme-v02.api.letsencrypt.org
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
         - matchName: acme-staging-v02.api.letsencrypt.org
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
         - matchName: route53.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
         - matchName: sts.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
         - matchPattern: sts.*.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
         - matchPattern: ns-*.awsdns-*.com
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toFQDNs:
         - matchPattern: ns-*.awsdns-*.net
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toFQDNs:
         - matchPattern: ns-*.awsdns-*.org
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toFQDNs:
         - matchPattern: ns-*.awsdns-*.co.uk
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
 ---
 # Source: gibson/templates/network-policies.yaml
 apiVersion: cilium.io/v2
@@ -19558,15 +19600,29 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "Pods of the external-dns egress group reach only these host names."
+  description: "Pods of the external-dns egress group reach only these host names, on their ports."
   endpointSelector:
     matchLabels:
       gibson.zeroroot.ai/egress-fqdn: external-dns
   egress:
     - toFQDNs:
         - matchName: route53.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
         - matchName: sts.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
         - matchPattern: sts.*.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
 ---
 # Source: gibson/templates/network-policies.yaml
 apiVersion: cilium.io/v2
@@ -19584,18 +19640,35 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "Pods of the object-store egress group reach only these host names."
+  description: "Pods of the object-store egress group reach only these host names, on their ports."
   endpointSelector:
     matchLabels:
       gibson.zeroroot.ai/egress-fqdn: object-store
   egress:
     - toFQDNs:
-        - matchName: s3.amazonaws.com
-        - matchPattern: '*.s3.amazonaws.com'
-        - matchPattern: s3.*.amazonaws.com
-        - matchPattern: '*.s3.*.amazonaws.com'
+        - matchName: example-durable-bucket.s3.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
+        - matchPattern: example-durable-bucket.s3.*.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
         - matchName: sts.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
         - matchPattern: sts.*.amazonaws.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
 ---
 # Source: gibson/templates/network-policies.yaml
 apiVersion: cilium.io/v2
