@@ -451,8 +451,8 @@ specs:
     ingress:
       - fromEndpoints:
           - matchLabels:
-              k8s:io.kubernetes.pod.namespace: {{ $scraper.namespace }}
-              {{- toYaml $scraper.matchLabels | nindent 14 }}
+              k8s:io.kubernetes.pod.namespace: {{ $scraper.namespace | quote }}
+              {{- toYaml (omit $scraper.matchLabels "k8s:io.kubernetes.pod.namespace") | nindent 14 }}
         toPorts:
           - ports:
               - port: {{ $p | quote }}

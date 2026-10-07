@@ -168,9 +168,8 @@ def selftest() -> int:
         print(f"SELFTEST FAIL: a policy that opens only the metrics ports must pass, got {judge(good)}")
         return 1
     failing = (
-        # The advisory shape: the OpenFGA HTTP API on 8080 open to the scraper.
         ("an API port labelled as the metrics port",
-         [policy(spec("8080")), pod("openfga", "8080", cname="http"), svc("openfga", "http", 8080)]),
+         [policy(spec("8080")), pod("api", "8080", cname="http"), svc("api", "http", 8080)]),
         ("a rule that opens a list of ports", [policy(spec("9090", opened=["9090", "8080"])), pod("d", "9090")]),
         ("a scraper from any namespace",
          [policy(spec("9090", peer={"matchLabels": {"app.kubernetes.io/name": "prometheus"},
