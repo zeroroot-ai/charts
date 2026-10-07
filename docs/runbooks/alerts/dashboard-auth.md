@@ -13,6 +13,8 @@ More than one percent of sign-in attempts fail over five minutes.
 
 A sign-in failed because the membership lookup of the dashboard did not reach the daemon. The person saw `/login/error?reason=daemon_unavailable`.
 
+The rule also fires once when a counter above 0 comes back after a monitoring gap longer than 5 minutes. After a monitoring gap, check whether the counter rose before you follow the steps.
+
 1. Check the daemon: `kubectl -n gibson get pods -l app.kubernetes.io/component=daemon`.
 2. Check Envoy: `kubectl -n gibson get pods -l app.kubernetes.io/component=envoy` and its log for the upstream of the daemon.
 3. Read the dashboard log for `ListMyMemberships` and the gRPC code (`Unavailable` or `DeadlineExceeded`).

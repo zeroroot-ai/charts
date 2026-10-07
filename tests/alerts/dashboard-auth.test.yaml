@@ -41,3 +41,31 @@ tests:
                 person saw /login/error?reason=daemon_unavailable. Check the
                 daemon pods, Envoy, and the network policy between the
                 dashboard and the daemon.
+  # The producer creates the label set at its first failure: the series has
+  # no sample before it starts at 1. The rule fires on it, and it stops once
+  # the series is older than the window (charts#507).
+  - interval: 1m
+    input_series:
+      - series: 'dashboard_signin_total{outcome="error", error_reason="daemon_unavailable", pod="dashboard-0"}'
+        values: '_x5 1x40'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DashboardSignInDaemonUnreachable
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: DashboardSignInDaemonUnreachable
+        exp_alerts:
+          - exp_labels: {severity: page, component: dashboard-auth}
+            exp_annotations:
+              summary: "A sign-in failed because the dashboard cannot reach the daemon"
+              runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/dashboard-auth.md#dashboardsignindaemonunreachable"
+              description: |
+                A sign-in callback of the dashboard failed in the last 5
+                minutes because ListMyMemberships did not reach the daemon
+                (Unavailable, DeadlineExceeded, or a transport failure). The
+                person saw /login/error?reason=daemon_unavailable. Check the
+                daemon pods, Envoy, and the network policy between the
+                dashboard and the daemon.
+      - eval_time: 14m
+        alertname: DashboardSignInDaemonUnreachable
+        exp_alerts: []
