@@ -187,8 +187,14 @@ lists.
        lists. Two identities stay out on purpose, and the check names them:
        platform/helm-test and platform/e2e-runner (see clusterspiffeids.yaml
        for the reason each carries no privilege). */ -}}
-{{- $protectedComponents := list "daemon" "ext-authz" "ratelimit" "dashboard" "tenant-operator" "connector-operator" "platform-operator" "envoy" "openbao" -}}
+{{- /* The setec frontend (platform/setec-frontend, ADR-0142) runs in the setec
+       namespace under the ServiceAccount of the setec chart; both bindings
+       below select that namespace as well, so a pod there that wears its
+       component or its ServiceAccount is fenced the same way. */ -}}
+{{- $setecNs := include "gibson.setecNamespace" . -}}
+{{- $protectedComponents := list "daemon" "ext-authz" "ratelimit" "dashboard" "tenant-operator" "connector-operator" "platform-operator" "envoy" "openbao" "frontend" -}}
 {{- $protectedSAs := list
+      (printf "%s-frontend" (include "gibson.setecFullname" .))
       (include "gibson.serviceAccountName" .)
       (include "gibson.extAuthzServiceAccountName" .)
       (include "gibson.dashboardServiceAccountName" .)
@@ -305,14 +311,17 @@ spec:
   # report, not a control.
   validationActions: {{ $actions | toJson }}
   matchResources:
-    # Scoped to the one namespace the platform ClusterSPIFFEIDs select on.
+    # Scoped to the two namespaces the platform ClusterSPIFFEIDs select on:
+    # the release namespace and the setec namespace (the frontend identity).
     # Their namespaceSelector is `kubernetes.io/metadata.name: <ns>`, and
     # that label is apiserver-managed (NamespaceDefaultLabelName), not
     # settable by a namespace author — so the two scopes cannot be made to
     # disagree.
     namespaceSelector:
-      matchLabels:
-        kubernetes.io/metadata.name: {{ $ns }}
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [{{ $ns | quote }}, {{ $setecNs | quote }}]
 ---
 {{/*
 =============================================================================
@@ -418,5 +427,7 @@ spec:
   validationActions: {{ $actions | toJson }}
   matchResources:
     namespaceSelector:
-      matchLabels:
-        kubernetes.io/metadata.name: {{ $ns }}
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [{{ $ns | quote }}, {{ $setecNs | quote }}]

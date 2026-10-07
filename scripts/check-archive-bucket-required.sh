@@ -29,13 +29,20 @@ must_pass() { # <label> <helm args...>
     || { echo "❌ $label must render: $(tail -n1 "$WORK/err")"; fail=1; }
 }
 
+# The other install inputs with no default (ADR-0166): the registry and the
+# public key of the sandbox disks. Given here so the one missing input is the
+# bucket, and the render refuses on that one.
+SETEC_INPUTS=(
+  --set-string "gibson-workloads.setec.launcher.diskRepo=registry.example.com/setec-disks"
+  --set-string "gibson-workloads.setec.launcher.diskBuilder.publicKeys[0]=ExAmPlEpUbLiCkEy0000000000000000000000000000="
+)
 # THE FIXTURE THIS EXISTS FOR: the baseline alone has no bucket and must refuse.
 # Two values name the durable bucket: the WAL archive and the audit export
 # (charts#446). Either required guard may fire first.
 must_fail "helm/gibson baseline alone" "destinationPath is REQUIRED|auditExport.bucket is REQUIRED" \
-  "$ROOT/helm/gibson" -f "$ROOT/helm/gibson/values-baseline.yaml"
+  "$ROOT/helm/gibson" -f "$ROOT/helm/gibson/values-baseline.yaml" "${SETEC_INPUTS[@]}"
 must_fail "helm/gibson baseline with an archive bucket only" "auditExport.bucket is REQUIRED" \
-  "$ROOT/helm/gibson" -f "$ROOT/helm/gibson/values-baseline.yaml" \
+  "$ROOT/helm/gibson" -f "$ROOT/helm/gibson/values-baseline.yaml" "${SETEC_INPUTS[@]}" \
   --set "platformPostgres.backup.destinationPath=s3://example-durable-bucket/backups/postgres/"
 must_fail "helm/gibson with two different buckets" "differ: both name the one durable bucket" \
   "$ROOT/helm/gibson" -f "$ROOT/helm/gibson/values-baseline.yaml" -f "$ROOT/helm/testdata/render-inputs/gibson.yaml" \
@@ -50,7 +57,7 @@ must_pass "helm/gibson-velero + render inputs" \
 # kind's rungs carry kind's bucket, so baseline + rung renders on its own.
 for rung in developer ci; do
   must_pass "helm/gibson baseline + $rung rung" \
-    "$ROOT/helm/gibson" -f "$ROOT/helm/gibson/values-baseline.yaml" -f "$ROOT/helm/gibson/values-$rung.yaml"
+    "$ROOT/helm/gibson" -f "$ROOT/helm/gibson/values-baseline.yaml" -f "$ROOT/helm/gibson/values-$rung.yaml" "${SETEC_INPUTS[@]}"
   must_pass "helm/gibson-velero $rung rung" \
     "$ROOT/helm/gibson-velero" -f "$ROOT/helm/gibson-velero/values-$rung.yaml"
 done
