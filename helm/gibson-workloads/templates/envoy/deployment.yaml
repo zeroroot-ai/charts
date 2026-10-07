@@ -49,7 +49,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: envoy
-        {{- include "gibson.netLabels" (dict "role" "platform" "edge" true) | nindent 8 }}
+        {{- include "gibson.netLabels" (dict "role" "platform" "edge" true "metricsPort" 9901) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
