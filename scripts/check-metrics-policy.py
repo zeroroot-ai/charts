@@ -50,7 +50,7 @@ def pods(docs: list):
             t = spec.get("template") or {}
             yield (f"{kind} {d['metadata']['name']}", ns_of(d), (t.get("metadata") or {}).get("labels") or {},
                    (t.get("spec") or {}).get("containers") or [])
-        elif kind == "Cluster" and str(d.get("apiVersion", "")).startswith("postgresql.cnpg.io"):
+        elif kind == "Cluster" and str(d.get("apiVersion", "")).split("/")[0] == "postgresql.cnpg.io":
             yield (f"Cluster {d['metadata']['name']}", ns_of(d),
                    (spec.get("inheritedMetadata") or {}).get("labels") or {}, [])
 
