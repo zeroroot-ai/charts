@@ -31,6 +31,8 @@
 #   nothing about what a pod may use at runtime. Every pod still bursts to its
 #   limit. On a single-node cluster there is nothing to protect against
 #   contention, so tight packing changes nothing about WHAT the platform does.
+#   It also turns on the Mailpit mail sink, so that an invitation and the mail
+#   of Zitadel are delivered (charts#503).
 #
 # WHY IT IS NEEDED
 #   The baseline requests about 2.85 CPU of reservations. That is the honest
@@ -65,6 +67,13 @@
 #   ("Provided cpu value ... is less than minimum"), so that floor is what
 #   every other request here makes room for.
 gibson-workloads:
+  # The mail sink of every rung below staging (charts#503, gibson#480). The
+  # baseline mails with "log", and the daemon refuses "log" for an invitation
+  # and for signup. Mailpit accepts the mail of the daemon, the
+  # tenant-operator and Zitadel, and its web UI on port 8025 shows each
+  # message. global.email below points the one mail value at it.
+  mailpit:
+    enabled: true
   # daemon — the single biggest request (1000m / 2Gi). 50m / 512Mi schedules;
   # it bursts to its limits.
   gibson:
@@ -214,3 +223,21 @@ platformPostgres:
 # neo4j is NOT lowered: chart v2026.4.0 refuses to render below 500m CPU
 # ("Provided cpu value ... is less than minimum"), so its 500m is the floor
 # every other request here makes room for.
+
+# One mail value for the daemon, the tenant-operator and Zitadel (hosted#223).
+# The host is the Mailpit Service of this release, from the helper
+# gibson.mailpit.host, so a release with another name still reaches it.
+# Mailpit listens in plaintext, offers no STARTTLS, and accepts any sender with
+# no credential. The chart refuses plaintext with a credential, so this pair
+# cannot reach a cloud profile by a copy.
+global:
+  email:
+    provider: "smtp"
+    from: "no-reply@localhost.zeroroot.ai"
+    fromName: "Gibson"
+    smtp:
+      host: '{{ include "gibson.mailpit.host" . }}'
+      port: 1025
+      tlsMode: "plaintext"
+      credentials:
+        source: "none"
