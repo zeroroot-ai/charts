@@ -13,9 +13,9 @@
 
     GIBSON_URL             the api host of the edge; the SDK enrols there and derives
                            the gRPC dial target from it (no GIBSON_DAEMON_ADDR)
-    GIBSON_PLUGIN_RUNTIME  selects the SDK egress enforcer mode (pod|setec)
-    GIBSON_PLUGIN_MANIFEST absolute path to the baked manifest (/etc/gibson/plugin.yaml);
-                           the SDK falls back to ./plugin.yaml (CWD) only for local dev
+
+  The plugin declares its name, version and methods in code (ADR-0097). The
+  image carries no manifest file.
 
   Enrolment uses the pod's PROJECTED ServiceAccount token as the one-time
   capability-grant bootstrap credential (capabilitygrant.ResolveBootstrap falls
@@ -74,8 +74,6 @@
       (dict "name" "HOME" "value" "/home/nonroot")
       (dict "name" "GIBSON_URL" "value" (printf "https://%s" (include "gibson.apiHost" $root)))
       (dict "name" "GIBSON_DAEMON_TLS" "value" "1")
-      (dict "name" "GIBSON_PLUGIN_RUNTIME" "value" $runtime)
-      (dict "name" "GIBSON_PLUGIN_MANIFEST" "value" "/etc/gibson/plugin.yaml")
       (dict "name" "SSL_CERT_DIR" "value" "/etc/ssl/certs:/etc/ssl/envoy-ca")
       (dict "name" "SPIFFE_ENDPOINT_SOCKET" "value" "unix:///run/spire/sockets/api.sock")
 }}
@@ -188,9 +186,7 @@ spec:
             # Writable ~/.gibson for the capability-grant host key
             # (~/.gibson/plugin/<name>/host_key.json) under the read-only rootfs.
             # Scoped to .gibson, NOT the whole HOME (/home/nonroot): an emptyDir
-            # over the WorkingDir shadows the image's baked files. The manifest
-            # loads from GIBSON_PLUGIN_MANIFEST (/etc/gibson/plugin.yaml) which is
-            # unaffected, but a WorkingDir-wide mount is a defect regardless.
+            # over the WorkingDir shadows the image's baked files.
             - name: state
               mountPath: /home/nonroot/.gibson
             {{- if eq (include "gibson.envoyEdge.caRequired" $root) "true" }}
