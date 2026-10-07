@@ -74,17 +74,13 @@ spec:
         # Velero fs-backup skips the ACL file an init container renders; the
         # data claim stays in the backup. scripts/check-velero-volume-excludes.sh.
         backup.velero.io/backup-volumes-excludes: "redis-acl"
-        # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). The redis-stack
-        # image bakes the REQUIREPASS value from $REDIS_PASSWORD into its
-        # internal ACL at startup and does NOT re-read the env var when the
-        # backing Secret rotates; the Reloader controller watches the
-        # explicitly-named Secret and rolls this StatefulSet whenever it
-        # changes. The prior checksum-annotation pattern (computing a
-        # sha256sum of a lookup-loaded Secret) was broken under Argo's offline
-        # `helm template` render — lookup returned nil, the checksum never
-        # changed, the pod never rolled on rotation, and the WRONGPASS loop
-        # took sign-in down. See PRD deploy#255 for the incident.
-        secret.reloader.stakater.com/reload: "{{ .Release.Name }}-redis-stack"
+        # No Reloader annotation for the password Secret (ADR-0171). The
+        # CronJob <release>-redis-rotation runs a rotation on the running
+        # store: it adds the new password, restarts each client, and then
+        # removes the old one. A Reloader restart of this pod would start it
+        # with the new password only and refuse each client that has not
+        # restarted yet. The init container writes the ACL file from the
+        # Secret, so any later restart starts with the current password.
     spec:
       {{- $pcn := include "gibson.priorityClassName" (dict "component" "openfga") }}
       {{- if $pcn }}
@@ -215,7 +211,10 @@ spec:
               command:
                 - sh
                 - -c
-                - redis-cli -a "$REDIS_PASSWORD" ping | grep -q PONG
+                # The probe proves that the server answers. NOAUTH and
+                # WRONGPASS are answers: during a rotation the env of this
+                # container can hold the old password (ADR-0171).
+                - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --no-auth-warning ping 2>&1 | grep -q -E 'PONG|NOAUTH|WRONGPASS'
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
@@ -225,7 +224,10 @@ spec:
               command:
                 - sh
                 - -c
-                - redis-cli -a "$REDIS_PASSWORD" ping | grep -q PONG
+                # The probe proves that the server answers. NOAUTH and
+                # WRONGPASS are answers: during a rotation the env of this
+                # container can hold the old password (ADR-0171).
+                - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --no-auth-warning ping 2>&1 | grep -q -E 'PONG|NOAUTH|WRONGPASS'
             initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3

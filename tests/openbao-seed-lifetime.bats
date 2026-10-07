@@ -2,9 +2,11 @@
 # The lifetime of a seed key (ADR-0171, D83).
 #
 # The test renders the chart, takes the real seed functions out of the
-# rendered openbao-auto-init sidecar, and runs seed_one against a stub key
-# store. kv_get, kv_put, kv_created_epoch and seed_generate are the stubs: the
-# lifetime logic under test is the rendered text.
+# rendered openbao-auto-init sidecar, and runs them under sh, the shell of the
+# sidecar. seed_one runs against a stub key store (kv_get, kv_put,
+# kv_created_epoch, seed_generate). kv_created_epoch runs against a stub curl
+# that answers with a real KV v2 metadata body. The logic under test is the
+# rendered text.
 
 setup_file() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
@@ -32,7 +34,7 @@ teardown_file() { rm -rf "$WORK"; }
 # run_seed <stored JSON> <age of the current version in seconds, "" = absent> <specs>
 # Prints the written JSON, or <unchanged>.
 run_seed() {
-  bash -c '
+  sh -c '
     set -u
     STORE="$1"; AGE="$2"; SPECS="$3"
     seed_checked=0; seed_written=0
@@ -42,9 +44,28 @@ run_seed() {
     kv_created_epoch() { [ -z "$AGE" ] || echo $(( $(date +%s) - AGE )); }
     seed_generate() { printf "new-%s" "$2"; }
     rm -f "$WORK/put.json"
-    seed_one tok gibson-redis-password "$SPECS" >/dev/null
+    seed_one tok gibson-redis-password "$SPECS" >/dev/null 2>&1 || { echo "<failed>"; exit 0; }
     if [ -f "$WORK/put.json" ]; then cat "$WORK/put.json"; else echo "<unchanged>"; fi
   ' _ "$1" "$2" "$3"
+}
+
+# run_created <HTTP code> <metadata body>: kv_created_epoch against a stub curl.
+# Prints the epoch, <empty>, or <failed>.
+run_created() {
+  sh -c '
+    set -u
+    CODE="$1"; BODY="$2"
+    TMPD="$(mktemp -d)"; BAO_ADDR_LOCAL=http://stub
+    . "$WORK/seed.sh"
+    curl() {
+      while [ $# -gt 0 ]; do
+        case "$1" in -o) printf "%s" "$BODY" > "$2"; shift 2 ;; *) shift ;; esac
+      done
+      printf "%s" "$CODE"
+    }
+    out=$(kv_created_epoch tok some-key 2>/dev/null) || { echo "<failed>"; exit 0; }
+    [ -n "$out" ] && echo "$out" || echo "<empty>"
+  ' _ "$1" "$2"
 }
 
 @test "a key younger than its lifetime is kept" {
@@ -76,6 +97,38 @@ run_seed() {
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | jq -r .password)" = "new-pw" ]
   [ "$(printf '%s' "$output" | jq -r .mode)" = "fixed" ]
+}
+
+@test "a lifetime that is not @<hours>h fails the key and writes nothing" {
+  for bad in '@30d' '@h' '@0h' '@7x2h'; do
+    run run_seed '{"password":"old"}' 3600 "password:pw $bad"
+    [ "$status" -eq 0 ]
+    [ "$output" = "<failed>" ] || { echo "accepted $bad: $output"; return 1; }
+  done
+}
+
+@test "the creation time of the current version is read from KV v2 metadata" {
+  run run_created 200 '{"data":{"current_version":2,"versions":{"1":{"created_time":"2026-01-01T00:00:00.5Z"},"2":{"created_time":"2026-09-01T10:00:00.123456789Z"}}}}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "1788256800" ]
+}
+
+@test "an absent key has no creation time" {
+  run run_created 404 '{"errors":[]}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "<empty>" ]
+}
+
+@test "metadata with no entry for the current version fails" {
+  run run_created 200 '{"data":{"current_version":3,"versions":{"1":{"created_time":"2026-01-01T00:00:00Z"}}}}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "<failed>" ]
+}
+
+@test "a refused metadata read fails" {
+  run run_created 403 '{"errors":["permission denied"]}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "<failed>" ]
 }
 
 @test "the redis password has a lifetime in the seed table" {

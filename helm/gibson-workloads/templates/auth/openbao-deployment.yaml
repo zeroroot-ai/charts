@@ -1071,8 +1071,14 @@ spec:
                 c=$(curl -sS -o ${TMPD}/kvmeta.json -w '%{http_code}' \
                   -H "X-Vault-Token: $1" "${BAO_ADDR_LOCAL}/v1/secret/metadata/$2")
                 case "$c" in
-                  200) jq -r '.data as $d | $d.versions[($d.current_version | tostring)].created_time
-                              | sub("\\.[0-9]+"; "") | fromdateiso8601' ${TMPD}/kvmeta.json ;;
+                  200)
+                    # TZ=UTC: some jq builds apply the local zone in
+                    # fromdateiso8601, and the time here is UTC.
+                    t=$(TZ=UTC jq -r '.data as $d | $d.versions[($d.current_version | tostring)].created_time
+                               | sub("\\.[0-9]+"; "") | fromdateiso8601' ${TMPD}/kvmeta.json) || {
+                      echo "[openbao-auto-init] FATAL: secret/metadata/$2 holds no creation time of its current version" >&2
+                      rm -f ${TMPD}/kvmeta.json; return 1; }
+                    printf '%s\n' "$t" ;;
                   404) ;;
                   *) echo "[openbao-auto-init] FATAL: read secret/metadata/$2 returned HTTP $c: $(cat ${TMPD}/kvmeta.json)" >&2; rm -f ${TMPD}/kvmeta.json; return 1 ;;
                 esac
@@ -1100,15 +1106,23 @@ spec:
                 cur=$(kv_get "$tok" "$key") || return 1
                 rotate=0
                 for spec in $specs; do
+                  case "$spec" in @*) ;; *) continue ;; esac
+                  hours="${spec#@}"; hours="${hours%h}"
                   case "$spec" in
-                    @*h)
-                      hours="${spec#@}"; hours="${hours%h}"
-                      created=$(kv_created_epoch "$tok" "$key") || return 1
-                      if [ -n "$created" ] && [ $(( $(date +%s) - created )) -ge $(( hours * 3600 )) ]; then
-                        rotate=1
-                        echo "[openbao-auto-init] secret/${key} is older than its lifetime of ${hours}h; rotating"
-                      fi ;;
+                    @*[!0-9]*h|@h|@0*) hours="" ;;
+                    @*h) ;;
+                    *) hours="" ;;
                   esac
+                  if [ -z "$hours" ]; then
+                    echo "[openbao-auto-init] FATAL: secret/${key} names the lifetime '${spec}'; a lifetime is @<hours>h, for example @720h" >&2
+                    return 1
+                  fi
+                  created=$(kv_created_epoch "$tok" "$key") || return 1
+                  if [ -n "$created" ] && [ $(( $(date +%s) - created )) -ge $(( hours * 3600 )) ]; then
+                    rotate=1
+                    # stderr: the five-minute pass sends stdout to /dev/null.
+                    echo "[openbao-auto-init] secret/${key} is older than its lifetime of ${hours}h; rotating" >&2
+                  fi
                 done
                 new="$cur"
                 written=""

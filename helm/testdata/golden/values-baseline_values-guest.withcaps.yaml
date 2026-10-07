@@ -5249,7 +5249,7 @@ rules:
     verbs: ["patch"]
   - apiGroups: ["apps"]
     resources: ["statefulsets"]
-    resourceNames: ["gibson-gibson-workloads","gibson-redis-stack"]
+    resourceNames: ["gibson-gibson-workloads"]
     verbs: ["patch"]
   - apiGroups: ["batch"]
     resources: ["cronjobs"]
@@ -5465,15 +5465,16 @@ rules:
   # workloads the script rolls:
   #   kubectl rollout restart statefulset/$DAEMON_STS
   #   kubectl rollout restart deployment/$TENANT_OP
-  # redis-stack is deliberately absent — Reloader restarts it; this job only
-  # `rollout status`es it, which the read rule above covers.
+  #   kubectl rollout restart deployment/$EXT_AUTHZ
+  #   kubectl rollout restart deployment/$RATELIMIT
+  # redis-stack is deliberately absent: it never restarts for a rotation.
   - apiGroups: ["apps"]
     resources: ["statefulsets"]
     resourceNames: ["gibson-gibson-workloads"]
     verbs: ["patch"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    resourceNames: ["gibson-tenant-operator"]
+    resourceNames: ["gibson-tenant-operator", "gibson-ext-authz", "gibson-ratelimit"]
     verbs: ["patch"]
   # rollout status needs to watch the status sub-resource.
   - apiGroups: ["apps"]
@@ -12058,8 +12059,14 @@ spec:
                 c=$(curl -sS -o ${TMPD}/kvmeta.json -w '%{http_code}' \
                   -H "X-Vault-Token: $1" "${BAO_ADDR_LOCAL}/v1/secret/metadata/$2")
                 case "$c" in
-                  200) jq -r '.data as $d | $d.versions[($d.current_version | tostring)].created_time
-                              | sub("\\.[0-9]+"; "") | fromdateiso8601' ${TMPD}/kvmeta.json ;;
+                  200)
+                    # TZ=UTC: some jq builds apply the local zone in
+                    # fromdateiso8601, and the time here is UTC.
+                    t=$(TZ=UTC jq -r '.data as $d | $d.versions[($d.current_version | tostring)].created_time
+                               | sub("\\.[0-9]+"; "") | fromdateiso8601' ${TMPD}/kvmeta.json) || {
+                      echo "[openbao-auto-init] FATAL: secret/metadata/$2 holds no creation time of its current version" >&2
+                      rm -f ${TMPD}/kvmeta.json; return 1; }
+                    printf '%s\n' "$t" ;;
                   404) ;;
                   *) echo "[openbao-auto-init] FATAL: read secret/metadata/$2 returned HTTP $c: $(cat ${TMPD}/kvmeta.json)" >&2; rm -f ${TMPD}/kvmeta.json; return 1 ;;
                 esac
@@ -12087,15 +12094,23 @@ spec:
                 cur=$(kv_get "$tok" "$key") || return 1
                 rotate=0
                 for spec in $specs; do
+                  case "$spec" in @*) ;; *) continue ;; esac
+                  hours="${spec#@}"; hours="${hours%h}"
                   case "$spec" in
-                    @*h)
-                      hours="${spec#@}"; hours="${hours%h}"
-                      created=$(kv_created_epoch "$tok" "$key") || return 1
-                      if [ -n "$created" ] && [ $(( $(date +%s) - created )) -ge $(( hours * 3600 )) ]; then
-                        rotate=1
-                        echo "[openbao-auto-init] secret/${key} is older than its lifetime of ${hours}h; rotating"
-                      fi ;;
+                    @*[!0-9]*h|@h|@0*) hours="" ;;
+                    @*h) ;;
+                    *) hours="" ;;
                   esac
+                  if [ -z "$hours" ]; then
+                    echo "[openbao-auto-init] FATAL: secret/${key} names the lifetime '${spec}'; a lifetime is @<hours>h, for example @720h" >&2
+                    return 1
+                  fi
+                  created=$(kv_created_epoch "$tok" "$key") || return 1
+                  if [ -n "$created" ] && [ $(( $(date +%s) - created )) -ge $(( hours * 3600 )) ]; then
+                    rotate=1
+                    # stderr: the five-minute pass sends stdout to /dev/null.
+                    echo "[openbao-auto-init] secret/${key} is older than its lifetime of ${hours}h; rotating" >&2
+                  fi
                 done
                 new="$cur"
                 written=""
@@ -12714,17 +12729,13 @@ spec:
         # Velero fs-backup skips the ACL file an init container renders; the
         # data claim stays in the backup. scripts/check-velero-volume-excludes.sh.
         backup.velero.io/backup-volumes-excludes: "redis-acl"
-        # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). The redis-stack
-        # image bakes the REQUIREPASS value from $REDIS_PASSWORD into its
-        # internal ACL at startup and does NOT re-read the env var when the
-        # backing Secret rotates; the Reloader controller watches the
-        # explicitly-named Secret and rolls this StatefulSet whenever it
-        # changes. The prior checksum-annotation pattern (computing a
-        # sha256sum of a lookup-loaded Secret) was broken under Argo's offline
-        # `helm template` render — lookup returned nil, the checksum never
-        # changed, the pod never rolled on rotation, and the WRONGPASS loop
-        # took sign-in down. See PRD deploy#255 for the incident.
-        secret.reloader.stakater.com/reload: "gibson-redis-stack"
+        # No Reloader annotation for the password Secret (ADR-0171). The
+        # CronJob <release>-redis-rotation runs a rotation on the running
+        # store: it adds the new password, restarts each client, and then
+        # removes the old one. A Reloader restart of this pod would start it
+        # with the new password only and refuse each client that has not
+        # restarted yet. The init container writes the ACL file from the
+        # Secret, so any later restart starts with the current password.
     spec:
       priorityClassName: gibson-platform-critical
       # Redis does not call the Kubernetes API, so the pod mounts no
@@ -12857,7 +12868,10 @@ spec:
               command:
                 - sh
                 - -c
-                - redis-cli -a "$REDIS_PASSWORD" ping | grep -q PONG
+                # The probe proves that the server answers. NOAUTH and
+                # WRONGPASS are answers: during a rotation the env of this
+                # container can hold the old password (ADR-0171).
+                - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --no-auth-warning ping 2>&1 | grep -q -E 'PONG|NOAUTH|WRONGPASS'
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
@@ -12867,7 +12881,10 @@ spec:
               command:
                 - sh
                 - -c
-                - redis-cli -a "$REDIS_PASSWORD" ping | grep -q PONG
+                # The probe proves that the server answers. NOAUTH and
+                # WRONGPASS are answers: during a rotation the env of this
+                # container can hold the old password (ADR-0171).
+                - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --no-auth-warning ping 2>&1 | grep -q -E 'PONG|NOAUTH|WRONGPASS'
             initialDelaySeconds: 10
             periodSeconds: 5
             timeoutSeconds: 3
@@ -15113,6 +15130,8 @@ spec:
                   REDIS_STS="gibson-redis-stack"
                   DAEMON_STS="gibson-gibson-workloads"
                   TENANT_OP="gibson-tenant-operator"
+                  EXT_AUTHZ="gibson-ext-authz"
+                  RATELIMIT="gibson-ratelimit"
 
                   # The Secret this rotates is created by the same release that
                   # schedules this CronJob, so on a fresh install the first firing
@@ -15163,54 +15182,51 @@ spec:
 
                   echo "Rotation detected: version ${LAST_VERSION:-<none>} → ${CURRENT_VERSION}"
 
-                  # Wait for redis-stack to be Ready with the new password
-                  # (Reloader restarts it before this CronJob fires).
-                  echo "Waiting for redis-stack StatefulSet rollout..."
-                  kubectl rollout status statefulset/"$REDIS_STS" -n "$NS" --timeout=120s
-
-                  # Derive the redis-stack pod name directly instead of LISTing.
-                  # redis-stack is a replicas=1 StatefulSet, so the sole pod is
-                  # always "<sts>-0". Deriving it lets the Role drop its
-                  # namespace-wide `pods: list` grant and name-scope pods/exec to
-                  # exactly this pod (deploy#1363).
+                  # redis-stack is a replicas=1 StatefulSet, so its one pod is
+                  # always "<sts>-0". Deriving the name lets the Role name-scope
+                  # pods/exec to exactly this pod (deploy#1363).
                   REDIS_POD="${REDIS_STS}-0"
-                  echo "Redis pod: ${REDIS_POD}"
 
-                  # Open dual-password window: add previous password to the
-                  # running redis-stack's in-memory ACL so existing daemon/
-                  # tenant-op pods (still holding old password) keep working
-                  # during the rolling restart.
-                  if [ -n "$PREV_PASSWORD" ] && [ "$PREV_PASSWORD" != "$CURRENT_PASSWORD" ]; then
-                    echo "Opening dual-password window (adding old password to ACL)..."
-                    kubectl exec -n "$NS" "$REDIS_POD" -- \
-                      redis-cli -a "$CURRENT_PASSWORD" --no-auth-warning \
-                      ACL SETUSER default ">${PREV_PASSWORD}"
-                    echo "Both old and new passwords now accepted by redis-stack."
-                  else
-                    echo "No previous password in state; skipping dual-password window."
-                    echo "(First rotation after deploy — brief WRONGPASS window expected.)"
+                  # redis_acl <login password> <ACL SETUSER args...>. The login
+                  # password goes on stdin, never on an argv.
+                  redis_acl() {
+                    pw="$1"; shift
+                    printf '%s\n' "$pw" | kubectl exec -i -n "$NS" "$REDIS_POD" -- \
+                      sh -c 'read -r p; REDISCLI_AUTH="$p" exec redis-cli --no-auth-warning ACL SETUSER default "$@"' redis-cli "$@"
+                  }
+
+                  if [ -z "$PREV_PASSWORD" ]; then
+                    echo "[rotation] FATAL: the state holds no previous password, so the CronJob cannot log in to add the new one." >&2
+                    exit 1
                   fi
 
-                  # Rolling restart daemon — picks up new password from refreshed env.
-                  echo "Rolling restart daemon StatefulSet ${DAEMON_STS}..."
-                  kubectl rollout restart statefulset/"$DAEMON_STS" -n "$NS"
-                  kubectl rollout status statefulset/"$DAEMON_STS" -n "$NS" --timeout=900s
-                  echo "Daemon ready."
-
-                  # Rolling restart tenant-operator.
-                  echo "Rolling restart tenant-operator Deployment ${TENANT_OP}..."
-                  kubectl rollout restart deployment/"$TENANT_OP" -n "$NS"
-                  kubectl rollout status deployment/"$TENANT_OP" -n "$NS" --timeout=120s
-                  echo "Tenant-operator ready."
-
-                  # Close dual-password window: remove old password from ACL.
-                  if [ -n "$PREV_PASSWORD" ] && [ "$PREV_PASSWORD" != "$CURRENT_PASSWORD" ]; then
-                    echo "Closing dual-password window (removing old password from ACL)..."
-                    kubectl exec -n "$NS" "$REDIS_POD" -- \
-                      redis-cli -a "$CURRENT_PASSWORD" --no-auth-warning \
-                      ACL SETUSER default resetpass ">${CURRENT_PASSWORD}"
-                    echo "Old password removed. Only new password accepted."
+                  # 1. Both passwords work. The store still runs with the old one.
+                  if [ "$PREV_PASSWORD" != "$CURRENT_PASSWORD" ]; then
+                    out=$(redis_acl "$PREV_PASSWORD" ">${CURRENT_PASSWORD}")
+                    case "$out" in
+                      OK) echo "[rotation] added the new password; the old and the new password both work" ;;
+                      *) echo "[rotation] FATAL: ACL SETUSER with the old password answered: ${out}" >&2; exit 1 ;;
+                    esac
                   fi
+
+                  # 2. Each client restarts and reads the new password.
+                  restart() {
+                    echo "[rotation] restarting $1..."
+                    kubectl rollout restart "$1" -n "$NS"
+                    kubectl rollout status "$1" -n "$NS" --timeout="$2"
+                    echo "[rotation] $1 ready"
+                  }
+                  restart "statefulset/${DAEMON_STS}" 900s
+                  restart "deployment/${TENANT_OP}" 180s
+                  restart "deployment/${EXT_AUTHZ}" 180s
+                  restart "deployment/${RATELIMIT}" 180s
+
+                  # 3. The old password is refused.
+                  out=$(redis_acl "$CURRENT_PASSWORD" resetpass ">${CURRENT_PASSWORD}")
+                  case "$out" in
+                    OK) echo "[rotation] removed the old password; only the new password works" ;;
+                    *) echo "[rotation] FATAL: ACL SETUSER resetpass answered: ${out}" >&2; exit 1 ;;
+                  esac
 
                   # Persist rotation state: current version + password for next
                   # rotation's dual-password window.
