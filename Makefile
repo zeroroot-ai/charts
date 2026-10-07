@@ -86,6 +86,10 @@ no-pinned-addressing: ## No hostAliases, no pinned Envoy address, and no public 
 
 .PHONY: openbao-token-rotation
 openbao-token-rotation: ## A service token older than its lifetime or a rotation request gets a successor, and the old one is revoked after its grace (ADR-0171)
+	@# The test renders the umbrella, which reads the PACKAGED gibson-workloads
+	@# chart. chart-deps tracks dependency sources, not templates, so repack first.
+	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
+	@$(MAKE) -s chart-deps >/dev/null
 	@bats tests/openbao-token-rotation.bats
 
 .PHONY: openbao-seed-inputor

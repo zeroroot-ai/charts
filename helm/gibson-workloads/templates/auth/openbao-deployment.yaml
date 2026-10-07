@@ -846,9 +846,12 @@ spec:
               }
 
               secret_annotation() {
-                # $1 the Secret, $2 the annotation. Prints its value, or nothing.
-                kube_curl "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/$1" 2>/dev/null \
-                  | jq -r --arg a "$2" '.metadata.annotations[$a] // empty' 2>/dev/null
+                # $1 the Secret, $2 the annotation. Prints its value, or
+                # nothing. Fails when the Secret cannot be read, so a caller
+                # never reads an API error as "no annotation".
+                sa_json=$(kube_curl "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/$1" 2>/dev/null) || return 1
+                printf '%s' "$sa_json" | jq -e '.metadata' >/dev/null 2>&1 || return 1
+                printf '%s' "$sa_json" | jq -r --arg a "$2" '.metadata.annotations[$a] // empty'
               }
 
               secret_set_revoke() {
@@ -871,17 +874,20 @@ spec:
                 # $1 the Secret, $2 a seeder token. Revokes the old token of a
                 # rotation once its grace is over, by accessor, so this
                 # sidecar never holds the old token itself.
-                acc=$(secret_annotation "$1" "$REVOKE_ACCESSOR_ANN")
+                acc=$(secret_annotation "$1" "$REVOKE_ACCESSOR_ANN") || return 1
                 [ -n "$acc" ] || return 0
-                after=$(secret_annotation "$1" "$REVOKE_AFTER_ANN")
+                after=$(secret_annotation "$1" "$REVOKE_AFTER_ANN") || return 1
                 [ "$(date +%s)" -ge "${after:-0}" ] 2>/dev/null || return 0
                 [ -n "$2" ] || return 1
                 c=$(curl -sS -o ${TMPD}/revacc.json -w '%{http_code}' \
                   -X POST -H "X-Vault-Token: $2" -H "Content-Type: application/json" \
                   -d "$(jq -nc --arg a "$acc" '{accessor:$a}')" \
                   "${BAO_ADDR_LOCAL}/v1/auth/token/revoke-accessor")
-                # 400 "invalid accessor": the token is gone already, which is the goal.
-                if [ "$c" = "204" ] || [ "$c" = "200" ] || { [ "$c" = "400" ] && grep -q 'invalid accessor' ${TMPD}/revacc.json; }; then
+                # OpenBao answers an unknown accessor with 200 and a warning,
+                # and an accessor whose token entry is gone with 400 "token
+                # not found". In both cases the old token is gone, which is
+                # the goal.
+                if [ "$c" = "204" ] || [ "$c" = "200" ] || { [ "$c" = "400" ] && grep -q 'not found' ${TMPD}/revacc.json; }; then
                   rm -f ${TMPD}/revacc.json
                   secret_set_revoke "$1" "" "" || return 1
                   echo "[openbao-auto-init] revoked the old token of ${1} after its grace" >&2
@@ -933,11 +939,17 @@ spec:
                       # is still valid. The old token is revoked by accessor
                       # after TOKEN_REVOKE_GRACE_S (token_revoke_pending), when
                       # each consumer uses the new one.
+                      # Only with a held seeder token: without one, nothing can
+                      # mint the successor, and the token is renewed instead.
                       created=$(jq -r '.data.creation_time // 0' ${TMPD}/lookup.json)
                       old_accessor=$(jq -r '.data.accessor // empty' ${TMPD}/lookup.json)
                       requested=$(token_rotation_requested_at "$held")
                       now=$(date +%s)
-                      if [ -z "$(secret_annotation "$secret" "$REVOKE_ACCESSOR_ANN")" ] \
+                      if [ "${requested:-0}" -gt "$now" ]; then
+                        echo "[openbao-auto-init] ${TOKEN_ROTATION_KEY} requested_at=${requested} is in the future; ignored" >&2
+                        requested=0
+                      fi
+                      if [ -n "$held" ] && pending=$(secret_annotation "$secret" "$REVOKE_ACCESSOR_ANN") && [ -z "$pending" ] \
                          && { [ $(( now - created )) -ge "$TOKEN_LIFETIME_S" ] || [ "${requested:-0}" -gt "$created" ]; }; then
                         echo "[openbao-auto-init] ${secret} token is older than its lifetime or a rotation request; minting its successor" >&2
                         rotating=1; rotate_old="$old_accessor"
@@ -980,6 +992,13 @@ spec:
                   fi
                 else
                   erc=1
+                  # A rotation whose mint failed leaves the old token in force.
+                  # It is still valid, so keep it alive.
+                  if [ "$rotating" = 1 ]; then
+                    curl -sS -o /dev/null -X POST -H "X-Vault-Token: ${current_tok}" \
+                      "${BAO_ADDR_LOCAL}/v1/auth/token/renew-self" || true
+                    echo "[openbao-auto-init] the successor of ${secret} could not be minted; the old token was renewed and stays in force" >&2
+                  fi
                 fi
                 rotate_old=""
                 # The KV copy the platform-operator reads through ESO must follow.
@@ -1494,10 +1513,12 @@ spec:
               # the pod was restarted, and every image pull ran on an empty
               # password meanwhile.
               vault_follow_keyring_inputs() {
-                seeder=$(bao_login_seeder) || return 1
+                # $1 (optional) a seeder token the caller holds and revokes.
+                seeder="${1:-}"
+                if [ -z "$seeder" ]; then seeder=$(bao_login_seeder) || return 1; fi
                 rc=0
                 vault_seed_platform_secrets "$seeder" >/dev/null || rc=1
-                vault_revoke_self "$seeder"
+                [ -n "${1:-}" ] || vault_revoke_self "$seeder"
                 seeder=""
                 return $rc
               }
@@ -1656,12 +1677,13 @@ spec:
                   # the tokens are still renewed, and nothing rotates.
                   if pass_tok=$(bao_login_seeder); then
                     vault_ensure_tokens "$pass_tok" || echo "[openbao-auto-init] WARN: service token refresh failed"
+                    vault_follow_keyring_inputs "$pass_tok" || echo "[openbao-auto-init] WARN: keyring input pass did not complete; it runs again in five minutes"
                     vault_revoke_self "$pass_tok"
                   else
                     vault_ensure_tokens || echo "[openbao-auto-init] WARN: service token refresh failed"
+                    echo "[openbao-auto-init] WARN: the ${SEEDER_ROLE} login failed; the keyring input pass runs again in five minutes"
                   fi
                   pass_tok=""
-                  vault_follow_keyring_inputs || echo "[openbao-auto-init] WARN: keyring input pass did not complete; it runs again in five minutes"
                   steady_tick=0
                 fi
                 sleep 10

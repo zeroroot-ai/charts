@@ -38,9 +38,11 @@ PY
 teardown_file() { rm -rf "$WORK"; }
 
 # run_ensure <seconds since the token was created> <requested_at> <pending accessor>
-# Prints one line per effect: "mint", "annotate <accessor> <after-now>", or "none".
+# Env: HELD (default held), MINTFAIL=1 makes the mint fail, READFAIL=1 makes the
+# Secret read fail.
+# Prints one line per effect: "mint", "renew", "annotate <accessor> <after-now>", or "none".
 run_ensure() {
-  sh -c '
+  HELD="${HELD-held}" MINTFAIL="${MINTFAIL:-}" READFAIL="${READFAIL:-}" sh -c '
     set -u
     AGE="$1"; REQ="$2"; PENDING="$3"
     TMPD="$(mktemp -d)"; NAMESPACE=gibson; KUBE_API=https://k; BAO_ADDR_LOCAL=http://b
@@ -56,6 +58,7 @@ run_ensure() {
         */lookup-self)
           printf "{\"data\":{\"ttl\":3000,\"policies\":[\"platform-operator\"],\"creation_time\":%s,\"accessor\":\"acc-old\"}}" $((NOW - AGE)) > "$out"
           printf 200 ;;
+        */renew-self) echo renew >> "$EFFECTS"; printf 200 ;;
         *) printf 500 ;;
       esac
     }
@@ -64,15 +67,16 @@ run_ensure() {
         *PATCH*) for a in "$@"; do case "$a" in {*) printf "%s\n" "$a" > "$TMPD/patch.json" ;; esac; done
                  echo "annotate $(jq -r ".metadata.annotations[\"gibson.zeroroot.ai/revoke-accessor\"]" "$TMPD/patch.json") $(( $(jq -r ".metadata.annotations[\"gibson.zeroroot.ai/revoke-after\"] | tonumber" "$TMPD/patch.json") - NOW ))" >> "$EFFECTS"
                  printf 200 ;;
-        *) if [ -n "$PENDING" ]; then printf "{\"metadata\":{\"annotations\":{\"gibson.zeroroot.ai/revoke-accessor\":\"%s\"}}}" "$PENDING"; else echo "{\"metadata\":{}}"; fi ;;
+        *) if [ -n "$READFAIL" ]; then return 7; fi
+           if [ -n "$PENDING" ]; then printf "{\"metadata\":{\"annotations\":{\"gibson.zeroroot.ai/revoke-accessor\":\"%s\"}}}" "$PENDING"; else echo "{\"metadata\":{}}"; fi ;;
       esac
     }
     kv_get() { printf "{\"requested_at\":\"%s\"}" "$REQ"; }
-    vault_mint_token() { echo mint >> "$EFFECTS"; }
+    vault_mint_token() { if [ -n "$MINTFAIL" ]; then echo mint-failed >> "$EFFECTS"; return 1; fi; echo mint >> "$EFFECTS"; }
     seed_one() { :; }
     bao_login_seeder() { echo seeder; }
     vault_revoke_self() { :; }
-    vault_ensure_token gibson-platform-operator-vault platform-operator held >/dev/null 2>&1
+    vault_ensure_token gibson-platform-operator-vault platform-operator "$HELD" >/dev/null 2>&1
     [ -s "$EFFECTS" ] && cat "$EFFECTS" || echo none
   ' _ "$1" "$2" "$3"
 }
@@ -102,17 +106,17 @@ run_ensure() {
   [ "$output" = "none" ]
 }
 
-# run_revoke <seconds until revoke-after> <HTTP code of revoke-accessor>
+# run_revoke <seconds until revoke-after> <HTTP code of revoke-accessor> [answer body]
 run_revoke() {
   sh -c '
     set -u
-    LEFT="$1"; CODE="$2"
+    LEFT="$1"; CODE="$2"; BODY="${3:-{\}}"
     TMPD="$(mktemp -d)"; NAMESPACE=gibson; KUBE_API=https://k; BAO_ADDR_LOCAL=http://b
     . "$WORK/tokens.sh"
     NOW=$(date +%s)
     curl() {
       out=""; while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; -d) echo "revoke $2" >> "$TMPD/effects"; shift 2 ;; *) shift ;; esac; done
-      echo "{}" > "$out"; printf "%s" "$CODE"
+      printf "%s" "$BODY" > "$out"; printf "%s" "$CODE"
     }
     kube_curl() {
       case "$*" in
@@ -123,7 +127,7 @@ run_revoke() {
     token_revoke_pending gibson-platform-operator-vault seeder 2>/dev/null; rc=$?
     [ -f "$TMPD/effects" ] && cat "$TMPD/effects" || echo none
     echo "rc=$rc"
-  ' _ "$1" "$2"
+  ' _ "$1" "$2" "${3:-}"
 }
 
 @test "a pending revoke waits for its grace" {
@@ -146,4 +150,43 @@ run_revoke() {
   [ "$status" -eq 0 ]
   [ "${lines[1]}" = "rc=1" ]
   [[ "$output" != *cleared* ]]
+}
+
+@test "a rotation whose mint fails renews the old token" {
+  MINTFAIL=1 run run_ensure 90000 0 ""
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "mint-failed" ]
+  [ "${lines[1]}" = "renew" ]
+}
+
+@test "with no held seeder token nothing rotates" {
+  HELD="" run run_ensure 90000 "$(date +%s)" ""
+  [ "$status" -eq 0 ]
+  [ "$output" = "none" ]
+}
+
+@test "a rotation request in the future is ignored" {
+  run run_ensure 600 "$(( $(date +%s) + 86400 ))" ""
+  [ "$status" -eq 0 ]
+  [ "$output" = "none" ]
+}
+
+@test "FAILING FIXTURE: a failed read of the Secret does not count as no pending revoke" {
+  READFAIL=1 run run_ensure 90000 0 ""
+  [ "$status" -eq 0 ]
+  [[ "$output" != *mint* ]]
+}
+
+@test "an accessor whose token is gone counts as revoked" {
+  run run_revoke -5 400 '{"errors":["token not found"]}'
+  [ "$status" -eq 0 ]
+  [ "${lines[1]}" = "cleared" ]
+  [ "${lines[2]}" = "rc=0" ]
+}
+
+@test "FAILING FIXTURE: another 400 keeps the record" {
+  run run_revoke -5 400 '{"errors":["missing accessor"]}'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *cleared* ]]
+  [[ "$output" == *"rc=1"* ]]
 }
