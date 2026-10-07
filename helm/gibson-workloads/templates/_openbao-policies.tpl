@@ -24,6 +24,7 @@ path "sys/policies/acl/*" { capabilities = ["create", "update", "read"] }
 path "sys/policies/acl/platform-admin" { capabilities = ["delete"] }
 path "auth/token/create" { capabilities = ["create", "update", "sudo"] }
 path "secret/data/*" { capabilities = ["create", "read", "update"] }
+path "secret/metadata/*" { capabilities = ["read"] }
 path "transit/keys/*" { capabilities = ["create", "read", "update"] }
 path "transit/export/signing-key/*" { capabilities = ["read"] }
 {{- end -}}

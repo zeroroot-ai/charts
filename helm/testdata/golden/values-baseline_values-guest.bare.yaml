@@ -11390,7 +11390,11 @@ spec:
               # the cross-repo record of which key each consumer reads, and
               # zeroroot-ai/hosted scripts/check-secret-contract.py gates it.
               #
-              # Format: one key per line, `<key> <property>:<kind>[:<arg>] ...`.
+              # Format: one key per line, `<key> <property>:<kind>[:<arg>] ... [@<hours>h]`.
+              # The optional last field is the lifetime of the key (ADR-0171). When the
+              # current version is older than it, the sidecar writes a new value for each
+              # generated property (rand, randb64, rand8, pw). Give a key a lifetime only
+              # when each consumer has a rotation path that keeps service.
               # Comment lines start with `#`.
               #
               # Kinds, and what the sidecar does when the property is ABSENT:
@@ -11429,7 +11433,7 @@ spec:
               gibson-openfga-postgres-password password:pw
               gibson-spire-postgres-password password:pw
               gibson-neo4j-password password:pw
-              gibson-redis-password password:pw
+              gibson-redis-password password:pw @720h
               zitadel-masterkey value:rand
               gibson-dashboard-session-secrets auth_secret:rand server_actions_key:randb64
               gibson-cg-signing-key key:rand kid:rand8
@@ -12026,18 +12030,56 @@ spec:
                 esac
               }
 
+              kv_created_epoch() {
+                # $1 token, $2 key. Prints the creation time of the current
+                # version of secret/<key> in Unix seconds, or nothing for an
+                # absent key. Fails on any other answer.
+                c=$(curl -sS -o ${TMPD}/kvmeta.json -w '%{http_code}' \
+                  -H "X-Vault-Token: $1" "${BAO_ADDR_LOCAL}/v1/secret/metadata/$2")
+                case "$c" in
+                  200) jq -r '.data as $d | $d.versions[($d.current_version | tostring)].created_time
+                              | sub("\\.[0-9]+"; "") | fromdateiso8601' ${TMPD}/kvmeta.json ;;
+                  404) ;;
+                  *) echo "[openbao-auto-init] FATAL: read secret/metadata/$2 returned HTTP $c: $(cat ${TMPD}/kvmeta.json)" >&2; rm -f ${TMPD}/kvmeta.json; return 1 ;;
+                esac
+                rm -f ${TMPD}/kvmeta.json
+              }
+
               seed_one() {
                 # $1 token, $2 key, $3 the property specs of one table line.
                 # IDEMPOTENT BY PROPERTY, and that is load-bearing: overwriting
                 # an existing value would rotate a credential underneath a
                 # running workload on every restart. A property that is
                 # present is left exactly as it is, except `input`/`inputjson`
-                # (follow the keyring) and `svctoken` (follows the Secret).
+                # (follow the keyring), `svctoken` (follows the Secret), and a
+                # key that has outlived its lifetime.
+                #
+                # LIFETIME (ADR-0171). A line that ends in `@<hours>h` names
+                # the lifetime of its key. When the current version of the key
+                # is older than that, this pass writes a new version with a
+                # new value for each generated property (rand, randb64, rand8,
+                # pw). That is the same write as scripts/baseline-set-secret.sh,
+                # so the schedule and the monthly drill start one rotation
+                # path. A key gets a lifetime only when each consumer of it
+                # has a rotation path that keeps service.
                 tok="$1"; key="$2"; specs="$3"
                 cur=$(kv_get "$tok" "$key") || return 1
+                rotate=0
+                for spec in $specs; do
+                  case "$spec" in
+                    @*h)
+                      hours="${spec#@}"; hours="${hours%h}"
+                      created=$(kv_created_epoch "$tok" "$key") || return 1
+                      if [ -n "$created" ] && [ $(( $(date +%s) - created )) -ge $(( hours * 3600 )) ]; then
+                        rotate=1
+                        echo "[openbao-auto-init] secret/${key} is older than its lifetime of ${hours}h; rotating"
+                      fi ;;
+                  esac
+                done
                 new="$cur"
                 written=""
                 for spec in $specs; do
+                  case "$spec" in @*) continue ;; esac
                   prop="${spec%%:*}"
                   rest="${spec#*:}"
                   kind="${rest%%:*}"
@@ -12069,6 +12111,11 @@ spec:
                     svctoken)
                       val=$(kube_read_token "$PLATFORM_TOKEN_SECRET")
                       if [ -n "$val" ] && [ "$val" != "$curval" ]; then write=1; fi ;;
+                    rand|randb64|rand8|pw)
+                      if [ "$present" != "true" ] || [ "$rotate" = 1 ]; then
+                        val=$(seed_generate "$tok" "$kind" "$arg") || return 1
+                        write=1
+                      fi ;;
                     *)
                       if [ "$present" != "true" ]; then
                         val=$(seed_generate "$tok" "$kind" "$arg") || return 1
@@ -12188,6 +12235,7 @@ spec:
               path "sys/policies/acl/platform-admin" { capabilities = ["delete"] }
               path "auth/token/create" { capabilities = ["create", "update", "sudo"] }
               path "secret/data/*" { capabilities = ["create", "read", "update"] }
+              path "secret/metadata/*" { capabilities = ["read"] }
               path "transit/keys/*" { capabilities = ["create", "read", "update"] }
               path "transit/export/signing-key/*" { capabilities = ["read"] }' || return 1
 
