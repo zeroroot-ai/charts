@@ -77,6 +77,10 @@ tenantOperator:
     create: true
     name: gibson-tenant-operator
     annotations: {}
+  # The namespace of the gibson-velero release, where the operator writes the
+  # last Backup of a deleted tenant (ADR-0075, charts#424). It must equal the
+  # --namespace of that release (scripts/baseline-up.sh installs it in velero).
+  veleroNamespace: velero
   rbac:
     create: true
   webhook:

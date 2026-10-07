@@ -230,6 +230,13 @@ spec:
             # connector credential write.
             - name: CONNECTOR_OPERATOR_SERVICE_ACCOUNT_NAME
               value: {{ .Values.connectorOperator.serviceAccount.name | default "gibson-connector-operator" | quote }}
+            # The namespace of the gibson-velero release (ADR-0075, charts#424).
+            # A tenant delete first takes a last Velero Backup there, and the
+            # operator exits at start when this is empty. gibson-velero renders
+            # the Role that lets this ServiceAccount get and create Backups in
+            # that namespace (templates/tenant-operator-rbac.yaml).
+            - name: VELERO_NAMESPACE
+              value: {{ required "tenantOperator.veleroNamespace is required: the namespace of the gibson-velero release (charts#424)" .Values.tenantOperator.veleroNamespace | quote }}
             # GIBSON_APP_URL — the PRODUCT-surface origin (app.<domain>) the
             # tenant-operator reads to build the two human-facing links it
             # emails: the tenant-member invitation accept-link and the new
