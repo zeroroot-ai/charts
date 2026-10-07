@@ -58,6 +58,23 @@ every pod still bursts as it would.
 | 5 | `velero` | `oci://ghcr.io/zeroroot-ai/charts/gibson-velero` | `velero` | The backup seam. |
 | 6 | `gibson` | `oci://ghcr.io/zeroroot-ai/charts/gibson` | the platform namespace | The umbrella chart: operators, then workloads. |
 
+### The seams
+
+A seam is a dependency `condition:`. It selects whose service runs, never
+whether one runs (ADR-0087). Each seam defaults to on. No other dependency has
+a condition, and `make seam-conditions` fails on one.
+
+| Seam | Chart | Condition | Off means |
+|---|---|---|---|
+| cert-manager | `gibson` | `certManager.enabled` | The cluster runs its own cert-manager. |
+| External Secrets | `gibson` | `externalSecrets.enabled` | The cluster runs its own External Secrets Operator. |
+| external-dns | `gibson` | `externalDns.enabled` | The cluster runs its own external-dns. |
+| CloudNativePG | `gibson` | `cnpg.enabled` | The cluster runs its own CloudNativePG operator. |
+| setec | `gibson-workloads` | `setec.enabled` | The setec endpoint names a fleet outside this cluster. This endpoint is not built, so the render refuses off. |
+
+`values-guest.yaml` turns the four operator seams off. The monitoring CRDs of
+`gibson-crds` are the monitoring seam (`prometheus-operator-crds.enabled`).
+
 Do not install the `gibson` chart alone. On a cluster without releases 3 and 4
 the install fails, because the API server does not know the custom resources
 that the chart renders.

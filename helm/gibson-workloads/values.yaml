@@ -2933,10 +2933,13 @@ reservedNames:
 # sufficient for an end-to-end Sandbox round-trip on staging until setec adds
 # Toleration support.
 setec:
-  # enabled flips the Setec subchart on. The daemon always dials a setec
+  # enabled is the setec seam (ADR-0087). The daemon always dials a setec
   # frontend (ADR-0142), so the seam selects whose fleet runs, never whether
-  # one runs (ADR-0087): off means the fleet is in another cluster and
-  # gibson.sandbox.setec.address names it.
+  # one runs. Off means that the setec endpoint names a fleet outside this
+  # cluster (gibson.sandbox.setec.address and spiffeID). That endpoint pair
+  # is not built, so the render refuses off today (validateSetecDispatch).
+  # scripts/check-seam-conditions.py holds the list of seams and proves the
+  # refusal.
   enabled: true
 
   # fullnameOverride pins the Setec subchart's object names to the CANONICAL
