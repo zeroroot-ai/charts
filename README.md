@@ -29,9 +29,13 @@ Firecracker machine, and the device plugin of setec hands `/dev/kvm` of the
 node to the launcher Pod. The script stops before it installs anything when a
 fleet node has no `/dev/kvm`. KVM comes from a metal node, or from an instance
 type with nested virtualization (on AWS: c8i, m8i, r8i or a metal type). The
-fleet is each amd64 node by default. A cluster that keeps its fleet on labeled
-nodes sets `FLEET_NODE_SELECTOR` to that label, for example
-`setec.zeroroot.ai/sandbox-host=true`. On kind, `helm/kind-config.yaml` mounts
+fleet is each node where the device plugin DaemonSet of setec runs: each amd64
+Linux node. On a cluster that mixes system nodes and a KVM node pool, the
+preflight fails on the first system node. Set `FLEET_NODE_SELECTOR` to the label
+of the pool, for example `setec.zeroroot.ai/sandbox-host=true`. When the pool
+scales from zero, start one node of the pool before the install. Otherwise the
+preflight finds no fleet node and stops. When a probe Pod does not run, the
+message names its phase and its events, not the device. On kind, `helm/kind-config.yaml` mounts
 `/dev/kvm` of the host into the node. With the setec seam off (ADR-0087), the
 fleet is in another cluster, and the preflight checks no node here.
 
