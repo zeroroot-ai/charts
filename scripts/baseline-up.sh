@@ -160,6 +160,20 @@ for crd in ciliumnetworkpolicies.cilium.io ciliumclusterwidenetworkpolicies.cili
 done
 echo "  ✓ the Cilium policy CRDs exist"
 
+# Each fleet node exposes /dev/kvm (ADR-0083, charts#413). Every sandbox is a
+# Firecracker machine, and the device plugin of setec hands /dev/kvm of the
+# node to its launcher Pod. On a node with no device each sandbox stays
+# pending, and nothing else says so. So stop here, before anything is
+# installed. The setec seam (ADR-0087) selects whose fleet runs: with the
+# seam off in the layered values the fleet is in another cluster, and the
+# preflight checks no node here. FLEET_NODE_SELECTOR names the fleet nodes
+# when a cluster keeps them on a label.
+log "preflight: each fleet node exposes /dev/kvm"
+PREFLIGHT_VALUES=(-f "$VALUES")
+[ -n "$RUNG_FILE" ] && PREFLIGHT_VALUES+=(-f "$RUNG_FILE")
+[ -n "$OVERLAY_FILE" ] && PREFLIGHT_VALUES+=(-f "$OVERLAY_FILE")
+"$(dirname "$0")/preflight-kvm.sh" "${PREFLIGHT_VALUES[@]}" "${EXTRA_VALUES_ARGS[@]}"
+
 
 # ---------------------------------------------------------------------------
 # The principal that applies the chart.
