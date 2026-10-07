@@ -263,7 +263,7 @@ includes the daemon hits the check.
 {{- $ppHost := and (hasKey $pp "host") (ne (toString ($pp.host | default "")) "") -}}
 {{- $ppExternal := and ($pp.external | default dict).enabled (($pp.external).host) -}}
 {{- if not (or $pgHost $ppHost $ppExternal) -}}
-{{- fail (printf "validateTenantStoresConfigured: the daemon requires a Postgres data-plane store. Provide one of:\n  a) Consolidated tier (in-cluster):  set platformPostgres.host=\"<cluster-pg-endpoint>\" (preferred — kind: kind-bootstrap CNPG)\n  b) Consolidated tier (external):    set platformPostgres.external.enabled=true + platformPostgres.external.host=\"<rds-endpoint>\"\n  c) External data-plane Postgres:    set dataPlane.postgres.host=\"<rds-endpoint>\" (port/admin_database/admin_username/admin_password_secret_ref filled in)\nSpec: per-tenant-data-plane-completion Requirements 6.1, 7.1; one-code-path epic deploy#186.") -}}
+{{- fail (printf "validateTenantStoresConfigured: the daemon requires a Postgres data-plane store. Provide one of:\n  a) Consolidated tier (in-cluster):  set platformPostgres.host=\"<cluster-pg-endpoint>\" (preferred — kind: kind-bootstrap CNPG)\n  b) Consolidated tier (external):    set platformPostgres.external.enabled=true + platformPostgres.external.host=\"<rds-endpoint>\"\n  c) External data-plane Postgres:    set dataPlane.postgres.host=\"<rds-endpoint>\" (port/admin_database/admin_password_secret_ref filled in)\nSpec: per-tenant-data-plane-completion Requirements 6.1, 7.1; one-code-path epic deploy#186.") -}}
 {{- end -}}
 
 {{- /* ---- Neo4j ----------------------------------------------------------- */ -}}

@@ -218,17 +218,16 @@ data:
 
     {{- $tenantPgHost := include "gibson.tenant.dbHost" . }}
     {{- if $tenantPgHost }}
-    # Per-tenant admin Postgres — host, port, admin_username and ssl_mode, which
-    # are the keys the daemon still binds. admin_password and admin_database are
-    # NOT rendered: gibson#599 unbound both, so viper dropped them in silence, and
-    # the bootstrap credential reaches the tenant-operator instead.
+    # Per-tenant admin Postgres — host, port and ssl_mode, which are the keys
+    # the daemon still binds. admin_username, admin_password and admin_database
+    # are NOT rendered: gibson#599 and D78 unbound them, so viper dropped them in
+    # silence, and the bootstrap credential reaches the tenant-operator instead.
     # Spec: per-tenant-data-plane-completion Req 1, D1, D5; Tasks 6, 25.
     #
     # Host: dataPlane.postgres.host (gibson.tenant.dbHost).
     tenant_postgres:
       host: {{ $tenantPgHost | quote }}
       port: {{ .Values.dataPlane.postgres.port | default 5432 }}
-      admin_username: {{ .Values.dataPlane.postgres.admin_username | default "gibson_admin" | quote }}
       {{- /* sslmode=require is hardcoded — Spec first-deploy-unblock-and-ha R7. */}}
       ssl_mode: "require"
     {{- end }}

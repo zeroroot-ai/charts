@@ -3854,17 +3854,16 @@ data:
       password: ${DASHBOARD_DB_PASSWORD}
       ssl_mode: "require"
       max_conns: 10
-    # Per-tenant admin Postgres — host, port, admin_username and ssl_mode, which
-    # are the keys the daemon still binds. admin_password and admin_database are
-    # NOT rendered: gibson#599 unbound both, so viper dropped them in silence, and
-    # the bootstrap credential reaches the tenant-operator instead.
+    # Per-tenant admin Postgres — host, port and ssl_mode, which are the keys
+    # the daemon still binds. admin_username, admin_password and admin_database
+    # are NOT rendered: gibson#599 and D78 unbound them, so viper dropped them in
+    # silence, and the bootstrap credential reaches the tenant-operator instead.
     # Spec: per-tenant-data-plane-completion Req 1, D1, D5; Tasks 6, 25.
     #
     # Host: dataPlane.postgres.host (gibson.tenant.dbHost).
     tenant_postgres:
       host: "platform-postgres-rw.gibson.svc.cluster.local"
       port: 5432
-      admin_username: "gibson_admin"
       ssl_mode: "require"
 
     graphrag:
@@ -16444,7 +16443,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "tmp,spire-agent-socket"
-        checksum/config: 1e34401628350b6751d7231a49abdb7823eda0ed5cc1dadaca9de278a872dc39
+        checksum/config: 978165bfca7b61cd0d21cae9c562cd922c4986f4bca31113a81c5ce78e04859f
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). Consumer envFrom
         # resolution is frozen for the pod's lifetime; Reloader watches the
         # named Secrets and triggers a rolling restart when any changes.
