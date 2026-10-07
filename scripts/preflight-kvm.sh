@@ -6,12 +6,16 @@
 # runs no sandbox, and nothing else says so before the first sandbox stays
 # pending. scripts/baseline-up.sh runs this before it installs anything.
 #
-# The fleet is each node that FLEET_NODE_SELECTOR names. The default names
-# each amd64 node, which is where the device plugin DaemonSet runs. A cluster
+# The fleet is each node that FLEET_NODE_SELECTOR names. The default is the
+# node selector of the device plugin DaemonSet of setec (amd64 and linux), so
+# it names each node where the plugin offers /dev/kvm. A cluster
 # that keeps its fleet on labeled nodes sets the selector to that label, for
 # example setec.zeroroot.ai/sandbox-host=true. For each fleet node this runs
 # one short Pod on that node, with /dev of the node mounted read-only, and
-# fails on the first node where the device is absent.
+# fails on the first node where the device is absent. A probe Pod that does
+# not run to an answer (for example a refused hostPath, or an image that the
+# node cannot pull) is a separate failure: the message names its phase and
+# its events, and it does not claim that the device is absent.
 #
 # The setec seam (ADR-0087) selects whose fleet runs. When the layered values
 # turn the seam off, the fleet is in another cluster, and the nodes of this
@@ -23,18 +27,18 @@
 #
 # Env:
 #   KUBECTL              the kubectl command           (default: kubectl)
-#   FLEET_NODE_SELECTOR  a label selector of the fleet (default: kubernetes.io/arch=amd64)
+#   FLEET_NODE_SELECTOR  a label selector of the fleet (default: kubernetes.io/arch=amd64,kubernetes.io/os=linux)
 #   KVM_PROBE_NS         the namespace of the probe    (default: kube-system)
 #   KVM_PROBE_IMAGE      the probe image               (default: the alpine mirror)
 #   KVM_TIMEOUT          seconds to wait for one probe (default: 180)
 #   POLL_SECONDS         seconds between two polls     (default: 3)
 #
 # Exit: 0 each fleet node has /dev/kvm, or the seam is off · 1 a node has
-# none, or no fleet node exists · 2 bad arguments.
+# none, a probe did not run, or no fleet node exists · 2 bad arguments.
 set -euo pipefail
 
 KUBECTL="${KUBECTL:-kubectl}"
-SELECTOR="${FLEET_NODE_SELECTOR:-kubernetes.io/arch=amd64}"
+SELECTOR="${FLEET_NODE_SELECTOR:-kubernetes.io/arch=amd64,kubernetes.io/os=linux}"
 NS="${KVM_PROBE_NS:-kube-system}"
 IMAGE="${KVM_PROBE_IMAGE:-ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d}"
 TIMEOUT="${KVM_TIMEOUT:-180}"
@@ -75,12 +79,12 @@ fi
 
 nodes="$($KUBECTL get nodes -l "$SELECTOR" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"
 if [ -z "$nodes" ]; then
-  echo "FATAL: no node matches FLEET_NODE_SELECTOR=${SELECTOR}, so this cluster has no sandbox fleet. Each sandbox is a Firecracker machine on a fleet node that exposes /dev/kvm (ADR-0083)." >&2
+  echo "FATAL: no node matches FLEET_NODE_SELECTOR=${SELECTOR}, so this cluster has no sandbox fleet. Each sandbox is a Firecracker machine on a fleet node that exposes /dev/kvm (ADR-0083). When the fleet is a node pool that scales from zero, start one node of the pool before the install." >&2
   exit 1
 fi
 
 for node in $nodes; do
-  pod="kvm-probe-$(printf '%s' "$node" | tr -c 'a-z0-9' '-' | cut -c1-40)"
+  pod="fleet-probe-$(printf '%s' "$node" | tr -c 'a-z0-9' '-' | cut -c1-40)"
   $KUBECTL -n "$NS" delete pod "$pod" --ignore-not-found --wait=true >/dev/null 2>&1 || true
   $KUBECTL -n "$NS" apply -f - >/dev/null <<YAML
 apiVersion: v1
@@ -88,7 +92,7 @@ kind: Pod
 metadata:
   name: ${pod}
   labels:
-    app.kubernetes.io/name: kvm-probe
+    app.kubernetes.io/name: fleet-probe
 spec:
   nodeName: ${node}
   restartPolicy: Never
@@ -96,7 +100,7 @@ spec:
   containers:
     - name: probe
       image: ${IMAGE}
-      command: ["sh", "-c", "test -c /host-dev/kvm && echo kvm-present"]
+      command: ["sh", "-c", "if test -c /host-dev/kvm; then echo kvm-present; else echo kvm-absent; exit 3; fi"]
       securityContext:
         allowPrivilegeEscalation: false
         capabilities: { drop: ["ALL"] }
@@ -113,9 +117,23 @@ YAML
     sleep "$POLL"
   done
   out="$($KUBECTL -n "$NS" logs "$pod" 2>/dev/null || true)"
-  $KUBECTL -n "$NS" delete pod "$pod" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  events=""
   if [ "$phase" != Succeeded ] || [ "$out" != kvm-present ]; then
-    echo "FATAL: node ${node} has no /dev/kvm (probe phase ${phase:-none}). Each sandbox is a Firecracker machine (ADR-0083), so each fleet node needs KVM: a metal node, or an instance type with nested virtualization (on AWS: c8i, m8i, r8i or a metal type). On kind, mount /dev/kvm of the host into the node, as helm/kind-config.yaml does. When the fleet runs on labeled nodes only, set FLEET_NODE_SELECTOR to that label." >&2
+    events="$($KUBECTL -n "$NS" get events --field-selector "involvedObject.name=${pod}" \
+      -o jsonpath='{range .items[*]}{.reason}: {.message}{"\n"}{end}' 2>/dev/null || true)"
+  fi
+  $KUBECTL -n "$NS" delete pod "$pod" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  if [ "$phase" = Succeeded ] && [ "$out" = kvm-present ]; then
+    :
+  elif [ "$phase" = Failed ] && [ "$out" = kvm-absent ]; then
+    echo "FATAL: node ${node} has no /dev/kvm. Each sandbox is a Firecracker machine (ADR-0083), so each fleet node needs KVM: a metal node, or an instance type with nested virtualization (on AWS: c8i, m8i, r8i or a metal type). On kind, mount /dev/kvm of the host into the node, as helm/kind-config.yaml does. When the fleet runs on labeled nodes only, set FLEET_NODE_SELECTOR to that label." >&2
+    exit 1
+  else
+    {
+      echo "FATAL: the probe Pod ${pod} on node ${node} did not run to an answer (phase ${phase:-none}, log '${out}'). The preflight cannot tell if the node has the device."
+      echo "The Pod runs in namespace ${NS} with a read-only hostPath mount of /dev and the image ${IMAGE}. Check the Pod Security label of ${NS}, a policy engine that refuses hostPath, and the registry access of the node. When either one is the cause, set the namespace or the image of the probe (the Env list of scripts/preflight-kvm.sh)."
+      [ -n "$events" ] && { echo "Events of the Pod:"; printf '%s\n' "$events"; }
+    } >&2
     exit 1
   fi
   printf '  ✓ node %s exposes /dev/kvm\n' "$node"
