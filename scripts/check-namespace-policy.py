@@ -57,7 +57,8 @@ def dns_only(rule: dict) -> bool:
     if not peers or any(p != {"matchLabels": KUBE_DNS} for p in peers):
         return False
     ports = [p for tp in rule.get("toPorts") or [] for p in tp.get("ports") or []]
-    return bool(ports) and all(str(p.get("port")) == "53" and p.get("protocol") in ("UDP", "TCP") for p in ports)
+    return bool(ports) and all(set(p) <= {"port", "protocol"} and str(p.get("port")) == "53"
+                               and p.get("protocol") in ("UDP", "TCP") for p in ports)
 
 
 def covered(docs: list) -> set[str]:
@@ -66,7 +67,10 @@ def covered(docs: list) -> set[str]:
         spec = d.get("spec") or {}
         if d.get("kind") == "CiliumClusterwideNetworkPolicy":
             deny = spec.get("enableDefaultDeny") or {}
-            ns = ((spec.get("endpointSelector") or {}).get("matchLabels") or {}).get(NS_LABEL)
+            sel = spec.get("endpointSelector") or {}
+            ml = sel.get("matchLabels") or {}
+            # Only a selector of the namespace alone covers each pod of it.
+            ns = ml.get(NS_LABEL) if set(sel) == {"matchLabels"} and set(ml) == {NS_LABEL} else None
             if not (ns and deny.get("ingress") is True and deny.get("egress") is True):
                 continue
             if any(r != {} for r in spec.get("ingress") or []):
@@ -143,6 +147,12 @@ def selftest() -> int:
                             [pod("a"), ccnp("a", eg=[dns, {"toEntities": ["world"]}])], set()),
                            ("a clusterwide policy that allows all ingress",
                             [pod("a"), ccnp("a", ing=[{"fromEntities": ["all"]}])], set()),
+                           ("a clusterwide policy whose DNS port opens a range",
+                            [pod("a"), ccnp("a", eg=[dict(dns, toPorts=[{"ports": [
+                                {"port": "53", "endPort": 65535, "protocol": "UDP"}]}])])], set()),
+                           ("a clusterwide policy that selects some pods of the namespace",
+                            [pod("a"), dict(ccnp("a"), spec=dict(ccnp("a")["spec"], endpointSelector={
+                                "matchLabels": {NS_LABEL: "a", "app": "x"}}))], set()),
                            ("a clusterwide policy whose DNS rule reaches each pod",
                             [pod("a"), ccnp("a", eg=[dict(dns, toEndpoints=[{}])])], set()),
                            ("a pod with no namespace", [{"kind": "Job", "metadata": {"name": "j"}}], set())):
