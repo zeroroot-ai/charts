@@ -265,6 +265,33 @@ spec:
             # fixed path platform/daemon.
             - name: GIBSON_DAEMON_SPIFFE_ID
               value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/daemon") | quote }}
+            # Per-tenant plugins (gibson#815). The operator deploys one
+            # instance of a catalog plugin for each tenant that enables it, in
+            # the namespace tenant-<t>-plugins, and writes its ClusterSPIFFEID
+            # spiffe://<td>/plugin/<vendor>/<tenant>. The operator exits when
+            # one of the four required values is empty.
+            #   PLUGIN_SPIRE_CLASS_NAME     the className of the SPIRE
+            #                               controller-manager, or SPIRE
+            #                               ignores the ClusterSPIFFEID.
+            #   PLUGIN_TRUST_DOMAIN         the trust domain of the install.
+            #   PLUGIN_GIBSON_URL           the edge origin; the plugin dials
+            #                               the daemon only through Envoy.
+            #   PLUGIN_WAIT_FOR_SPIRE_IMAGE the image of the init container
+            #                               that waits for the SPIRE socket.
+            #   PLUGIN_ENVOY_CA_FILE        the edge CA that the operator
+            #                               copies into each plugin namespace.
+            #                               Empty when the operator mounts no
+            #                               edge CA: the edge has a public cert.
+            - name: PLUGIN_SPIRE_CLASS_NAME
+              value: {{ required "tenantOperator.plugins.spireClassName is required: the className of the SPIRE controller-manager (gibson#815)" ((.Values.tenantOperator.plugins).spireClassName) | quote }}
+            - name: PLUGIN_TRUST_DOMAIN
+              value: {{ include "gibson.trustDomain" . | quote }}
+            - name: PLUGIN_GIBSON_URL
+              value: {{ printf "https://%s" (include "gibson.apiHost" .) | quote }}
+            - name: PLUGIN_WAIT_FOR_SPIRE_IMAGE
+              value: {{ include "gibson.waitForSpireSocketImage" . | quote }}
+            - name: PLUGIN_ENVOY_CA_FILE
+              value: {{ if .Values.envoy.tls.secretName }}"/etc/ssl/envoy-ca/envoy-ca.crt"{{ else }}""{{ end }}
             # First-tenant seed (gibson#1496): on a self-hosted install with no
             # signup, the operator enqueues the first tenant over its SPIFFE
             # identity via EnqueueTenantProvisioning — the session-less path,

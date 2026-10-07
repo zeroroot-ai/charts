@@ -165,11 +165,10 @@ secrets:
 registration: open
 
 gibson:
-  # First-party plugin SVID enrollment binding. platformTenant is the
-  # install tenant slug a plugin's SPIFFE JWT-SVID maps to; the daemon resolves
-  # that tenant's OWNER dynamically from FGA at enrol time (gibson#1533), so no
-  # owner sub is configured here (it does not exist until first-admin runs).
-  # Unset (the default) = SVID enrollment disabled, a safe no-op.
+  # platformTenant is the slug of the install tenant (GIBSON_PLATFORM_TENANT).
+  # The e2e runner tenancy and the Neo4j APOC check of the daemon read it. A
+  # plugin does not: each tenant runs its own plugin instance, which the
+  # tenant-operator deploys (gibson#815).
   platformTenant: ""
 
   # Audit export to the durable bucket (ADR-0113, charts#446). The daemon
@@ -3575,38 +3574,3 @@ tests:
     dashboardPatSecret: "gibson-zitadel-dashboard"
     dashboardPatKey: "pat"
 
-# -----------------------------------------------------------------------------
-# First-party plugins (R5: plugin deploy = CI-built image + Helm +
-# GitOps, run as pod|setec — NOT a bespoke reconcile controller, NOT
-# in-cluster building).
-#
-# A plugin is a Go service (the vendor's own SDK wrapped in the plugin `Serve`
-# loop) that the integrations-repo CI builds and pushes to
-# `ghcr.io/<repo>/<vendor>`. This chart deploys it as a Deployment (runtime
-# `pod`, the default) or a setec microVM Sandbox (runtime `setec`, hardened) in
-# the release namespace. The plugin enrols with the daemon over
-# capability-grant (its projected ServiceAccount token is the one-time
-# bootstrap credential) and resolves every vendor credential at call time
-# through the secrets broker over the daemon gRPC channel — nothing is passed
-# through Helm values, and no ExternalSecret is created here (ESO-only /
-# holds trivially: this chart authors no Secret).
-#
-# The `plugins` map is keyed by vendor. It is EMPTY by default — a base install
-# runs no plugins. An overlay (e.g. values-baseline.yaml, or a customer fork's
-# GitOps values) opts a plugin in. Each entry:
-#
-#   <vendor>:
-#     enabled: true
-#     runtime: pod            # pod (default) | setec (hardened microVM)
-#     image:
-#       repository: ghcr.io/zeroroot-ai/integrations/<vendor>
-#       tag: "0.1.0"          # the plugin version the CI published
-#       digest: ""            # pin @sha256 for staging/prod reproducibility
-#       pullPolicy: IfNotPresent
-#     replicas: 1
-#     resources: { requests: {cpu, memory}, limits: {cpu, memory} }
-#     sandboxClassName: ""    # REQUIRED when runtime: setec
-#
-# Every enabled pod-runtime plugin ships its own NetworkPolicy so it is not
-# severed by the namespace default-deny (check-secure-pod, deploy#1365).
-plugins: {}

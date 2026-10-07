@@ -1026,6 +1026,17 @@ empty, and the daemon statefulset invokes it. It has no escape hatch:
 {{- end }}
 
 {{/*
+gibson.waitForSpireSocketImage: the image of the wait-for-spire-socket init
+container. Two places run it: the helper below, in each chart pod, and the
+tenant-operator, which gives it to each plugin pod it deploys in a
+tenant-<t>-plugins namespace (PLUGIN_WAIT_FOR_SPIRE_IMAGE, gibson#815). One
+pin keeps the two the same.
+*/}}
+{{- define "gibson.waitForSpireSocketImage" -}}
+ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+{{- end -}}
+
+{{/*
 gibson.waitForSpireSocket — init container that blocks pod start until the
 SPIRE agent's Workload API socket is present on the node. Every SPIFFE-
 consuming pod (daemon, ext-authz, tenant-operator, dashboard) renders this
@@ -1053,7 +1064,7 @@ declare the `spire-agent-socket` volume with the matching mount path.
 */}}
 {{- define "gibson.waitForSpireSocket" -}}
 - name: wait-for-spire-socket
-  image: ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+  image: {{ include "gibson.waitForSpireSocketImage" . }}
   command: ['sh', '-c']
   args:
     - |

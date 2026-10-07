@@ -471,6 +471,14 @@ postgresSetup:
     tag: "16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
 
 gibson-operators:
+  tenantOperator:
+    daemonGrpcAddress: "gibson-gibson-workloads:50051"
+    # The className of the SPIRE controller-manager, for the ClusterSPIFFEID
+    # of each plugin instance (gibson#815). The anchor keeps it equal to
+    # gibson-workloads.spire.controllerManager.className below, which takes
+    # its value from this anchor.
+    plugins:
+      spireClassName: &spireClassName "gibson-gibson"
   # The login brand. templates/zitadel-login-branding.yaml renders this
   # ConfigMap from files/branding, and the platform-operator applies it to
   # the Zitadel instance label policy (a bootstrap step, LoginBrandingReady).
@@ -515,7 +523,7 @@ gibson-workloads:
       # tenant-operator all hung at startup with no log line (observed live
       # on staging 2026-06-11; the failure mode is documented at the knob in
       # gibson-workloads/values.yaml).
-      className: "gibson-gibson"
+      className: *spireClassName
 
 # Cross-cutting platform secrets folded from gitops (deploy#787).
 externalSecrets:

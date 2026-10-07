@@ -373,38 +373,15 @@ spec:
   workloadSelectorTemplates:
     - "k8s:ns:{{ $ns }}"
     - "k8s:sa:{{ include "gibson.helmTestServiceAccountName" . }}"
-{{- /* --- first-party plugins ---
-       One ClusterSPIFFEID per ENABLED plugin. The JWT-SVID is the plugin's
-       capability-grant enrollment credential — it replaces the bootstrap token
-       so no autonomous minter is needed (/ no-autonomous-bootstrap-
-       token stays intact). All plugins share component=plugin, so the per-vendor
-       gibson.zeroroot.ai/plugin label is the podSelector discriminator; the
-       literal k8s:ns + k8s:sa workloadSelectorTemplates are the real attested
-       boundary (see this file's header). Rendered only for enabled plugins. */}}
-{{- range $vendor, $p := .Values.plugins }}
-{{- if $p.enabled }}
----
-apiVersion: spire.spiffe.io/v1alpha1
-kind: ClusterSPIFFEID
-metadata:
-  name: {{ printf "gibson-plugin-%s" $vendor }}
-  labels:
-    {{- include "gibson.labels" $ | nindent 4 }}
-    app.kubernetes.io/component: spire-controller-manager
-spec:
-  className: {{ $className | quote }}
-  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/plugin/{{ $vendor }}"
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/component: plugin
-      gibson.zeroroot.ai/plugin: {{ $vendor | quote }}
-  namespaceSelector:
-    matchLabels:
-      kubernetes.io/metadata.name: {{ $ns }}
-  workloadSelectorTemplates:
-    - "k8s:ns:{{ $ns }}"
-    - "k8s:sa:{{ printf "%s-plugin-%s" $.Release.Name $vendor }}"
-{{- end }}
+{{- /* --- plugins ---
+       No plugin identity here. Each tenant runs its own instance of a
+       catalog plugin, and the tenant-operator writes one ClusterSPIFFEID for
+       each (plugin, tenant): spiffe://<td>/plugin/<vendor>/<tenant>
+       (gibson#815). The admission policy
+       gibson-tenant-operator-clusterspiffeid-scope (gibson-operators) holds
+       each write of the operator to that shape. */}}
+{{- if .Values.plugins }}
+{{- fail "plugins was deleted (gibson#815). A tenant enables a catalog plugin through the API, and the tenant-operator deploys one instance for that tenant. Remove plugins from your values." }}
 {{- end }}
 {{/*
   --- e2e exit-test runner (TEST PROFILES ONLY) -------------------------------

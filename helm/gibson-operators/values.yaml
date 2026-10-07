@@ -35,6 +35,13 @@ gibson:
 # `orphanReaper.enabled`) remain legitimate.
 tenantOperator:
   namespace: gibson
+  # Per-tenant plugins (gibson#815). spireClassName MUST equal the className
+  # of the SPIRE controller-manager, the same value as
+  # gibson-workloads.spire.controllerManager.className. The umbrella sets both
+  # from one YAML anchor. A wrong name is silent: SPIRE ignores the
+  # ClusterSPIFFEID, and the plugin pod never gets an SVID.
+  plugins:
+    spireClassName: ""
   image:
     # Consolidated monorepo publishes the tenant-operator image as
     # ghcr.io/zeroroot-ai/tenant-operator. The pre-consolidation
