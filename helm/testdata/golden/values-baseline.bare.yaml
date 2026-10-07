@@ -18102,37 +18102,144 @@ spec:
                 exit 1
               fi
 
-              echo "--- Step 4: seed platform-operator tuples (optional) ---"
-              # Wait for sa-identity-map population; on Kind it may not be
-              # populated synchronously, so allow a bounded soft-fail (60s)
-              # rather than the 360s hard-fail of the legacy chart. Daemon
-              # functions without these tuples for the unauthenticated /
-              # health paths needed to render the sign-in screen; tuples are
-              # only required for the platform_operator admin RPCs.
-              # Platform SAs that must hold a platform_operator tuple on
-              # system_tenant:_system. Only two gRPC services check this
-              # relation: DaemonOperatorService (called by the operators
-              # and the daemon itself, never by the dashboard) and
-              # AdminTenantService (whose admin RPCs the dashboard always
-              # calls with the SIGNED-IN HUMAN's own forwarded session,
-              # never with its own service identity).
+              # --- Tuple seeding on system_tenant:_system ---
+              # Two relations are seeded, each with its own holder list:
               #
-              # gibson-dashboard-service is deliberately NOT in this list
-              # (hosted#191). It used to be, on the theory that it needed
-              # the tuple for platform BillingService webhook RPCs
-              # (dashboard#780) — BillingService no longer exists in
-              # gibson, and an audit of every RPC the dashboard's own
-              # service identity actually calls (SignupService,
-              # UserService.*SignupProgress, TenantProvisioningService,
-              # MembershipService invite flows) found none that need
-              # platform_operator. It is internet-facing; giving it a
-              # cross-tenant relation it never uses was pure exposure.
+              #   platform_operator — REQUIRED (gibson-iam-admin and
+              #     gibson-tenant-operator). Only two gRPC services check
+              #     this relation: DaemonOperatorService (called by the
+              #     operators and the daemon itself, never by the dashboard)
+              #     and AdminTenantService (whose admin RPCs the dashboard
+              #     always calls with the SIGNED-IN HUMAN's own forwarded
+              #     session, never with its own service identity).
+              #     gibson-dashboard-service is deliberately NOT in this
+              #     list (hosted#191): it is internet-facing, and a
+              #     cross-tenant relation it never uses was pure exposure.
+              #
+              #   signup_service — SIGNUP_SERVICE_SA (gibson-dashboard-service)
+              #     and no other caller (D11, gibson#761, charts#485). It
+              #     gates UserService.GetSignupProgress and
+              #     SetSignupProgress, which run before any tenant exists.
+              #     gibson v0.154.0 requires it: without the tuple the
+              #     daemon refuses signup progress with PermissionDenied.
+              #
+              # Each holder is named by its gibson-sa-identity-map key, which
+              # is the name of its MACHINE_USER OIDCClient child. The
+              # platform-operator writes that map from the children it
+              # minted, so the dashboard's service identity is the
+              # gibson-dashboard-service entry (its browser-login client
+              # gibson-dashboard is an OIDC app, not a subject).
+              #
+              # Each list is the whole list, not a floor (ADR-0093,
+              # hosted#207): prune_relation deletes every other holder, so an
+              # upgrade from a chart that seeded more SAs leaves no tuple
+              # behind. One delete per request: OpenFGA fails a whole write
+              # batch when one key in it is wrong.
               #
               # NOTE: gibson-tool-runner-sa was REMOVED — its MACHINE_USER
               # OIDCClient no longer exists, so it never appears in the
               # sa-identity-map. Listing it here previously wedged the
               # all-or-nothing wait below and silently skipped EVERY tuple.
               REQUIRED='gibson-iam-admin gibson-tenant-operator'
+              SIGNUP_SERVICE_SA='gibson-dashboard-service'
+              SEEDED=0
+              SKIPPED=0
+              MISSING=0
+              PRUNED=0
+
+              # resolve_sub SA — prints the numeric sub of SA from the
+              # sa-identity-map, or nothing when the entry is absent or
+              # "<unset>".
+              resolve_sub() {
+                echo "$MAP_JSON" | jq -r --arg k "$1" '.data[$k] // empty' 2>/dev/null | grep -v '^<unset>$' || true
+              }
+
+              # seed_tuple RELATION SA — writes user:<sub> RELATION
+              # system_tenant:_system for SA and appends the user to KEEP.
+              # An absent SA warns and counts in REL_MISSING; the other
+              # holders of the relation are still seeded.
+              seed_tuple() {
+                relation="$1"
+                sa="$2"
+                numeric=$(resolve_sub "$sa")
+                if [ -z "$numeric" ]; then
+                  echo "  WARNING: ${sa} absent from sa-identity-map — ${relation} tuple NOT seeded for it."
+                  REL_MISSING=$((REL_MISSING+1))
+                  MISSING=$((MISSING+1))
+                  return 0
+                fi
+                KEEP="${KEEP} user:${numeric}"
+                TUPLE_BODY=$(jq -cn --arg u "user:${numeric}" --arg r "$relation" '{writes:{tuple_keys:[{user:$u,relation:$r,object:"system_tenant:_system"}]}}')
+                TUPLE_HTTP=$(curl -sS -o /tmp/tuple.json -w '%{http_code}' \
+                  -H 'Content-Type: application/json' \
+                  -X POST --data "$TUPLE_BODY" \
+                  "${FGA}/stores/${STORE_ID}/write")
+                RESP=$(cat /tmp/tuple.json)
+                case "$RESP" in
+                  *"already exists"*|*"already existed"*|*cannot_allow_duplicate_tuple*)
+                    echo "  ${sa} (user:${numeric}) ${relation} tuple exists (idempotent)"
+                    SKIPPED=$((SKIPPED+1))
+                    ;;
+                  "{}"|"")
+                    echo "  seeded ${sa} (user:${numeric}) → ${relation} on system_tenant:_system"
+                    SEEDED=$((SEEDED+1))
+                    ;;
+                  *)
+                    echo "  WARNING: ${relation} tuple write failed for ${sa} (HTTP ${TUPLE_HTTP}): ${RESP}"
+                    ;;
+                esac
+              }
+
+              # prune_relation RELATION — deletes every RELATION holder on
+              # system_tenant:_system that is not in KEEP. Only when every
+              # holder of the relation resolved (REL_MISSING is 0): otherwise
+              # KEEP is short and a valid tuple would go.
+              prune_relation() {
+                relation="$1"
+                if [ "$REL_MISSING" -ne 0 ]; then
+                  echo "  WARNING: ${REL_MISSING} ${relation} SA(s) unresolved — prune skipped."
+                  return 0
+                fi
+                HOLDERS=""
+                CONT=""
+                while :; do
+                  READ_BODY=$(jq -cn --arg r "$relation" --arg c "$CONT" '{tuple_key:{relation:$r,object:"system_tenant:_system"},page_size:100} + (if $c == "" then {} else {continuation_token:$c} end)')
+                  READ_HTTP=$(curl -sS -o /tmp/read.json -w '%{http_code}' \
+                    -H 'Content-Type: application/json' \
+                    -X POST --data "$READ_BODY" \
+                    "${FGA}/stores/${STORE_ID}/read")
+                  if [ "$READ_HTTP" != "200" ]; then
+                    echo "FATAL: read ${relation} tuples returned ${READ_HTTP}"
+                    cat /tmp/read.json
+                    exit 1
+                  fi
+                  HOLDERS="${HOLDERS} $(jq -r '[.tuples[]?.key.user] | join(" ")' /tmp/read.json)"
+                  CONT=$(jq -r '.continuation_token // empty' /tmp/read.json)
+                  [ -n "$CONT" ] || break
+                done
+                for holder in $HOLDERS; do
+                  case " ${KEEP} " in *" ${holder} "*) continue ;; esac
+                  DEL_BODY=$(jq -cn --arg u "$holder" --arg r "$relation" '{deletes:{tuple_keys:[{user:$u,relation:$r,object:"system_tenant:_system"}]}}')
+                  DEL_HTTP=$(curl -sS -o /tmp/del.json -w '%{http_code}' \
+                    -H 'Content-Type: application/json' \
+                    -X POST --data "$DEL_BODY" \
+                    "${FGA}/stores/${STORE_ID}/write")
+                  if [ "$DEL_HTTP" != "200" ]; then
+                    echo "FATAL: delete ${relation} tuple for ${holder} returned ${DEL_HTTP}"
+                    cat /tmp/del.json
+                    exit 1
+                  fi
+                  echo "  pruned ${holder} → ${relation} on system_tenant:_system (not a listed SA)"
+                  PRUNED=$((PRUNED+1))
+                done
+              }
+
+              echo "--- Step 4: wait for the sa-identity-map ---"
+              # Wait for sa-identity-map population; on Kind it may not be
+              # populated synchronously, so allow a bounded soft-fail (60s)
+              # rather than the 360s hard-fail of the legacy chart. The
+              # daemon serves the unauthenticated / health paths that render
+              # the sign-in screen without these tuples.
               MAP_JSON=""
               ALL_SET="false"
               i=0
@@ -18141,9 +18248,8 @@ spec:
                   -H "Authorization: Bearer ${TOKEN}" \
                   "${K8S}/api/v1/namespaces/${NS}/configmaps/gibson-sa-identity-map" 2>/dev/null)
                 ALL_SET="true"
-                for sa in $REQUIRED; do
-                  val=$(echo "$MAP_JSON" | jq -r --arg k "$sa" '.data[$k] // empty' 2>/dev/null)
-                  if [ -z "$val" ] || [ "$val" = "<unset>" ]; then
+                for sa in $REQUIRED $SIGNUP_SERVICE_SA; do
+                  if [ -z "$(resolve_sub "$sa")" ]; then
                     ALL_SET="false"
                     break
                   fi
@@ -18159,101 +18265,29 @@ spec:
               if [ "$ALL_SET" != "true" ]; then
                 # Do NOT skip everything: one missing SA (e.g. a removed
                 # MACHINE_USER) must not silently disable every OTHER
-                # platform_operator tuple. The bounded wait above already
-                # gave the post-install Zitadel Job time to populate the
-                # map; now seed whatever IS present and warn (not skip) on
-                # whatever is not.
+                # tuple. The bounded wait above already gave the
+                # platform-operator time to populate the map; now seed
+                # whatever IS present and warn (not skip) on whatever is not.
                 echo "  WARNING: sa-identity-map not fully populated after 60s — seeding present SAs, warning on absent ones."
               fi
 
-              SEEDED=0
-              SKIPPED=0
-              MISSING=0
+              echo "--- Step 5: seed platform_operator tuples ---"
               KEEP=""
+              REL_MISSING=0
               for sa in $REQUIRED; do
-                numeric=$(echo "$MAP_JSON" | jq -r --arg k "$sa" '.data[$k] // empty')
-                if [ -z "$numeric" ] || [ "$numeric" = "<unset>" ]; then
-                  echo "  WARNING: ${sa} absent from sa-identity-map — platform_operator tuple NOT seeded for it."
-                  MISSING=$((MISSING+1))
-                  continue
-                fi
-                KEEP="${KEEP} user:${numeric}"
-                TUPLE_BODY="{
-                  \"writes\": {
-                    \"tuple_keys\": [
-                      { \"user\": \"user:${numeric}\",
-                        \"relation\": \"platform_operator\",
-                        \"object\": \"system_tenant:_system\" }
-                    ]
-                  }
-                }"
-                TUPLE_HTTP=$(curl -sS -o /tmp/tuple.json -w '%{http_code}' \
-                  -H 'Content-Type: application/json' \
-                  -X POST --data "$TUPLE_BODY" \
-                  "${FGA}/stores/${STORE_ID}/write")
-                RESP=$(cat /tmp/tuple.json)
-                case "$RESP" in
-                  *"already exists"*|*"already existed"*|*cannot_allow_duplicate_tuple*)
-                    echo "  ${sa} (user:${numeric}) tuple exists (idempotent)"
-                    SKIPPED=$((SKIPPED+1))
-                    ;;
-                  "{}"|"")
-                    echo "  seeded ${sa} (user:${numeric}) → platform_operator on system_tenant:_system"
-                    SEEDED=$((SEEDED+1))
-                    ;;
-                  *)
-                    echo "  WARNING: tuple write failed for ${sa} (HTTP ${TUPLE_HTTP}): ${RESP}"
-                    ;;
-                esac
+                seed_tuple platform_operator "$sa"
               done
 
-              echo "--- Step 5: prune platform_operator tuples outside REQUIRED ---"
-              # REQUIRED is the whole list, not a floor (ADR-0093, hosted#207).
-              # An upgrade from a chart that seeded more SAs (for example
-              # gibson-dashboard-service, before hosted#191) leaves their
-              # tuples behind, because Step 4 only writes. Delete every
-              # platform_operator holder on system_tenant:_system that is
-              # not a REQUIRED SA. Only when every REQUIRED SA resolved:
-              # otherwise KEEP is short and a valid tuple would go.
-              # One delete per request: OpenFGA fails a whole write batch
-              # when one key in it is wrong.
-              PRUNED=0
-              if [ "$MISSING" -ne 0 ]; then
-                echo "  WARNING: ${MISSING} REQUIRED SA(s) unresolved — prune skipped."
-              else
-                HOLDERS=""
-                CONT=""
-                while :; do
-                  READ_BODY=$(jq -cn --arg c "$CONT" '{tuple_key:{relation:"platform_operator",object:"system_tenant:_system"},page_size:100} + (if $c == "" then {} else {continuation_token:$c} end)')
-                  READ_HTTP=$(curl -sS -o /tmp/read.json -w '%{http_code}' \
-                    -H 'Content-Type: application/json' \
-                    -X POST --data "$READ_BODY" \
-                    "${FGA}/stores/${STORE_ID}/read")
-                  if [ "$READ_HTTP" != "200" ]; then
-                    echo "FATAL: read platform_operator tuples returned ${READ_HTTP}"
-                    cat /tmp/read.json
-                    exit 1
-                  fi
-                  HOLDERS="${HOLDERS} $(jq -r '[.tuples[]?.key.user] | join(" ")' /tmp/read.json)"
-                  CONT=$(jq -r '.continuation_token // empty' /tmp/read.json)
-                  [ -n "$CONT" ] || break
-                done
-                for holder in $HOLDERS; do
-                  case " ${KEEP} " in *" ${holder} "*) continue ;; esac
-                  DEL_BODY=$(jq -cn --arg u "$holder" '{deletes:{tuple_keys:[{user:$u,relation:"platform_operator",object:"system_tenant:_system"}]}}')
-                  DEL_HTTP=$(curl -sS -o /tmp/del.json -w '%{http_code}' \
-                    -H 'Content-Type: application/json' \
-                    -X POST --data "$DEL_BODY" \
-                    "${FGA}/stores/${STORE_ID}/write")
-                  if [ "$DEL_HTTP" != "200" ]; then
-                    echo "FATAL: delete platform_operator tuple for ${holder} returned ${DEL_HTTP}"
-                    cat /tmp/del.json
-                    exit 1
-                  fi
-                  echo "  pruned ${holder} → platform_operator on system_tenant:_system (not a REQUIRED SA)"
-                  PRUNED=$((PRUNED+1))
-                done
-              fi
+              echo "--- Step 6: prune platform_operator tuples outside REQUIRED ---"
+              prune_relation platform_operator
+
+              echo "--- Step 7: seed the signup_service tuple ---"
+              KEEP=""
+              REL_MISSING=0
+              seed_tuple signup_service "$SIGNUP_SERVICE_SA"
+
+              echo "--- Step 8: prune signup_service tuples outside SIGNUP_SERVICE_SA ---"
+              prune_relation signup_service
 
               echo "=== FGA Init Complete: store=${STORE_ID} model=${MODEL_ID} seeded=${SEEDED} skipped=${SKIPPED} missing=${MISSING} pruned=${PRUNED} ==="
           env:
