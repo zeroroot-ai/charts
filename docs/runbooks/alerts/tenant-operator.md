@@ -21,6 +21,8 @@ A `tenant-*` namespace stays in `Terminating` longer than the grace period of th
 
 A tenant delete stopped because the last backup of the tenant did not complete. The delete removed nothing, and the operator retries on the next pass.
 
+The rule also fires once when a counter above 0 comes back after a monitoring gap longer than 15 minutes. After a monitoring gap, check whether the counter rose before you follow the steps.
+
 1. Read the `reason` label of `gibson_tenant_operator_final_backup_failures_total`.
 2. If the reason is `backup_failed` or `timeout`, read the Velero Backup: `kubectl -n velero get backups.velero.io -l gibson.zeroroot.ai/backup-kind=final` and `velero backup describe <name> --details`.
 3. If the reason is `create` or `read`, check the Velero API: `kubectl -n velero get pods` and the operator log for the Velero error.
