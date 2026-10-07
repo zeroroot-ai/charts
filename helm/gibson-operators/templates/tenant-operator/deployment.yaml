@@ -32,7 +32,7 @@ spec:
                through the SMTP relay, and it calls AWS KMS when kms.keyARN is
                set. An external Vault, JWKS URL or tenant Postgres is in the
                group too. All other peers are in the cluster. */}}
-        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis" "openbao" "neo4j") "kubeApi" true "fqdn" "tenant-operator" "namespaces" true "controlPlane" true) | nindent 8 }}
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis" "openbao" "neo4j") "kubeApi" true "fqdn" "tenant-operator" "namespaces" true "controlPlane" true "metricsPort" 8080) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a

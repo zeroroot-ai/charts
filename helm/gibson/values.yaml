@@ -129,6 +129,16 @@ global:
     # allowed, the ENI addresses answered and the ClusterIP timed out, and
     # OpenBao's Kubernetes-auth TokenReview died with it.
     apiServerCIDRs: []
+    # The cluster scraper that reads the metrics ports (the metrics policy of
+    # templates/network-policies.yaml). The policy admits only a pod in this
+    # namespace with these labels, and only to the metrics port of each pod
+    # (gibson.metricsPorts). A pod label alone is not proof: the person who
+    # creates a pod chooses its labels, so the namespace is pinned too.
+    # The default is the kube-prometheus-stack Prometheus of the hosted estate.
+    metricsScraper:
+      namespace: monitoring
+      matchLabels:
+        app.kubernetes.io/name: prometheus
   # (deploy#1733): OpenBao is the one External Secrets backend on
   # every substrate, so there is no backend selector and no key prefix.
   # `global.secretBackend` and `global.secretPrefix` are DELETED. A values
@@ -1595,6 +1605,7 @@ cert-manager:
   # hosts of the solver (the self-check, or Route53 and its name servers).
   podLabels:
     gibson.zeroroot.ai/net-role: system
+    gibson.zeroroot.ai/metrics-port: "9402"
     gibson.zeroroot.ai/kube-api: "true"
     gibson.zeroroot.ai/egress-fqdn: cert-manager
   # Canonical names (cert-manager, cert-manager-webhook, cert-manager-cainjector)
@@ -1633,6 +1644,7 @@ cert-manager:
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
     podLabels:
       gibson.zeroroot.ai/net-role: system
+      gibson.zeroroot.ai/metrics-port: "9402"
       gibson.zeroroot.ai/kube-api: "true"
       gibson.zeroroot.ai/ingress-control-plane: "true"
     deploymentAnnotations:
@@ -1655,6 +1667,7 @@ cert-manager:
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
     podLabels:
       gibson.zeroroot.ai/net-role: system
+      gibson.zeroroot.ai/metrics-port: "9402"
       gibson.zeroroot.ai/kube-api: "true"
     deploymentAnnotations:
       argocd.argoproj.io/sync-wave: "-20"
@@ -1672,6 +1685,7 @@ external-secrets:
   # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
   podLabels:
     gibson.zeroroot.ai/net-role: system
+    gibson.zeroroot.ai/metrics-port: "8080"
     gibson.zeroroot.ai/client-openbao: "true"
     gibson.zeroroot.ai/kube-api: "true"
   # Canonical name: the ClusterSecretStore (gibson-workloads) authenticates to
@@ -1696,6 +1710,7 @@ external-secrets:
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
     podLabels:
       gibson.zeroroot.ai/net-role: system
+      gibson.zeroroot.ai/metrics-port: "8080"
       gibson.zeroroot.ai/kube-api: "true"
       gibson.zeroroot.ai/ingress-control-plane: "true"
     # The two ValidatingWebhookConfigurations (secretstore-validate,
@@ -1720,6 +1735,7 @@ external-secrets:
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
     podLabels:
       gibson.zeroroot.ai/net-role: system
+      gibson.zeroroot.ai/metrics-port: "8080"
       gibson.zeroroot.ai/kube-api: "true"
     rbac:
       create: false
@@ -1764,6 +1780,7 @@ cnpg:
   # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
   podLabels:
     gibson.zeroroot.ai/net-role: system
+    gibson.zeroroot.ai/metrics-port: "8080"
     gibson.zeroroot.ai/client-postgres: "true"
     gibson.zeroroot.ai/kube-api: "true"
     gibson.zeroroot.ai/ingress-control-plane: "true"

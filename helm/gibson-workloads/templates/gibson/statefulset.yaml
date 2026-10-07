@@ -23,7 +23,8 @@ Deploy posture (post-cutover):
 
 The daemon Service is ClusterIP-only across every overlay. The network
 policy of the release (umbrella templates/network-policies.yaml) lets only
-the platform pods and the metrics scrapers reach the daemon ports.
+the platform pods reach the daemon ports, and the cluster scraper reaches the
+metrics port (9090) only.
 Liveness/readiness probes use HTTP /healthz on the dedicated `health` (8080)
 container port. The kubelet reaches that from the node, which Cilium allows.
 
@@ -96,7 +97,7 @@ spec:
                SMTP relay. A tenant sets the base URL of each provider, so the
                hosts are not known at render time and a host list cannot
                name them. */}}
-        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis" "openbao" "neo4j") "kubeApi" true "internet" true "namespaces" true) | nindent 8 }}
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis" "openbao" "neo4j") "kubeApi" true "internet" true "namespaces" true "metricsPort" 9090) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
