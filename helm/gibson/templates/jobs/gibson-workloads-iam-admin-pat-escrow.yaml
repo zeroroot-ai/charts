@@ -182,8 +182,14 @@ spec:
               404) have="" ;;
               *) echo "ERROR: read secret/$KEY returned HTTP $code: $(cat /tmp/kv.json)"; exit 1 ;;
             esac
-            if [ -n "$have" ] && ! kubectl -n "$NS" get secret "$SECRET" >/dev/null 2>&1; then
-              echo "ESCROWED already: secret/$KEY is in the store and Secret $SECRET is not yet materialised (restore path)"
+            # A value in the store is never written over. The store is the
+            # source of each value after the first escrow: the platform-operator
+            # rotates the login-client token there (ADR-0171), and a restore
+            # brings the value back there. Writing the Secret value over it
+            # would undo a rotation whenever this hook runs before ESO has
+            # refreshed the Secret.
+            if [ -n "$have" ]; then
+              echo "ESCROWED already: secret/$KEY holds a value; the store is its source"
               continue
             fi
             # A Secret this ServiceAccount may not read looks exactly like one
@@ -199,10 +205,6 @@ spec:
             done
             VALUE=$(kubectl -n "$NS" get secret "$SECRET" -o json | jq -r --arg k "$DATAKEY" '.data[$k] // empty' | base64 -d)
             [ -n "$VALUE" ] || { echo "ERROR: $SECRET never appeared or its $DATAKEY is empty"; exit 1; }
-            if [ "$have" = "$VALUE" ]; then
-              echo "ESCROWED already: secret/$KEY matches Secret $SECRET"
-              continue
-            fi
             code=$(curl -sS -o /tmp/kv.json -w '%{http_code}' -X POST \
               -H "X-Vault-Token: $VAULT_ADMIN_TOKEN" -H "Content-Type: application/json" \
               -d "$(jq -nc --arg p "$PROP" --arg v "$VALUE" '{data: {($p): $v}}')" "$BAO_ADDR/v1/secret/data/$KEY")

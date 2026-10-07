@@ -14434,6 +14434,7 @@ metadata:
     app.kubernetes.io/component: login
   annotations:
     configmap.reloader.stakater.com/reload: zitadel-login-branding
+    secret.reloader.stakater.com/reload: login-client
 spec:
   revisionHistoryLimit: 10
   replicas: 1
@@ -15793,13 +15794,17 @@ spec:
                 #                            platformBootstrap.vaultTransit.keyName
                 #   secret/data/gibson-zitadel-iam-admin-pat
                 #                            the admin token it mints (gibson#794)
+                #   secret/data/gibson-zitadel-login-client-pat
+                #                            the login-client token it rotates
+                #                            (ADR-0171)
                 # lookup-self and renew-self come with the default policy.
                 vault_write_policy "$tok" "$PLATFORM_POLICY" \
                   '
               path "sys/mounts" { capabilities = ["read"] }
               path "sys/mounts/transit" { capabilities = ["create", "update"] }
               path "transit/keys/master-kek" { capabilities = ["create", "read", "update"] }
-              path "secret/data/gibson-zitadel-iam-admin-pat" { capabilities = ["create", "read", "update"] }' || return 1
+              path "secret/data/gibson-zitadel-iam-admin-pat" { capabilities = ["create", "read", "update"] }
+              path "secret/data/gibson-zitadel-login-client-pat" { capabilities = ["create", "read", "update"] }' || return 1
 
                 # The Jobs that configure the store, each with the paths of its
                 # own script (helpers in _openbao-policies.tpl).
@@ -26260,8 +26265,14 @@ spec:
               404) have="" ;;
               *) echo "ERROR: read secret/$KEY returned HTTP $code: $(cat /tmp/kv.json)"; exit 1 ;;
             esac
-            if [ -n "$have" ] && ! kubectl -n "$NS" get secret "$SECRET" >/dev/null 2>&1; then
-              echo "ESCROWED already: secret/$KEY is in the store and Secret $SECRET is not yet materialised (restore path)"
+            # A value in the store is never written over. The store is the
+            # source of each value after the first escrow: the platform-operator
+            # rotates the login-client token there (ADR-0171), and a restore
+            # brings the value back there. Writing the Secret value over it
+            # would undo a rotation whenever this hook runs before ESO has
+            # refreshed the Secret.
+            if [ -n "$have" ]; then
+              echo "ESCROWED already: secret/$KEY holds a value; the store is its source"
               continue
             fi
             # A Secret this ServiceAccount may not read looks exactly like one
@@ -26277,10 +26288,6 @@ spec:
             done
             VALUE=$(kubectl -n "$NS" get secret "$SECRET" -o json | jq -r --arg k "$DATAKEY" '.data[$k] // empty' | base64 -d)
             [ -n "$VALUE" ] || { echo "ERROR: $SECRET never appeared or its $DATAKEY is empty"; exit 1; }
-            if [ "$have" = "$VALUE" ]; then
-              echo "ESCROWED already: secret/$KEY matches Secret $SECRET"
-              continue
-            fi
             code=$(curl -sS -o /tmp/kv.json -w '%{http_code}' -X POST \
               -H "X-Vault-Token: $VAULT_ADMIN_TOKEN" -H "Content-Type: application/json" \
               -d "$(jq -nc --arg p "$PROP" --arg v "$VALUE" '{data: {($p): $v}}')" "$BAO_ADDR/v1/secret/data/$KEY")

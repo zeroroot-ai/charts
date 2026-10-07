@@ -1211,6 +1211,9 @@ spec:
                 #                            platformBootstrap.vaultTransit.keyName
                 #   secret/data/gibson-zitadel-iam-admin-pat
                 #                            the admin token it mints (gibson#794)
+                #   secret/data/gibson-zitadel-login-client-pat
+                #                            the login-client token it rotates
+                #                            (ADR-0171)
                 # lookup-self and renew-self come with the default policy.
                 vault_write_policy "$tok" "$PLATFORM_POLICY" \
                   '{{- include "gibson.openbaoPolicy.platformOperator" . | nindent 14 }}' || return 1
