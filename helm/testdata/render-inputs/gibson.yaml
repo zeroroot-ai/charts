@@ -12,6 +12,7 @@ platformPostgres:
 # The sandbox disks (ADR-0166): the registry of the signed image disks and the
 # public key of the disk signing seed. scripts/baseline-up.sh sets both from
 # substrate.env and the keyring; an example pair here so the render has them.
+# The audit export names the same durable bucket (charts#446).
 gibson-workloads:
   setec:
     launcher:
@@ -19,3 +20,7 @@ gibson-workloads:
       diskBuilder:
         publicKeys:
           - "ExAmPlEpUbLiCkEy0000000000000000000000000000="
+  gibson:
+    auditExport:
+      bucket: "example-durable-bucket"
+      lockMode: "GOVERNANCE"

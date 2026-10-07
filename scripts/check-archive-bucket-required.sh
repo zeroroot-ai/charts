@@ -19,7 +19,7 @@ must_fail() { # <label> <expected message fragment> <helm args...>
   local label="$1" want="$2"; shift 2
   if helm template gibson "$@" --namespace gibson > /dev/null 2> "$WORK/err"; then
     echo "❌ $label rendered with no bucket; the required guard did not fire"; fail=1
-  elif ! grep -qF -- "$want" "$WORK/err"; then
+  elif ! grep -qE -- "$want" "$WORK/err"; then
     echo "❌ $label failed, but not on the bucket: $(tail -n1 "$WORK/err")"; fail=1
   fi
 }
@@ -30,8 +30,16 @@ must_pass() { # <label> <helm args...>
 }
 
 # THE FIXTURE THIS EXISTS FOR: the baseline alone has no bucket and must refuse.
-must_fail "helm/gibson baseline alone" "destinationPath is REQUIRED" \
+# Two values name the durable bucket: the WAL archive and the audit export
+# (charts#446). Either required guard may fire first.
+must_fail "helm/gibson baseline alone" "destinationPath is REQUIRED|auditExport.bucket is REQUIRED" \
   "$ROOT/helm/gibson" -f "$ROOT/helm/gibson/values-baseline.yaml"
+must_fail "helm/gibson baseline with an archive bucket only" "auditExport.bucket is REQUIRED" \
+  "$ROOT/helm/gibson" -f "$ROOT/helm/gibson/values-baseline.yaml" \
+  --set "platformPostgres.backup.destinationPath=s3://example-durable-bucket/backups/postgres/"
+must_fail "helm/gibson with two different buckets" "differ: both name the one durable bucket" \
+  "$ROOT/helm/gibson" -f "$ROOT/helm/gibson/values-baseline.yaml" -f "$ROOT/helm/testdata/render-inputs/gibson.yaml" \
+  --set "gibson-workloads.gibson.auditExport.bucket=another-bucket"
 must_fail "helm/gibson-velero alone" "bucket.name is required" \
   "$ROOT/helm/gibson-velero"
 # The installer's inputs satisfy both.
@@ -47,8 +55,8 @@ for rung in developer ci; do
     "$ROOT/helm/gibson-velero" -f "$ROOT/helm/gibson-velero/values-$rung.yaml"
 done
 # And the defaults name nobody's bucket.
-if grep -nE '^\s*(destinationPath|endpointURL|name|endpoint): *"(s3://gibson-kind|http://172\.18\.255\.250).*"' \
-     "$ROOT/helm/gibson/values.yaml" "$ROOT/helm/gibson-velero/values.yaml"; then
+if grep -nE '^\s*(destinationPath|endpointURL|name|endpoint|bucket): *"(s3://gibson-kind|gibson-kind|http://172\.18\.255\.250).*"' \
+     "$ROOT/helm/gibson/values.yaml" "$ROOT/helm/gibson-velero/values.yaml" "$ROOT/helm/gibson-workloads/values.yaml"; then
   echo "❌ a chart default names kind's stage-0 bucket or MinIO address"; fail=1
 fi
 

@@ -53,6 +53,14 @@ claim the role `postgres`.
 {{- if not (regexMatch "^s3://[^/]+/backups/" $dest) }}
   {{- fail (printf "platformPostgres.backup.destinationPath %q must be s3://<durable-bucket>/backups/<prefix>: backups/ is the prefix the durable bucket's lifecycle rule covers and preflight proves (deploy#1730)." $dest) }}
 {{- end }}
+{{- /* One durable bucket (charts#446): the audit export of the daemon writes
+       to the same bucket as the WAL archive. Two values name it, so the
+       render fails when they differ. */ -}}
+{{- $axBucket := ((((index .Values "gibson-workloads") | default dict).gibson | default dict).auditExport | default dict).bucket | default "" }}
+{{- $pgBucket := regexReplaceAll "^s3://([^/]+)/.*$" $dest "${1}" }}
+{{- if ne $axBucket $pgBucket }}
+  {{- fail (printf "gibson-workloads.gibson.auditExport.bucket %q and the bucket of platformPostgres.backup.destinationPath %q differ: both name the one durable bucket of the environment (charts#446)." $axBucket $pgBucket) }}
+{{- end }}
 {{- $_ := required "platformPostgres.backup.s3Credentials.accessKeyIdSecret.name is REQUIRED (deploy#1730)." ($backup.s3Credentials.accessKeyIdSecret).name }}
 {{- $_ := required "platformPostgres.backup.s3Credentials.secretAccessKeySecret.name is REQUIRED (deploy#1730)." ($backup.s3Credentials.secretAccessKeySecret).name }}
 apiVersion: postgresql.cnpg.io/v1

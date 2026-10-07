@@ -73,6 +73,14 @@ jobs:
           echo "${kc_sha}  /tmp/kubeconform.tgz" | sha256sum -c -
           sudo tar -xzf /tmp/kubeconform.tgz -C /usr/local/bin kubeconform
           kubeconform -v
+          # promtool, for `make check`'s alert-rules-test gate (charts#446).
+          # Pinned by version and by the checksum of the release archive.
+          pv=3.15.0
+          pv_sha=2a542df32eac02ee17b9d844fb2aa1de00dafa5476579ba8a3ba862e9d572ea0
+          curl -fsSL "https://github.com/prometheus/prometheus/releases/download/v${pv}/prometheus-${pv}.linux-amd64.tar.gz" -o /tmp/prometheus.tgz
+          echo "${pv_sha}  /tmp/prometheus.tgz" | sha256sum -c -
+          sudo tar -xzf /tmp/prometheus.tgz -C /usr/local/bin --strip-components=1 "prometheus-${pv}.linux-amd64/promtool"
+          promtool --version
 
       # `make check` runs `chart-deps`, which pulls subcharts from ghcr. The
       # packages are public, but an unauthenticated pull is rate-limited by IP

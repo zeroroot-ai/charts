@@ -431,12 +431,17 @@ fi
 substrate_get() { grep -E "^$1=" "$SUBSTRATE_ENV" | head -n1 | cut -d= -f2-; }
 BUCKET_ENDPOINT="$(substrate_get BUCKET_ENDPOINT)"
 BUCKET_NAME="$(substrate_get BUCKET_NAME)"
+BUCKET_REGION="$(substrate_get BUCKET_REGION)"
 KEYRING_FILE="${KEYRING_FILE:-$(substrate_get KEYRING_FILE)}"
 log "stage 0: bucket s3://${BUCKET_NAME} at ${BUCKET_ENDPOINT}"
 NS="$NS" KEYRING_FILE="$KEYRING_FILE" "$(dirname "$0")/keyring-to-cluster.sh" "$SUBSTRATE_ENV"
 BUCKET_ARGS=(
   --set "platformPostgres.backup.destinationPath=s3://${BUCKET_NAME}/backups/postgres/"
   --set "platformPostgres.backup.endpointURL=${BUCKET_ENDPOINT}"
+  # The audit export writes to the same durable bucket (charts#446).
+  --set "gibson-workloads.gibson.auditExport.bucket=${BUCKET_NAME}"
+  --set "gibson-workloads.gibson.auditExport.endpoint=${BUCKET_ENDPOINT}"
+  --set "gibson-workloads.gibson.auditExport.region=${BUCKET_REGION:-us-east-1}"
 )
 
 # The sandbox disks (ADR-0166). The setec disk builder pushes one signed disk
