@@ -61,6 +61,7 @@ case "$args" in
     # kubectl names the default container on stderr when -c is absent and
     # the pod has init containers, as redis-stack does.
     case "$args" in *" -c redis-stack "*) ;; *) echo 'Defaulted container "redis-stack" out of: redis-stack, own-data (init), init-acl (init)' >&2 ;; esac
+    if [ -n "${EXEC_FAILS:-}" ]; then echo 'error: unable to upgrade connection: container not found ("redis-stack")' >&2; exit 1; fi
     read -r login
     grep -qxF -- "$login" "$S/acl" || { echo "AUTH failed: WRONGPASS invalid username-password pair"; echo "NOAUTH Authentication required."; exit 0; }
     case "$args" in
@@ -169,6 +170,15 @@ run_job() { run env PATH="$S/bin:$PATH" S="$S" bash "$WORK/rotation.sh"; }
   world new 2 old 1 old
   STATE_API_ERROR=1 run env PATH="$S/bin:$PATH" S="$S" STATE_API_ERROR=1 bash "$WORK/rotation.sh"
   [ "$status" -ne 0 ]
+  [ "$(cat "$S/state_ver")" = 1 ]
+  [ ! -s "$S/restarts" ]
+}
+
+@test "FAILING FIXTURE: a failed exec of an ACL step fails the job, names the pod, and keeps the state" {
+  world new 2 old 1 old
+  run env PATH="$S/bin:$PATH" S="$S" EXEC_FAILS=1 bash "$WORK/rotation.sh"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"gibson-redis-stack-0"* ]]
   [ "$(cat "$S/state_ver")" = 1 ]
   [ ! -s "$S/restarts" ]
 }

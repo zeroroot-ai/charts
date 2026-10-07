@@ -335,7 +335,7 @@ spec:
                     # stopped after step 3. The clients must restart now.
                     echo "[rotation] redis-stack already accepts only the new password; restarting the clients"
                   else
-                    echo "[rotation] FATAL: redis-stack accepts neither the previous nor the current password" >&2
+                    echo "[rotation] FATAL: ${REDIS_POD} accepts neither the previous nor the current password, or the exec into it failed" >&2
                     exit 1
                   fi
 
