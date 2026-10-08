@@ -7106,7 +7106,7 @@ spec:
               readOnly: true
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/connector-operator:v0.156.0@sha256:1100064e4c1d84eb2e2e88f41983c83346b915740a68ded201dd67e792a0c5b5"
+          image: "ghcr.io/zeroroot-ai/connector-operator:v0.157.0@sha256:ad19c7fb892f60fde7a35422ee1d51ff93222f94efafbe69244a118dacc14a3b"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -7238,7 +7238,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/platform-operator:v0.156.0@sha256:458af5deee409ff18d0086b2e7fdd5fb359a9b2cd1374c623d37553f5501dbec"
+          image: "ghcr.io/zeroroot-ai/platform-operator:v0.157.0@sha256:6cc65a3892a543d0afd2701522b1b51f370c95ae29fe20e529b65105c559ea03"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -7709,7 +7709,7 @@ spec:
               memory: 64Mi
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.156.0@sha256:87fa00247e12d039417bc86d07b7f3f83eddfbd3728ec02532a56047d05e6aa9"
+          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.157.0@sha256:d9b474f663b82e19511886115610baf0e4e2b7ebd910f31698d50ad5ce0062b0"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -9759,7 +9759,7 @@ spec:
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,tmp"
         checksum/registry: c1c29512582a893a867405ae14499183f952c17ed756544d689ca1b5877c2c5c
-        checksum/daemon-registry: 5a656067ee168ac71163f9533f5e3449d4941f0273384e4b21e38da89d1e2052
+        checksum/daemon-registry: d9ee0f16e0a93c2a8b19d85cdd6b2f967eeae34067c392899f20b40b9ed9daa7
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
         secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc,gibson-ext-authz-health-tls"
     spec:
@@ -9896,7 +9896,7 @@ spec:
               memory: 32Mi
       containers:
         - name: ext-authz
-          image: "ghcr.io/zeroroot-ai/ext-authz:v0.156.0@sha256:de8de16c113df239dbc100d1d6ae128834d784799dc318a2b50a89b076cfeb36"
+          image: "ghcr.io/zeroroot-ai/ext-authz:v0.157.0@sha256:a3ac56de171470f07c41962a7700ab8218cac25af5f7999714c920de51281aca"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -13098,7 +13098,7 @@ spec:
               memory: 32Mi
       containers:
         - name: gibson
-          image: "ghcr.io/zeroroot-ai/gibson:v0.156.0@sha256:ea83c303215cf5cfe6de26d06f2d907b1286e617781dadb56cafda4b4ba63036"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.157.0@sha256:37c276c4355161baf00daa9b4d38b75e2f43780d8dabe2ef8ba5bdea09ded61a"
           imagePullPolicy: Always
           ports:
             - name: callback
@@ -14327,7 +14327,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-fga-init-5a656067
+  name: gibson-gibson-workloads-fga-init-d9ee0f16
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -14396,7 +14396,7 @@ spec:
         # The entrypoint is the gibson binary, so command overrides it to get a
         # shell for the redirect. The runtime image is alpine-based and has one.
         - name: dump-model
-          image: "ghcr.io/zeroroot-ai/gibson:v0.156.0@sha256:ea83c303215cf5cfe6de26d06f2d907b1286e617781dadb56cafda4b4ba63036"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.157.0@sha256:37c276c4355161baf00daa9b4d38b75e2f43780d8dabe2ef8ba5bdea09ded61a"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -14844,7 +14844,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-active-session-backfill-5a656067
+  name: gibson-gibson-workloads-active-session-backfill-d9ee0f16
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -14935,7 +14935,7 @@ spec:
               memory: 64Mi
       containers:
         - name: active-session-backfill
-          image: "ghcr.io/zeroroot-ai/gibson:v0.156.0@sha256:ea83c303215cf5cfe6de26d06f2d907b1286e617781dadb56cafda4b4ba63036"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.157.0@sha256:37c276c4355161baf00daa9b4d38b75e2f43780d8dabe2ef8ba5bdea09ded61a"
           imagePullPolicy: Always
           # allowlist-bringup-job-idempotency (deploy#928): the command is a
           # single Go binary, not a shell script — there is no multi-step shell
@@ -20223,7 +20223,7 @@ spec:
       # The daemon image itself — same repo@digest the StatefulSet runs — so
       # `gibson --version` reports the toolchain the DEPLOYED binary was built
       # with, not some proxy. The runtime image is alpine-based (has /bin/sh).
-      image: "ghcr.io/zeroroot-ai/gibson:v0.156.0@sha256:ea83c303215cf5cfe6de26d06f2d907b1286e617781dadb56cafda4b4ba63036"
+      image: "ghcr.io/zeroroot-ai/gibson:v0.157.0@sha256:37c276c4355161baf00daa9b4d38b75e2f43780d8dabe2ef8ba5bdea09ded61a"
       imagePullPolicy: Always
       command: ["/bin/sh", "-c"]
       args:
