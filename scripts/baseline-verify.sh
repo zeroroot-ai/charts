@@ -25,9 +25,11 @@ deadline=$(( $(date +%s) + WAIT_SECS ))
 # seal_status — one poll of /v1/sys/seal-status. Prints the body, or nothing
 # and a non-zero status when the pod cannot be reached yet. Every caller is a
 # deadline loop, so the caller decides; nothing here swallows the exit code.
+# The listener serves only TLS (charts#540). The openbao-auto-init sidecar has
+# curl and sets CURL_CA_BUNDLE to the chart CA, so the poll runs there.
 seal_status() {
-  kubectl -n "$NS" exec "$POD" -c openbao -- \
-    sh -c 'wget -qO- http://127.0.0.1:8200/v1/sys/seal-status' 2>/dev/null
+  kubectl -n "$NS" exec "$POD" -c openbao-auto-init -- \
+    sh -c 'curl -sS https://127.0.0.1:8200/v1/sys/seal-status' 2>/dev/null
 }
 
 # --- 1. OpenBao is initialized AND unsealed -------------------------------

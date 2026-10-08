@@ -9,8 +9,9 @@ do not hold). It fails on:
   2. an OpenBao Service port whose targetPort is not a port of the OpenBao
      container,
   3. a plaintext OpenBao address anywhere in the render (an env value, a
-     script, a store, a generator, an issuer, a CR) or in the values files
-     of the charts: http:// with "openbao" in the host, or http:// on 8200,
+     script, a store, a generator, an issuer, a CR), in the values files
+     of the charts, or in an operator script under scripts/ (charts#554):
+     http:// with "openbao" in the host, or http:// on 8200,
   4. a ClusterSecretStore, a VaultDynamicSecret or a vault ClusterIssuer that
      dials OpenBao and names no CA,
   5. a container that dials OpenBao over https and does not trust the CA:
@@ -36,6 +37,9 @@ VALUES = [os.path.join("helm", "gibson", "values*.yaml"), os.path.join("helm", "
           os.path.join("helm", "testdata", "render-inputs", "*.yaml")]
 PLAIN = re.compile(r"http://(?:[^\s\"'/]*openbao[^\s\"']*|[^\s\"'/]*:8200[^\s\"']*)")
 TLS = re.compile(r"https://(?:[^\s\"'/]*openbao[^\s\"'/]*|127\.0\.0\.1):8200")
+# The operator scripts run against a live install through kubectl exec. They
+# are not part of the render, so the render scan cannot see them.
+SCRIPTS = [os.path.join("scripts", "**", "*.sh")]
 POD_KINDS = {"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Pod"}
 TRUST_ENV = ("SSL_CERT_DIR", "CURL_CA_BUNDLE", "BAO_CACERT")
 
@@ -118,6 +122,11 @@ def judge(docs: list, text: str) -> list[str]:
     return bad
 
 
+def script_findings(name: str, text: str) -> list[str]:
+    """Each plaintext OpenBao address in one operator script."""
+    return [f"{name}: a plaintext OpenBao address: {m}" for m in sorted(set(PLAIN.findall(text)))]
+
+
 def render_with_vault_issuer(root: str) -> tuple[list, str]:
     r = subprocess.run(
         ["helm", "template", "gibson", "helm/gibson", "--namespace", "gibson",
@@ -148,6 +157,11 @@ def audit(root: str) -> tuple[list[str], int]:
         for f in sorted(glob.glob(os.path.join(root, pattern))):
             for m in sorted(set(PLAIN.findall(open(f).read()))):
                 bad.append(f"{os.path.relpath(f, root)}: a plaintext OpenBao address: {m}")
+    scripts = sorted({f for pattern in SCRIPTS for f in glob.glob(os.path.join(root, pattern), recursive=True)})
+    if not scripts:
+        bad.append("no operator script under scripts/: this check is blind to them")
+    for f in scripts:
+        bad += script_findings(os.path.relpath(f, root), open(f).read())
     if not seen:
         bad.append("no golden render holds the OpenBao ConfigMap: this check is blind")
     return bad, seen
@@ -203,9 +217,16 @@ def selftest() -> int:
         if len(got) != want:
             print(f"SELFTEST FAIL: {what} must give {want} finding(s), got {got}")
             return 1
+    # charts#554: an operator script that calls OpenBao over plain HTTP.
+    if not script_findings("set.sh", 'curl -sS "http://127.0.0.1:8200/v1/secret/data/$K"\n'):
+        print("SELFTEST FAIL: an operator script with http://127.0.0.1:8200 must fail")
+        return 1
+    if script_findings("set.sh", 'curl -sS "https://127.0.0.1:8200/v1/secret/data/$K"\n'):
+        print("SELFTEST FAIL: an operator script with https://127.0.0.1:8200 must pass")
+        return 1
     print("  ✓ selftest: a plaintext listener, a listener with no certificate, a Service on a missing port, an "
-          "http:// address, a store or issuer with no CA, a client with no CA, a duplicate SSL_CERT_DIR and a test "
-          "Pod fail")
+          "http:// address, a store or issuer with no CA, a client with no CA, a duplicate SSL_CERT_DIR, a test "
+          "Pod and an operator script on http:// fail")
     return 0
 
 
