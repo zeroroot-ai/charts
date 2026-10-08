@@ -36,7 +36,7 @@ teardown() { rm -rf "$S"; }
 
 # slot <name> <kid> <age in seconds>: one slot of the store.
 slot() {
-  if [ -n "$2" ]; then printf '{"kid":"%s","key":"seed-%s"}' "$2" "$2" > "$S/$1.json"
+  if [ -n "$2" ]; then printf '{"kid":"%s","key":"%s"}' "$2" "$(printf '%s' "$2" | sha256sum | cut -c1-32)" > "$S/$1.json"
   else printf '{"kid":"","key":""}' > "$S/$1.json"; fi
   echo "$3" > "$S/$1.age"
 }
@@ -100,4 +100,25 @@ run_rotate() {
   slot current nxt 2600000; slot next "" 0; slot previous cur 2600000
   run_rotate
   [ "$output" = "put previous " ]
+}
+
+@test "FAILING FIXTURE: a next with a kid and no seed is not promoted" {
+  slot current cur 2600000; slot previous "" 0
+  printf '{"kid":"nxt","key":""}' > "$S/next.json"; echo 700 > "$S/next.age"
+  run_rotate
+  [ "$output" = "none" ]
+}
+
+@test "FAILING FIXTURE: a next whose seed is not 32 bytes is not promoted" {
+  slot current cur 2600000; slot previous "" 0
+  printf '{"kid":"nxt","key":"too-short"}' > "$S/next.json"; echo 700 > "$S/next.age"
+  run_rotate
+  [ "$output" = "none" ]
+}
+
+@test "a next with a URL-safe base64 seed of 32 bytes is promoted" {
+  slot current cur 2600000; slot previous "" 0
+  printf '{"kid":"nxt","key":"%s"}' "$(head -c 32 /dev/urandom | base64 | tr -d '\n=' | tr '+/' '-_')" > "$S/next.json"; echo 700 > "$S/next.age"
+  run_rotate
+  [ "${lines[1]}" = "put current nxt" ]
 }
