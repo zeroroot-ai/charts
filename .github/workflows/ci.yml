@@ -51,8 +51,12 @@ jobs:
           version: v3.18.4
 
       # bats, for `make check`'s purge-tenant-backup gate (tests/*.bats).
+      # From its pinned release on GitHub, not from apt: the Ubuntu mirror
+      # hung this step past the job timeout on 2026-10-07 (charts#541).
       - name: Install bats
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+        run: |
+          scripts/install-bats.sh "$HOME/.local"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # actionlint, for `make check`'s workflows gate. A workflow with a bad
       # expression is rejected by GitHub at dispatch and reports failure with
