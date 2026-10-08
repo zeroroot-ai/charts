@@ -12,8 +12,9 @@ pods. This release brings its own:
                    nothing else.
 
 The bucket allow names only the bucket host:
-  - bucket.endpoint empty (AWS S3): the host names s3.<region>.amazonaws.com
-    and <bucket>.s3.<region>.amazonaws.com, on 443.
+  - bucket.endpoint empty (AWS S3): the host <bucket>.s3.<region>.amazonaws.com,
+    on 443. The location addresses the bucket by host there, so the regional
+    host s3.<region>.amazonaws.com, which reaches each bucket, stays closed.
   - bucket.endpoint a host name: that name, on the port of the URL.
   - bucket.endpoint an IP address (the kind MinIO): that address, on the
     port of the URL.
@@ -86,18 +87,18 @@ metadata:
     app.kubernetes.io/component: network-velero
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
-spec:
-  description: "Velero reaches the API server and the backup bucket only."
-  specs:
+{{- /* specs is a top-level field of the policy, beside metadata, not a field
+       of spec: the CRD refuses .spec.specs (charts#494). */}}
+specs:
     {{- range $sel := list (dict "matchLabels" (dict "app.kubernetes.io/name" "velero")) (dict "matchExpressions" (list (dict "key" "velero.io/repo-name" "operator" "Exists"))) }}
-    - endpointSelector:
+    - description: "Velero reaches the API server and the backup bucket only."
+      endpointSelector:
         {{- toYaml $sel | nindent 8 }}
       egress:
         - toEntities:
             - kube-apiserver
         {{- if not $endpoint }}
         - toFQDNs:
-            - matchName: {{ printf "s3.%s.amazonaws.com" $bucket.region | quote }}
             - matchName: {{ printf "%s.s3.%s.amazonaws.com" $bucket.name $bucket.region | quote }}
           toPorts:
             - ports:

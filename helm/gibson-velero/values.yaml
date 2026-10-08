@@ -24,8 +24,10 @@ bucket:
   # bucket lifecycle rule covers; the render fails otherwise. Retention is
   # that rule and nothing else.
   prefix: "backups/velero"
-  # MinIO addresses buckets by path, S3 by host. True is correct for both:
-  # AWS still serves path-style addressing.
+  # With an endpoint (MinIO, another S3 store): true addresses the bucket by
+  # path. Read only with an endpoint. On AWS S3 (no endpoint) the chart always
+  # addresses the bucket by host, because the network policy opens only the
+  # host of the bucket (templates/network-policy.yaml).
   forcePathStyle: true
   # How often the server re-validates the location.
   validationFrequency: "1h"
