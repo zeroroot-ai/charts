@@ -360,6 +360,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "gibson.dashboardSecrets.name" . }}
                   key: auth-secret
+            # ADR-0171: the seed pass rotates auth-secret every 720 hours and
+            # keeps the old value here. Empty before the first rotation.
+            - name: AUTH_SECRET_PREVIOUS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.dashboardSecrets.name" . }}
+                  key: auth-secret-previous
             # Stable encryption key for Next.js Server Action IDs — see
             # dashboard/secret.yaml + next.config.ts. Without this, every
             # dashboard rebuild rotates action IDs and any browser tab that

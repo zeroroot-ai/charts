@@ -1287,6 +1287,14 @@ spec:
                     svctoken)
                       val=$(kube_read_token "$PLATFORM_TOKEN_SECRET")
                       if [ -n "$val" ] && [ "$val" != "$curval" ]; then write=1; fi ;;
+                    prev)
+                      # The old value of the property this one follows, so a
+                      # consumer accepts both during a rotation (ADR-0171).
+                      if [ "$rotate" = 1 ]; then
+                        val=$(printf '%s' "$cur" | jq -r --arg p "$arg" '.[$p] // ""'); write=1
+                      elif [ "$present" != "true" ]; then
+                        val=""; write=1
+                      fi ;;
                     rand|randb64|rand8|pw)
                       if [ "$present" != "true" ] || [ "$rotate" = 1 ]; then
                         val=$(seed_generate "$tok" "$kind" "$arg") || return 1

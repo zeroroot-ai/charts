@@ -131,6 +131,26 @@ run_created() {
   [ "$output" = "<failed>" ]
 }
 
+@test "a prev property takes the old value of the property it follows on a rotation" {
+  run run_seed '{"auth_secret":"old","auth_secret_previous":"older"}' $(( 721 * 3600 )) 'auth_secret:rand auth_secret_previous:prev:auth_secret @720h'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r .auth_secret)" = "new-rand" ]
+  [ "$(printf '%s' "$output" | jq -r .auth_secret_previous)" = "old" ]
+}
+
+@test "a prev property starts empty and does not change without a rotation" {
+  run run_seed '{}' '' 'auth_secret:rand auth_secret_previous:prev:auth_secret @720h'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r .auth_secret_previous)" = "" ]
+  run run_seed '{"auth_secret":"cur","auth_secret_previous":"prev"}' 3600 'auth_secret:rand auth_secret_previous:prev:auth_secret @720h'
+  [ "$output" = "<unchanged>" ]
+}
+
+@test "the dashboard session secret has a lifetime and keeps its previous value" {
+  grep -q '^gibson-dashboard-session-secrets auth_secret:rand auth_secret_previous:prev:auth_secret server_actions_key:randb64 @[0-9][0-9]*h$' \
+    "$ROOT/helm/gibson-workloads/files/openbao-seed-keys.txt"
+}
+
 @test "the redis password has a lifetime in the seed table" {
   grep -q '^gibson-redis-password password:pw @[0-9][0-9]*h$' \
     "$ROOT/helm/gibson-workloads/files/openbao-seed-keys.txt"

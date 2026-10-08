@@ -11759,7 +11759,7 @@ spec:
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,shared-identity,next-cache,tmp"
         checksum/config: e563bc5ecf6d646d021bd5dc33d7a7dd726b0e8eda1299977e4b43923b0c2089
-        checksum/secret: 63d61f5eecbd9fe2aa37b2b997c1683e6a8c6aa09ed0f29c5b74a5f153d825f9
+        checksum/secret: a63fb887766463a15afacd6caaa488d50993cff1c5300f5559dad586b60df704
         # Pod-roll-on-Secret-change is delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). The prior pattern
         # (a checksum annotation computing sha256sum over a lookup-loaded
         # Secret) was broken under Argo's offline `helm template` render —
@@ -12102,6 +12102,13 @@ spec:
                 secretKeyRef:
                   name: gibson-gibson-workloads-dashboard-secrets
                   key: auth-secret
+            # ADR-0171: the seed pass rotates auth-secret every 720 hours and
+            # keeps the old value here. Empty before the first rotation.
+            - name: AUTH_SECRET_PREVIOUS
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-gibson-workloads-dashboard-secrets
+                  key: auth-secret-previous
             # Stable encryption key for Next.js Server Action IDs — see
             # dashboard/secret.yaml + next.config.ts. Without this, every
             # dashboard rebuild rotates action IDs and any browser tab that
@@ -14608,6 +14615,9 @@ spec:
               #                  the literal <v> (charts#486). A test-mode placeholder stays
               #                  only while the keyring member is empty.
               #   svctoken       the platform service token the sidecar minted
+              #   prev:<prop>    the value <prop> had before the last rotation of the key
+              #                  (ADR-0171), empty before the first one. A consumer that
+              #                  accepts the old and the new value reads both.
               #
               # A property that is PRESENT is never overwritten, with two exceptions:
               # `input`, `inputjson` and `inputor` follow the keyring (a non-empty keyring value that
@@ -14623,7 +14633,7 @@ spec:
               gibson-spire-postgres-password password:pw
               gibson-redis-password password:pw @720h
               zitadel-masterkey value:rand
-              gibson-dashboard-session-secrets auth_secret:rand server_actions_key:randb64
+              gibson-dashboard-session-secrets auth_secret:rand auth_secret_previous:prev:auth_secret server_actions_key:randb64 @720h
               gibson-cg-signing-key key:rand kid:rand8
               # The verify-only slots of the CG signing key set. Empty in steady state; the
               # sidecar fills and clears them during a rotation (cg_key_rotate, ADR-0171).
@@ -15434,6 +15444,14 @@ spec:
                     svctoken)
                       val=$(kube_read_token "$PLATFORM_TOKEN_SECRET")
                       if [ -n "$val" ] && [ "$val" != "$curval" ]; then write=1; fi ;;
+                    prev)
+                      # The old value of the property this one follows, so a
+                      # consumer accepts both during a rotation (ADR-0171).
+                      if [ "$rotate" = 1 ]; then
+                        val=$(printf '%s' "$cur" | jq -r --arg p "$arg" '.[$p] // ""'); write=1
+                      elif [ "$present" != "true" ]; then
+                        val=""; write=1
+                      fi ;;
                     rand|randb64|rand8|pw)
                       if [ "$present" != "true" ] || [ "$rotate" = 1 ]; then
                         val=$(seed_generate "$tok" "$kind" "$arg") || return 1
@@ -20278,11 +20296,16 @@ spec:
       type: Opaque
       data:
         auth-secret: "{{ .auth_secret }}"
+        # The secret auth-secret replaced at the last rotation (ADR-0171).
+        # The dashboard signs with auth-secret and accepts both.
+        auth-secret-previous: "{{ .auth_secret_previous }}"
         next-server-actions-encryption-key: "{{ .server_actions_key }}"
         captcha-secret-key: "{{ .captcha_secret_key }}"
   data:
     - secretKey: auth_secret
       remoteRef: { key: gibson-dashboard-session-secrets, property: auth_secret }
+    - secretKey: auth_secret_previous
+      remoteRef: { key: gibson-dashboard-session-secrets, property: auth_secret_previous }
     - secretKey: server_actions_key
       remoteRef: { key: gibson-dashboard-session-secrets, property: server_actions_key }
     - secretKey: captcha_secret_key
