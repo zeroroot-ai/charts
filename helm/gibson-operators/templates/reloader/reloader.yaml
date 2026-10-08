@@ -4,8 +4,9 @@ and triggers rolling restarts of Deployments / StatefulSets / DaemonSets
 that carry the `secret.reloader.stakater.com/reload` annotation.
 
 Required by design deploy (PRD deploy#255) / slice S7 (deploy#263):
-the chart's daemon StatefulSet, dashboard Deployment, and redis-stack
-StatefulSet all carry the explicit-annotation form of Reloader's contract.
+the chart's daemon StatefulSet and dashboard Deployment carry the
+explicit-annotation form of Reloader's contract. redis-stack does not: its
+password rotation is the CronJob <release>-redis-rotation (ADR-0171).
 Without the controller running, the annotations are no-ops and Secret
 rotations require manual `kubectl rollout restart`.
 

@@ -7,7 +7,11 @@
 # the cross-repo record of which key each consumer reads, and
 # zeroroot-ai/hosted scripts/check-secret-contract.py gates it.
 #
-# Format: one key per line, `<key> <property>:<kind>[:<arg>] ...`.
+# Format: one key per line, `<key> <property>:<kind>[:<arg>] ... [@<hours>h]`.
+# The optional last field is the lifetime of the key (ADR-0171). When the
+# current version is older than it, the sidecar writes a new value for each
+# generated property (rand, randb64, rand8, pw). Give a key a lifetime only
+# when each consumer has a rotation path that keeps service.
 # Comment lines start with `#`.
 #
 # Kinds, and what the sidecar does when the property is ABSENT:
@@ -46,7 +50,7 @@ gibson-zitadel-postgres-password password:pw
 gibson-openfga-postgres-password password:pw
 gibson-spire-postgres-password password:pw
 gibson-neo4j-password password:pw
-gibson-redis-password password:pw
+gibson-redis-password password:pw @720h
 zitadel-masterkey value:rand
 gibson-dashboard-session-secrets auth_secret:rand server_actions_key:randb64
 gibson-cg-signing-key key:rand kid:rand8
