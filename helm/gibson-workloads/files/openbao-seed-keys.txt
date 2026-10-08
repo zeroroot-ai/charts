@@ -54,6 +54,10 @@ gibson-redis-password password:pw @720h
 zitadel-masterkey value:rand
 gibson-dashboard-session-secrets auth_secret:rand server_actions_key:randb64
 gibson-cg-signing-key key:rand kid:rand8
+# The verify-only slots of the CG signing key set. Empty in steady state; the
+# sidecar fills and clears them during a rotation (cg_key_rotate, ADR-0171).
+gibson-cg-signing-key-next kid:empty key:empty
+gibson-cg-signing-key-previous kid:empty key:empty
 gibson-zitadel-system-bot-key private_key:rsapem:zitadel-system-bot public_key:rsapub:zitadel-system-bot
 ghcr-pull-secret pat:input:ghcr-pull-token
 gibson-dashboard-auth-hardening captcha_secret_key:empty email_resend_api_key:empty

@@ -229,9 +229,12 @@ probe-timeouts: ## Every container probe the chart renders states its timeoutSec
 openbao-login-diagnosis: ## A failed OpenBao kubernetes-auth login names which step failed, not just 403 (charts#330)
 	@./scripts/check-openbao-login-diagnosis.sh
 
-cg-rotation-window: ## The CG signing-key rotation window renders the previous key, and steady state does not (charts#316)
+cg-rotation-window: ## The CG signing-key set projects its current, next and previous slots always, with no rotation flag (ADR-0171)
+	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
+	@$(MAKE) -s chart-deps >/dev/null
 	@python3 scripts/check-cg-rotation-window.py --selftest
 	@python3 scripts/check-cg-rotation-window.py
+	@bats tests/openbao-cg-key-rotation.bats
 
 email-smtp-external-secret: ## The daemon's SMTP ExternalSecret renders only with the seam on, and reads both halves of the credential (hosted secret-contract chart-gate)
 	@python3 scripts/check-email-smtp-external-secret.py --selftest
