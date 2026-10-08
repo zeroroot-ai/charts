@@ -48,7 +48,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: ext-authz
-        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis" "openbao") "kubeApi" true) | nindent 8 }}
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis" "openbao") "kubeApi" true "metricsPort" 9003) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -179,6 +179,10 @@ spec:
             - name: http
               containerPort: {{ .Values.extAuthz.ports.http | default 9002 }}
               protocol: TCP
+            # The metrics-only listener (charts#515): GET /metrics, mTLS.
+            - name: metrics
+              containerPort: 9003
+              protocol: TCP
           env:
             - name: EXT_AUTHZ_LOG_LEVEL
               value: {{ .Values.extAuthz.logLevel | default "info" | quote }}
@@ -186,6 +190,8 @@ spec:
               value: ":{{ .Values.extAuthz.ports.grpc | default 9001 }}"
             - name: EXT_AUTHZ_HTTP_ADDR
               value: ":{{ .Values.extAuthz.ports.http | default 9002 }}"
+            - name: EXT_AUTHZ_METRICS_ADDR
+              value: ":9003"
             {{- /* ext-authz speaks HTTP/JSON to OpenFGA (Go net/http client),
                   NOT gRPC. Must point at OpenFGA's HTTP listener (8080), not
                   the gRPC listener (8081) — pointing at gRPC causes

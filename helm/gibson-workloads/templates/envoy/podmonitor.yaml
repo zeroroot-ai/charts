@@ -1,8 +1,12 @@
-{{/* Envoy ServiceMonitor (Week 2 §3 R21). Scrapes /stats/prometheus on :9901, the admin_probe listener that fronts the loopback admin.
-     It renders only where the cluster serves monitoring.coreos.com/v1 (ADR-0087). */}}
+{{/* Envoy PodMonitor (Week 2 §3 R21). Scrapes /stats/prometheus on :9901, the
+     admin_probe listener that fronts the loopback admin. A PodMonitor, not a
+     ServiceMonitor: the edge Service is public and must not publish :9901
+     (charts#515; the old ServiceMonitor named a Service port that did not
+     exist). It renders only where the cluster serves
+     monitoring.coreos.com/v1 (ADR-0087). */}}
 {{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
 apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
+kind: PodMonitor
 metadata:
   name: {{ .Release.Name }}-envoy
   namespace: {{ .Release.Namespace }}
@@ -14,9 +18,8 @@ spec:
     matchLabels:
       {{- include "gibson.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: envoy
-  endpoints:
+  podMetricsEndpoints:
     - port: admin
       path: /stats/prometheus
       interval: 30s
-
 {{- end }}

@@ -1,0 +1,28 @@
+{{/*
+The scrape object of the dashboard (charts#515). The dashboard alert rules
+(templates/dashboard/auth-prometheusrule.yaml) read its dashboard_* series,
+and without this object no scraper collected them. The dashboard serves
+GET /metrics on the metrics-only port 9464, plain HTTP; the metrics network
+rule admits only the cluster scraper there. It renders only where the
+cluster serves monitoring.coreos.com/v1 (ADR-0087).
+*/}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dashboard
+spec:
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dashboard
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scheme: http
+{{- end }}

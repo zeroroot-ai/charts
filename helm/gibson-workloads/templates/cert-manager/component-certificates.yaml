@@ -6,12 +6,16 @@ awspca-issuer in prod, vault-issuer in kind, selfsigned-ca otherwise. Each
 cert lands in a Secret that one listener mounts:
 
   - gibson-daemon-metrics-tls   the daemon metrics listener :9090
-  - gibson-ext-authz-health-tls the ext-authz health listener :9002
+  - gibson-ext-authz-health-tls the ext-authz health listener :9002 and its
+                                metrics listener :9003
+  - gibson-metrics-scraper-tls  the client certificate that the scrape objects
+                                present to the mTLS metrics listeners
   - gibson-openfga-http-tls     the OpenFGA HTTP listener :8080
 
 Rotation (ADR-0171, row component-tls): cert-manager renews each cert
-360 hours before its end. Each listener loads its cert one time at start,
-so Reloader restarts the workload when its Secret changes (the
+360 hours before its end. The metrics listeners of the daemon and ext-authz
+re-read their files on each handshake. Reloader restarts the workloads whose
+other listeners load the cert one time at start (the
 secret.reloader.stakater.com/reload annotation of the daemon, ext-authz
 and OpenFGA). The SPIFFE listeners (daemon :50001 and :50051, ext-authz
 :9001) take their certs from SPIRE, not from this file.
@@ -88,6 +92,36 @@ spec:
     - {{ printf "%s-ext-authz" .Release.Name | quote }}
     - {{ printf "%s-ext-authz.%s.svc" .Release.Name .Release.Namespace | quote }}
     - {{ printf "%s-ext-authz.%s.svc.cluster.local" .Release.Name .Release.Namespace | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ $issuerName | quote }}
+    kind: {{ $issuerKind | quote }}
+    group: {{ ternary "awspca.cert-manager.io" "cert-manager.io" (eq $issuerKind "AWSPCAClusterIssuer") | quote }}
+
+{{- /* The client certificate of the cluster scraper (charts#515). The daemon
+       :9090 and ext-authz :9003 metrics listeners require a client cert that
+       chains to this issuer. The ServiceMonitors present this one. The
+       listeners re-read their material on renewal (gibson observability
+       metrics server), so a renewed cert needs no restart. */}}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gibson-metrics-scraper-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics-scraper-tls
+spec:
+  secretName: gibson-metrics-scraper-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: metrics-scraper
+  usages:
+    - digital signature
+    - client auth
   privateKey:
     algorithm: ECDSA
     size: 256

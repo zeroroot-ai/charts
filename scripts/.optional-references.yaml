@@ -41,7 +41,6 @@ cases:
   helm/gibson-workloads/templates/_validators.tpl default {{- $tenantNeo4jTag = .tag | default "" -}}: The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
   helm/gibson-workloads/templates/_validators.tpl default {{- $tier := $setec.tier | default "" -}}: The validator normalizes an absent value to empty and then compares it; a wrong or missing value fails the render.
   helm/gibson-workloads/templates/auth/openbao-deployment.yaml optional secret {{ $keyringSecretName | quote }}: The two keyring inputs (pull token, SMTP relay) are optional members of the keyring; the pod starts without them (deploy#1732).
-  helm/gibson-workloads/templates/dashboard/deployment.yaml default {{ .metrics.allowedCIDRs | default "" | quote }}: Empty disables CIDR filtering of the metrics endpoint, which stays cluster-internal.
   helm/gibson-workloads/templates/dashboard/deployment.yaml optional configMap gibson-sa-identity-map: The Zitadel bootstrap writes the map after install; the resolve-sa-identity-map init container handles the empty case (canonical-service-identity Req 5).
   helm/gibson-workloads/templates/dashboard/deployment.yaml optional secret gibson-dashboard-oidc: The platform-operator mints the dashboard OIDC client at run time; the wait-for-zitadel-client init container blocks the main containers until both keys are projected.
   ? helm/gibson-workloads/templates/envoy/configmap.yaml default {{- $envoyNodePort := .Values.envoy.service.nodePort | default "" -}}

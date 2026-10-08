@@ -34,5 +34,13 @@ spec:
           secret:
             name: gibson-daemon-metrics-tls
             key: ca.crt
+        # The listener requires a client cert (charts#515).
+        cert:
+          secret:
+            name: gibson-metrics-scraper-tls
+            key: tls.crt
+        keySecret:
+          name: gibson-metrics-scraper-tls
+          key: tls.key
 
 {{- end }}

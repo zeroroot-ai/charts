@@ -1,0 +1,28 @@
+{{/*
+The scrape object of the tenant-operator (charts#515). The alert rules of
+templates/tenant-operator/prometheusrule.yaml read its series, and without
+this object no scraper collected them. The manager serves plain http
+metrics on :8080 (--metrics-secure=false), through the Service
+gibson-tenant-operator-metrics. The chart ships no monitoring stack, so this
+renders only where the cluster serves monitoring.coreos.com/v1 (ADR-0087).
+*/}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gibson-tenant-operator
+  namespace: {{ .Values.tenantOperator.namespace | default "gibson" }}
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/component: tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gibson-tenant-operator
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 60s
+      scheme: http
+{{- end }}

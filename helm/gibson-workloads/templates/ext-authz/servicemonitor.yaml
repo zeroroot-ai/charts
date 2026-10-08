@@ -16,8 +16,25 @@ spec:
       {{- include "gibson.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: ext-authz
   endpoints:
-    - port: health
+    # The metrics-only listener :9003 (charts#515). It requires a client cert
+    # that chains to the component issuer, and serves the cert of
+    # gibson-ext-authz-health-tls.
+    - port: metrics
       path: /metrics
       interval: 30s
+      scheme: https
+      tlsConfig:
+        serverName: {{ printf "%s-ext-authz.%s.svc" .Release.Name .Release.Namespace | quote }}
+        ca:
+          secret:
+            name: gibson-ext-authz-health-tls
+            key: ca.crt
+        cert:
+          secret:
+            name: gibson-metrics-scraper-tls
+            key: tls.crt
+        keySecret:
+          name: gibson-metrics-scraper-tls
+          key: tls.key
 
 {{- end }}

@@ -9187,6 +9187,11 @@ spec:
       port: 3000
       targetPort: http
       protocol: TCP
+    # The metrics-only listener (charts#515).
+    - name: metrics
+      port: 9464
+      targetPort: metrics
+      protocol: TCP
   selector:
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
@@ -9321,6 +9326,11 @@ spec:
       targetPort: http
       protocol: TCP
       appProtocol: http
+    # The metrics-only listener (charts#515).
+    - name: metrics
+      port: 9003
+      targetPort: metrics
+      protocol: TCP
 ---
 # Source: gibson/charts/gibson-workloads/templates/gibson/service.yaml
 apiVersion: v1
@@ -10756,7 +10766,7 @@ spec:
               readOnly: true
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/connector-operator:v0.154.0@sha256:cdbc2d083e9573ec281a28bed4f90085cf8a28876a34fa834703a45b81b454a8"
+          image: "ghcr.io/zeroroot-ai/connector-operator:v0.156.0@sha256:1100064e4c1d84eb2e2e88f41983c83346b915740a68ded201dd67e792a0c5b5"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -10888,7 +10898,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/platform-operator:v0.154.0@sha256:cfae30520dcf12332da47802c5841d618cc2ab28e7d73b6ae845f967e6b09e0c"
+          image: "ghcr.io/zeroroot-ai/platform-operator:v0.156.0@sha256:458af5deee409ff18d0086b2e7fdd5fb359a9b2cd1374c623d37553f5501dbec"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -11359,7 +11369,7 @@ spec:
               memory: 64Mi
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.154.0@sha256:4c56cea8cd6d1c3be746d15f406a85ed11ea97f2961ec98962de8f80ece4943e"
+          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.156.0@sha256:87fa00247e12d039417bc86d07b7f3f83eddfbd3728ec02532a56047d05e6aa9"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -12151,6 +12161,7 @@ spec:
         gibson.zeroroot.ai/client-postgres: "true"
         gibson.zeroroot.ai/client-redis: "true"
         gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/metrics-port: "9464"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -12360,9 +12371,6 @@ spec:
         # Spec: canonical-service-identity Req 5 — resolve the readable SA
         # names in serviceAccounts.required against the gibson-sa-identity-map
         # ConfigMap (populated by the post-install Zitadel Job) into:
-        #   /shared/allowed-service-subjects   — comma-joined NUMERIC subs
-        #                                        consumed by the main container
-        #                                        as ALLOWED_SERVICE_SUBJECTS
         #   /shared/sa-identity-map.json       — full readable→numeric map
         #                                        consumed by identity-resolver
         #                                        for log enrichment
@@ -12388,7 +12396,6 @@ spec:
               # has no outbound network to alpine repos.
               echo "Resolving SA identity map (required: ${REQUIRED})..."
               if [ -z "$REQUIRED" ]; then
-                : > /shared/allowed-service-subjects
                 printf '{}' > /shared/sa-identity-map.json
                 echo "Resolved: (no SAs required)"
                 exit 0
@@ -12398,7 +12405,6 @@ spec:
                 ALL_SET="true"
                 JSON="{"
                 FIRST=true
-                OUT=""
                 for sa in $REQUIRED; do
                   if [ -r "/var/run/sa-identity-map/${sa}" ]; then
                     val=$(cat "/var/run/sa-identity-map/${sa}")
@@ -12410,18 +12416,16 @@ spec:
                     break
                   fi
                   if [ "$FIRST" = "true" ]; then
-                    OUT="$val"; FIRST=false
+                    FIRST=false
                     JSON="${JSON}\"${sa}\":\"${val}\""
                   else
-                    OUT="${OUT},${val}"
                     JSON="${JSON},\"${sa}\":\"${val}\""
                   fi
                 done
                 if [ "$ALL_SET" = "true" ]; then
                   JSON="${JSON}}"
-                  printf '%s' "$OUT" > /shared/allowed-service-subjects
                   printf '%s' "$JSON" > /shared/sa-identity-map.json
-                  echo "Resolved: $OUT"
+                  echo "Resolved: $JSON"
                   exit 0
                 fi
                 if [ $SECONDS_ -ge 600 ]; then
@@ -12440,35 +12444,16 @@ spec:
               mountPath: /shared
       containers:
         - name: dashboard
-          image: "ghcr.io/zeroroot-ai/dashboard:v0.128.0@sha256:41ce2921bd056f01938bb1188644ba16baac7503c43971293c1cad880ffa3588"
+          image: "ghcr.io/zeroroot-ai/dashboard:v0.130.1@sha256:19b122306fe11a6c3131fd1f503e8cce8c296507b2ca609a6006c0817eaa0544"
           imagePullPolicy: IfNotPresent
-          # Spec: canonical-service-identity Req 5 — the resolve-sa-identity-map
-          # init container writes the comma-joined numeric subs to
-          # /shared/allowed-service-subjects. Wrap the image's default CMD
-          # (node server.js) to source that file into ALLOWED_SERVICE_SUBJECTS
-          # before exec — keeps verifyZitadelBearer's env-var contract.
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              if [ -s /shared/allowed-service-subjects ]; then
-                ALLOWED_SERVICE_SUBJECTS="$(cat /shared/allowed-service-subjects)"
-                export ALLOWED_SERVICE_SUBJECTS
-                echo "[startup] ALLOWED_SERVICE_SUBJECTS resolved from sa-identity-map"
-              elif [ -f /shared/allowed-service-subjects ]; then
-                # File exists but empty — the resolve-sa-identity-map init
-                # container short-circuited because serviceAccounts.required
-                # is empty (kind dev). Continue with no allowed subjects.
-                ALLOWED_SERVICE_SUBJECTS=""
-                export ALLOWED_SERVICE_SUBJECTS
-                echo "[startup] ALLOWED_SERVICE_SUBJECTS empty (no service accounts required)"
-              else
-                echo "[startup] FATAL: /shared/allowed-service-subjects missing or empty — resolve-sa-identity-map init container did not run" >&2
-                exit 1
-              fi
-              exec node server.js
           ports:
             - name: http
               containerPort: 3000
+              protocol: TCP
+            # The metrics-only listener (charts#515): GET /metrics, plain HTTP.
+            # The network rule admits only the cluster scraper to it.
+            - name: metrics
+              containerPort: 9464
               protocol: TCP
           env:
             # NODE_OPTIONS — the V8 heap ceiling tracks this container's memory
@@ -12730,18 +12715,6 @@ spec:
             # Auth.js log level, and powers the /api/debug/recent-errors
             # ring buffer + the in-page DebugErrorPanel.
 
-            # Zitadel JWT verification — used by /api/admin/provisioning/*
-            # routes to authenticate in-cluster service accounts (operator,
-            # dashboard SA, tool-runner SA) via Zitadel-issued JWTs.
-            # Spec: service-acting-auth (R4.1, R9.2).
-            - name: ZITADEL_AUDIENCE
-              value: "gibson-platform"
-            # ALLOWED_SERVICE_SUBJECTS is NOT a static env entry — spec
-            # canonical-service-identity Req 5: the resolve-sa-identity-map
-            # init container writes the comma-joined numeric subs to
-            # /shared/allowed-service-subjects, and the container's command
-            # wrapper above sources that into the env before exec.
-            #
             # SA_IDENTITY_MAP_PATH points the in-process identity-resolver
             # helper at the JSON map for log enrichment ONLY — never an auth
             # decision (vitest visibility test pins the importer paths).
@@ -12765,8 +12738,6 @@ spec:
                 secretKeyRef:
                   name: gibson-gibson-workloads-dashboard-secrets
                   key: captcha-secret-key
-            - name: DASHBOARD_METRICS_ALLOWED_CIDRS
-              value: "" 
 
           # one-code-path #203: was `optional: true`. The chart renders
           # the dashboard-config ConfigMap unconditionally, so the
@@ -12813,8 +12784,7 @@ spec:
           # the shared-identity + envoy-ca mounts are unconditional —
           # Zitadel + Envoy are structurally required, so the
           # resolve-sa-identity-map init container always runs and the
-          # dashboard always reads /shared/allowed-service-subjects on
-          # startup.
+          # dashboard reads /shared/sa-identity-map.json for log enrichment.
           volumeMounts:
             # SPIRE agent socket — matches SPIFFE_ENDPOINT_SOCKET above.
             # Without this the wait-for-spire-socket init container gated the
@@ -13410,6 +13380,7 @@ spec:
         gibson.zeroroot.ai/client-redis: "true"
         gibson.zeroroot.ai/client-openbao: "true"
         gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/metrics-port: "9003"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -13421,7 +13392,7 @@ spec:
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,tmp"
         checksum/registry: c1c29512582a893a867405ae14499183f952c17ed756544d689ca1b5877c2c5c
-        checksum/daemon-registry: 1aefec506e4e855d4c7619472786376435758fa29be3234389f9c42a93036671
+        checksum/daemon-registry: 5a656067ee168ac71163f9533f5e3449d4941f0273384e4b21e38da89d1e2052
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
         secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc,gibson-ext-authz-health-tls"
     spec:
@@ -13558,7 +13529,7 @@ spec:
               memory: 32Mi
       containers:
         - name: ext-authz
-          image: "ghcr.io/zeroroot-ai/ext-authz:v0.154.0@sha256:394bfc66f423cf706a72b0abd1a8dddfd741662831eaa950b094d326ef31f738"
+          image: "ghcr.io/zeroroot-ai/ext-authz:v0.156.0@sha256:de8de16c113df239dbc100d1d6ae128834d784799dc318a2b50a89b076cfeb36"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -13575,6 +13546,10 @@ spec:
             - name: http
               containerPort: 9002
               protocol: TCP
+            # The metrics-only listener (charts#515): GET /metrics, mTLS.
+            - name: metrics
+              containerPort: 9003
+              protocol: TCP
           env:
             - name: EXT_AUTHZ_LOG_LEVEL
               value: "info"
@@ -13582,6 +13557,8 @@ spec:
               value: ":9001"
             - name: EXT_AUTHZ_HTTP_ADDR
               value: ":9002"
+            - name: EXT_AUTHZ_METRICS_ADDR
+              value: ":9003"
             - name: EXT_AUTHZ_FGA_ADDR
               value: "https://gibson-openfga:8080"
             # Redis is required (ADR-0045, charts#397). ext-authz does not start
@@ -16755,7 +16732,7 @@ spec:
               memory: 32Mi
       containers:
         - name: gibson
-          image: "ghcr.io/zeroroot-ai/gibson:v0.154.0@sha256:560d708bc9814dfb272643baa8afe14d1869b98f1833518a2f1c4048dbdccc23"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.156.0@sha256:ea83c303215cf5cfe6de26d06f2d907b1286e617781dadb56cafda4b4ba63036"
           imagePullPolicy: Always
           ports:
             - name: callback
@@ -17977,7 +17954,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-fga-init-1aefec50
+  name: gibson-gibson-workloads-fga-init-5a656067
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -18046,7 +18023,7 @@ spec:
         # The entrypoint is the gibson binary, so command overrides it to get a
         # shell for the redirect. The runtime image is alpine-based and has one.
         - name: dump-model
-          image: "ghcr.io/zeroroot-ai/gibson:v0.154.0@sha256:560d708bc9814dfb272643baa8afe14d1869b98f1833518a2f1c4048dbdccc23"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.156.0@sha256:ea83c303215cf5cfe6de26d06f2d907b1286e617781dadb56cafda4b4ba63036"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -18494,7 +18471,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-active-session-backfill-1aefec50
+  name: gibson-gibson-workloads-active-session-backfill-5a656067
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -18585,7 +18562,7 @@ spec:
               memory: 64Mi
       containers:
         - name: active-session-backfill
-          image: "ghcr.io/zeroroot-ai/gibson:v0.154.0@sha256:560d708bc9814dfb272643baa8afe14d1869b98f1833518a2f1c4048dbdccc23"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.156.0@sha256:ea83c303215cf5cfe6de26d06f2d907b1286e617781dadb56cafda4b4ba63036"
           imagePullPolicy: Always
           # allowlist-bringup-job-idempotency (deploy#928): the command is a
           # single Go binary, not a shell script — there is no multi-step shell
@@ -19312,6 +19289,35 @@ spec:
     - "gibson-ext-authz"
     - "gibson-ext-authz.gibson.svc"
     - "gibson-ext-authz.gibson.svc.cluster.local"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: "selfsigned-ca"
+    kind: "Issuer"
+    group: "cert-manager.io"
+---
+# Source: gibson/charts/gibson-workloads/templates/cert-manager/component-certificates.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gibson-metrics-scraper-tls
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: metrics-scraper-tls
+spec:
+  secretName: gibson-metrics-scraper-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: metrics-scraper
+  usages:
+    - digital signature
+    - client auth
   privateKey:
     algorithm: ECDSA
     size: 256
@@ -20164,6 +20170,19 @@ specs:
           - ports:
               - port: "8080"
                 protocol: TCP
+  - description: "The cluster scraper reaches the metrics port 9003 of the pods that serve metrics there."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/metrics-port: "9003"
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: "monitoring"
+              app.kubernetes.io/name: prometheus
+        toPorts:
+          - ports:
+              - port: "9003"
+                protocol: TCP
   - description: "The cluster scraper reaches the metrics port 9090 of the pods that serve metrics there."
     endpointSelector:
       matchLabels:
@@ -20202,6 +20221,19 @@ specs:
         toPorts:
           - ports:
               - port: "9402"
+                protocol: TCP
+  - description: "The cluster scraper reaches the metrics port 9464 of the pods that serve metrics there."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/metrics-port: "9464"
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: "monitoring"
+              app.kubernetes.io/name: prometheus
+        toPorts:
+          - ports:
+              - port: "9464"
                 protocol: TCP
   - description: "The cluster scraper reaches the metrics port 9901 of the pods that serve metrics there."
     endpointSelector:
@@ -21957,6 +21989,30 @@ spec:
       - name: "spire"
         owner: "spire"
 ---
+# Source: gibson/charts/gibson-workloads/templates/envoy/podmonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: gibson-envoy
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: envoy
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gibson-workloads
+      app.kubernetes.io/instance: gibson
+      app.kubernetes.io/component: envoy
+  podMetricsEndpoints:
+    - port: admin
+      path: /stats/prometheus
+      interval: 30s
+---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -22425,279 +22481,6 @@ spec:
               credential that changed, a lock mode or lock days that the
               bucket policy refuses, or a store that does not answer.
 ---
-# Source: gibson/charts/gibson-workloads/templates/observability/plugin-rotation-propagation-rule.yaml
-# PrometheusRule for the plugin rotation-propagation SLO defined in
-# spec plugin-runtime Requirement 10.6.
-#
-# SLO: end-to-end propagation latency from operator action (rotate a secret in
-# the dashboard) to plugin observation (cache invalidated) MUST meet a
-# 5-second p95 over a 10-minute rolling window.
-#
-# Companion script: tests/plugin/rotation-monitor.sh in zeroroot-ai/hosted
-# emits gibson_plugin_rotation_propagation_seconds samples on a CronJob
-# cadence; this rule alerts on p95 budget burn.
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-metadata:
-  name: gibson-plugin-rotation-propagation
-  labels:
-    app.kubernetes.io/name: gibson-plugin-runtime
-    app.kubernetes.io/component: plugin-rotation-slo
-    spec: plugin-runtime
-    requirement: "10.6"
-spec:
-  groups:
-    # ----------------------------------------------------------------------
-    # SLO recording rules — referenced by the alerts below and by the
-    # plugin runtime Grafana dashboard.
-    #
-    # The histogram is emitted by the plugin SDK metrics package at
-    # core/sdk/plugin/metrics/metrics.go.  Cardinality is bounded by the
-    # plugin label (manifest.metadata.name); install_id is intentionally
-    # absent from the histogram per the cardinality discipline in the
-    # package doc.
-    # ----------------------------------------------------------------------
-    - name: plugin-rotation-slos
-      interval: 30s
-      rules:
-        - record: slo:plugin_rotation_propagation_p95_seconds
-          expr: |
-            histogram_quantile(
-              0.95,
-              sum(rate(gibson_plugin_rotation_propagation_seconds_bucket[10m])) by (le, plugin)
-            )
-        - record: slo:plugin_rotation_propagation_p99_seconds
-          expr: |
-            histogram_quantile(
-              0.99,
-              sum(rate(gibson_plugin_rotation_propagation_seconds_bucket[10m])) by (le, plugin)
-            )
-
-    # ----------------------------------------------------------------------
-    # Alerts — page when the 10-minute rolling p95 exceeds the 5-second
-    # SLO.  The synthetic monitor CronJob runs hourly so the histogram
-    # contains a low-rate stream of samples; the 10m window matches the
-    # NFR Performance requirement and the requirement-10.6 SLO budget.
-    # ----------------------------------------------------------------------
-    - name: plugin-rotation-alerts
-      rules:
-        - alert: PluginRotationPropagationP95HighSlo
-          expr: |
-            slo:plugin_rotation_propagation_p95_seconds > 5
-          for: 10m
-          labels:
-            severity: page
-            component: plugin-runtime
-            slo: rotation-propagation
-            spec: plugin-runtime
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/plugin-rotation.md#pluginrotationpropagationp95highslo"
-            summary: "Plugin {{ $labels.plugin }} rotation-propagation p95 above 5s SLO"
-            description: |
-              The 10-minute p95 of gibson_plugin_rotation_propagation_seconds
-              for plugin {{ $labels.plugin }} has exceeded the 5-second SLO
-              for at least 10 minutes (Requirement 10.6).
-
-              Investigate:
-                - secrets-broker rotation event emission latency
-                  (gibson_secrets_rotation_emit_seconds);
-                - daemon-side component callback stream backlog
-                  (gibson_component_callback_lag_seconds);
-                - plugin event subscriber goroutine health
-                  (gibson_plugin_state{plugin="{{ $labels.plugin }}"}).
-
-              Synthetic monitor:
-                tests/plugin/rotation-monitor.sh in zeroroot-ai/hosted
-              emits one sample per CronJob run; correlate with that
-              monitor's logs for the failing rotation tag.
-
-        - alert: PluginRotationPropagationNoSamples
-          # If the synthetic monitor stops emitting samples for two
-          # consecutive scheduling windows we cannot observe the SLO at
-          # all.  Page so the on-call investigates the monitor itself.
-          expr: |
-            absent_over_time(
-              gibson_plugin_rotation_propagation_seconds_count[2h]
-            ) == 1
-          for: 30m
-          labels:
-            severity: warning
-            component: plugin-runtime
-            slo: rotation-propagation
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/plugin-rotation.md#pluginrotationpropagationnosamples"
-            summary: "No rotation-propagation samples observed in the last 2h"
-            description: |
-              The plugin rotation-propagation synthetic monitor has not
-              produced a sample in the past 2 hours.  Either the CronJob
-              has stopped scheduling, the monitor's test plugin is down,
-              or the metrics scrape is failing.
-
-              Check:
-                - kubectl get cronjob gibson-plugin-rotation-monitor
-                - kubectl logs -l app=gibson-plugin-rotation-monitor
-                  --tail=200
-                - Prometheus target health for the monitor pod.
----
-# Source: gibson/charts/gibson-workloads/templates/observability/sandbox-slo.yaml
-apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
-metadata:
-  name: gibson-gibson-workloads-sandbox-slo
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: sandbox-slo
-  annotations:
-    gibson.zeroroot.ai/spec: setec-sandbox-prod-default
-spec:
-  groups:
-    - name: gibson.sandbox.slo
-      interval: 30s
-      rules:
-        # ---- Recording rules: SLI inputs --------------------------------
-        # Cold-start vs warm-start split via the `cold_start` label
-        # emitted by the daemon's dispatch-duration histogram (Task 52,
-        # daemon-side).
-        - record: gibson:sandbox_dispatch_duration_seconds:p95_5m
-          expr: |
-            histogram_quantile(0.95,
-              sum by (le, cold_start) (
-                rate(gibson_sandbox_dispatch_duration_seconds_bucket[5m])
-              ))
-        - record: gibson:sandbox_dispatch_duration_seconds:p99_5m
-          expr: |
-            histogram_quantile(0.99,
-              sum by (le) (
-                rate(gibson_sandbox_dispatch_duration_seconds_bucket[5m])
-              ))
-
-        # ---- Alerts: SLO violations -------------------------------------
-        # NFR-P1: cold-start p95 = 500ms.
-        - alert: SandboxColdStartLatencyHigh
-          expr: |
-            gibson:sandbox_dispatch_duration_seconds:p95_5m{cold_start="true"} > 0.5
-          for: 10m
-          labels:
-            severity: warning
-            slo: cold_start_p95_500ms
-            component: setec-sandbox
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxcoldstartlatencyhigh"
-            summary: "Setec cold-start p95 above 500ms (SLI breach)"
-            description: |
-              The 5-minute p95 latency of cold-start SANDBOXED dispatches
-              has been above 500ms for 10 minutes. Cold starts launch a
-              fresh microVM; sustained breach usually means Setec's
-              snapshot pre-warm pool is exhausted or the bare-metal
-              sandbox-host node is at CPU saturation.
-
-        # NFR-P2: warm-start p95 = 100ms.
-        - alert: SandboxWarmStartLatencyHigh
-          expr: |
-            gibson:sandbox_dispatch_duration_seconds:p95_5m{cold_start="false"} > 0.1
-          for: 10m
-          labels:
-            severity: warning
-            slo: warm_start_p95_100ms
-            component: setec-sandbox
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxwarmstartlatencyhigh"
-            summary: "Setec warm-start p95 above 100ms (SLI breach)"
-            description: |
-              The 5-minute p95 latency of warm-start SANDBOXED
-              dispatches (re-using a pre-warmed microVM from the snapshot
-              pool) has been above 100ms for 10 minutes. Likely causes:
-              snapshot-pool starvation, KVM contention, or a Setec
-              frontend slowdown.
-
-        # R10.3: 99% of SANDBOXED dispatches < 10s.
-        - alert: SandboxDispatchSLOBreach
-          expr: |
-            gibson:sandbox_dispatch_duration_seconds:p99_5m > 10
-          for: 5m
-          labels:
-            severity: critical
-            slo: dispatch_p99_10s
-            component: setec-sandbox
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxdispatchslobreach"
-            summary: "99th-percentile SANDBOXED dispatch above 10s SLO"
-            description: |
-              At least 1% of SANDBOXED dispatches are taking longer than
-              10 seconds end-to-end. This is the hard user-facing SLO;
-              a sustained breach blocks UNTRUSTED-content missions for
-              users.
-
-        # R5.3: sandbox unavailable for >5m.
-        - alert: SandboxUnavailable
-          expr: |
-            avg_over_time(gibson_sandbox_health{status="up"}[5m]) < 0.5
-          for: 5m
-          labels:
-            severity: critical
-            component: setec-sandbox
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxunavailable"
-            summary: "Setec sandbox unavailable for >5m — SANDBOXED dispatch failing closed"
-            description: |
-              The daemon's 30s health probe has reported the Setec
-              frontend unreachable for the majority of the last 5
-              minutes. UNTRUSTED-content missions are failing closed with
-              `sandbox_unavailable`; trusted-content missions continue.
-
-        # NFR-R1 + Scenario 4: spot-eviction storm signal.
-        # health=degraded for >5m means the eviction handler in
-        # core/gibson/internal/sandbox/eviction has been cancelling
-        # in-flight detonations (the gauge flip, NOT a Setec frontend
-        # outage). Sustained degraded means too many spot evictions
-        # in flight.
-        - alert: SandboxSpotEvictionStorm
-          expr: |
-            avg_over_time(gibson_sandbox_health{status="degraded"}[5m]) > 0.5
-          for: 5m
-          labels:
-            severity: warning
-            component: setec-sandbox
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxspotevictionstorm"
-            summary: "Sustained spot-eviction churn — consider raising on-demand fallback cap"
-            description: |
-              The sandbox health gauge has been in `degraded` state for
-              >5m, which means the in-daemon eviction handler is
-              cancelling detonations in response to AWS spot-interruption
-              notices faster than the on-demand fallback ASG can
-              backfill. Mitigation: raise the on-demand share of the
-              fleet node pool in the hosted substrate; revert once the
-              spot pool recovers. Escalate to the EKS sister-spec owner
-              if sustained >24h.
-
-        # R4.4: per-tenant quota-exceeded rate elevated.
-        # The alert uses the sum across tenants intentionally — a
-        # per-tenant alert would create cardinality + alert-storm
-        # problems. Operators triage which tenant via the dashboard
-        # panel keyed off gibson_sandbox_detonation_total{outcome=
-        # "quota_exceeded"}.
-        - alert: SandboxQuotaExceededRate
-          expr: |
-            sum(rate(gibson_sandbox_detonation_total{outcome="quota_exceeded"}[5m])) > 0.1
-          for: 15m
-          labels:
-            severity: warning
-            component: setec-sandbox
-          annotations:
-            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/sandbox.md#sandboxquotaexceededrate"
-            summary: "Setec quota_exceeded rejections elevated across tenants"
-            description: |
-              SANDBOXED dispatches are being rejected with
-              `quota_exceeded` at a sustained rate above 0.1/sec for 15m.
-              Likely a single tenant driving traffic past the per-tenant
-              cap. The runbook shows the query by tenant.
----
 # Source: gibson/charts/gibson-workloads/templates/ratelimit/alertrule.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -22753,11 +22536,31 @@ spec:
       interval: 60s
       scheme: http
 ---
-# Source: gibson/charts/gibson-workloads/templates/envoy/servicemonitor.yaml
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/servicemonitor.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: gibson-envoy
+  name: gibson-tenant-operator
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/component: tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gibson-tenant-operator
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 60s
+      scheme: http
+---
+# Source: gibson/charts/gibson-workloads/templates/dashboard/servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gibson-dashboard
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -22765,17 +22568,18 @@ metadata:
     app.kubernetes.io/instance: gibson
     app.kubernetes.io/version: "0.154.0"
     app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: envoy
+    app.kubernetes.io/component: dashboard
 spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: gibson-workloads
       app.kubernetes.io/instance: gibson
-      app.kubernetes.io/component: envoy
+      app.kubernetes.io/component: dashboard
   endpoints:
-    - port: admin
-      path: /stats/prometheus
+    - port: metrics
+      path: /metrics
       interval: 30s
+      scheme: http
 ---
 # Source: gibson/charts/gibson-workloads/templates/ext-authz/servicemonitor.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -22797,9 +22601,26 @@ spec:
       app.kubernetes.io/instance: gibson
       app.kubernetes.io/component: ext-authz
   endpoints:
-    - port: health
+    # The metrics-only listener :9003 (charts#515). It requires a client cert
+    # that chains to the component issuer, and serves the cert of
+    # gibson-ext-authz-health-tls.
+    - port: metrics
       path: /metrics
       interval: 30s
+      scheme: https
+      tlsConfig:
+        serverName: "gibson-ext-authz.gibson.svc"
+        ca:
+          secret:
+            name: gibson-ext-authz-health-tls
+            key: ca.crt
+        cert:
+          secret:
+            name: gibson-metrics-scraper-tls
+            key: tls.crt
+        keySecret:
+          name: gibson-metrics-scraper-tls
+          key: tls.key
 ---
 # Source: gibson/charts/gibson-workloads/templates/gibson/servicemonitor.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -22839,6 +22660,14 @@ spec:
           secret:
             name: gibson-daemon-metrics-tls
             key: ca.crt
+        # The listener requires a client cert (charts#515).
+        cert:
+          secret:
+            name: gibson-metrics-scraper-tls
+            key: tls.crt
+        keySecret:
+          name: gibson-metrics-scraper-tls
+          key: tls.key
 ---
 # Source: gibson/charts/gibson-workloads/templates/observability/tenant-neo4j-servicemonitor.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -25439,7 +25268,7 @@ spec:
       # The daemon image itself — same repo@digest the StatefulSet runs — so
       # `gibson --version` reports the toolchain the DEPLOYED binary was built
       # with, not some proxy. The runtime image is alpine-based (has /bin/sh).
-      image: "ghcr.io/zeroroot-ai/gibson:v0.154.0@sha256:560d708bc9814dfb272643baa8afe14d1869b98f1833518a2f1c4048dbdccc23"
+      image: "ghcr.io/zeroroot-ai/gibson:v0.156.0@sha256:ea83c303215cf5cfe6de26d06f2d907b1286e617781dadb56cafda4b4ba63036"
       imagePullPolicy: Always
       command: ["/bin/sh", "-c"]
       args:

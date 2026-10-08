@@ -1,3 +1,4 @@
+{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "dashboard.zitadel.audience" "dashboard.auth.metrics") "use" "nothing: the dashboard serves its metrics on the metrics-only port 9464 and verifies no inbound service token (charts#515)") }}
 {{- /*
   dashboard is structural infrastructure (one-code-path /
   deploy#188). The previous outer `.Values.dashboard.enabled`
@@ -25,7 +26,7 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: dashboard
-        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis") "kubeApi" true) | nindent 8 }}
+        {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "redis") "kubeApi" true "metricsPort" 9464) | nindent 8 }}
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
         # snapshots every pod volume it is not told to skip. These hold a
@@ -202,9 +203,6 @@ spec:
         # Spec: canonical-service-identity Req 5 — resolve the readable SA
         # names in serviceAccounts.required against the gibson-sa-identity-map
         # ConfigMap (populated by the post-install Zitadel Job) into:
-        #   /shared/allowed-service-subjects   — comma-joined NUMERIC subs
-        #                                        consumed by the main container
-        #                                        as ALLOWED_SERVICE_SUBJECTS
         #   /shared/sa-identity-map.json       — full readable→numeric map
         #                                        consumed by identity-resolver
         #                                        for log enrichment
@@ -230,7 +228,6 @@ spec:
               # has no outbound network to alpine repos.
               echo "Resolving SA identity map (required: ${REQUIRED})..."
               if [ -z "$REQUIRED" ]; then
-                : > /shared/allowed-service-subjects
                 printf '{}' > /shared/sa-identity-map.json
                 echo "Resolved: (no SAs required)"
                 exit 0
@@ -240,7 +237,6 @@ spec:
                 ALL_SET="true"
                 JSON="{"
                 FIRST=true
-                OUT=""
                 for sa in $REQUIRED; do
                   if [ -r "/var/run/sa-identity-map/${sa}" ]; then
                     val=$(cat "/var/run/sa-identity-map/${sa}")
@@ -252,18 +248,16 @@ spec:
                     break
                   fi
                   if [ "$FIRST" = "true" ]; then
-                    OUT="$val"; FIRST=false
+                    FIRST=false
                     JSON="${JSON}\"${sa}\":\"${val}\""
                   else
-                    OUT="${OUT},${val}"
                     JSON="${JSON},\"${sa}\":\"${val}\""
                   fi
                 done
                 if [ "$ALL_SET" = "true" ]; then
                   JSON="${JSON}}"
-                  printf '%s' "$OUT" > /shared/allowed-service-subjects
                   printf '%s' "$JSON" > /shared/sa-identity-map.json
-                  echo "Resolved: $OUT"
+                  echo "Resolved: $JSON"
                   exit 0
                 fi
                 if [ $SECONDS_ -ge 600 ]; then
@@ -284,33 +278,14 @@ spec:
         - name: dashboard
           image: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.dashboard.image.repository "tag" .Values.dashboard.image.tag "digest" .Values.dashboard.image.digest "appVersion" .Chart.AppVersion) | quote }}
           imagePullPolicy: {{ .Values.dashboard.image.pullPolicy | default "IfNotPresent" }}
-          # Spec: canonical-service-identity Req 5 — the resolve-sa-identity-map
-          # init container writes the comma-joined numeric subs to
-          # /shared/allowed-service-subjects. Wrap the image's default CMD
-          # (node server.js) to source that file into ALLOWED_SERVICE_SUBJECTS
-          # before exec — keeps verifyZitadelBearer's env-var contract.
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              if [ -s /shared/allowed-service-subjects ]; then
-                ALLOWED_SERVICE_SUBJECTS="$(cat /shared/allowed-service-subjects)"
-                export ALLOWED_SERVICE_SUBJECTS
-                echo "[startup] ALLOWED_SERVICE_SUBJECTS resolved from sa-identity-map"
-              elif [ -f /shared/allowed-service-subjects ]; then
-                # File exists but empty — the resolve-sa-identity-map init
-                # container short-circuited because serviceAccounts.required
-                # is empty (kind dev). Continue with no allowed subjects.
-                ALLOWED_SERVICE_SUBJECTS=""
-                export ALLOWED_SERVICE_SUBJECTS
-                echo "[startup] ALLOWED_SERVICE_SUBJECTS empty (no service accounts required)"
-              else
-                echo "[startup] FATAL: /shared/allowed-service-subjects missing or empty — resolve-sa-identity-map init container did not run" >&2
-                exit 1
-              fi
-              exec node server.js
           ports:
             - name: http
               containerPort: 3000
+              protocol: TCP
+            # The metrics-only listener (charts#515): GET /metrics, plain HTTP.
+            # The network rule admits only the cluster scraper to it.
+            - name: metrics
+              containerPort: 9464
               protocol: TCP
           env:
             # NODE_OPTIONS — the V8 heap ceiling tracks this container's memory
@@ -608,18 +583,6 @@ spec:
               value: "1"
             {{- end }}
 
-            # Zitadel JWT verification — used by /api/admin/provisioning/*
-            # routes to authenticate in-cluster service accounts (operator,
-            # dashboard SA, tool-runner SA) via Zitadel-issued JWTs.
-            # Spec: service-acting-auth (R4.1, R9.2).
-            - name: ZITADEL_AUDIENCE
-              value: {{ (((.Values.dashboard).zitadel).audience) | default "gibson-platform" | quote }}
-            # ALLOWED_SERVICE_SUBJECTS is NOT a static env entry — spec
-            # canonical-service-identity Req 5: the resolve-sa-identity-map
-            # init container writes the comma-joined numeric subs to
-            # /shared/allowed-service-subjects, and the container's command
-            # wrapper above sources that into the env before exec.
-            #
             # SA_IDENTITY_MAP_PATH points the in-process identity-resolver
             # helper at the JSON map for log enrichment ONLY — never an auth
             # decision (vitest visibility test pins the importer paths).
@@ -659,8 +622,6 @@ spec:
               was never on it — the chart carried a provider knob, an SMTP host,
               a port and two credentials for a sender that did not exist.
             */}}
-            - name: DASHBOARD_METRICS_ALLOWED_CIDRS
-              value: {{ .metrics.allowedCIDRs | default "" | quote }} {{/* allowlist-silent-default: empty disables CIDR filtering (cluster-internal only). */}}
             {{- end }}
 
             {{- /*
@@ -756,8 +717,7 @@ spec:
           # the shared-identity + envoy-ca mounts are unconditional —
           # Zitadel + Envoy are structurally required, so the
           # resolve-sa-identity-map init container always runs and the
-          # dashboard always reads /shared/allowed-service-subjects on
-          # startup.
+          # dashboard reads /shared/sa-identity-map.json for log enrichment.
           volumeMounts:
             {{- if eq (include "gibson.envoyEdge.caRequired" .) "true" }}
             - name: envoy-ca
