@@ -184,9 +184,13 @@ wait_external_secrets
 if [ -n "${KEYRING_FILE:-}" ] && [ "${SKIP_RESTORE_DRILL:-}" != "1" ]; then
   KEYRING_SECRET="${KEYRING_SECRET:-bringup-keyring}"
   KEYRING_KEY="${KEYRING_KEY:-openbao-seal-key}"
+  # The previous seal key of a rotation (ADR-0171). The foreign key gets no
+  # previous key, so no kept key can open the store.
+  KEYRING_PREVIOUS_KEY="${KEYRING_PREVIOUS_KEY:-openbao-seal-previous-key}"
   log "keyring drill: starting the store under a key that never sealed it"
   kubectl -n "$NS" create secret generic "$KEYRING_SECRET" \
     --from-literal="${KEYRING_KEY}=$(head -c 32 /dev/urandom | base64 | tr -d '\n')" \
+    --from-literal="${KEYRING_PREVIOUS_KEY}=" \
     --dry-run=client -o yaml | kubectl apply -n "$NS" -f - >/dev/null
   kubectl -n "$NS" delete pod "$POD" --wait=true --timeout=180s
 
@@ -210,6 +214,7 @@ if [ -n "${KEYRING_FILE:-}" ] && [ "${SKIP_RESTORE_DRILL:-}" != "1" ]; then
   log "putting the keyring back from ${KEYRING_FILE}"
   kubectl -n "$NS" create secret generic "$KEYRING_SECRET" \
     --from-literal="${KEYRING_KEY}=$(grep -E '^OPENBAO_SEAL_KEY=' "$KEYRING_FILE" | head -n1 | cut -d= -f2-)" \
+    --from-literal="${KEYRING_PREVIOUS_KEY}=$(grep -E '^OPENBAO_SEAL_KEY_PREVIOUS=' "$KEYRING_FILE" | head -n1 | cut -d= -f2- || true)" \
     --dry-run=client -o yaml | kubectl apply -n "$NS" -f - >/dev/null
   kubectl -n "$NS" delete pod "$POD" --wait=true --timeout=180s
   restored=0

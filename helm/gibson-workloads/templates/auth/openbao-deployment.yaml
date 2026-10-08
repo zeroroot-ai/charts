@@ -99,6 +99,7 @@ reach the daemon through the secrets broker.
 {{- $sealCfg := (.Values.openbao.config).seal | default dict }}
 {{- $keyringSecretName := $sealCfg.keyringSecretName | required "openbao.config.seal.keyringSecretName is REQUIRED: the Kubernetes Secret in the release namespace that holds the bringup keyring's OpenBao seal key. The chart renders no Secret for it; the bringup writes it before the umbrella syncs (deploy#1731)." }}
 {{- $keyringSecretKey := $sealCfg.keyringSecretKey | required "openbao.config.seal.keyringSecretKey is REQUIRED: the key inside the keyring Secret that holds the 32-byte OpenBao seal key (deploy#1731)." }}
+{{- $keyringPreviousKey := $sealCfg.keyringPreviousSecretKey | required "openbao.config.seal.keyringPreviousSecretKey is REQUIRED: the key inside the keyring Secret that holds the previous seal key during a rotation, empty otherwise (ADR-0171)." }}
 {{- /* The ServiceAccount External Secrets logs in with (deploy#1732). The
        sidecar binds the eso-reader role to it, and the ClusterSecretStore
        presents it, so both read the one values path and cannot drift. */ -}}
@@ -195,12 +196,11 @@ data:
     # it at init and unwraps it on every start, so a pod restart returns
     # unsealed with no unseal key anywhere in the cluster.
     #
-    # current_key_id is a permanent label for THIS key. A key rotation adds
-    # previous_key / previous_key_id with a new id; it never renames this one.
-    seal "static" {
-      current_key_id = "bringup-keyring"
-      current_key    = "file:///etc/openbao/seal/openbao-seal-key"
-    }
+    # The seal "static" stanza is not here. The openbao container writes it
+    # at start into /tmp/seal.hcl (see its command): the key id is a
+    # fingerprint of the key, so each key keeps one id for its whole life,
+    # and a rotation adds the previous key with its own id (ADR-0171, row
+    # keyring-generated-keys).
 
     api_addr = "https://{{ .Release.Name }}-openbao:8200"
     cluster_addr = "https://{{ .Release.Name }}-openbao:8201"
@@ -275,10 +275,34 @@ spec:
         - name: openbao
           image: "{{ $openbaoRepo }}:{{ $openbaoTag }}"
           imagePullPolicy: {{ .Values.openbao.image.pullPolicy | default "IfNotPresent" }}
+          # The seal stanza (ADR-0171, row keyring-generated-keys). Each key
+          # file holds the base64 of a 32-byte key. Its id is "keyring-" and
+          # the first 16 hex digits of the sha256 of that text, so the id
+          # follows the key and never needs a value. During a rotation the
+          # keyring Secret also holds the previous key: OpenBao unwraps with
+          # either and wraps with the current one. An empty previous file
+          # means no rotation runs. A missing or empty current file fails the
+          # start, as before.
           command:
-            - bao
-            - server
-            - -config=/etc/openbao/config/openbao.hcl
+            - /bin/sh
+            - -ec
+            - |
+              seal_id() { printf 'keyring-%s' "$(sha256sum "$1" | cut -c1-16)"; }
+              cur=/etc/openbao/seal/openbao-seal-key
+              prev=/etc/openbao/seal/openbao-seal-previous-key
+              [ -s "$cur" ] || { echo "FATAL: the seal key file is missing or empty" >&2; exit 1; }
+              {
+                echo 'seal "static" {'
+                echo "  current_key_id = \"$(seal_id "$cur")\""
+                echo "  current_key    = \"file://${cur}\""
+                if [ -s "$prev" ]; then
+                  echo "  previous_key_id = \"$(seal_id "$prev")\""
+                  echo "  previous_key    = \"file://${prev}\""
+                fi
+                echo '}'
+              } > /tmp/seal.hcl
+              echo "[openbao] seal key id $(seal_id "$cur")$([ -s "$prev" ] && echo ", previous $(seal_id "$prev")")"
+              exec bao server -config=/etc/openbao/config/openbao.hcl -config=/tmp/seal.hcl
           ports:
             - name: https
               containerPort: 8200
@@ -1856,7 +1880,7 @@ spec:
           configMap:
             name: {{ .Release.Name }}-openbao-config
         # The bringup keyring Secret (deploy#1731). Produced by the
-        # bringup, never by this chart. Only the seal key is projected, so a
+        # bringup, never by this chart. Only the two seal keys are projected, so a
         # keyring Secret that later carries other members exposes none of
         # them to this pod. A missing Secret or key keeps the pod in
         # ContainerCreating, which is the loud failure we want.
@@ -1867,6 +1891,9 @@ spec:
             items:
               - key: {{ $keyringSecretKey | quote }}
                 path: openbao-seal-key
+              # Empty unless a rotation runs (scripts/keyring.sh rotate).
+              - key: {{ $keyringPreviousKey | quote }}
+                path: openbao-seal-previous-key
         # The two keyring INPUTS for the sidecar (deploy#1732): the same
         # bringup keyring Secret, a different volume, and NEVER the seal key.
         # Item names follow scripts/keyring.sh: member GHCR_PULL_TOKEN is the
