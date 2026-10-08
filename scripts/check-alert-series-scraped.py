@@ -113,9 +113,9 @@ def scraped_ports(docs: list, ns: str, labels: dict, containers: list) -> list[i
     out = []
     for m in docs:
         # The Prometheus operator looks for targets in the namespace of the
-        # monitor unless the monitor names others.
-        sel_ns = ((m.get("spec") or {}).get("namespaceSelector") or {}).get("matchNames") or [ns_of(m)]
-        if ns not in sel_ns:
+        # monitor unless the monitor names others, or selects any namespace.
+        nsel = (m.get("spec") or {}).get("namespaceSelector") or {}
+        if not nsel.get("any") and ns not in (nsel.get("matchNames") or [ns_of(m)]):
             continue
         if m.get("kind") == "PodMonitor" and selects((m.get("spec") or {}).get("selector"), labels):
             for ep in m["spec"].get("podMetricsEndpoints") or []:
@@ -224,6 +224,12 @@ def selftest() -> int:
     if judge(good):
         print(f"SELFTEST FAIL: a scraped series must pass, got {judge(good)}")
         return 1
+    any_ns = [rule(expr), pod("dashboard"), svc("dashboard"),
+              dict(sm("dashboard"), metadata={"name": "d", "namespace": "other"},
+                   spec=dict(sm("dashboard")["spec"], namespaceSelector={"any": True}))]
+    if judge(any_ns):
+        print(f"SELFTEST FAIL: a monitor with namespaceSelector.any scrapes each namespace, got {judge(any_ns)}")
+        return 1
     failing = (
         # The charts#515 shapes.
         ("a series with no scrape object", [rule(expr), pod("dashboard")]),
@@ -242,7 +248,7 @@ def selftest() -> int:
             print(f"SELFTEST FAIL: {what} must give one finding, got {judge(docs)}")
             return 1
     print("  ✓ selftest: an unscraped series, a missing Service port, a closed port, an unknown producer and a "
-          "missing pod fail")
+          "missing pod fail; a monitor of any namespace passes")
     return 0
 
 
