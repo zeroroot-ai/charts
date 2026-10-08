@@ -92,7 +92,9 @@ run_ensure() {
   run run_ensure 90000 0 ""
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "mint" ]
-  [[ "${lines[1]}" =~ ^annotate\ acc-old\ (89[0-9]|900)$ ]]
+  # The template reads the clock after the harness does, so the grace is 900
+  # seconds or a few more, never less.
+  [[ "${lines[1]}" =~ ^annotate\ acc-old\ (900|90[0-9])$ ]]
 }
 
 @test "a rotation request newer than the token gets a successor" {
@@ -121,8 +123,9 @@ run_revoke() {
     }
     kube_curl() {
       case "$*" in
-        *PATCH*) echo cleared >> "$TMPD/effects"; printf 200 ;;
-        *) printf "{\"kind\":\"Secret\",\"metadata\":{\"annotations\":{\"gibson.zeroroot.ai/revoke-accessor\":\"acc-old\",\"gibson.zeroroot.ai/revoke-after\":\"%s\"}}}" $((NOW + LEFT)) ;;
+        *PATCH*) case "$*" in *\":null*) echo cleared ;; *) echo rearmed ;; esac >> "$TMPD/effects"; printf 200 ;;
+        *) case "$LEFT" in -*|[0-9]*) after=$((NOW + LEFT)) ;; *) after="$LEFT" ;; esac
+           printf "{\"kind\":\"Secret\",\"metadata\":{\"annotations\":{\"gibson.zeroroot.ai/revoke-accessor\":\"acc-old\",\"gibson.zeroroot.ai/revoke-after\":\"%s\"}}}" "$after" ;;
       esac
     }
     token_revoke_pending gibson-platform-operator-vault seeder 2>/dev/null; rc=$?
@@ -203,4 +206,12 @@ run_revoke() {
   [ "$status" -eq 0 ]
   [ "${lines[1]}" = "cleared" ]
   [ "${lines[2]}" = "rc=0" ]
+}
+
+@test "a revoke-after that is not a number waits one more grace, and revokes nothing now" {
+  run run_revoke soon 204
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "rearmed" ]
+  [ "${lines[1]}" = "rc=0" ]
+  [[ "$output" != *revoke\ * ]]
 }

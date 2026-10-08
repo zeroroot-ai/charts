@@ -881,8 +881,12 @@ spec:
                 after=$(secret_annotation "$1" "$REVOKE_AFTER_ANN") || return 1
                 case "${after:-}" in
                   ''|*[!0-9]*)
-                    echo "[openbao-auto-init] ${1} has the revoke record ${acc} with no valid ${REVOKE_AFTER_ANN} (\"${after}\"); it is revoked now" >&2
-                    after=0 ;;
+                    # Only a hand edit makes such a value. The consumers may
+                    # still hold the old token, so the record gets a full
+                    # grace from now, not a revoke at once.
+                    echo "[openbao-auto-init] ${1} has the revoke record ${acc} with no valid ${REVOKE_AFTER_ANN} (\"${after}\"); it is revoked one grace from now" >&2
+                    secret_set_revoke "$1" "$acc" "$(( $(date +%s) + TOKEN_REVOKE_GRACE_S ))" || return 1
+                    return 0 ;;
                 esac
                 [ "$(date +%s)" -ge "$after" ] || return 0
                 [ -n "$2" ] || return 1
