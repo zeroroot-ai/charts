@@ -24,7 +24,7 @@
 #   The baseline requests about 2.85 CPU of reservations. That is the honest
 #   self-hosted floor and it MUST NOT be lowered in the baseline: an operator's
 #   single-node install needs it. One local node cannot meet it. With the real
-#   requests the daemon, neo4j, OpenBao and the rest never schedule ("0/1 nodes
+#   requests the daemon, OpenBao and the rest never schedule ("0/1 nodes
 #   are available: 1 Insufficient cpu"), OpenBao never unseals, no admin token,
 #   no pull secret, no workload Ready, and the post-install hook times out at
 #   30 minutes. Measured on run 32773702081. The node is the constraint, not
@@ -49,9 +49,6 @@
 #     baseline plus this file and fails when the total exceeds what one
 #     2-vCPU node can schedule.
 #
-# neo4j is NOT lowered: its chart refuses to render below 500m CPU and 2Gi
-#   ("Provided cpu value ... is less than minimum"), so that floor is what
-#   every other request here makes room for.
 #
 # The same content as values-ci.yaml. They are two files so either may change
 #   later without a rename. scripts/check-rungs.sh fails when a request of the
@@ -209,10 +206,6 @@ platformPostgres:
     requests:
       cpu: 10m
       memory: 256Mi
-
-# neo4j is NOT lowered: chart v2026.4.0 refuses to render below 500m CPU
-# ("Provided cpu value ... is less than minimum"), so its 500m is the floor
-# every other request here makes room for.
 
 # One mail value for the daemon, the tenant-operator and Zitadel (hosted#223).
 # The host is the Mailpit Service of this release, from the helper

@@ -53,14 +53,14 @@ against a freshly-installed cluster. They probe the live system end-to-end:
 
 | Pod | Asserts |
 |-----|---------|
-| `test-service-reachability` | Every first-party Service is reachable from inside the cluster (daemon gRPC, dashboard, ext-authz, Envoy, Redis, Vault, plus sibling-Argo OpenFGA / Zitadel / Neo4j). |
+| `test-service-reachability` | Every first-party Service is reachable from inside the cluster (daemon gRPC, dashboard, ext-authz, Envoy, Redis, Vault, plus sibling-Argo OpenFGA / Zitadel). |
 | `test-bootstrap-secrets` | `gibson-openbao-keys`, master-KEK Secret, dashboard OIDC Secret, Zitadel admin PAT, MACHINE_USER PAT Secrets exist and carry non-empty values on their documented keys. |
 | `test-bootstrap-configmaps` | `gibson-fga-config` (store_id + model_id), chart-shipped FGA model JSON, `gibson-extauthz-rpc-registry`, reserved-names CM, SA-identity-map CM. |
 | `test-fga-tuple-seed` | Canary tuple `(user:platform_operator, member, platform:gibson)` resolves to `allowed=true` via OpenFGA HTTP Check. |
 | `test-spire-attestation` | SPIRE workload-API socket is present + SPIRE issues a valid X.509-SVID with a `spiffe://<trust-domain>/` SPIFFE ID to a test pod that matches the daemon's selector. |
 | `test-envoy-admin` | Envoy `/ready` returns 200, `gibson_daemon_grpc` cluster has healthy endpoints, `ext_authz` cluster has healthy endpoints, `jwt_authn` JWKS fetch is succeeding. |
 | `test-zitadel-auth-probe` | Zitadel OIDC discovery is reachable + the MACHINE_USER PAT exchanges successfully against `/management/v1/info`. |
-| `test-data-plane` | Postgres (CNPG -rw), Redis (stack), and Neo4j (Bolt) accept TCP connections from inside the cluster. |
+| `test-data-plane` | Postgres (CNPG -rw) and Redis (stack) accept connections from inside the cluster. |
 
 #### Running
 

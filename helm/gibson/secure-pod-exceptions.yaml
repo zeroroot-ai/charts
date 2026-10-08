@@ -82,9 +82,6 @@ pods:
   'Pod/gibson/gibson-openfga-test-connection read-only':
     digest: 1eb6b295da1171fb
     reason: "An upstream OpenFGA helm test pod. The chart sets no security context for it and has no value for one."
-  'StatefulSet/gibson/gibson read-only':
-    digest: 0fd9fbd579bd9de9
-    reason: "Neo4j. The image entrypoint writes neo4j.conf under /var/lib/neo4j at start, so the server needs a writable root. The init container runs read-only."
   'DaemonSet/gibson/gibson-agent restricted':
     digest: 58a63912eaf1ea86
     reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths."
@@ -127,6 +124,3 @@ pods:
   'Pod/gibson/gibson-spiffe-oidc-discovery-provider-test-keys token':
     digest: e89690d6cef81447
     reason: "An upstream SPIRE helm test pod on the OIDC provider ServiceAccount. The chart has no value that turns the token mount off."
-  'StatefulSet/gibson/gibson token':
-    digest: f905b201ea835d99
-    reason: "The Neo4j chart runs the pod on the default ServiceAccount and has no value that turns the token mount off."

@@ -315,9 +315,8 @@ rules:
 
   # Pre-backup hooks (deploy#1735). A backup hook is an exec into the target
   # pod, issued by the server through this subresource
-  # (internal/hook/item_hook_handler.go). The platform runs two: the Neo4j
-  # checkpoint on the per-tenant pods and on the platform graph pod
-  # (templates/schedule.yaml). The grant is `create` on pods/exec alone: it
+  # (internal/hook/item_hook_handler.go). The platform runs one: the Neo4j
+  # checkpoint on the per-tenant pods (templates/schedule.yaml). The grant is `create` on pods/exec alone: it
   # enters a running container, it authors nothing, and the role still holds
   # no verb on secrets, so the API path to a Secret object stays closed. What
   # exec does reach is whatever the entered container itself can read, which
