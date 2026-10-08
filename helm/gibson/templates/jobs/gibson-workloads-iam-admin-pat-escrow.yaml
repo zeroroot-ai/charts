@@ -1,18 +1,19 @@
 {{/*
 iam-admin-pat-escrow — copy what the Zitadel setup Job minted into OpenBao.
 
-The Zitadel setup Job mints TWO Secrets on the first instance and writes
-only the Kubernetes objects: iam-admin (the IAM_OWNER machine key,
-iam-admin.json) and login-client (the login client's PAT). The IAM admin PAT
-is no longer one of them: the platform-operator mints it with its System API
-key and writes it to OpenBao itself, and the ExternalSecret iam-admin-pat is
-its one writer (charts#407, gibson#794). A restore brings back the OpenBao volume and no Secret, so
-all three must live in OpenBao to survive one. This Job waits for each
-minted Secret, compares it with its key in the store, and writes it when
-absent or different. The ExternalSecrets in gibson-workloads
-templates/external-secrets/iam-admin-pat-externalsecret.yaml read them
-back. On a restore the ExternalSecrets create the Secrets from the restored
-store first, and this Job finds each pair equal and exits.
+The Zitadel setup Job mints ONE Secret on the first instance and writes
+only the Kubernetes object: login-client (the login client's PAT). The IAM
+admin PAT is not one of them: the platform-operator mints it with its System
+API key and writes it to OpenBao itself, and the ExternalSecret iam-admin-pat
+is its one writer (charts#407, gibson#794). The setup Job mints no machine
+key of iam-admin (FirstInstance.Org.Machine.MachineKey is null, ADR-0171).
+A restore brings back the OpenBao volume and no Secret, so login-client must
+live in OpenBao to survive one. This Job waits for the minted Secret,
+compares it with its key in the store, and writes it when absent. The
+ExternalSecret in gibson-workloads
+templates/external-secrets/iam-admin-pat-externalsecret.yaml reads it back.
+On a restore the ExternalSecret creates the Secret from the restored store
+first, and this Job finds the key in the store and exits.
 
 Same hook shape as signup-bot-pat-minter: post-install/post-upgrade, Argo
 Sync hook, weight 3, self-waiting. See the ExternalSecret's header for the
@@ -67,7 +68,7 @@ rules:
   # whole window: hosted run 34271811189 (2026-09-08) sat 20 minutes on
   # "waiting for iam-admin" with the Secret present and this list naming
   # the PAT alone. The Job now refuses to wait on a Secret it may not read.
-  resourceNames: [iam-admin, login-client]
+  resourceNames: [login-client]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -146,8 +147,8 @@ spec:
           value: /tmp
         - name: BAO_ADDR
           value: {{ $baoAddr | quote }}
-        # The token of this Job alone, policy iam-admin-escrow: the three KV
-        # keys below and nothing else. openbao-auto-init mints it.
+        # The token of this Job alone, policy iam-admin-escrow: the KV key
+        # below and nothing else. openbao-auto-init mints it.
         - name: VAULT_ADMIN_TOKEN
           valueFrom:
             secretKeyRef:
@@ -158,17 +159,13 @@ spec:
         - |
           set -euo pipefail
           NS=gibson
-          # Every Secret the Zitadel setup Job mints on the first instance
-          # (its zitadel-machinekey, zitadel-machine-pat and
-          # zitadel-login-client-pat containers), as
+          # The Secret the Zitadel setup Job mints on the first instance (its
+          # zitadel-login-client-pat container), as
           #   <Secret>:<data key>:<store key>:<store property>
-          # The platform-operator reads iam-admin (the machine key, for the
-          # SA identity map) and iam-admin-pat; zitadel-login mounts
-          # login-client. A restore brings back none of them (blocker 3 loop
-          # #14, 2026-09-08: PlatformBootstrap SAIdentityMapReady=False
-          # "Secret gibson/iam-admin not yet written", zitadel-login on
-          # "secret login-client not found").
-          ENTRIES="iam-admin:iam-admin.json:gibson-zitadel-iam-admin-machinekey:machinekey login-client:pat:gibson-zitadel-login-client-pat:pat"
+          # zitadel-login mounts login-client. A restore does not bring it
+          # back (blocker 3 loop #14, 2026-09-08: zitadel-login on "secret
+          # login-client not found").
+          ENTRIES="login-client:pat:gibson-zitadel-login-client-pat:pat"
           # The store key that the platform-operator rotates (ADR-0171). This
           # hook writes it only when the store holds no value.
           OPERATOR_ROTATED="gibson-zitadel-login-client-pat"

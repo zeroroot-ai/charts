@@ -788,9 +788,16 @@ zitadel:
       # that block. The platform-operator mints the PAT with its System API
       # key and writes it to OpenBao, and the ExternalSecret iam-admin-pat is
       # the one writer of the Secret (gibson#794, ADR-0014).
+      # The setup Job mints no machine key of iam-admin either (ADR-0171,
+      # row zitadel-bringup-tokens). The upstream default mints one that
+      # lives until 2029 and writes it to the Secret iam-admin. No code
+      # authenticates with it, and the platform-operator reads the user id
+      # of iam-admin from iam-admin-pat (gibson#1047). The machine user
+      # itself stays: the platform-operator mints its PAT.
       FirstInstance:
         Org:
           Machine:
+            MachineKey: null
             Pat: null
       ExternalPort: 30443
       ExternalSecure: true

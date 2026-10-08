@@ -26,8 +26,10 @@ KEY = "gibson-zitadel-iam-admin-pat"
 # Every Secret the Zitadel setup Job mints, and the store key each rides in.
 # The IAM admin PAT is not one of them since charts#407: the platform-operator
 # mints it and writes it to OpenBao, and its ExternalSecret is the one writer.
+# The machine key of iam-admin is not one of them since ADR-0171: the setup
+# Job mints none, and the platform-operator reads the user id of iam-admin
+# from iam-admin-pat (gibson#1047).
 MINTED = {
-    "iam-admin": ("iam-admin.json", "gibson-zitadel-iam-admin-machinekey"),
     "login-client": ("pat", "gibson-zitadel-login-client-pat"),
 }
 def check(docs):
@@ -54,7 +56,13 @@ def check(docs):
                 m = (((cfg or {}).get("FirstInstance") or {}).get("Org") or {}).get("Machine") or {}
                 if m.get("Pat"):
                     bad.append("the Zitadel setup Job still mints iam-admin-pat (FirstInstance.Org.Machine.Pat): two writers of one Secret (charts#407)")
-    es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin"]
+                # The upstream default mints a machine key of iam-admin that
+                # lives until 2029 and that no code reads (ADR-0171).
+                if m.get("MachineKey"):
+                    bad.append("the Zitadel setup Job still mints a machine key of iam-admin (FirstInstance.Org.Machine.MachineKey must be null): an IAM_OWNER credential that nothing reads and nothing rotates (ADR-0171)")
+    if any(d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin" for d in docs):
+        bad.append("an ExternalSecret still writes the Secret iam-admin: the machine key is deleted (ADR-0171)")
+    es = [d for d in docs if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "login-client"]
     for secret, (data_key, store_key) in MINTED.items():
         got = [d for d in docs if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == secret]
         if not got:
@@ -90,7 +98,7 @@ def check(docs):
             if keys and not (wave_of(keys[0]) < jw):
                 bad.append(f"the gibson-openbao-keys ExternalSecret (wave {wave_of(keys[0])}) must be applied BEFORE the escrow hook (wave {jw}) that mounts it: at the same or a later wave the hook pod cannot start")
             if not (sw < jw < es_wave < 0):
-                bad.append(f"the machine key must be minted, escrowed and read back BEFORE wave 0, in that order: zitadel-setup wave {sw}, escrow Job wave {jw}, ExternalSecret wave {es_wave}. Any ExternalSecret wave >= 0 deadlocks a restore (the platform-operator at wave 0 waits for the PAT, and Argo waits for wave 0 before applying it); any wave at or before the escrow is Degraded on a fresh bootstrap")
+                bad.append(f"the login-client token must be minted, escrowed and read back BEFORE wave 0, in that order: zitadel-setup wave {sw}, escrow Job wave {jw}, ExternalSecret wave {es_wave}. Any ExternalSecret wave >= 0 deadlocks a restore (the platform-operator at wave 0 waits for the PAT, and Argo waits for wave 0 before applying it); any wave at or before the escrow is Degraded on a fresh bootstrap")
     jobs = [d for d in docs if d.get("kind") == "Job" and d["spec"]["template"]["metadata"].get("labels", {}).get("app.kubernetes.io/component") == "iam-admin-pat-escrow"]
     if not jobs:
         bad.append("no Job carries app.kubernetes.io/component=iam-admin-pat-escrow: nothing writes the minted PAT to OpenBao")
@@ -147,7 +155,7 @@ if not any("userId" in b for b in check(nouid)):
 # The deadlock of 2026-09-08, planted: the ExternalSecret at wave 1.
 late = copy.deepcopy(docs)
 for d in late:
-    if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin":
+    if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "login-client":
         d["metadata"].setdefault("annotations", {})["argocd.argoproj.io/sync-wave"] = "1"
 if not any("BEFORE wave 0" in b for b in check(late)):
     sys.exit("self-test broken: the ExternalSecret at wave 1 (the restore deadlock) was not detected")
@@ -165,9 +173,32 @@ for d in narrow:
     if d.get("kind") == "Role" and d["metadata"]["name"] == "iam-admin-pat-escrow":
         for rule in d.get("rules", []):
             if "secrets" in (rule.get("resources") or []):
-                rule["resourceNames"] = ["iam-admin"]
+                rule["resourceNames"] = ["iam-admin-pat"]
 if not any("does not let the escrow Job get Secret" in b for b in check(narrow)):
-    sys.exit("self-test broken: a Role naming the machine key alone was not detected")
+    sys.exit("self-test broken: a Role that does not name login-client was not detected")
+# ADR-0171, planted: the upstream default machine key comes back.
+def with_machine_key(docs, value):
+    out = copy.deepcopy(docs)
+    for d in out:
+        if d.get("kind") == "ConfigMap" and "zitadel" in d["metadata"]["name"]:
+            for k, v in (d.get("data") or {}).items():
+                if isinstance(v, str) and "FirstInstance" in v:
+                    cfg = yaml.safe_load(v)
+                    m = cfg["FirstInstance"]["Org"]["Machine"]
+                    m["MachineKey"] = value
+                    d["data"][k] = yaml.safe_dump(cfg)
+    return out
+if not any("machine key of iam-admin" in b for b in check(with_machine_key(docs, {"ExpirationDate": "2029-01-01T00:00:00Z", "Type": 1}))):
+    sys.exit("self-test broken: a Zitadel config that mints a machine key of iam-admin was not detected")
+# ADR-0171, planted: the iam-admin ExternalSecret comes back.
+back = copy.deepcopy(docs)
+for d in docs:
+    if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "login-client":
+        e = copy.deepcopy(d)
+        e["metadata"]["name"] = e["spec"]["target"]["name"] = "iam-admin"
+        back.append(e)
+if not any("writes the Secret iam-admin" in b for b in check(back)):
+    sys.exit("self-test broken: an ExternalSecret that writes iam-admin was not detected")
 # charts#407, planted: the PAT ExternalSecret back on Orphan.
 orphan = copy.deepcopy(docs)
 for d in orphan:
@@ -194,5 +225,5 @@ if bad:
     print("✗ check-iam-admin-pat-escrow:", file=sys.stderr)
     for b in bad: print("   " + b, file=sys.stderr)
     sys.exit(1)
-print("✅ self-test: each removed ExternalSecret, a Role naming the machine key alone, a wave-1 ExternalSecret, a wave-0 gibson-openbao-keys and a PAT ExternalSecret on Orphan are detected; iam-admin and login-client are escrowed by a covered Job and read back by Orphan ExternalSecrets, and iam-admin-pat has one writer, its Owner ExternalSecret")
+print("✅ self-test: each removed ExternalSecret, a Role that does not name login-client, a wave-1 ExternalSecret, a wave-0 gibson-openbao-keys, a PAT ExternalSecret on Orphan, a machine key of iam-admin and an iam-admin ExternalSecret are detected; login-client is escrowed by a covered Job and read back by an Orphan ExternalSecret, iam-admin-pat has one writer, its Owner ExternalSecret, and the setup Job mints no machine key")
 PY
