@@ -67,6 +67,8 @@ KEY="$1"; PROP="$2"; VALUE="$3"
 # ServiceAccount token of the pod, the same login the sidecar uses for its own
 # seed pass. That token lives 15 minutes, and the script revokes it at the end.
 # No consumer token can write an arbitrary KV key: each holds only its own paths.
+# The listener serves only TLS (charts#540). The sidecar sets CURL_CA_BUNDLE to
+# the chart CA, and kubectl exec keeps the container env, so curl verifies it.
 
 # Read-modify-write: a KV v2 write REPLACES the whole object, so writing one
 # property naively would silently drop the others (ses-smtp-credentials holds two).
@@ -83,16 +85,16 @@ code="$(kubectl -n "$NS" exec -i "$POD" -c openbao-auto-init -- \
 set -eu
 VAULT_TOKEN=$(jq -nc --arg j "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" '{role:"openbao-seeder",jwt:$j}' \
   | curl -sS -X POST -H 'Content-Type: application/json' -d @- \
-    "http://127.0.0.1:8200/v1/auth/kubernetes/login" | jq -r '.auth.client_token // empty')
+    "https://127.0.0.1:8200/v1/auth/kubernetes/login" | jq -r '.auth.client_token // empty')
 [ -n "$VAULT_TOKEN" ] || { echo 000; exit 0; }
-trap 'curl -sS -o /dev/null -X POST -H "X-Vault-Token: $VAULT_TOKEN" http://127.0.0.1:8200/v1/auth/token/revoke-self || true' EXIT
+trap 'curl -sS -o /dev/null -X POST -H "X-Vault-Token: $VAULT_TOKEN" https://127.0.0.1:8200/v1/auth/token/revoke-self || true' EXIT
 cur=$(curl -sS -H "X-Vault-Token: $VAULT_TOKEN" \
-  "http://127.0.0.1:8200/v1/secret/data/$SET_KEY" | jq -c '.data.data // {}')
+  "https://127.0.0.1:8200/v1/secret/data/$SET_KEY" | jq -c '.data.data // {}')
 merged=$(printf '%s' "$cur" | jq -c --arg p "$SET_PROP" --arg v "$SET_VALUE" '.[$p]=$v')
 curl -sS -o /dev/null -w '%{http_code}' -X POST -H "X-Vault-Token: $VAULT_TOKEN" \
   -H 'Content-Type: application/json' \
   -d "$(jq -nc --argjson d "$merged" '{data:$d}')" \
-  "http://127.0.0.1:8200/v1/secret/data/$SET_KEY"
+  "https://127.0.0.1:8200/v1/secret/data/$SET_KEY"
 EOF
 )"
 case "$code" in
