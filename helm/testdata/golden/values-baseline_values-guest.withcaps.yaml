@@ -11361,6 +11361,20 @@ spec:
               # The policy every token carried before each consumer got its
               # own. The reconcile pass deletes it after the re-mint.
               LEGACY_POLICY="platform-admin"
+              # The lifetime of each service token, and the grace before the old
+              # token is revoked after a rotation (ADR-0171, row
+              # openbao-service-tokens). The grace is longer than the longest
+              # path to a consumer: the KV copy, the ESO refresh, the kubelet
+              # sync and the follow interval of the platform-operator, about 3
+              # minutes, and a Reloader restart of the tenant-operator.
+              TOKEN_LIFETIME_S=86400
+              TOKEN_REVOKE_GRACE_S=900
+              # The KV key that the monthly drill writes to ask for a rotation
+              # now. Its property requested_at is a Unix time. A token created
+              # before it is rotated on the next pass.
+              TOKEN_ROTATION_KEY="gibson-service-token-rotation"
+              REVOKE_ACCESSOR_ANN="gibson.zeroroot.ai/revoke-accessor"
+              REVOKE_AFTER_ANN="gibson.zeroroot.ai/revoke-after"
               # The two operator tokens, each in its own Secret (vault_mint_token).
               PLATFORM_TOKEN_SECRET="gibson-platform-operator-vault"
               TENANT_OP_TOKEN_SECRET="gibson-tenant-operator-vault"
@@ -11442,6 +11456,9 @@ spec:
               gibson-stripe-credentials publishable_key:inputor:stripe-publishable-key:pk_test_placeholder secret_key:inputor:stripe-secret-key:sk_test_placeholder webhook_secret:inputor:stripe-webhook-secret:whsec_placeholder
               ses-smtp-credentials username:input:smtp-username password:input:smtp-password
               gibson-vault-admin-token token:svctoken
+              # The monthly drill writes requested_at (a Unix time) to rotate each service
+              # token now. 0 asks for nothing (ADR-0171).
+              gibson-service-token-rotation requested_at:literal:0
               setec-disk-signing seed:input:setec-disk-signing-seed
               
               '
@@ -11788,6 +11805,78 @@ spec:
                 fi
               }
 
+              token_rotation_requested_at() {
+                # $1 a seeder token. Prints the requested_at of the rotation
+                # request key, or 0.
+                [ -n "$1" ] || { echo 0; return 0; }
+                kv_get "$1" "$TOKEN_ROTATION_KEY" 2>/dev/null \
+                  | jq -r '(.requested_at // "0") | tonumber? // 0' 2>/dev/null || echo 0
+              }
+
+              secret_annotation() {
+                # $1 the Secret, $2 the annotation. Prints its value, or
+                # nothing. Fails when the Secret cannot be read, so a caller
+                # never reads an API error as "no annotation".
+                sa_json=$(kube_curl "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/$1" 2>/dev/null) || return 1
+                # A Kubernetes error answer is a Status object, so only a
+                # Secret object counts as an answer.
+                printf '%s' "$sa_json" | jq -e '.kind == "Secret"' >/dev/null 2>&1 || return 1
+                printf '%s' "$sa_json" | jq -r --arg a "$2" '.metadata.annotations[$a] // empty'
+              }
+
+              secret_set_revoke() {
+                # $1 the Secret, $2 the accessor to revoke later ("" clears),
+                # $3 the Unix time after which it is revoked.
+                if [ -n "$2" ]; then
+                  body=$(jq -nc --arg a "$REVOKE_ACCESSOR_ANN" --arg t "$REVOKE_AFTER_ANN" \
+                    --arg acc "$2" --arg after "$3" '{metadata:{annotations:{($a):$acc,($t):$after}}}')
+                else
+                  body=$(jq -nc --arg a "$REVOKE_ACCESSOR_ANN" --arg t "$REVOKE_AFTER_ANN" \
+                    '{metadata:{annotations:{($a):null,($t):null}}}')
+                fi
+                c=$(kube_curl -o /dev/null -w '%{http_code}' \
+                  -H "Content-Type: application/merge-patch+json" -X PATCH --data-binary "$body" \
+                  "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/$1")
+                [ "$c" = "200" ]
+              }
+
+              token_revoke_pending() {
+                # $1 the Secret, $2 a seeder token. Revokes the old token of a
+                # rotation once its grace is over, by accessor, so this
+                # sidecar never holds the old token itself.
+                acc=$(secret_annotation "$1" "$REVOKE_ACCESSOR_ANN") || return 1
+                [ -n "$acc" ] || return 0
+                after=$(secret_annotation "$1" "$REVOKE_AFTER_ANN") || return 1
+                case "${after:-}" in
+                  ''|*[!0-9]*)
+                    # Only a hand edit makes such a value. The consumers may
+                    # still hold the old token, so the record gets a full
+                    # grace from now, not a revoke at once.
+                    echo "[openbao-auto-init] ${1} has the revoke record ${acc} with no valid ${REVOKE_AFTER_ANN} (\"${after}\"); it is revoked one grace from now" >&2
+                    secret_set_revoke "$1" "$acc" "$(( $(date +%s) + TOKEN_REVOKE_GRACE_S ))" || return 1
+                    return 0 ;;
+                esac
+                [ "$(date +%s)" -ge "$after" ] || return 0
+                [ -n "$2" ] || return 1
+                c=$(curl -sS -o ${TMPD}/revacc.json -w '%{http_code}' \
+                  -X POST -H "X-Vault-Token: $2" -H "Content-Type: application/json" \
+                  -d "$(jq -nc --arg a "$acc" '{accessor:$a}')" \
+                  "${BAO_ADDR_LOCAL}/v1/auth/token/revoke-accessor")
+                # OpenBao answers an unknown accessor with 200 and a warning,
+                # and an accessor whose token entry is gone with 400 "token
+                # not found". In both cases the old token is gone, which is
+                # the goal.
+                if [ "$c" = "204" ] || [ "$c" = "200" ] || { [ "$c" = "400" ] && grep -q 'not found' ${TMPD}/revacc.json; }; then
+                  rm -f ${TMPD}/revacc.json
+                  secret_set_revoke "$1" "" "" || return 1
+                  echo "[openbao-auto-init] revoked the old token of ${1} after its grace" >&2
+                  return 0
+                fi
+                echo "[openbao-auto-init] revoke-accessor for ${1} returned HTTP $c: $(cat ${TMPD}/revacc.json)" >&2
+                rm -f ${TMPD}/revacc.json
+                return 1
+              }
+
               vault_ensure_token() {
                 # $1 the Secret, $2 its policy, $3 (optional) a seeder login
                 # token the caller already holds.
@@ -11812,6 +11901,7 @@ spec:
                 # way the re-auth path is the ServiceAccount, never a stored
                 # credential (deploy#1732 closed the deploy#1731 gap).
                 secret="$1"; policy="$2"; held="${3:-}"
+                rotating=0; rotate_old=""
                 current_tok=$(kube_read_token "$secret")
                 if [ -n "$current_tok" ]; then
                   lookup_resp=$(curl -sS -o ${TMPD}/lookup.json -w '%{http_code}' \
@@ -11823,18 +11913,39 @@ spec:
                     # A token that carries another policy (a store from
                     # before the tenant-operator had its own) is replaced.
                     if jq -e --arg p "$policy" '.data.policies | index($p)' ${TMPD}/lookup.json >/dev/null; then
-                      if [ "$ttl" -gt 1800 ] 2>/dev/null; then
+                      # ROTATION (ADR-0171). A token older than its lifetime,
+                      # or older than a rotation request, is replaced while it
+                      # is still valid. The old token is revoked by accessor
+                      # after TOKEN_REVOKE_GRACE_S (token_revoke_pending), when
+                      # each consumer uses the new one.
+                      # Only with a held seeder token: without one, nothing can
+                      # mint the successor, and the token is renewed instead.
+                      created=$(jq -r '.data.creation_time // 0' ${TMPD}/lookup.json)
+                      old_accessor=$(jq -r '.data.accessor // empty' ${TMPD}/lookup.json)
+                      requested=$(token_rotation_requested_at "$held")
+                      now=$(date +%s)
+                      if [ "${requested:-0}" -gt "$now" ]; then
+                        echo "[openbao-auto-init] ${TOKEN_ROTATION_KEY} requested_at=${requested} is in the future; ignored" >&2
+                        requested=0
+                      fi
+                      if [ -n "$held" ] && pending=$(secret_annotation "$secret" "$REVOKE_ACCESSOR_ANN") && [ -z "$pending" ] \
+                         && { [ $(( now - created )) -ge "$TOKEN_LIFETIME_S" ] || [ "${requested:-0}" -gt "$created" ]; }; then
+                        echo "[openbao-auto-init] ${secret} token is older than its lifetime or a rotation request; minting its successor" >&2
+                        rotating=1; rotate_old="$old_accessor"
+                      elif [ "$ttl" -gt 1800 ] 2>/dev/null; then
                         return 0
                       fi
-                      echo "[openbao-auto-init] ${secret} token TTL=${ttl}s below 1800s threshold — renewing"
-                      renew_code=$(curl -sS -o /dev/null -w '%{http_code}' \
-                        -X POST -H "X-Vault-Token: ${current_tok}" \
-                        "${BAO_ADDR_LOCAL}/v1/auth/token/renew-self")
-                      if [ "$renew_code" = "200" ]; then
-                        echo "[openbao-auto-init] ${secret} token renewed (same ID, extended TTL)"
-                        return 0
+                      if [ "$rotating" = 0 ]; then
+                        echo "[openbao-auto-init] ${secret} token TTL=${ttl}s below 1800s threshold — renewing"
+                        renew_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+                          -X POST -H "X-Vault-Token: ${current_tok}" \
+                          "${BAO_ADDR_LOCAL}/v1/auth/token/renew-self")
+                        if [ "$renew_code" = "200" ]; then
+                          echo "[openbao-auto-init] ${secret} token renewed (same ID, extended TTL)"
+                          return 0
+                        fi
+                        echo "[openbao-auto-init] renew-self returned HTTP ${renew_code} — re-minting ${secret}"
                       fi
-                      echo "[openbao-auto-init] renew-self returned HTTP ${renew_code} — re-minting ${secret}"
                     else
                       echo "[openbao-auto-init] ${secret} token does not carry policy ${policy} — re-minting"
                     fi
@@ -11854,9 +11965,25 @@ spec:
                 if vault_mint_token "$minter" "$policy" "$secret"; then
                   echo "[openbao-auto-init] re-minted ${secret} with the ${SEEDER_ROLE} role (ServiceAccount ${OWN_SA}); no root token was involved"
                   erc=0
+                  if [ "$rotating" = 1 ] && [ -n "$rotate_old" ]; then
+                    secret_set_revoke "$secret" "$rotate_old" "$(( $(date +%s) + TOKEN_REVOKE_GRACE_S ))" \
+                      || { echo "[openbao-auto-init] could not record the old token of ${secret} for its revoke" >&2; erc=1; }
+                  fi
                 else
                   erc=1
+                  # A rotation whose mint failed leaves the old token in force.
+                  # It is still valid, so keep it alive.
+                  if [ "$rotating" = 1 ]; then
+                    rn=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "X-Vault-Token: ${current_tok}" \
+                      "${BAO_ADDR_LOCAL}/v1/auth/token/renew-self" || true)
+                    if [ "$rn" = "200" ]; then
+                      echo "[openbao-auto-init] the successor of ${secret} could not be minted; the old token was renewed and stays in force" >&2
+                    else
+                      echo "[openbao-auto-init] the successor of ${secret} could not be minted, and the renewal of the old token returned HTTP ${rn}" >&2
+                    fi
+                  fi
                 fi
+                rotate_old=""
                 # The KV copy the platform-operator reads through ESO must follow.
                 if [ "$secret" = "$PLATFORM_TOKEN_SECRET" ]; then
                   seed_one "$minter" gibson-vault-admin-token token:svctoken || erc=1
@@ -11867,11 +11994,15 @@ spec:
 
               vault_ensure_tokens() {
                 # Every consumer token. $1 (optional) a held seeder token.
+                # With a held token each Secret also gets its pending revoke
+                # (token_revoke_pending). A rotation needs the held token too,
+                # because only a seeder token reads the rotation request.
                 trc=0
-                vault_ensure_token "$PLATFORM_TOKEN_SECRET" "$PLATFORM_POLICY" "${1:-}" || trc=1
-                vault_ensure_token "$TENANT_OP_TOKEN_SECRET" "$TENANT_OP_POLICY" "${1:-}" || trc=1
-                for pair in $JOB_TOKENS; do
+                for pair in "${PLATFORM_TOKEN_SECRET}:${PLATFORM_POLICY}" "${TENANT_OP_TOKEN_SECRET}:${TENANT_OP_POLICY}" $JOB_TOKENS; do
                   vault_ensure_token "${pair%%:*}" "${pair#*:}" "${1:-}" || trc=1
+                  if [ -n "${1:-}" ]; then
+                    token_revoke_pending "${pair%%:*}" "$1" || trc=1
+                  fi
                 done
                 return $trc
               }
@@ -12247,6 +12378,7 @@ spec:
               path "sys/policies/acl/*" { capabilities = ["create", "update", "read"] }
               path "sys/policies/acl/platform-admin" { capabilities = ["delete"] }
               path "auth/token/create" { capabilities = ["create", "update", "sudo"] }
+              path "auth/token/revoke-accessor" { capabilities = ["update"] }
               path "secret/data/*" { capabilities = ["create", "read", "update"] }
               path "secret/metadata/*" { capabilities = ["read"] }
               path "transit/keys/*" { capabilities = ["create", "read", "update"] }
@@ -12381,10 +12513,12 @@ spec:
               # the pod was restarted, and every image pull ran on an empty
               # password meanwhile.
               vault_follow_keyring_inputs() {
-                seeder=$(bao_login_seeder) || return 1
+                # $1 (optional) a seeder token the caller holds and revokes.
+                seeder="${1:-}"
+                if [ -z "$seeder" ]; then seeder=$(bao_login_seeder) || return 1; fi
                 rc=0
                 vault_seed_platform_secrets "$seeder" >/dev/null || rc=1
-                vault_revoke_self "$seeder"
+                [ -n "${1:-}" ] || vault_revoke_self "$seeder"
                 seeder=""
                 return $rc
               }
@@ -12538,8 +12672,18 @@ spec:
                 fi
                 steady_tick=$((${steady_tick:-0} + 1))
                 if [ "$steady_tick" -ge 30 ]; then
-                  vault_ensure_tokens || echo "[openbao-auto-init] WARN: service token refresh failed"
-                  vault_follow_keyring_inputs || echo "[openbao-auto-init] WARN: keyring input pass did not complete; it runs again in five minutes"
+                  # One seeder login for the pass: the token rotation and its
+                  # pending revokes need it (ADR-0171). When the login fails,
+                  # the tokens are still renewed, and nothing rotates.
+                  if pass_tok=$(bao_login_seeder); then
+                    vault_ensure_tokens "$pass_tok" || echo "[openbao-auto-init] WARN: service token refresh failed"
+                    vault_follow_keyring_inputs "$pass_tok" || echo "[openbao-auto-init] WARN: keyring input pass did not complete; it runs again in five minutes"
+                    vault_revoke_self "$pass_tok"
+                  else
+                    vault_ensure_tokens || echo "[openbao-auto-init] WARN: service token refresh failed"
+                    echo "[openbao-auto-init] WARN: the ${SEEDER_ROLE} login failed; the keyring input pass runs again in five minutes"
+                  fi
+                  pass_tok=""
                   steady_tick=0
                 fi
                 sleep 10
