@@ -3922,9 +3922,6 @@ data:
           Machine:
             Name: Automatically Initialized IAM Admin
             Username: iam-admin
-          MachineKey:
-            ExpirationDate: "2029-01-01T00:00:00Z"
-            Type: 1
       Skip: false
     Machine:
       Identification:
@@ -10546,7 +10543,7 @@ spec:
     metadata:
       annotations:
         secret.reloader.stakater.com/reload: gibson-zitadel-system-key
-        checksum/configmap: b4e23c9a2bc26df5d0ab18e673c651d16a9eee8218176ad5ba9d7f9e7c957849
+        checksum/configmap: 574eda3fcb550abf2acc68b2b279fa08709e18020b2929b0b8a937d10792da79
         checksum/secret-db-ssl-ca-crt: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         checksum/secret-zitadel-secrets: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
       labels:
@@ -12045,8 +12042,6 @@ spec:
                 # own script (helpers in _openbao-policies.tpl).
                 vault_write_policy "$tok" iam-admin-escrow \
                   '
-              path "secret/data/gibson-zitadel-iam-admin-pat" { capabilities = ["create", "read", "update"] }
-              path "secret/data/gibson-zitadel-iam-admin-machinekey" { capabilities = ["create", "read", "update"] }
               path "secret/data/gibson-zitadel-login-client-pat" { capabilities = ["create", "read", "update"] }' || return 1
                 vault_write_policy "$tok" jwt-auth-init \
                   '
@@ -16594,43 +16589,6 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: iam-admin
-  namespace: gibson
-  annotations:
-    # After the escrow hook (-2), before wave 0; see the header.
-    argocd.argoproj.io/sync-wave: "-1"
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: zitadel
-spec:
-  refreshInterval: 60s
-  secretStoreRef:
-    name: "gibson-secrets"
-    kind: ClusterSecretStore
-  target:
-    name: iam-admin
-    creationPolicy: Orphan
-    template:
-      engineVersion: v2
-      type: Opaque
-      metadata:
-        labels:
-          app.kubernetes.io/managed-by: external-secrets
-          app.kubernetes.io/component: zitadel
-      data:
-        iam-admin.json: '{{ .machinekey }}'
-  data:
-    - secretKey: machinekey
-      remoteRef: { key: gibson-zitadel-iam-admin-machinekey, property: machinekey }
----
-# Source: gibson/charts/gibson-workloads/templates/external-secrets/iam-admin-pat-externalsecret.yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
   name: login-client
   namespace: gibson
   annotations:
@@ -19210,7 +19168,7 @@ rules:
   # whole window: hosted run 34271811189 (2026-09-08) sat 20 minutes on
   # "waiting for iam-admin" with the Secret present and this list naming
   # the PAT alone. The Job now refuses to wait on a Secret it may not read.
-  resourceNames: [iam-admin, login-client]
+  resourceNames: [login-client]
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/02-bootstrap-secrets.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -19560,8 +19518,8 @@ spec:
           secret_has_key "$NS" "gibson-dashboard-oidc" "client_id"
           secret_has_key "$NS" "gibson-dashboard-oidc" "client_secret"
 
-          # The Zitadel owner credentials (iam-admin-pat, iam-admin, the System
-          # API key) and the OpenBao platform-operator token (gibson-openbao-keys,
+          # The Zitadel owner credentials (iam-admin-pat, the System API key)
+          # and the OpenBao platform-operator token (gibson-openbao-keys,
           # which can read the escrowed copies) are not checked here. Only
           # bootstrap may read them (scripts/check-owner-credential-readers.py),
           # and a test that reads them would be one more reader. The
@@ -21541,8 +21499,8 @@ spec:
           value: /tmp
         - name: BAO_ADDR
           value: "https://gibson-openbao.gibson.svc:8200"
-        # The token of this Job alone, policy iam-admin-escrow: the three KV
-        # keys below and nothing else. openbao-auto-init mints it.
+        # The token of this Job alone, policy iam-admin-escrow: the KV key
+        # below and nothing else. openbao-auto-init mints it.
         - name: VAULT_ADMIN_TOKEN
           valueFrom:
             secretKeyRef:
@@ -21553,17 +21511,13 @@ spec:
         - |
           set -euo pipefail
           NS=gibson
-          # Every Secret the Zitadel setup Job mints on the first instance
-          # (its zitadel-machinekey, zitadel-machine-pat and
-          # zitadel-login-client-pat containers), as
+          # The Secret the Zitadel setup Job mints on the first instance (its
+          # zitadel-login-client-pat container), as
           #   <Secret>:<data key>:<store key>:<store property>
-          # The platform-operator reads iam-admin (the machine key, for the
-          # SA identity map) and iam-admin-pat; zitadel-login mounts
-          # login-client. A restore brings back none of them (blocker 3 loop
-          # #14, 2026-09-08: PlatformBootstrap SAIdentityMapReady=False
-          # "Secret gibson/iam-admin not yet written", zitadel-login on
-          # "secret login-client not found").
-          ENTRIES="iam-admin:iam-admin.json:gibson-zitadel-iam-admin-machinekey:machinekey login-client:pat:gibson-zitadel-login-client-pat:pat"
+          # zitadel-login mounts login-client. A restore does not bring it
+          # back (blocker 3 loop #14, 2026-09-08: zitadel-login on "secret
+          # login-client not found").
+          ENTRIES="login-client:pat:gibson-zitadel-login-client-pat:pat"
           # The store key that the platform-operator rotates (ADR-0171). This
           # hook writes it only when the store holds no value.
           OPERATOR_ROTATED="gibson-zitadel-login-client-pat"
