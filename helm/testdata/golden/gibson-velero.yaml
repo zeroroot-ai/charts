@@ -3880,9 +3880,8 @@ rules:
 
   # Pre-backup hooks (deploy#1735). A backup hook is an exec into the target
   # pod, issued by the server through this subresource
-  # (internal/hook/item_hook_handler.go). The platform runs two: the Neo4j
-  # checkpoint on the per-tenant pods and on the platform graph pod
-  # (templates/schedule.yaml). The grant is `create` on pods/exec alone: it
+  # (internal/hook/item_hook_handler.go). The platform runs one: the Neo4j
+  # checkpoint on the per-tenant pods (templates/schedule.yaml). The grant is `create` on pods/exec alone: it
   # enters a running container, it authors nothing, and the role still holds
   # no verb on secrets, so the API path to a Secret object stays closed. What
   # exec does reach is whatever the entered container itself can read, which
@@ -4532,16 +4531,13 @@ spec:
     ttl: "4320h0m0s"
     hooks:
       resources:
-        # One hook per Neo4j pod shape. The two label sets come from the two
-        # producers: the tenant operator stamps
-        # app.kubernetes.io/component=tenant-neo4j on every per-tenant pod
-        # (gibson operators/tenant/internal/dataplane/neo4j_networkpolicy.go),
-        # and the upstream neo4j chart stamps
-        # helm.neo4j.com/pod_category=neo4j-instance on the platform graph
-        # pod. Both run the container `neo4j` and both carry their auth as
-        # `neo4j/<password>`: the tenant pod in the env var NEO4J_AUTH, the
-        # platform pod in the file NEO4J_AUTH_PATH points at. The command
-        # reads whichever is present and checkpoints over bolt on localhost.
+        # The tenant operator stamps app.kubernetes.io/component=tenant-neo4j
+        # on every per-tenant pod (gibson
+        # operators/tenant/internal/dataplane/neo4j_networkpolicy.go). The
+        # pod runs the container `neo4j` and carries its auth as
+        # `neo4j/<password>` in the env var NEO4J_AUTH. The platform runs no
+        # Neo4j of its own (ADR-0171). The command checkpoints over bolt on
+        # localhost.
         - name: tenant-neo4j-checkpoint
           labelSelector:
             matchLabels:
@@ -4553,29 +4549,7 @@ spec:
                   - /bin/sh
                   - -c
                   - |
-                    A="${NEO4J_AUTH:-$(cat "$NEO4J_AUTH_PATH")}"
-                    out="$(cypher-shell -a bolt://127.0.0.1:7687 -u "${A%%/*}" -p "${A#*/}" "CALL db.checkpoint()" 2>&1)" && { echo "$out"; exit 0; }
-                    case "$out" in
-                      *"no procedure with the name"*)
-                        echo "community edition has no db.checkpoint (measured on neo4j:5.26.0-community, deploy#1735): the periodic checkpoint bounds replay, asserting the store answers instead"
-                        exec cypher-shell -a bolt://127.0.0.1:7687 -u "${A%%/*}" -p "${A#*/}" "CALL db.ping()"
-                        ;;
-                      *) echo "$out" >&2; exit 1 ;;
-                    esac
-                onError: Fail
-                timeout: "5m"
-        - name: platform-neo4j-checkpoint
-          labelSelector:
-            matchLabels:
-              helm.neo4j.com/pod_category: neo4j-instance
-          pre:
-            - exec:
-                container: neo4j
-                command:
-                  - /bin/sh
-                  - -c
-                  - |
-                    A="${NEO4J_AUTH:-$(cat "$NEO4J_AUTH_PATH")}"
+                    A="${NEO4J_AUTH}"
                     out="$(cypher-shell -a bolt://127.0.0.1:7687 -u "${A%%/*}" -p "${A#*/}" "CALL db.checkpoint()" 2>&1)" && { echo "$out"; exit 0; }
                     case "$out" in
                       *"no procedure with the name"*)

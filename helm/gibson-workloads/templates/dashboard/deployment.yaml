@@ -51,6 +51,10 @@ spec:
     spec:
       {{- include "gibson.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ .Values.dashboard.serviceAccount.name | default "gibson-dashboard" }}
+      # The dashboard holds no Kubernetes access (dashboard src/lib/env-validator.ts),
+      # and since ADR-0171 no init container reads a Secret through the API.
+      # So the pod mounts no ServiceAccount token (ADR-0165).
+      automountServiceAccountToken: false
       # Secure pod (ADR-0165, charts#394): every container runs non-root with
       # the RuntimeDefault seccomp profile, a read-only root filesystem and no
       # capabilities.
@@ -69,8 +73,7 @@ spec:
         Per epic one-code-path (deploy#186), slices deploy#196 + #201 +
         #203: the `.Values.zitadel.enabled` and `.Values.spire.enabled`
         gates have been deleted (Zitadel + SPIRE are structurally
-        required), and wait-for-db-secrets is unconditional (the
-        dashboard always consumes NEO4J_PASSWORD). initContainers always
+        required). initContainers always
         renders — wait-for-spire-socket, wait-for-zitadel-client +
         secret, resolve-sa-identity-map are mandatory. Per-feature waits
         (e.g. waitForGibson) remain gated on their feature flags. The
@@ -162,44 +165,6 @@ spec:
             - name: zitadel-client
               mountPath: /var/run/zitadel-client
               readOnly: true
-        # one-code-path #203: wait-for-db-secrets blocks pod start until
-        # the Secret backing NEO4J_PASSWORD has been materialised. The
-        # NEO4J_PASSWORD env entry was flipped from `optional: true` to
-        # required.
-        - name: wait-for-db-secrets
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
-          command: ['/bin/bash', '-c']
-          args:
-            - |
-              set -eu
-              name={{ .Values.secrets.databases.existingSecret | default (include "gibson.dbSecrets.name" .) | quote }}
-              ns={{ .Release.Namespace | quote }}
-              echo "[wait-for-db-secrets] waiting for Secret ${ns}/${name} key=NEO4J_PASSWORD..."
-              for i in $(seq 1 30); do
-                if kubectl get secret -n "${ns}" "${name}" \
-                    -o jsonpath='{.data.NEO4J_PASSWORD}' 2>/dev/null \
-                    | base64 -d 2>/dev/null | grep -q .; then
-                  echo "[wait-for-db-secrets] ok"
-                  exit 0
-                fi
-                sleep 2
-              done
-              echo "[wait-for-db-secrets] timed out after 60s -- the dashboard DB-secrets Secret was not materialised. Check: kubectl get externalsecret,secret -n ${ns}" >&2
-              exit 1
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 1001
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
         # Spec: canonical-service-identity Req 5 — resolve the readable SA
         # names in serviceAccounts.required against the gibson-sa-identity-map
         # ConfigMap (populated by the post-install Zitadel Job) into:
@@ -514,21 +479,6 @@ spec:
             # model.
             - name: GIBSON_PUBLIC_URL
               value: {{ .Values.dashboard.gibsonPlatformPublicUrl | default (include "gibson.apiOrigin" .) | quote }}
-
-            # Neo4j connection URI for the dashboard knowledge-graph client.
-            # Required — the dashboard Neo4j driver uses this at startup.
-            - name: NEO4J_URI
-              value: {{ .Values.dashboard.neo4j.uri | default (printf "bolt://%s-neo4j:7687" .Release.Name) | quote }}
-            - name: NEO4J_USER
-              value: {{ .Values.dashboard.neo4j.user | default "neo4j" | quote }}
-            # one-code-path #203: was `optional: true`. The
-            # wait-for-db-secrets init container above blocks pod start
-            # until the Secret is materialised by ESO.
-            - name: NEO4J_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.secrets.databases.existingSecret | default (include "gibson.dbSecrets.name" .) }}
-                  key: NEO4J_PASSWORD
 
             # Database URL for the dashboard (Auth.js adapter + tenant
             # provisioning state, rate-limit / lockout counters via

@@ -1,7 +1,7 @@
 {{/*
 helm-test pod: data-plane
 
-Exec'd probes against the three data-plane services (Postgres, Redis, Neo4j)
+Exec'd probes against the two platform data-plane services (Postgres, Redis)
 to verify they're accepting connections AND that the chart-managed
 credentials are valid.
 
@@ -14,10 +14,8 @@ Probes:
   - Redis (gibson-workloads-redis-stack):
       TCP probe only — auth is validated by the StatefulSet readiness probe.
 
-  - Neo4j (gibson-neo4j Bolt :7687):
-      TCP-handshake only — cypher-shell takes long enough to add startup
-      latency that affects helm-test scaffolding. The dedicated
-      tenant-neo4j ClusterSPIFFEID validates auth elsewhere.
+  The platform runs no Neo4j (ADR-0171). Each tenant has its own Neo4j,
+  which the tenant-operator provisions and checks.
 
 This pod uses two containers (different images) instead of one because
 combining psql + redis-cli into one image either bloats the size or
@@ -153,43 +151,6 @@ spec:
         runAsNonRoot: true
         runAsUser: 999
         runAsGroup: 999
-        readOnlyRootFilesystem: true
-        capabilities:
-          drop: ["ALL"]
-        seccompProfile:
-          type: RuntimeDefault
-      volumeMounts:
-        - name: tmp
-          mountPath: /tmp
-    - name: neo4j-probe
-      image: "{{ include "gibson-workloads.tests.image" . }}"
-      imagePullPolicy: IfNotPresent
-      command: ["/bin/sh", "-c"]
-      args:
-        - |
-          set -eu
-          ERR='{{ include "gibson-workloads.tests.errorPrefix" . }}'
-          NEO4J_HOST='gibson-neo4j'
-          NEO4J_BOLT_PORT='7687'
-
-          echo "[neo4j-probe] TCP-probing ${NEO4J_HOST}:${NEO4J_BOLT_PORT}"
-          if ! (echo > "/dev/tcp/${NEO4J_HOST}/${NEO4J_BOLT_PORT}") 2>/dev/null ; then
-            echo "$ERR neo4j-probe: ${NEO4J_HOST}:${NEO4J_BOLT_PORT} not reachable"
-            exit 1
-          fi
-          echo "[neo4j-probe] PASS"
-      resources:
-        requests:
-          cpu: 10m
-          memory: 32Mi
-        limits:
-          cpu: 100m
-          memory: 64Mi
-      securityContext:
-        allowPrivilegeEscalation: false
-        runAsNonRoot: true
-        runAsUser: 65534
-        runAsGroup: 65534
         readOnlyRootFilesystem: true
         capabilities:
           drop: ["ALL"]

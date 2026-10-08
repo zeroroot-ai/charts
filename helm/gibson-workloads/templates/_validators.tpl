@@ -271,7 +271,6 @@ includes the daemon hits the check.
        provisioned by the tenant-operator) or "multi-db" (shared Enterprise
        cluster with tenant_<id> databases). Vector path is N/A under this spec
        — removed. Spec per-tenant-data-plane-completion Tasks 11-22, Req 5. */ -}}
-{{- $n4j := $dp.neo4j | default dict -}}
 {{- $tenantMode := "" -}}
 {{- with .Values.neo4j -}}
 {{- $tenantMode = .tenant_mode | default "" -}}

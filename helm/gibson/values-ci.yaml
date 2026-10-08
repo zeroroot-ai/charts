@@ -20,9 +20,9 @@
 #
 # A CI analysis on 2026-09-15 looked for a divergence worth making and found
 # none. The measured node budget is 1885m of 1900m CPU and 6900Mi of 7000Mi.
-# Of that, a local Kubernetes control plane takes 950m and neo4j takes 700m and
-# 4096Mi, leaving the whole platform about 235m. Every component already
-# requests between 5m and 25m. There is nothing left for a CI-only tweak to
+# Of that, a local Kubernetes control plane took 950m and the platform Neo4j
+# took 700m and 4096Mi (the platform runs no Neo4j since ADR-0171). Every
+# component already requests between 5m and 25m. There is nothing left for a CI-only tweak to
 # win, so the content stays the same.
 #
 # WHAT IT DOES
@@ -38,7 +38,7 @@
 #   The baseline requests about 2.85 CPU of reservations. That is the honest
 #   self-hosted floor and it MUST NOT be lowered in the baseline: an operator's
 #   single-node install needs it. One local node cannot meet it. With the real
-#   requests the daemon, neo4j, OpenBao and the rest never schedule ("0/1 nodes
+#   requests the daemon, OpenBao and the rest never schedule ("0/1 nodes
 #   are available: 1 Insufficient cpu"), OpenBao never unseals, no admin token,
 #   no pull secret, no workload Ready, and the post-install hook times out at
 #   30 minutes. Measured on run 32773702081. The node is the constraint, not
@@ -63,9 +63,6 @@
 #     baseline plus this file and fails when the total exceeds what one
 #     2-vCPU node can schedule.
 #
-# neo4j is NOT lowered: its chart refuses to render below 500m CPU and 2Gi
-#   ("Provided cpu value ... is less than minimum"), so that floor is what
-#   every other request here makes room for.
 gibson-workloads:
   # The mail sink of every rung below staging (charts#503, gibson#480). The
   # baseline mails with "log", and the daemon refuses "log" for an invitation
@@ -219,10 +216,6 @@ platformPostgres:
     requests:
       cpu: 10m
       memory: 256Mi
-
-# neo4j is NOT lowered: chart v2026.4.0 refuses to render below 500m CPU
-# ("Provided cpu value ... is less than minimum"), so its 500m is the floor
-# every other request here makes room for.
 
 # One mail value for the daemon, the tenant-operator and Zitadel (hosted#223).
 # The host is the Mailpit Service of this release, from the helper

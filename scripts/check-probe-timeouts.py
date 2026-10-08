@@ -40,7 +40,7 @@ which is the smallest render that contains every probe-bearing workload.
 VENDORED CHARTS
 
 A vendored upstream chart is not ours to edit, and only some expose the field
-through values. neo4j does, so helm/gibson/values.yaml sets it. The three in
+through values. helm/gibson/values.yaml sets it where a chart does. The ones in
 EXEMPT do not, at the versions this chart pins. The exemption is keyed by chart
 name, never by a count or a line number, and it is checked in both directions:
 an entry that no longer has a gap FAILS, so a chart bump that adds the knob

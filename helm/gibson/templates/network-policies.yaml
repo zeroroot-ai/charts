@@ -8,7 +8,7 @@ a new policy, and no policy lists each internal peer.
                       release namespace. It allows DNS to kube-dns and nothing
                       else, in both directions.
   2. platform         Platform pods reach each other.
-  3. data stores      Postgres, Redis, OpenBao and Neo4j each admit only the
+  3. data stores      Postgres, Redis and OpenBao each admit only the
                       pods with their client label.
   4. kube-api         Pods with the kube-api label reach the API server.
   5. internet         Pods with the egress-internet label reach each host
@@ -103,7 +103,6 @@ spec:
   (dict "name" "postgres" "ports" (list 5432 8000))
   (dict "name" "redis" "ports" (list 6379))
   (dict "name" "openbao" "ports" (list 8200))
-  (dict "name" "neo4j" "ports" (list 7687 7474))
 }}
 {{- range $s := $stores }}
 ---

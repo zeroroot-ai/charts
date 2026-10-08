@@ -4266,295 +4266,6 @@ data:
                       address:
                         socket_address: { address: 127.0.0.1, port_value: 8082 }
 ---
-# Source: gibson/charts/neo4j/templates/neo4j-config.yaml
-# Neo4j config values that are required for neo4j to work correctly in Kubernetes, these are not overridden by user-provided values
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: "gibson-k8s-config"
-  namespace: "gibson"
-  labels:
-    app: "gibson-neo4j"    
-    "gibson.zeroroot.ai/datastore": "neo4j"
-    "gibson.zeroroot.ai/net-role": "datastore"
-data:
-  server.default_listen_address: "0.0.0.0"
----
-# Source: gibson/charts/neo4j/templates/neo4j-config.yaml
-# User-provided Neo4j config values
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: "gibson-user-config"
-  namespace: "gibson"
-  labels:
-    app: "gibson-neo4j"    
-    "gibson.zeroroot.ai/datastore": "neo4j"
-    "gibson.zeroroot.ai/net-role": "datastore"
-data:
-  dbms.security.procedures.allowlist: apoc.merge.node,apoc.merge.relationship
-  dbms.security.tls_reload_enabled: "true"
-  internal.dbms.sharded_property_database.enabled: "false"
-  server.config.strict_validation.enabled: "false"
-  server.memory.heap.initial_size: 1g
-  server.memory.heap.max_size: 1g
-  server.memory.pagecache.size: 512m
-  server.jvm.additional: |-  
-    -XX:+UseG1GC
-    -XX:-OmitStackTraceInFastThrow
-    -XX:+AlwaysPreTouch
-    -XX:+UnlockExperimentalVMOptions
-    -XX:+TrustFinalNonStaticFields
-    -XX:+DisableExplicitGC
-    -Djdk.nio.maxCachedBufferSize=1024
-    -Dio.netty.tryReflectionSetAccessible=true
-    -Djdk.tls.ephemeralDHKeySize=2048
-    -Djdk.tls.rejectClientInitiatedRenegotiation=true
-    -XX:FlightRecorderOptions=stackdepth=256
-    -XX:+UnlockDiagnosticVMOptions
-    -XX:+DebugNonSafepoints
-    --add-opens=java.base/java.nio=ALL-UNNAMED
-    --add-opens=java.base/java.io=ALL-UNNAMED
-    --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
-    -Dlog4j2.disable.jmx=true
----
-# Source: gibson/charts/neo4j/templates/neo4j-config.yaml
-# Default Neo4j config values, these are overridden by user-provided values in gibson-user-config
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: "gibson-default-config"
-  namespace: "gibson"
-  labels:
-    app: "gibson-neo4j"    
-    "gibson.zeroroot.ai/datastore": "neo4j"
-    "gibson.zeroroot.ai/net-role": "datastore"
-data:
-
-  # Neo4j defaults
-  db.tx_log.rotation.retention_policy: 1 days
-  server.windows_service_name: neo4j
-  
-  server.logs.config: /config/server-logs.xml/server-logs.xml
-  server.logs.user.config: /config/user-logs.xml/user-logs.xml
-
-  # Helm defaults
-
-  # Bolt keep alive
-  # this helps to ensure that LoadBalancers do not close bolt connections that are in use but appear idle
-  server.bolt.connection_keep_alive: "30s"
-  server.bolt.connection_keep_alive_for_requests: "ALL"
-  server.bolt.connection_keep_alive_streaming_scheduling_interval: "30s"
-
-  # If we set default advertised address it over-rides the bolt address used to populate the browser in a really annoying way
-  # dbms.default_advertised_address: "$(bash -c 'echo ${SERVICE_DOMAIN}')"
-
-
-  # Other
-  internal.dbms.ssl.system.ignore_dot_files: "true"
-
-  # set the below configs in case of cluster or analytics
-  # Logging
-  server.directories.logs: "/logs"
-  # Import
-  server.directories.import: "/import"
-
-  # Use more reliable defaults SSL / TLS settings for K8s
-  dbms.ssl.policy.bolt.client_auth: "NONE"
-  dbms.ssl.policy.https.client_auth: "NONE"
----
-# Source: gibson/charts/neo4j/templates/neo4j-config.yaml
-# User-provided Neo4j Apoc config values
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: "gibson-apoc-config"
-  namespace: "gibson"
-  labels:
-    app: "gibson-neo4j"    
-    "gibson.zeroroot.ai/datastore": "neo4j"
-    "gibson.zeroroot.ai/net-role": "datastore"
-data:
-  apoc.conf: |-
-      apoc.export.file.enabled=false
-      apoc.import.file.enabled=false
----
-# Source: gibson/charts/neo4j/templates/neo4j-config.yaml
-# server-logs.xml as configmap
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: "gibson-server-logs-config"
-  namespace: "gibson"
-  labels:
-    app: "gibson-neo4j"    
-    "gibson.zeroroot.ai/datastore": "neo4j"
-    "gibson.zeroroot.ai/net-role": "datastore"
-data:
-  server-logs.xml: |-
-    <?xml version="1.0" encoding="UTF-8"?>
-    <!--
-    
-        Copyright (c) "Neo4j"
-        Neo4j Sweden AB [http://neo4j.com]
-        This file is a commercial add-on to Neo4j Enterprise Edition.
-    
-    -->
-    <!--
-        This is a log4j 2 configuration file.
-    
-        It is highly recommended to keep the original "debug.log" as is, to make sure enough data is captured in case
-        of errors in a format that neo4j developers can work with.
-    
-        All configuration values can be queried with the lookup prefix "config:". You can for example, resolve
-        the path to your neo4j home directory with ${config:dbms.directories.neo4j_home}.
-    
-        Please consult https://logging.apache.org/log4j/2.x/manual/configuration.html for instructions and
-        available configuration options.
-    -->
-    <Configuration status="ERROR" monitorInterval="30" packages="org.neo4j.logging.log4j">
-        <Appenders>
-            <!-- Default debug.log, please keep -->
-            <RollingRandomAccessFile name="DebugLog" fileName="${config:server.directories.logs}/debug.log"
-                                     filePattern="$${config:server.directories.logs}/debug.log.%02i">
-                <Neo4jDebugLogLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p [%c{1.}] %m%n"/>
-                <Policies>
-                    <SizeBasedTriggeringPolicy size="20 MB"/>
-                </Policies>
-                <DefaultRolloverStrategy fileIndex="min" max="7"/>
-            </RollingRandomAccessFile>
-    
-            <RollingRandomAccessFile name="HttpLog" fileName="${config:server.directories.logs}/http.log"
-                                     filePattern="$${config:server.directories.logs}/http.log.%02i">
-                <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p %m%n"/>
-                <Policies>
-                    <SizeBasedTriggeringPolicy size="20 MB"/>
-                </Policies>
-                <DefaultRolloverStrategy fileIndex="min" max="5"/>
-            </RollingRandomAccessFile>
-    
-            <RollingRandomAccessFile name="QueryLog" fileName="${config:server.directories.logs}/query.log"
-                                     filePattern="$${config:server.directories.logs}/query.log.%02i">
-                <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p %m%n"/>
-                <Policies>
-                    <SizeBasedTriggeringPolicy size="20 MB"/>
-                </Policies>
-                <DefaultRolloverStrategy fileIndex="min" max="7"/>
-            </RollingRandomAccessFile>
-    
-            <RollingRandomAccessFile name="SecurityLog" fileName="${config:server.directories.logs}/security.log"
-                                     filePattern="$${config:server.directories.logs}/security.log.%02i">
-                <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p %m%n"/>
-                <Policies>
-                    <SizeBasedTriggeringPolicy size="20 MB"/>
-                </Policies>
-                <DefaultRolloverStrategy fileIndex="min" max="7"/>
-            </RollingRandomAccessFile>
-        </Appenders>
-    
-        <Loggers>
-            <!-- Log levels. One of DEBUG, INFO, WARN, ERROR or OFF -->
-    
-            <!-- The debug log is used as the root logger to catch everything -->
-            <Root level="INFO">
-                <AppenderRef ref="DebugLog"/> <!-- Keep this -->
-            </Root>
-    
-            <!-- The query log, must be named "QueryLogger" -->
-            <Logger name="QueryLogger" level="INFO" additivity="false">
-                <AppenderRef ref="QueryLog"/>
-            </Logger>
-    
-            <!-- The http request log, must be named "HttpLogger" -->
-            <Logger name="HttpLogger" level="INFO" additivity="false">
-                <AppenderRef ref="HttpLog"/>
-            </Logger>
-    
-            <!-- The security log, must be named "SecurityLogger" -->
-            <Logger name="SecurityLogger" level="INFO" additivity="false">
-                <AppenderRef ref="SecurityLog"/>
-            </Logger>
-        </Loggers>
-    </Configuration>
----
-# Source: gibson/charts/neo4j/templates/neo4j-config.yaml
-# user-logs.xml as configmap
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: "gibson-user-logs-config"
-  namespace: "gibson"
-  labels:
-    app: "gibson-neo4j"    
-    "gibson.zeroroot.ai/datastore": "neo4j"
-    "gibson.zeroroot.ai/net-role": "datastore"
-data:
-  user-logs.xml: |-
-    <?xml version="1.0" encoding="UTF-8"?>
-    <!--
-    
-        Copyright (c) "Neo4j"
-        Neo4j Sweden AB [http://neo4j.com]
-        This file is a commercial add-on to Neo4j Enterprise Edition.
-    
-    -->
-    <!--
-        This is a log4j 2 configuration file that provides maximum flexibility.
-    
-        All configuration values can be queried with the lookup prefix "config:". You can for example, resolve
-        the path to your neo4j home directory with ${config:dbms.directories.neo4j_home}.
-    
-        Please consult https://logging.apache.org/log4j/2.x/manual/configuration.html for instructions and
-        available configuration options.
-    -->
-    <Configuration status="ERROR" monitorInterval="30" packages="org.neo4j.logging.log4j">
-    
-        <Appenders>
-            <RollingRandomAccessFile name="Neo4jLog" fileName="${config:server.directories.logs}/neo4j.log"
-                                     filePattern="$${config:server.directories.logs}/neo4j.log.%02i">
-                <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p %m%n"/>
-                <Policies>
-                    <SizeBasedTriggeringPolicy size="20 MB"/>
-                </Policies>
-                <DefaultRolloverStrategy fileIndex="min" max="7"/>
-            </RollingRandomAccessFile>
-    
-            <!-- Only used by "neo4j console", will be ignored otherwise -->
-            <Console name="ConsoleAppender" target="SYSTEM_OUT">
-                <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSSZ}{GMT+0} %-5p %m%n"/>
-            </Console>
-        </Appenders>
-    
-        <Loggers>
-            <!-- Log level for the neo4j log. One of DEBUG, INFO, WARN, ERROR or OFF -->
-            <Root level="INFO">
-                <AppenderRef ref="Neo4jLog"/>
-                <AppenderRef ref="ConsoleAppender"/>
-            </Root>
-        </Loggers>
-    
-    </Configuration>
----
-# Source: gibson/charts/neo4j/templates/neo4j-env.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: "gibson-env"
-  namespace: "gibson"
-  labels:
-    app: "gibson-neo4j"    
-    "gibson.zeroroot.ai/datastore": "neo4j"
-    "gibson.zeroroot.ai/net-role": "datastore"
-data:
-  # It should not be necessary for neo4j users/administrators to modify this configMap
-  # Neo4j configuration is set in the gibson-user-config ConfigMap
-  NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
-  NEO4J_AUTH_PATH: "/config/neo4j-auth/NEO4J_AUTH"
-  NEO4J_EDITION: "COMMUNITY_K8S"
-  NEO4J_CONF: "/config/"
-  K8S_NEO4J_NAME: "gibson-neo4j"
-  EXTENDED_CONF: "yes"
----
 # Source: gibson/charts/spire/charts/spiffe-oidc-discovery-provider/templates/configmap.yaml
 apiVersion: v1
 kind: ConfigMap
@@ -7878,22 +7589,6 @@ rules:
       - gibson-openbao-iam-admin-escrow
       - gibson-openbao-jwt-auth-init
 ---
-# Source: gibson/charts/gibson-workloads/templates/dashboard/init-secrets-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: gibson-dashboard-init-secrets
-  namespace: gibson
-  labels:
-    app.kubernetes.io/name: gibson-dashboard
-    app.kubernetes.io/part-of: gibson
-rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get"]
-    resourceNames:
-      - "gibson-gibson-workloads-db-secrets"
----
 # Source: gibson/charts/gibson-workloads/templates/databases/redis-rotation-controller.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -8505,24 +8200,6 @@ subjects:
   - kind: ServiceAccount
     name: gibson-openbao
     namespace: gibson
----
-# Source: gibson/charts/gibson-workloads/templates/dashboard/init-secrets-rbac.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: gibson-dashboard-init-secrets
-  namespace: gibson
-  labels:
-    app.kubernetes.io/name: gibson-dashboard
-    app.kubernetes.io/part-of: gibson
-subjects:
-  - kind: ServiceAccount
-    name: gibson-dashboard
-    namespace: gibson
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: gibson-dashboard-init-secrets
 ---
 # Source: gibson/charts/gibson-workloads/templates/databases/redis-rotation-controller.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -9407,74 +9084,6 @@ spec:
       targetPort: grpc
       protocol: TCP
       appProtocol: grpc
----
-# Source: gibson/charts/neo4j/templates/neo4j-loadbalancer.yaml
-# Service for applications that need access to neo4j
-apiVersion: v1
-kind: Service
-metadata:
-  name: "gibson-neo4j-lb-neo4j"
-  namespace: "gibson"
-  labels:
-    helm.neo4j.com/neo4j.name: "gibson-neo4j"
-    app: "gibson-neo4j"
-    helm.neo4j.com/service: "neo4j"    
-    "gibson.zeroroot.ai/datastore": "neo4j"
-    "gibson.zeroroot.ai/net-role": "datastore"
-  annotations:
-spec:
-  type: "ClusterIP"
-  
-  sessionAffinity: None
-  ports:
-    - protocol: TCP
-      port: 7474
-      targetPort: 7474
-      name: http
-    - protocol: TCP
-      port: 7473
-      targetPort: 7473
-      name: https
-    - protocol: TCP
-      port: 7687
-      targetPort: 7687
-      name: tcp-bolt
-    
-    
-  selector:
-    app: "gibson-neo4j"
-    helm.neo4j.com/clustering: "false"
-    helm.neo4j.com/neo4j.loadbalancer: include
----
-# Source: gibson/charts/neo4j/templates/neo4j-svc.yaml
-# ClusterIP service for bolt / http connections
-apiVersion: v1
-kind: Service
-metadata:
-  name: "gibson"
-  namespace: "gibson"
-  labels:
-    helm.neo4j.com/neo4j.name: "gibson-neo4j"
-    app: "gibson-neo4j"
-    helm.neo4j.com/instance: "gibson"
-    helm.neo4j.com/service: "default"    
-    "gibson.zeroroot.ai/datastore": "neo4j"
-    "gibson.zeroroot.ai/net-role": "datastore"
-spec:
-  publishNotReadyAddresses: false
-  type: ClusterIP
-  selector:
-    app: "gibson-neo4j"
-    helm.neo4j.com/instance: "gibson"
-  ports:
-    - protocol: TCP
-      port: 7687
-      targetPort: 7687
-      name: tcp-bolt
-    - protocol: TCP
-      port: 7474
-      targetPort: 7474
-      name: tcp-http
 ---
 # Source: gibson/charts/openfga/templates/service.yaml
 apiVersion: v1
@@ -12188,6 +11797,10 @@ spec:
       imagePullSecrets:
         - name: ghcr-credentials
       serviceAccountName: gibson-dashboard
+      # The dashboard holds no Kubernetes access (dashboard src/lib/env-validator.ts),
+      # and since ADR-0171 no init container reads a Secret through the API.
+      # So the pod mounts no ServiceAccount token (ADR-0165).
+      automountServiceAccountToken: false
       # Secure pod (ADR-0165, charts#394): every container runs non-root with
       # the RuntimeDefault seccomp profile, a read-only root filesystem and no
       # capabilities.
@@ -12330,44 +11943,6 @@ spec:
             - name: zitadel-client
               mountPath: /var/run/zitadel-client
               readOnly: true
-        # one-code-path #203: wait-for-db-secrets blocks pod start until
-        # the Secret backing NEO4J_PASSWORD has been materialised. The
-        # NEO4J_PASSWORD env entry was flipped from `optional: true` to
-        # required.
-        - name: wait-for-db-secrets
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
-          command: ['/bin/bash', '-c']
-          args:
-            - |
-              set -eu
-              name="gibson-gibson-workloads-db-secrets"
-              ns="gibson"
-              echo "[wait-for-db-secrets] waiting for Secret ${ns}/${name} key=NEO4J_PASSWORD..."
-              for i in $(seq 1 30); do
-                if kubectl get secret -n "${ns}" "${name}" \
-                    -o jsonpath='{.data.NEO4J_PASSWORD}' 2>/dev/null \
-                    | base64 -d 2>/dev/null | grep -q .; then
-                  echo "[wait-for-db-secrets] ok"
-                  exit 0
-                fi
-                sleep 2
-              done
-              echo "[wait-for-db-secrets] timed out after 60s -- the dashboard DB-secrets Secret was not materialised. Check: kubectl get externalsecret,secret -n ${ns}" >&2
-              exit 1
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 1001
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
         # Spec: canonical-service-identity Req 5 — resolve the readable SA
         # names in serviceAccounts.required against the gibson-sa-identity-map
         # ConfigMap (populated by the post-install Zitadel Job) into:
@@ -12661,21 +12236,6 @@ spec:
             # model.
             - name: GIBSON_PUBLIC_URL
               value: "https://api.localhost.zeroroot.ai"
-
-            # Neo4j connection URI for the dashboard knowledge-graph client.
-            # Required — the dashboard Neo4j driver uses this at startup.
-            - name: NEO4J_URI
-              value: "bolt://gibson-neo4j:7687"
-            - name: NEO4J_USER
-              value: "neo4j"
-            # one-code-path #203: was `optional: true`. The
-            # wait-for-db-secrets init container above blocks pod start
-            # until the Secret is materialised by ESO.
-            - name: NEO4J_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: gibson-gibson-workloads-db-secrets
-                  key: NEO4J_PASSWORD
 
             # Database URL for the dashboard (Auth.js adapter + tenant
             # provisioning state, rate-limit / lockout counters via
@@ -15043,7 +14603,6 @@ spec:
               gibson-zitadel-postgres-password password:pw
               gibson-openfga-postgres-password password:pw
               gibson-spire-postgres-password password:pw
-              gibson-neo4j-password password:pw
               gibson-redis-password password:pw @720h
               zitadel-masterkey value:rand
               gibson-dashboard-session-secrets auth_secret:rand server_actions_key:randb64
@@ -17287,221 +16846,6 @@ spec:
           requests:
             storage: 20Gi
 ---
-# Source: gibson/charts/neo4j/templates/neo4j-statefulset.yaml
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  labels:
-    helm.neo4j.com/neo4j.name: "gibson-neo4j"
-    helm.neo4j.com/clustering: "false"
-    app: "gibson-neo4j"
-    helm.neo4j.com/instance: gibson    
-    "gibson.zeroroot.ai/datastore": "neo4j"
-    "gibson.zeroroot.ai/net-role": "datastore"
-  name: gibson
-  namespace: "gibson"
-spec:
-  serviceName: "gibson"
-  podManagementPolicy: "Parallel" # This setting means that the StatefulSet controller doesn't block applying changes until the existing Pod is READY.
-  replicas: 1
-  selector:
-    matchLabels:
-      app: "gibson-neo4j"
-      helm.neo4j.com/instance: "gibson"
-  template:
-    metadata:
-      labels:
-        app: "gibson-neo4j"
-        helm.neo4j.com/neo4j.name: "gibson-neo4j"
-        helm.neo4j.com/clustering: "false"
-        helm.neo4j.com/pod_category: "neo4j-instance" # used for anti affinity rules
-        helm.neo4j.com/neo4j.loadbalancer: "include"
-        helm.neo4j.com/instance: "gibson"        
-        "gibson.zeroroot.ai/datastore": "neo4j"
-        "gibson.zeroroot.ai/net-role": "datastore"
-      annotations:
-        "checksum/gibson-config": dcec5328509e05856676b83c7b2d67fe1ba5d3c7468d017ee386cd35d658739d
-        "checksum/gibson-env": 0195f00c71a87b9cc7e7aca6850ee6f76fcb14a72549c7790e4f867890f038d4        
-        "backup.velero.io/backup-volumes-excludes": "neo4j-plugins"
-    spec:      
-      affinity:
-          podAntiAffinity:
-            requiredDuringSchedulingIgnoredDuringExecution:
-              - labelSelector:
-                  matchLabels:
-                    app: "gibson-neo4j"
-                    helm.neo4j.com/pod_category: "neo4j-instance"
-                topologyKey: kubernetes.io/hostname
-      dnsPolicy: ClusterFirst
-      securityContext: 
-        fsGroup: 7474
-        fsGroupChangePolicy: Always
-        runAsGroup: 7474
-        runAsNonRoot: true
-        runAsUser: 7474
-        seccompProfile:
-          type: RuntimeDefault            
-      
-      terminationGracePeriodSeconds: 3600
-      initContainers:
-        - command:
-          - bash
-          - -c
-          - cp /var/lib/neo4j/labs/apoc-*-core.jar /plugins/apoc.jar
-          name: install-apoc-core
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-              - ALL
-            readOnlyRootFilesystem: true
-            runAsGroup: 7474
-            runAsNonRoot: true
-            runAsUser: 7474
-          volumeMounts:
-          - mountPath: /plugins
-            name: neo4j-plugins
-          image: "ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community@sha256:5a015e53de1895e7eee1574ae0325cf8c4b89587222778108c594bdd45a474b5"            
-      containers:
-        - name: "neo4j"
-          image: "ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community@sha256:5a015e53de1895e7eee1574ae0325cf8c4b89587222778108c594bdd45a474b5"
-          imagePullPolicy: "IfNotPresent"
-          envFrom:
-            - configMapRef:
-                name: "gibson-env"
-          env:
-            - name: HELM_NEO4J_VERSION
-              value: "2026.04.0"
-            - name: HELM_CHART_VERSION
-              value: "2026.4.0"
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: SERVICE_NEO4J_ADMIN
-              value: "gibson-admin.gibson.svc.cluster.local"
-            - name: SERVICE_NEO4J_INTERNALS
-              value: "gibson-internals.gibson.svc.cluster.local"
-            - name: SERVICE_NEO4J
-              value: "gibson.gibson.svc.cluster.local"
-          ports:
-            - containerPort: 7474
-              name: http
-            - containerPort: 7687
-              name: bolt
-          resources:
-            limits:
-              cpu: 1000m
-              memory: 3Gi
-            requests:
-              cpu: 500m
-              memory: 2Gi
-          securityContext: 
-              allowPrivilegeEscalation: false
-              capabilities:
-                drop:
-                - ALL
-              runAsGroup: 7474
-              runAsNonRoot: true
-              runAsUser: 7474
-          volumeMounts:
-            - mountPath: "/config/neo4j.conf"
-              name: neo4j-conf
-            - mountPath: "/config/server-logs.xml"
-              name: neo4j-server-logs
-            - mountPath: "/config/user-logs.xml"
-              name: neo4j-user-logs
-            - mountPath: "/config/neo4j-auth"
-              name: neo4j-auth
-            - mountPath: /plugins
-              name: neo4j-plugins            
-            - mountPath: "/config/"
-              name: "apoc-conf"                                    
-            - mountPath: "/backups"
-              name: "data"
-              subPathExpr: "backups"
-            - mountPath: "/data"
-              name: "data"
-              subPathExpr: "data"
-            - mountPath: "/import"
-              name: "data"
-              subPathExpr: "import"
-            - mountPath: "/licenses"
-              name: "data"
-              subPathExpr: "licenses"
-            - mountPath: "/logs"
-              name: "data"
-              subPathExpr: "logs/$(POD_NAME)"
-            - mountPath: "/metrics"
-              name: "data"
-              subPathExpr: "metrics/$(POD_NAME)"                        
-          # Allow user to override the readinessProbe settings for advanced use cases
-          # See: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.30/#probe-v1-core
-          readinessProbe:
-            # Allow overriding the probe action
-            tcpSocket:
-              port: 7687
-            # If no probe action is set, default to using tcpSocket probe to check port 7687 to check if bolt connections can be made
-            failureThreshold: 20
-            timeoutSeconds: 10
-            periodSeconds: 5
-          # Allow user to override the livenessProbe settings for advanced use cases
-          # See: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.30/#probe-v1-core
-          livenessProbe:
-            # Allow overriding the probe action
-            tcpSocket:
-              port: 7687
-            # If no probe action is set, default to using tcpSocket probe to check port 7687 to check if bolt connections can be made
-            failureThreshold: 40
-            timeoutSeconds: 10
-            periodSeconds: 5
-          # Allow user to override the startupProbe settings for advanced use cases
-          # See: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.30/#probe-v1-core
-          startupProbe:
-            # Allow overriding the probe action
-            tcpSocket:
-              port: 7687
-            timeoutSeconds: 10
-            failureThreshold: 1000
-            periodSeconds: 5
-      volumes:
-        - name: neo4j-conf
-          projected:
-            defaultMode: 0440
-            sources:
-              - configMap:
-                  name: "gibson-default-config"
-              - configMap:
-                  name: "gibson-user-config"
-              - configMap:
-                  name: "gibson-k8s-config"
-        - name: neo4j-server-logs
-          configMap:
-            name: "gibson-server-logs-config"
-        - name: neo4j-user-logs
-          configMap:
-            name: "gibson-user-logs-config"
-        - name: "neo4j-auth"
-          secret:
-            secretName: "gibson-neo4j-auth"        
-        - emptyDir: {}
-          name: neo4j-plugins        
-        - name: apoc-conf
-          projected:
-            defaultMode: 0440
-            sources:
-              - configMap:
-                  name: "gibson-apoc-config"                        
-  volumeClaimTemplates: 
-    - metadata:
-        name: "data"
-      spec:
-        accessModes:
-        - ReadWriteOnce
-        resources:
-          requests:
-            storage: 5Gi
----
 # Source: gibson/charts/spire/charts/spire-server/templates/server-resource.yaml
 apiVersion: apps/v1
 kind: StatefulSet
@@ -19715,51 +19059,6 @@ specs:
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: gibson-datastore-neo4j
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-0.1.0
-    app.kubernetes.io/name: gibson
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: network-datastore
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"
-specs:
-  - description: "The neo4j data store admits only its clients."
-    endpointSelector:
-      matchLabels:
-        gibson.zeroroot.ai/datastore: neo4j
-    ingress:
-      - fromEndpoints:
-          - matchLabels:
-              gibson.zeroroot.ai/client-neo4j: "true"
-        toPorts:
-          - ports:
-              - port: "7687"
-                protocol: TCP
-              - port: "7474"
-                protocol: TCP
-  - description: "The clients of the neo4j data store reach it."
-    endpointSelector:
-      matchLabels:
-        gibson.zeroroot.ai/client-neo4j: "true"
-    egress:
-      - toEndpoints:
-          - matchLabels:
-              gibson.zeroroot.ai/datastore: neo4j
-        toPorts:
-          - ports:
-              - port: "7687"
-                protocol: TCP
-              - port: "7474"
-                protocol: TCP
----
-# Source: gibson/templates/network-policies.yaml
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
   name: gibson-kube-api
   namespace: gibson
   labels:
@@ -21057,7 +20356,7 @@ spec:
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/missing-secrets.yaml
 # gibson-workloads-db-secrets — referenced by gibson daemon for tenant
-# admin DB password, neo4j admin password, and the SPIRE datastore password
+# admin DB password and the SPIRE datastore password
 # (Aurora/RDS spire role; deploy#572).
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -21081,12 +20380,9 @@ spec:
     template:
       type: Opaque
       data:
-        NEO4J_PASSWORD: "{{ .neo4j_password }}"
         TENANT_POSTGRES_ADMIN_PASSWORD: "{{ .tenant_admin_password }}"
         SPIRE_DB_PASSWORD: "{{ .spire_password }}"
   data:
-    - secretKey: neo4j_password
-      remoteRef: { key: gibson-neo4j-password, property: password }
     - secretKey: tenant_admin_password
       remoteRef: { key: gibson-tenant-admin-postgres-password, property: password }
     - secretKey: spire_password
@@ -21334,40 +20630,6 @@ spec:
       remoteRef:
         key: setec-disk-signing
         property: seed
----
-# Source: gibson/templates/externalsecrets/gibson-neo4j-auth.yaml
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  # Deterministic cold-bringup ordering (deploy#820): this ExternalSecret is
-  # STANDING infrastructure — it owns its target Secret for the life of the
-  # install (creationPolicy: Owner), so it must NOT be an Argo hook: hook
-  # lifecycle (BeforeHookCreation deletes, operation-retry cleanup) deletes the
-  # ExternalSecret and cascade-deletes the owned Secret out from under running
-  # workloads (observed live on staging, 2026-06-11). A regular resource at an
-  # early sync-wave (-8, after the store at -10, before the zitadel init chain
-  # at -6/-4/-3) gives the same cold-sync ordering with a durable object.
-  annotations:
-    argocd.argoproj.io/sync-wave: "-8"
-  name: gibson-neo4j-auth
-  namespace: gibson
-spec:
-  data:
-  - remoteRef:
-      key: gibson-neo4j-password
-      property: password
-    secretKey: password
-  refreshInterval: 60s
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: gibson-secrets
-  target:
-    creationPolicy: Owner
-    name: gibson-neo4j-auth
-    template:
-      data:
-        NEO4J_AUTH: neo4j/{{ .password }}
-      type: Opaque
 ---
 # Source: gibson/templates/externalsecrets/gibson-zitadel-system-key.yaml
 apiVersion: external-secrets.io/v1
@@ -24260,14 +23522,13 @@ spec:
               ;;
           esac
 
-          # Sibling-application services: OpenFGA, Zitadel, Neo4j. They are
+          # Sibling-application services: OpenFGA and Zitadel. They are
           # structural on every profile (ADR-0083), so an unreachable one is a
-          # failed install, not a soft warning. These three used to end in
+          # failed install, not a soft warning. These used to end in
           # `|| true`, which made this test unable to fail on them. Deep
           # contract checks live in their dedicated test pods.
           probe_http "openfga"       "https://gibson-openfga:8080/healthz" "200"
           probe_http "zitadel"       "http://gibson-zitadel:8080/debug/ready" "200"
-          probe_tcp  "neo4j-bolt"    "gibson-neo4j" "7687"
 
           echo ""
           echo "[svc-probe] all first-party probes PASSED"
@@ -25188,43 +24449,6 @@ spec:
         runAsNonRoot: true
         runAsUser: 999
         runAsGroup: 999
-        readOnlyRootFilesystem: true
-        capabilities:
-          drop: ["ALL"]
-        seccompProfile:
-          type: RuntimeDefault
-      volumeMounts:
-        - name: tmp
-          mountPath: /tmp
-    - name: neo4j-probe
-      image: "ghcr.io/zeroroot-ai/mirror/curl:8.10.1@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b"
-      imagePullPolicy: IfNotPresent
-      command: ["/bin/sh", "-c"]
-      args:
-        - |
-          set -eu
-          ERR='::error file=helm-test::'
-          NEO4J_HOST='gibson-neo4j'
-          NEO4J_BOLT_PORT='7687'
-
-          echo "[neo4j-probe] TCP-probing ${NEO4J_HOST}:${NEO4J_BOLT_PORT}"
-          if ! (echo > "/dev/tcp/${NEO4J_HOST}/${NEO4J_BOLT_PORT}") 2>/dev/null ; then
-            echo "$ERR neo4j-probe: ${NEO4J_HOST}:${NEO4J_BOLT_PORT} not reachable"
-            exit 1
-          fi
-          echo "[neo4j-probe] PASS"
-      resources:
-        requests:
-          cpu: 10m
-          memory: 32Mi
-        limits:
-          cpu: 100m
-          memory: 64Mi
-      securityContext:
-        allowPrivilegeEscalation: false
-        runAsNonRoot: true
-        runAsUser: 65534
-        runAsGroup: 65534
         readOnlyRootFilesystem: true
         capabilities:
           drop: ["ALL"]

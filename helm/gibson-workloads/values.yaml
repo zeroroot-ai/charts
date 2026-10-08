@@ -90,25 +90,6 @@ serviceAccounts:
 # Secrets Configuration
 # -----------------------------------------------------------------------------
 # These can be provided via .env file or directly in values
-secrets:
-  # No Stripe and no billing webhook Secret (charts#375, ADR-0060): billing is
-  # one private component in the private overlay, and it brings its own.
-
-  # OpenBao admin token used by tenant-operator for data-plane KEK/transit
-  # operations. Surfaced as the `gibson-openbao-keys` Secret by the
-  # ExternalSecret that reads `gibson-vault-admin-token`, property `token`,
-  # from the platform's OpenBao. The openbao-auto-init sidecar seeds that key
-  # with the platform service token it mints (policy platform-operator, never
-  # root) and keeps it current (deploy#1732).
-  # Spec: D1-A of polyrepo zero-dot-x reset (deploy#244).
-
-
-
-  # The Secret that holds the database credentials that the dashboard reads.
-  # Empty: the chart's own name (gibson.dbSecrets.name).
-  databases:
-    existingSecret: ""
-
 # -----------------------------------------------------------------------------
 # Gibson Core Daemon
 # -----------------------------------------------------------------------------
@@ -981,13 +962,6 @@ dashboard:
   # Defaults to https://api.<global.domain>. Override in environment overlays.
   # Spec: naming-and-config-standardization Requirement 2.6.
   gibsonPlatformPublicUrl: ""
-
-  # Neo4j connection settings for the dashboard knowledge-graph client.
-  # Required — the dashboard Neo4j driver uses neo4j.uri at startup.
-  # Defaults to bolt://<release-name>-neo4j:7687 (the in-chart Neo4j service).
-  neo4j:
-    uri: ""       # override for external Neo4j Aura or managed instances
-    user: "neo4j"
 
   # Dashboard PostgreSQL settings for the daemon configmap and the dashboard
   # deployment. The host, port, database and user come from the
@@ -2670,13 +2644,6 @@ dataPlane:
       key: "TENANT_POSTGRES_ADMIN_PASSWORD"
     # NOTE: ssl_mode is hardcoded `require` in chart templates (Spec
     # first-deploy-unblock-and-ha R7); no ssl_mode knob here.
-
-  neo4j:
-    # adminURI — Bolt URI the daemon's admin pool uses to CREATE/DROP per-tenant
-    # Neo4j databases and apply schema migrations.  Requires a role with
-    # database-management privileges.  Leave empty to use the in-chart neo4j subchart.
-    # Example: "bolt://neo4j-aura.example.com:7687"
-    adminURI: ""
 
   redis:
     # adminURL — Redis URL for the master index DB (db 0) used by the daemon to

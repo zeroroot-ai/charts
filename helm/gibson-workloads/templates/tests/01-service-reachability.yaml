@@ -17,7 +17,7 @@ block intentionally does NOT pin those strings, so the cross-chart-check tool's
 hardcoded-service-name rule doesn't flag this file. If you need to know the
 exact Service name a probe uses, read the args block.
 
-The neighbor third-party services (openfga, zitadel, neo4j) live in
+The neighbor third-party services (openfga, zitadel) live in
 sibling ArgoCD Applications and have their own health probes; the dedicated
 04-fga-tuple-seed.yaml + 07-zitadel-auth-probe.yaml + 08-data-plane.yaml pods
 cover them deeply. We probe them at the Service level here too as a smoke check.
@@ -152,14 +152,13 @@ spec:
               ;;
           esac
 
-          # Sibling-application services: OpenFGA, Zitadel, Neo4j. They are
+          # Sibling-application services: OpenFGA and Zitadel. They are
           # structural on every profile (ADR-0083), so an unreachable one is a
-          # failed install, not a soft warning. These three used to end in
+          # failed install, not a soft warning. These used to end in
           # `|| true`, which made this test unable to fail on them. Deep
           # contract checks live in their dedicated test pods.
           probe_http "openfga"       "https://gibson-openfga:8080/healthz" "200"
           probe_http "zitadel"       "http://gibson-zitadel:8080/debug/ready" "200"
-          probe_tcp  "neo4j-bolt"    "gibson-neo4j" "7687"
 
           echo ""
           echo "[svc-probe] all first-party probes PASSED"
