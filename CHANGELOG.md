@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.142.0](https://github.com/zeroroot-ai/charts/compare/v0.141.0...v0.142.0) (2026-10-09)
+
+
+### Features
+
+* **alerts:** page on an audit write error, a sign-in that cannot reach the daemon, and a failed final backup ([#497](https://github.com/zeroroot-ai/charts/issues/497)) ([68c2641](https://github.com/zeroroot-ai/charts/commit/68c26415b6be98b07fc9f8be92893c458d7750ed)), closes [#405](https://github.com/zeroroot-ai/charts/issues/405)
+* **capabilitygrant:** the sidecar rotates the CG signing key set, and the chart drops the rotation flag ([#555](https://github.com/zeroroot-ai/charts/issues/555)) ([c8b1549](https://github.com/zeroroot-ai/charts/commit/c8b154954830a23f5d2255e8ae18460099fe7b08))
+* **dashboard:** the session secret rotates every 720 hours and keeps its previous value ([#553](https://github.com/zeroroot-ai/charts/issues/553)) ([091d040](https://github.com/zeroroot-ai/charts/commit/091d040e287832eb5389a95ad90857970eeda979)), closes [#551](https://github.com/zeroroot-ai/charts/issues/551)
+* **guards:** each dependency condition is a named seam, and the render refuses setec off ([#501](https://github.com/zeroroot-ai/charts/issues/501)) ([9f4265f](https://github.com/zeroroot-ai/charts/commit/9f4265fbe3436cb90e638bdc59809cb306a25dd3))
+* **install:** the preflight proves each fleet node exposes /dev/kvm ([#496](https://github.com/zeroroot-ai/charts/issues/496)) ([f5d4d12](https://github.com/zeroroot-ai/charts/commit/f5d4d1229da44c02857a3d2d1d69809a5243f42c)), closes [#413](https://github.com/zeroroot-ai/charts/issues/413)
+* **openbao:** a seed key gets a new value when it outlives its lifetime ([#529](https://github.com/zeroroot-ai/charts/issues/529)) ([90e56fa](https://github.com/zeroroot-ai/charts/commit/90e56fae6fac8b5ee7b98333b6d4b5ae9c553ce7))
+* **openbao:** each service token gets a successor by age, and the old one is revoked after a grace ([#533](https://github.com/zeroroot-ai/charts/issues/533)) ([c9b1e67](https://github.com/zeroroot-ai/charts/commit/c9b1e67a277a02ea3dcd61672217e4df5662f785))
+* **rungs:** the developer and ci rungs deliver mail to the Mailpit sink ([#511](https://github.com/zeroroot-ai/charts/issues/511)) ([36ac0e7](https://github.com/zeroroot-ai/charts/commit/36ac0e7806eb205fe30c07bae6c579efd1cb5cd3))
+* **zitadel:** the admin token Secret carries the user id of iam-admin ([#545](https://github.com/zeroroot-ai/charts/issues/545)) ([9a13ff1](https://github.com/zeroroot-ai/charts/commit/9a13ff13b1c66fbec41d67e7d825c7481c240955))
+
+
+### Bug Fixes
+
+* **alerts:** each series an alert rule reads is scraped on a metrics-only port ([#541](https://github.com/zeroroot-ai/charts/issues/541)) ([f389ef0](https://github.com/zeroroot-ai/charts/commit/f389ef0be91c699301e532e975dd737e0331fad8))
+* **alerts:** the scrape guard reads namespaceSelector.any as every namespace ([#560](https://github.com/zeroroot-ai/charts/issues/560)) ([398756b](https://github.com/zeroroot-ai/charts/commit/398756b897c2ac4fecac289830a690307787b158))
+* **ci:** install bats from its pinned GitHub release, not from apt ([#548](https://github.com/zeroroot-ai/charts/issues/548)) ([c597d41](https://github.com/zeroroot-ai/charts/commit/c597d412964d2b55856865c5c895958262e0222f))
+* **guards:** the namespace-policy guard does not count an allow-all policy as a default deny ([#514](https://github.com/zeroroot-ai/charts/issues/514)) ([73b3837](https://github.com/zeroroot-ai/charts/commit/73b3837f09888fb54d46354e5d41b08efea301d6))
+* **keyring:** the charts copy no longer generates CNPG_BACKUP_KEY ([#536](https://github.com/zeroroot-ai/charts/issues/536)) ([0570efc](https://github.com/zeroroot-ai/charts/commit/0570efcd6799c3166e317622f25d5d81c101329e))
+* **neo4j:** the platform runs no Neo4j, and the dashboard moves to v0.131.0 ([#563](https://github.com/zeroroot-ai/charts/issues/563)) ([5d00206](https://github.com/zeroroot-ai/charts/commit/5d00206cc6b17a76d632b88eefa5ab91cd81d31b))
+* **network:** narrow the Postgres operator peer and the egress host rules ([#534](https://github.com/zeroroot-ai/charts/issues/534)) ([f752043](https://github.com/zeroroot-ai/charts/commit/f752043a829510d8b6e65970d27e2ea03d83a5fa))
+* **network:** the daemon admits the operator-started callers of tenant namespaces ([#520](https://github.com/zeroroot-ai/charts/issues/520)) ([d66744e](https://github.com/zeroroot-ai/charts/commit/d66744e0752d38659d8d5fde6056665e4f2cf580))
+* **network:** the metrics network rule selects pods by their metrics port ([#513](https://github.com/zeroroot-ai/charts/issues/513)) ([fb0ee05](https://github.com/zeroroot-ai/charts/commit/fb0ee05564e82d4bcfac575a7b72f71a3751913f))
+* **openbao:** the operator scripts call OpenBao over TLS, and the guard reads them ([#556](https://github.com/zeroroot-ai/charts/issues/556)) ([3545560](https://github.com/zeroroot-ai/charts/commit/354556075d1c63ded48967b3086453d00740f0c1))
+* **openbao:** the secrets store listener serves only TLS from the chart CA ([#540](https://github.com/zeroroot-ai/charts/issues/540)) ([c57f6a4](https://github.com/zeroroot-ai/charts/commit/c57f6a49b7bebe30967a7b1f1fea810247511adc))
+* **rework:** the first failure of a new counter series pages ([#509](https://github.com/zeroroot-ai/charts/issues/509)) ([de9a399](https://github.com/zeroroot-ai/charts/commit/de9a399204ee34a947685cb738e827fc16953bbb))
+* **rework:** the KVM preflight tells a probe that did not run from a missing device ([#510](https://github.com/zeroroot-ai/charts/issues/510)) ([d1ca837](https://github.com/zeroroot-ai/charts/commit/d1ca837cecd1e5907b26ec3c254d9258c9c453d8))
+* **rework:** the publish render check names the gibson namespace ([#500](https://github.com/zeroroot-ai/charts/issues/500)) ([5d07420](https://github.com/zeroroot-ai/charts/commit/5d0742094127b76d049be00736733dc13b920484))
+* **secrets:** delete four seeded credentials and one Postgres role that nothing reads ([#525](https://github.com/zeroroot-ai/charts/issues/525)) ([c0ad6c7](https://github.com/zeroroot-ai/charts/commit/c0ad6c701f33fca396864d7231915d9ccc4a50e1))
+* **secrets:** the platform store serves the setec namespace, so the disk signing seed is written ([#512](https://github.com/zeroroot-ai/charts/issues/512)) ([4f5b1b5](https://github.com/zeroroot-ai/charts/commit/4f5b1b56443c890388cdc5a2e79ff2c5548c00d1))
+* **tls:** a renewed component certificate reaches its listener ([#523](https://github.com/zeroroot-ai/charts/issues/523)) ([ed2c5a6](https://github.com/zeroroot-ai/charts/commit/ed2c5a66cbd366a79ec5ad5e77e0daccddfaf8e1))
+* **velero:** the velero Cilium policy puts specs at the top level, and a guard checks the shape ([#564](https://github.com/zeroroot-ai/charts/issues/564)) ([1a8c7ad](https://github.com/zeroroot-ai/charts/commit/1a8c7addda6f463e044099ddad8ddd98228dc95e))
+* **zitadel:** the chart lets the platform-operator rotate the login-client token ([#538](https://github.com/zeroroot-ai/charts/issues/538)) ([1eebb7f](https://github.com/zeroroot-ai/charts/commit/1eebb7f9adef9cd58f153cb2aeb981d56d0c757d))
+* **zitadel:** the setup Job mints no machine key of iam-admin, and gibson moves to v0.157.1 ([#550](https://github.com/zeroroot-ai/charts/issues/550)) ([1272b66](https://github.com/zeroroot-ai/charts/commit/1272b66a4cf0963add06a6a43280f63736cc5d54))
+
 ## [0.141.0](https://github.com/zeroroot-ai/charts/compare/v0.140.0...v0.141.0) (2026-10-07)
 
 
