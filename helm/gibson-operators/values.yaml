@@ -62,7 +62,7 @@ tenantOperator:
     # Tenant CR never reached Ready (deploy#1766, run 33600876035). The
     # package publishes main/latest/sha-* only, so the commit sha tag is the
     # honest provenance.
-    tag: "v0.157.1@sha256:548144885bfe3f38e17101f0f55868a6c1ac38aef545c4d460d46d798ffb0fff"
+    tag: "v0.158.0@sha256:b62723e7b650fcc2c091dd8aa82240f9caecc41a9927851c1fda2fc2a2d0635b"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     digest: ""
@@ -187,7 +187,7 @@ platformOperator:
     # deploy#789: digest-pinned for staging/prod immutability.
     # The digest below is the current `latest`. kind keeps :main, exempt.
     # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/platform-operator/versions
-    tag: "v0.157.1@sha256:81b8a966db2040da15199a92be0f24336857d3862f2dcb60fda6ec122d135abc"
+    tag: "v0.158.0@sha256:264d077fb09b900b53b7dff8287d82718620c3723dc2a0ed62e7eb855cb09230"
     # digest (deploy#1066) — see tenantOperator.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -238,7 +238,7 @@ connectorOperator:
     # name:tag@digest reference kubelet pulls by digest; the `main` tag is
     # cosmetic). kind keeps the floating :main tag (values-kind.yaml), exempt.
     # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/connector-operator/versions
-    tag: "v0.157.1@sha256:f797faa4f0301cd6f7dce4a315675aec8aeb512994938a3e96dd7618c9c41ea1"
+    tag: "v0.158.0@sha256:c31538df739b9e931be5209c4fbb5e6141d27cac67f1a383f4324c6c296a2ca6"
     # digest (deploy#1066) — see tenantOperator.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -488,7 +488,6 @@ platformBootstrap:
     loginBranding:
       configMap: ""
     systemClient:
-      systemUserName: ""
       trustedClusterDomain: ""
       # apiURL — the address the operator DIALS for Zitadel /system/v1/*
       # (GHSA-534c, gibson#1275). MUST be cluster-internal; the Envoy edge
