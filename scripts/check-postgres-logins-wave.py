@@ -79,7 +79,7 @@ def judge(docs: list[dict]) -> list[str]:
                 logins.append(d)
     if not logins:
         return ["no ExternalSecret reads a postgres-login generator in the render"]
-    before = [d for d in docs if (d.get("kind") == "Cluster" and str(d.get("apiVersion", "")).startswith("postgresql.cnpg.io"))
+    before = [d for d in docs if (d.get("kind") == "Cluster" and str(d.get("apiVersion", "")).split("/")[0] == "postgresql.cnpg.io")
               or (d.get("kind") == "Job" and d["metadata"]["name"].endswith("-postgres-setup"))]
     if not before:
         return ["no Postgres Cluster and no postgres-setup Job in the render"]
