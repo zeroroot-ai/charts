@@ -257,6 +257,10 @@ spec:
             # fixed path platform/daemon.
             - name: GIBSON_DAEMON_SPIFFE_ID
               value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/daemon") | quote }}
+            # The image of the belief trainer CronJob of each tenant
+            # (gibson#616). The operator exits at start when it is empty.
+            - name: BELIEF_TRAINER_IMAGE
+              value: {{ include "gibson.image" (dict "registry" (($.Values.global).registry) "repo" .Values.tenantOperator.beliefTrainer.image.repository "tag" .Values.tenantOperator.beliefTrainer.image.tag "digest" .Values.tenantOperator.beliefTrainer.image.digest) | quote }}
             # Per-tenant plugins (gibson#815). The operator deploys one
             # instance of a catalog plugin for each tenant that enables it, in
             # the namespace tenant-<t>-plugins, and writes its ClusterSPIFFEID
