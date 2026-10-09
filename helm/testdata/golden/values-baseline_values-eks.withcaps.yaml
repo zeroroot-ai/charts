@@ -22409,6 +22409,41 @@ spec:
         a plugin ClusterSPIFFEID of the tenant-operator sets no DNS name,
         federation, admin, downstream, fallback, hint or TTL field (gibson#815)
 ---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/namespace-label-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gibson-tenant-namespace-label
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["namespaces"]
+  variables:
+    - name: newValue
+      expression: >-
+        has(object.metadata.labels) && "gibson.zeroroot.ai/managed-by" in object.metadata.labels
+          ? object.metadata.labels["gibson.zeroroot.ai/managed-by"] : ''
+    - name: oldValue
+      expression: >-
+        request.operation == 'UPDATE' && has(oldObject.metadata.labels)
+          && "gibson.zeroroot.ai/managed-by" in oldObject.metadata.labels
+          ? oldObject.metadata.labels["gibson.zeroroot.ai/managed-by"] : ''
+  validations:
+    - expression: >-
+        variables.newValue == variables.oldValue
+          || request.userInfo.username == "system:serviceaccount:gibson:gibson-tenant-operator"
+      reason: Forbidden
+      messageExpression: >-
+        'only the tenant-operator sets the label gibson.zeroroot.ai/managed-by on a Namespace; ' +
+        request.userInfo.username + ' may not change it on ' + object.metadata.name + ' (charts#527)'
+---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/plugin-namespace-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -22819,6 +22854,18 @@ metadata:
     app.kubernetes.io/part-of: gibson
 spec:
   policyName: gibson-tenant-operator-clusterspiffeid-scope
+  validationActions: ["Deny"]
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/namespace-label-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gibson-tenant-namespace-label
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  policyName: gibson-tenant-namespace-label
   validationActions: ["Deny"]
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/plugin-namespace-admission.yaml

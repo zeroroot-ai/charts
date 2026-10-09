@@ -1,0 +1,64 @@
+{{- /*
+Who may set the tenant label on a Namespace (charts#527).
+
+The daemon admits the belief trainer of each tenant namespace on its gRPC
+port (the rule daemon-tenant-callers of the umbrella network policy). That
+rule selects the namespace by the label
+gibson.zeroroot.ai/managed-by=tenant-operator. The tenant-operator writes the
+label when it makes a tenant namespace. Other principals can write Namespaces
+too: the setec frontend can create one, and External Secrets can patch one.
+A principal that sets the label on a namespace of its own gets the daemon
+rule for each pod there with the trainer labels.
+
+This policy refuses a CREATE or UPDATE of a Namespace that adds, changes or
+removes the label, from any principal other than the tenant-operator. An
+UPDATE that keeps the label as it was passes, so the namespace controller and
+the garbage collector are not affected.
+*/ -}}
+{{- $ns := .Values.tenantOperator.namespace | default "gibson" }}
+{{- $operator := printf "system:serviceaccount:%s:gibson-tenant-operator" $ns }}
+{{- $key := "gibson.zeroroot.ai/managed-by" }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gibson-tenant-namespace-label
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["namespaces"]
+  variables:
+    - name: newValue
+      expression: >-
+        has(object.metadata.labels) && {{ $key | quote }} in object.metadata.labels
+          ? object.metadata.labels[{{ $key | quote }}] : ''
+    - name: oldValue
+      expression: >-
+        request.operation == 'UPDATE' && has(oldObject.metadata.labels)
+          && {{ $key | quote }} in oldObject.metadata.labels
+          ? oldObject.metadata.labels[{{ $key | quote }}] : ''
+  validations:
+    - expression: >-
+        variables.newValue == variables.oldValue
+          || request.userInfo.username == {{ $operator | quote }}
+      reason: Forbidden
+      messageExpression: >-
+        'only the tenant-operator sets the label {{ $key }} on a Namespace; ' +
+        request.userInfo.username + ' may not change it on ' + object.metadata.name + ' (charts#527)'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gibson-tenant-namespace-label
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  policyName: gibson-tenant-namespace-label
+  validationActions: ["Deny"]
