@@ -226,7 +226,7 @@ def network_findings(docs: list[dict]) -> dict[str, list[str]]:
     # The CNPG operator creates the Postgres pods at run time, with the labels
     # of the Cluster's inheritedMetadata.
     for d in docs:
-        if d.get("kind") == "Cluster" and str(d.get("apiVersion", "")).startswith("postgresql.cnpg.io/"):
+        if d.get("kind") == "Cluster" and str(d.get("apiVersion", "")).split("/", 1)[0] == "postgresql.cnpg.io":
             labels = (((d.get("spec") or {}).get("inheritedMetadata") or {}).get("labels")) or {}
             if NET + "datastore" in labels:
                 stores.append((cp.endpoint(ns_of(d), labels), labels[NET + "datastore"]))
