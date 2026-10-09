@@ -1482,8 +1482,12 @@ spec:
                   echo "[openbao-auto-init] the System API key of slot ${sys_oth} is new; Zitadel no longer trusts its old key" >&2
                   return 0
                 fi
-                sys_act_t=$(kv_created_epoch "$st" "$(sys_slot_key "$sys_act")") || return 1
-                [ $(( sys_now - ${sys_act_t:-$sys_now} )) -ge "$SYS_KEY_LIFETIME_S" ] || return 0
+                # The active slot ages from its flip, not from its key: a key
+                # that waited in the other slot does not count that wait.
+                [ $(( sys_now - ${sys_flip_t:-$sys_now} )) -ge "$SYS_KEY_LIFETIME_S" ] || return 0
+                # Flip only to a key that Zitadel has had time to trust: ESO
+                # refresh, the Reloader restart and the Zitadel boot.
+                [ $(( sys_now - ${sys_oth_t:-$sys_now} )) -ge "$SYS_REFRESH_WAIT_S" ] || return 0
                 kv_put "$st" "$SYS_ACTIVE_KEY" "$(jq -nc --arg s "$sys_oth" '{slot:$s}')" || return 1
                 echo "[openbao-auto-init] the System API key of slot ${sys_act} is older than its lifetime; slot ${sys_oth} is active" >&2
               }

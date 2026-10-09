@@ -83,10 +83,24 @@ run_rotate() {
   [ "${lines[1]}" = "rc=0" ]
 }
 
-@test "the slot flips back to a when b is older than its lifetime" {
+@test "the slot flips back to a when b has been active longer than its lifetime" {
   state b 2600000 2500000 2600000
   run_rotate
   [ "${lines[0]}" = "put active a" ]
+}
+
+@test "FAILING FIXTURE: a slot with a young flip stays, even when its key waited a lifetime in the other slot" {
+  state b 600 300 2592300
+  run_rotate
+  [ "${lines[0]}" = "none" ]
+  [ "${lines[1]}" = "rc=0" ]
+}
+
+@test "FAILING FIXTURE: no flip to an other-slot key younger than the refresh wait" {
+  state a 2600000 2600000 600
+  run_rotate
+  [ "${lines[0]}" = "none" ]
+  [ "${lines[1]}" = "rc=0" ]
 }
 
 @test "no slot yet is the first seed pass, and nothing changes" {
