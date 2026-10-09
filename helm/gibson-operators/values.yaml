@@ -67,6 +67,21 @@ tenantOperator:
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     digest: ""
     pullPolicy: IfNotPresent
+  # The belief trainer CronJob of each tenant (gibson#616, D33). The tenant
+  # operator writes this image into the CronJob of each tenant namespace, and
+  # it exits at start when BELIEF_TRAINER_IMAGE is empty. The default is the
+  # gibson image of the daemon: it holds the belief-trainer binary and the
+  # minimal base model. It is the same pin as gibson-workloads.gibson.image,
+  # and scripts/bump-image-digest.py moves both pins of the gibson image
+  # together. The hosted platform sets its own trainer image, the gibson
+  # image with the curated base model (gibson#31). The trainer pod has no
+  # image pull secret, so the image must be one that each node can pull.
+  beliefTrainer:
+    image:
+      repository: ghcr.io/zeroroot-ai/gibson
+      tag: "v0.158.0@sha256:fd59ec6f2bdc1f91a3e901f65a22597844a41835151464f0e30bf2760b29419b"
+      # digest: when set, gibson.image renders "<repository>@<digest>".
+      digest: ""
   # replicas: HA required for failurePolicy: Fail webhooks (deploy#204).
   # A single replica + Fail posture means any pod restart rejects every
   # tenant-create until the new pod is Ready. With ≥2 replicas + leader
