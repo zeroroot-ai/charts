@@ -1,0 +1,139 @@
+{{/*
+zitadel-masterkey-rotation — the rotation of the Zitadel masterkey (ADR-0171,
+row platform-generated-secrets).
+
+Zitadel wraps each of its encryption keys (table system.encryption_keys) with
+the masterkey: base64 URL of a 16-byte IV and AES-256-CFB of the key, with the
+first 32 characters of the masterkey as the AES key (zitadel
+internal/crypto/aes.go, EncryptAESString). CFB has no integrity check: a wrong
+masterkey decrypts to garbage with no error. So this Job keeps a marker row
+(gibson_rotation.masterkey_marker) that it encrypts with the masterkey that
+Zitadel runs with, and proves the current masterkey against it before it
+changes anything.
+
+The source is the OpenBao key zitadel-masterkey: `value` is the masterkey
+that Zitadel runs with (ExternalSecret gibson-zitadel-masterkey), and `next`
+is the masterkey of a pending rotation, empty otherwise. The openbao-auto-init
+sidecar writes `next` when `value` is older than its lifetime (mk_request).
+The monthly drill writes it with scripts/baseline-set-secret.sh.
+
+Each run, every 10 minutes:
+  1. No marker yet: write it, encrypted with `value`, and stop. A rotation
+     needs a marker that an earlier run wrote.
+  2. `next` empty: nothing to do.
+  3. The marker decrypts with `value`: rewrap every row and the marker with
+     `next`, in one transaction. Then write value = next, next = "". ESO
+     updates the Secret, and Reloader restarts Zitadel on the new masterkey.
+     A running Zitadel holds its keys in memory, so it keeps working until
+     the restart.
+  4. The marker decrypts with `next`: an earlier run rewrapped the rows and
+     did not move `next` to `value`. Move it now.
+  5. Neither: refuse, and keep every value. A person compares the store and
+     the Secret.
+*/}}
+{{- $img := .Values.postgresSetup.image -}}
+{{- $baoAddr := include "gibson.openbaoAddr" . -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zitadel-masterkey-rotation
+  namespace: {{ .Release.Namespace }}
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-zitadel-masterkey-rotation
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: zitadel-masterkey-rotation
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: zitadel-masterkey-rotation
+            {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "openbao")) | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: zitadel-masterkey-rotation
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+          {{- include "gibson.openbaoCAVolume" . | nindent 10 }}
+          # The masterkeys pass between the three steps here, in memory only.
+          - name: work
+            emptyDir:
+              medium: Memory
+              sizeLimit: 1Mi
+          - name: tmp
+            emptyDir:
+              medium: Memory
+              sizeLimit: 16Mi
+          initContainers:
+          # 1. Read secret/zitadel-masterkey (curl and jq: the tool image).
+          - name: read
+            image: {{ include "gibson.toolImage" . | quote }}
+            {{- include "gibson.masterkeyRotation.toolContainer" . | nindent 12 }}
+            command: [sh, -ec]
+            args:
+            - |
+{{ include "gibson.masterkeyRotation.read" . | indent 14 }}
+          # 2. Prove the marker and rewrap (psql and openssl: the client image).
+          - name: rewrap
+            # psql and openssl 3 (the postgres-setup client image).
+            image: {{ printf "%s:%s" $img.repository $img.tag | quote }}
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: tmp
+              mountPath: /tmp
+            env:
+            - name: PGHOST
+              value: platform-postgres-rw.{{ .Release.Namespace }}.svc
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: zitadel
+            - name: PGSSLMODE
+              value: require
+            - name: PGCONNECT_TIMEOUT
+              value: "5"
+            - name: PGUSER
+              value: zitadel
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zitadel-postgres-credentials
+                  key: password
+            command: [bash, -ec]
+            args:
+            - |
+{{ include "gibson.masterkeyRotation.rewrap" . | indent 14 }}
+          containers:
+          # 3. Move next to value when step 2 rewrapped the rows.
+          - name: write
+            image: {{ include "gibson.toolImage" . | quote }}
+            {{- include "gibson.masterkeyRotation.toolContainer" . | nindent 12 }}
+            command: [sh, -ec]
+            args:
+            - |
+{{ include "gibson.masterkeyRotation.write" . | indent 14 }}

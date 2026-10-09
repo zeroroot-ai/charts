@@ -499,7 +499,7 @@ spec:
               TENANT_OP_POLICY="tenant-operator"
               # The token of each Job that configures the store, as
               # <Secret>:<policy>. Each Job mounts its own Secret and nothing else.
-              JOB_TOKENS="gibson-openbao-iam-admin-escrow:iam-admin-escrow gibson-openbao-jwt-auth-init:jwt-auth-init{{ if $cmVault }} gibson-openbao-approle-init:cert-manager-approle-init gibson-openbao-approle-reader:cert-manager-approle-reader{{ end }}"
+              JOB_TOKENS="gibson-openbao-iam-admin-escrow:iam-admin-escrow gibson-openbao-jwt-auth-init:jwt-auth-init gibson-openbao-masterkey-rotation:zitadel-masterkey-rotation{{ if $cmVault }} gibson-openbao-approle-init:cert-manager-approle-init gibson-openbao-approle-reader:cert-manager-approle-reader{{ end }}"
               ESO_ROLE="eso-reader"
               ESO_POLICY="eso-reader"
               ESO_SA_NAME="{{ $esoSA.name | default "external-secrets" }}"
@@ -1359,6 +1359,7 @@ spec:
               SEED_EOF
                 cg_key_rotate "$tok" || seed_failed=$((seed_failed + 1))
                 sys_key_rotate "$tok" || seed_failed=$((seed_failed + 1))
+                mk_request "$tok" || seed_failed=$((seed_failed + 1))
                 echo "[openbao-auto-init] seed pass complete: ${seed_checked} keys checked, ${seed_written} written, ${seed_failed} failed"
                 [ "$seed_failed" -eq 0 ]
               }
@@ -1492,6 +1493,28 @@ spec:
                 echo "[openbao-auto-init] the System API key of slot ${sys_act} is older than its lifetime; slot ${sys_oth} is active" >&2
               }
 
+              # The request of a Zitadel masterkey rotation (ADR-0171, row
+              # platform-generated-secrets). When value is older than its
+              # lifetime and no rotation is pending, write a new masterkey to
+              # next. The CronJob zitadel-masterkey-rotation does the rest: it
+              # proves the current key against its marker, rewraps every
+              # Zitadel encryption key in one transaction, and moves next to
+              # value. The monthly drill writes next with
+              # scripts/baseline-set-secret.sh, the same write.
+              MK_KEY="zitadel-masterkey"
+              MK_LIFETIME_S=7776000
+              mk_request() {
+                mt="$1"
+                mk_cur=$(kv_get "$mt" "$MK_KEY") || return 1
+                [ -n "$(printf '%s' "$mk_cur" | jq -r '.value // empty')" ] || return 0
+                [ -z "$(printf '%s' "$mk_cur" | jq -r '.next // empty')" ] || return 0
+                mk_t=$(kv_created_epoch "$mt" "$MK_KEY") || return 1
+                [ $(( $(date +%s) - ${mk_t:-$(date +%s)} )) -ge "$MK_LIFETIME_S" ] || return 0
+                kv_put "$mt" "$MK_KEY" "$(printf '%s' "$mk_cur" | jq -c --arg n "$(gen_rand 32)" '.next = $n')" || return 1
+                mk_cur=""
+                echo "[openbao-auto-init] the Zitadel masterkey is older than its lifetime; wrote the next masterkey" >&2
+              }
+
               vault_write_policy() {
                 # $1 token, $2 name, $3 HCL.
                 c=$(curl -sS -o ${TMPD}/pol.json -w '%{http_code}' \
@@ -1586,6 +1609,8 @@ spec:
                   '{{- include "gibson.openbaoPolicy.iamAdminEscrow" . | nindent 14 }}' || return 1
                 vault_write_policy "$tok" jwt-auth-init \
                   '{{- include "gibson.openbaoPolicy.jwtAuthInit" . | nindent 14 }}' || return 1
+                vault_write_policy "$tok" zitadel-masterkey-rotation \
+                  '{{- include "gibson.openbaoPolicy.masterkeyRotation" . | nindent 14 }}' || return 1
                 {{- if $cmVault }}
                 vault_write_policy "$tok" cert-manager-approle-init \
                   '{{- include "gibson.openbaoPolicy.approleInit" . | nindent 14 }}' || return 1
@@ -2067,6 +2092,7 @@ metadata:
 #   gibson-platform-operator-vault — policy platform-operator
 #   gibson-tenant-operator-vault   — policy tenant-operator
 #   gibson-openbao-iam-admin-escrow, gibson-openbao-jwt-auth-init,
+#   gibson-openbao-masterkey-rotation,
 #   gibson-openbao-approle-init, gibson-openbao-approle-reader — the Jobs
 # A non-renewable root token in either would cause VaultTransitReady=False,
 # because vaulttoken.Renewer calls renew-self and OpenBao rejects it with
@@ -2117,6 +2143,7 @@ rules:
       - gibson-tenant-operator-vault
       - gibson-openbao-iam-admin-escrow
       - gibson-openbao-jwt-auth-init
+      - gibson-openbao-masterkey-rotation
       {{- if $cmVault }}
       - gibson-openbao-approle-init
       - gibson-openbao-approle-reader

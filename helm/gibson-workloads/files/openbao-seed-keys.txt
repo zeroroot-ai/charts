@@ -53,7 +53,11 @@ gibson-zitadel-postgres-password password:pw
 gibson-openfga-postgres-password password:pw
 gibson-spire-postgres-password password:pw
 gibson-redis-password password:pw @720h
-zitadel-masterkey value:rand
+# next: the masterkey of the next rotation, empty otherwise. The sidecar
+# writes it when value is older than its lifetime (mk_request), and the
+# CronJob zitadel-masterkey-rotation rewraps the Zitadel keys and moves it to
+# value (ADR-0171).
+zitadel-masterkey value:rand next:empty
 gibson-dashboard-session-secrets auth_secret:rand auth_secret_previous:prev:auth_secret server_actions_key:randb64 @720h
 gibson-cg-signing-key key:rand kid:rand8
 # The verify-only slots of the CG signing key set. Empty in steady state; the

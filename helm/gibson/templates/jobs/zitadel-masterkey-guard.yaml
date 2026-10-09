@@ -1,0 +1,19 @@
+{{/*
+zitadel-masterkey-guard: the script of the init container masterkey-guard of
+each Zitadel workload (values zitadel.zitadel.initContainers). It runs before
+Zitadel and refuses a masterkey that does not open the marker of the rotation
+CronJob (zitadel-masterkey-rotation.yaml). Wave -8, with the masterkey
+ExternalSecret: it exists before the Zitadel Jobs (-4, -3) and the Deployment.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gibson-zitadel-masterkey-guard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: zitadel-masterkey-guard
+  annotations:
+    argocd.argoproj.io/sync-wave: "-8"
+data:
+  guard.sh: |
+{{ include "gibson.masterkeyRotation.guard" . | indent 4 }}

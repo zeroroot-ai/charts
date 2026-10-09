@@ -780,6 +780,55 @@ zitadel:
     masterkey: ""
     masterkeySecretName: "gibson-zitadel-masterkey"
 
+    # The masterkey guard (ADR-0171, row platform-generated-secrets). The
+    # rotation CronJob rewraps the Zitadel keys before the Secret holds the
+    # new masterkey. A Zitadel process that starts in that window would
+    # decrypt its keys to garbage with no error. This init container runs
+    # before each Zitadel workload (Deployment, init and setup Jobs) and
+    # refuses a masterkey that does not open the marker. Its script is the
+    # ConfigMap gibson-zitadel-masterkey-guard (templates/jobs). The image
+    # is postgresSetup.image (psql and openssl): tests/zitadel-masterkey-rotation.bats
+    # fails when the two pins differ.
+    initContainers:
+      - name: masterkey-guard
+        image: ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184
+        command: [bash, /guard/guard.sh]
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+          capabilities:
+            drop: ["ALL"]
+        env:
+          - name: ZITADEL_MASTERKEY
+            valueFrom:
+              secretKeyRef:
+                name: gibson-zitadel-masterkey
+                key: masterkey
+          - name: PGHOST
+            value: platform-postgres-rw.gibson.svc.cluster.local
+          - name: PGPORT
+            value: "5432"
+          - name: PGDATABASE
+            value: zitadel
+          - name: PGSSLMODE
+            value: require
+          - name: PGCONNECT_TIMEOUT
+            value: "5"
+          - name: PGUSER
+            value: zitadel
+          - name: PGPASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: zitadel-postgres-credentials
+                key: password
+        volumeMounts:
+          - name: zitadel-masterkey-guard
+            mountPath: /guard
+            readOnly: true
+
     # NOTE: `masterkeyAnnotations` was deleted with the literal. It only ever
     # annotated the Secret the upstream chart renders from an inline
     # `masterkey:` (secret_zitadel-masterkey.yaml is gated on that value), and
@@ -969,13 +1018,16 @@ zitadel:
   #
   # Reloader is already deployed; it just was not told to watch this Secret.
   annotations:
-    secret.reloader.stakater.com/reload: "gibson-zitadel-system-key"
+    secret.reloader.stakater.com/reload: "gibson-zitadel-system-key,gibson-zitadel-masterkey"
 
   # Mount the public-key half of gibson-zitadel-system-key on
   # the Zitadel pods so the SystemAPIUsers Path: above resolves.
   # The Secret is materialised by ESO (see standalone-
   # externalsecrets/zitadel-system-key-externalsecret.yaml).
   extraVolumes:
+    - name: zitadel-masterkey-guard
+      configMap:
+        name: gibson-zitadel-masterkey-guard
     - name: zitadel-system-key
       secret:
         secretName: gibson-zitadel-system-key
@@ -1006,7 +1058,7 @@ zitadel:
     # the pod reloads the SystemAPIUsers public key from disk (#192).
     # Without this, Zitadel keeps the old in-memory key and rejects
     # platform-operator System API JWTs signed with the new private key.
-    secret.reloader.stakater.com/reload: "gibson-zitadel-system-key"
+    secret.reloader.stakater.com/reload: "gibson-zitadel-system-key,gibson-zitadel-masterkey"
   replicaCount: 1
   service:
     type: ClusterIP
