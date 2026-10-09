@@ -508,6 +508,41 @@ jobs:
           kubectl -n "$NS" scale deploy/gibson-envoy --replicas="${edge_replicas:-1}"
           kubectl -n "$NS" rollout status deploy/gibson-envoy --timeout=300s
 
+      # The belief trainer of a tenant reaches the daemon under Cilium
+      # (charts#519). The tenant-operator writes a trainer CronJob into each
+      # tenant namespace, and the daemon admits it on its gRPC port only
+      # (daemon-tenant-callers, charts#505). The CronJob runs at night, so the
+      # step starts one run now. The claim is the flow, not the training: the
+      # run must reach the daemon gRPC port, Hubble must record that flow as
+      # forwarded, and no policy may drop a flow of the trainer. The next step
+      # then reads every drop of the release namespace, these flows included.
+      - name: The belief trainer of a tenant reaches the daemon
+        run: |
+          set -euo pipefail
+          tns="$(kubectl get tenant primary -o jsonpath='{.status.namespace}')"
+          [ -n "$tns" ] || { echo "::error::the tenant primary reports no namespace"; exit 1; }
+          kubectl -n "$tns" get cronjob belief-trainer >/dev/null \
+            || { echo "::error::the tenant namespace $tns has no belief-trainer CronJob (gibson#616)"; exit 1; }
+          addr="$(kubectl -n "$NS" get deploy/gibson-tenant-operator \
+                    -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="GIBSON_DAEMON_GRPC_ADDRESS")].value}')"
+          port="${addr##*:}"
+          [ -n "$port" ] || { echo "::error::the tenant-operator sets no GIBSON_DAEMON_GRPC_ADDRESS"; exit 1; }
+          since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          kubectl -n "$tns" create job --from=cronjob/belief-trainer belief-trainer-proof
+          phase=""
+          for _ in $(seq 1 60); do
+            phase="$(kubectl -n "$tns" get pod -l job-name=belief-trainer-proof \
+                       -o jsonpath='{.items[0].status.phase}' 2>/dev/null || true)"
+            case "$phase" in Succeeded|Failed) break ;; esac
+            sleep 5
+          done
+          echo "  the trainer run ended in phase ${phase:-<none>} (the claim is the flow)"
+          kubectl -n "$tns" logs -l job-name=belief-trainer-proof --tail=40 --all-containers || true
+          case "$phase" in Succeeded|Failed) ;; *) echo "::error::the trainer run did not end in 300s"; exit 1 ;; esac
+          python3 scripts/check-hubble-drops.py --namespace "$tns" --since "$since" \
+            --expect-forward "belief-trainer-proof:${port}"
+          kubectl -n "$tns" delete job belief-trainer-proof --wait=false
+
       # The network policy on the running cluster (ADR-0165 rule 4, D76,
       # charts#489). After every assertion above, no flow to or from the
       # release namespace may be dropped by a policy: a drop is a pod that
