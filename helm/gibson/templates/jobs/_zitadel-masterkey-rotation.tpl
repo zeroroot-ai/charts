@@ -1,7 +1,7 @@
 {{/*
 The three steps of the CronJob zitadel-masterkey-rotation (see its template).
-They pass the masterkeys through /work, a memory emptyDir. The define
-gibson.masterkeyRotation.guard is the init container of each Zitadel workload. The bats test
+They pass the masterkeys through /work, a memory emptyDir. The guard at the
+end of this file is the init container of each Zitadel workload. The bats test
 tests/zitadel-masterkey-rotation.bats runs the rendered steps.
 */}}
 
