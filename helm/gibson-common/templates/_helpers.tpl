@@ -49,7 +49,8 @@ Values read: none. Derived from .Release.Name.
 {{/*
   gibson.daemonAddress
 
-  Returns the canonical daemon gRPC dialing address: "<service>:<port>".
+  Returns the canonical daemon gRPC dialing address:
+  "<service>.<namespace>.svc:<port>".
 
   Source of truth: the workloads chart's daemon Service name + port. In a
   unified install the daemon Service is named "gibson" (chart fullname
@@ -60,10 +61,15 @@ Values read: none. Derived from .Release.Name.
   Resolution order:
     1. .Values.gibson.daemonAddress when set (operator escape hatch for
        split-release installs).
-    2. "<daemon Service>:50051". The daemon Service is gibson.fullname of
-       the workloads chart, under the same release: "<release>-gibson-workloads",
-       or the release name alone when it already holds "gibson-workloads".
-       Under the umbrella release `gibson` that is "gibson-gibson-workloads".
+    2. "<daemon Service>.<release namespace>.svc:50051". The daemon Service
+       is gibson.fullname of the workloads chart, under the same release:
+       "<release>-gibson-workloads", or the release name alone when it
+       already holds "gibson-workloads". Under the umbrella release `gibson`
+       that is "gibson-gibson-workloads". The name carries the namespace
+       because the operators hand it to pods in other namespaces: the belief
+       trainer of each tenant namespace dials it (charts#526), and a short
+       name resolves to no Service there. ".svc" leaves the cluster domain to
+       the search path of the pod.
 
   Callers in templates:
       env:
@@ -73,6 +79,7 @@ Values read: none. Derived from .Release.Name.
   Values keys read:
     - .Values.gibson.daemonAddress       (the one override)
     - .Release.Name                      (used to construct the default)
+    - .Release.Namespace                 (the namespace of the daemon Service)
 
   Bug class it locks: the default named "<release>:50051", a Service that no
   release renders, and a second values key hid that by overriding it in
@@ -88,7 +95,7 @@ Values read: none. Derived from .Release.Name.
 {{- else -}}
 {{- $workloads := "gibson-workloads" -}}
 {{- $svc := ternary .Release.Name (printf "%s-%s" .Release.Name $workloads) (contains $workloads .Release.Name) -}}
-{{- printf "%s:50051" ($svc | trunc 63 | trimSuffix "-") -}}
+{{- printf "%s.%s.svc:50051" ($svc | trunc 63 | trimSuffix "-") .Release.Namespace -}}
 {{- end -}}
 {{- end -}}
 
