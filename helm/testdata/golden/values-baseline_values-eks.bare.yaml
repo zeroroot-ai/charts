@@ -21352,9 +21352,12 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # Standing infrastructure at an early sync-wave (deploy#820), never a hook.
-  annotations:
-    argocd.argoproj.io/sync-wave: "-8"
+  # No early sync-wave. The login comes from the OpenBao database engine,
+  # which the openbao-auto-init sidecar writes only after the Postgres
+  # superuser exists, and the platform operator at wave 0 makes the Postgres
+  # cluster. An ExternalSecret at wave -8 gates the operator and waits for a
+  # cluster that the operator makes: a from-zero install never ends.
+  # scripts/check-postgres-logins-wave.py fails on a wave below 0.
   name: gibson-platform-postgres-credentials
   namespace: gibson
   labels:
@@ -21602,9 +21605,12 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # Standing infrastructure at an early sync-wave (deploy#820), never a hook.
-  annotations:
-    argocd.argoproj.io/sync-wave: "-8"
+  # No early sync-wave. The login comes from the OpenBao database engine,
+  # which the openbao-auto-init sidecar writes only after the Postgres
+  # superuser exists, and the platform operator at wave 0 makes the Postgres
+  # cluster. An ExternalSecret at wave -8 gates the operator and waits for a
+  # cluster that the operator makes: a from-zero install never ends.
+  # scripts/check-postgres-logins-wave.py fails on a wave below 0.
   name: openfga-postgres-credentials
   namespace: gibson
 spec:
@@ -21666,9 +21672,12 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # Standing infrastructure at an early sync-wave (deploy#820), never a hook.
-  annotations:
-    argocd.argoproj.io/sync-wave: "-8"
+  # No early sync-wave. The login comes from the OpenBao database engine,
+  # which the openbao-auto-init sidecar writes only after the Postgres
+  # superuser exists, and the platform operator at wave 0 makes the Postgres
+  # cluster. An ExternalSecret at wave -8 gates the operator and waits for a
+  # cluster that the operator makes: a from-zero install never ends.
+  # scripts/check-postgres-logins-wave.py fails on a wave below 0.
   name: spire-postgres-credentials
   namespace: gibson
 spec:
@@ -21692,9 +21701,12 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # Standing infrastructure at an early sync-wave (deploy#820), never a hook.
-  annotations:
-    argocd.argoproj.io/sync-wave: "-8"
+  # No early sync-wave. The login comes from the OpenBao database engine,
+  # which the openbao-auto-init sidecar writes only after the Postgres
+  # superuser exists, and the platform operator at wave 0 makes the Postgres
+  # cluster. An ExternalSecret at wave -8 gates the operator and waits for a
+  # cluster that the operator makes: a from-zero install never ends.
+  # scripts/check-postgres-logins-wave.py fails on a wave below 0.
   name: tenant-admin-postgres-credentials
   namespace: gibson
 spec:
@@ -21718,9 +21730,12 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # Standing infrastructure at an early sync-wave (deploy#820), never a hook.
-  annotations:
-    argocd.argoproj.io/sync-wave: "-8"
+  # No early sync-wave. The login comes from the OpenBao database engine,
+  # which the openbao-auto-init sidecar writes only after the Postgres
+  # superuser exists, and the platform operator at wave 0 makes the Postgres
+  # cluster. An ExternalSecret at wave -8 gates the operator and waits for a
+  # cluster that the operator makes: a from-zero install never ends.
+  # scripts/check-postgres-logins-wave.py fails on a wave below 0.
   name: zitadel-postgres-credentials
   namespace: gibson
 spec:
