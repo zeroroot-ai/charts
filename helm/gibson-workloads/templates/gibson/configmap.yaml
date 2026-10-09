@@ -209,8 +209,10 @@ data:
       host: {{ include "gibson.platformPostgres.host" . }}
       port: {{ include "gibson.platformPostgres.port" . }}
       database: {{ include "gibson.platformPostgres.database" . | quote }}
-      username: {{ include "gibson.platformPostgres.username" . | quote }}
-      # Password injected from DASHBOARD_DB_PASSWORD env var at runtime
+      # The login role and its password, from DASHBOARD_DB_USERNAME and
+      # DASHBOARD_DB_PASSWORD at runtime (ADR-0171: the OpenBao database
+      # engine issues a new login role every 24 hours).
+      username: ${DASHBOARD_DB_USERNAME}
       password: ${DASHBOARD_DB_PASSWORD}
       ssl_mode: {{ include "gibson.platformPostgres.sslMode" . | quote }}
       max_conns: {{ .Values.dashboard.postgres.maxConns | default 10 }}

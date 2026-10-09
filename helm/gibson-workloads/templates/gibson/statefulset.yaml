@@ -123,7 +123,10 @@ spec:
         # gibson-daemon-metrics-tls: the metrics listener loads its cert one
         # time at start, so a cert-manager renewal restarts the daemon
         # (ADR-0171, row component-tls).
-        secret.reloader.stakater.com/reload: "{{ include "gibson.dbSecrets.name" . }},gibson-platform-postgres-credentials,gibson-native-login-oidc,gibson-daemon-metrics-tls"
+        # gibson-platform-postgres-credentials: the login role of
+        # gibson_platform, which the OpenBao database engine issues every
+        # 24 hours (ADR-0171, row postgres-role-passwords).
+        secret.reloader.stakater.com/reload: "{{ include "gibson.platformPostgres.passwordSecretName" . }},gibson-native-login-oidc,gibson-daemon-metrics-tls"
         {{- /*
           The daemon pins GIBSON_AUTHZ_FGA_MODEL_ID from gibson-fga-config at
           start. When the fga-init Job writes a new model (an evolved
@@ -493,6 +496,13 @@ spec:
             # prod overlays can point at an externally-managed RDS secret.
             # Spec helm-eks-readiness-and-pg-split Phase 2.
             {{- if .Values.dashboard.postgres.enabled }}
+            # The login role of gibson_platform (ADR-0171): the config file
+            # reads it as ${DASHBOARD_DB_USERNAME}.
+            - name: DASHBOARD_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.platformPostgres.passwordSecretName" . }}
+                  key: {{ include "gibson.platformPostgres.usernameSecretKey" . }}
             - name: DASHBOARD_DB_PASSWORD
               valueFrom:
                 secretKeyRef:

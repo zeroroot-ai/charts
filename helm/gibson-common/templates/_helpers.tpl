@@ -297,10 +297,6 @@ https
 {{- end }}
 
 
-{{- define "gibson.dbSecrets.name" -}}
-{{- printf "%s-db-secrets" (include "gibson.fullname" .) }}
-{{- end }}
-
 {{- define "gibson.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
@@ -509,14 +505,11 @@ consolidated StatefulSet that hosts gibson_platform + per-tenant DBs).
 {{- end -}}
 {{- end }}
 
-{{- define "gibson.platformPostgres.username" -}}
-{{- $cfg := .Values.platformPostgres | default dict -}}
-{{- $ext := $cfg.external | default dict -}}
-{{- if $ext.enabled -}}
-{{- $ext.username | default "gibson_platform" -}}
-{{- else -}}
-{{- $cfg.username | default "gibson_platform" -}}
-{{- end -}}
+{{- /* The key of the platform Postgres Secret that holds the login role.
+       The OpenBao database engine issues a new one every 24 hours
+       (ADR-0171), so no value names it. */ -}}
+{{- define "gibson.platformPostgres.usernameSecretKey" -}}
+username
 {{- end }}
 
 

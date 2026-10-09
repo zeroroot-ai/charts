@@ -38,4 +38,4 @@ spec:
   backoffLimit: 20
   ttlSecondsAfterFinished: 600
   template:
-    {{- include "gibson.postgresSetup.podTemplate" (dict "root" $ "entries" (list (dict "role" "zitadel" "db" "zitadel" "opts" "LOGIN CREATEDB" "secret" "zitadel-postgres-credentials"))) | nindent 4 }}
+    {{- include "gibson.postgresSetup.podTemplate" (dict "root" $ "entries" (list (dict "role" "zitadel" "db" "zitadel" "opts" "NOLOGIN CREATEDB"))) | nindent 4 }}

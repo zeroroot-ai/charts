@@ -254,7 +254,9 @@ spec:
       labels:
         {{- include "gibson.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: openbao
-        {{- include "gibson.netLabels" (dict "role" "datastore" "datastore" "openbao" "kubeApi" true) | nindent 8 }}
+        {{- /* clients postgres: the database engine issues the platform
+               login roles on platform-postgres (ADR-0171). */}}
+        {{- include "gibson.netLabels" (dict "role" "datastore" "datastore" "openbao" "kubeApi" true "clients" (list "postgres")) | nindent 8 }}
       annotations:
         checksum/config: {{ .Values.openbao.config | toYaml | sha256sum }}
         # Velero fs-backup skips the scratch volumes. scripts/check-velero-volume-excludes.sh.
@@ -1360,6 +1362,7 @@ spec:
                 cg_key_rotate "$tok" || seed_failed=$((seed_failed + 1))
                 sys_key_rotate "$tok" || seed_failed=$((seed_failed + 1))
                 mk_request "$tok" || seed_failed=$((seed_failed + 1))
+                pg_engine_ensure "$tok" || seed_failed=$((seed_failed + 1))
                 echo "[openbao-auto-init] seed pass complete: ${seed_checked} keys checked, ${seed_written} written, ${seed_failed} failed"
                 [ "$seed_failed" -eq 0 ]
               }
@@ -1397,6 +1400,77 @@ spec:
                 cg_b=$(printf '%s' "$cg_k" | tr -- '-_' '+/' | tr -d '=')
                 while [ $(( ${#cg_b} % 4 )) -ne 0 ]; do cg_b="${cg_b}="; done
                 [ $(( $(printf '%s' "$cg_b" | base64 -d 2>/dev/null | wc -c) )) -eq 32 ]
+              }
+
+              # The database engine that issues the login roles of the
+              # platform databases (ADR-0171, row postgres-role-passwords).
+              # Each owner role (gibson_platform, tenant_admin, zitadel,
+              # openfga, spire) owns its database and logs in no more. ESO
+              # asks database/creds/<role> for a login role, which is a member
+              # of the owner and sets role to it at each login, so each object
+              # stays owned by the owner. A lease lives 48 hours; ESO asks
+              # for a new one every 24 hours, and the revocation statements
+              # drop the old role when its lease ends. Each owner has its own
+              # connection to its own database, so REASSIGN OWNED and DROP
+              # OWNED run where its grants are. The engine logs in as the CNPG
+              # superuser (platform-postgres-superuser, mounted read-only).
+              PG_ENGINE_HOST="platform-postgres-rw.{{ .Release.Namespace }}.svc"
+              PG_SU_DIR="/etc/openbao/pg-superuser"
+              # <owner role> <database> <OpenBao role name>
+              PG_ENGINE_ROLES="gibson_platform gibson_platform gibson-platform
+              tenant_admin postgres tenant-admin
+              zitadel zitadel zitadel
+              openfga openfga openfga
+              spire spire spire"
+              pg_engine_ensure() {
+                pt="$1"
+                [ -s "${PG_SU_DIR}/username" ] && [ -s "${PG_SU_DIR}/password" ] || {
+                  echo "[openbao-auto-init] the CNPG superuser Secret is not mounted yet; the database engine waits" >&2; return 0; }
+                c=$(curl -sS -o ${TMPD}/mnt.json -w '%{http_code}' -H "X-Vault-Token: ${pt}" "${BAO_ADDR_LOCAL}/v1/sys/mounts/database")
+                if [ "$c" != 200 ]; then
+                  c=$(curl -sS -o ${TMPD}/mnt.json -w '%{http_code}' -X POST -H "X-Vault-Token: ${pt}" \
+                    -H "Content-Type: application/json" -d '{"type":"database"}' "${BAO_ADDR_LOCAL}/v1/sys/mounts/database")
+                  case "$c" in 200|204) ;; *) echo "[openbao-auto-init] FATAL: enable the database engine returned HTTP $c: $(cat ${TMPD}/mnt.json)" >&2; return 1 ;; esac
+                fi
+                pg_su_user=$(cat "${PG_SU_DIR}/username")
+                pg_su_hash=$(cat "${PG_SU_DIR}/username" "${PG_SU_DIR}/password" | sha256sum | cut -c1-16)
+                # The loop runs in a subshell (the pipe): exit, not return,
+                # carries a failure out, as the status of the pipe.
+                printf '%s\n' "$PG_ENGINE_ROLES" | while read -r owner db role; do
+                  [ -n "$owner" ] || continue
+                  # The connection, written again only when it is missing or
+                  # the superuser credential changed (the hash rides on the
+                  # connection as a verification-free plugin option).
+                  have=$(curl -sS -H "X-Vault-Token: ${pt}" "${BAO_ADDR_LOCAL}/v1/database/config/${role}" \
+                    | jq -r '.data.connection_details.username // empty')
+                  mark=$(kv_get "$pt" "gibson-pg-engine" | jq -r --arg r "$role" '.[$r] // empty') || exit 1
+                  if [ "$have" != "$pg_su_user" ] || [ "$mark" != "$pg_su_hash" ]; then
+                    body=$(jq -nc --arg u "$pg_su_user" --rawfile p "${PG_SU_DIR}/password" --arg r "$role" \
+                      --arg url "postgresql://{{ "{{" }}username{{ "}}" }}:{{ "{{" }}password{{ "}}" }}@${PG_ENGINE_HOST}:5432/${db}?sslmode=require" \
+                      '{plugin_name:"postgresql-database-plugin", connection_url:$url, username:$u, password:($p|rtrimstr("\n")),
+                        allowed_roles:[$r], verify_connection:false, password_authentication:"scram-sha-256"}')
+                    c=$(printf '%s' "$body" | curl -sS -o ${TMPD}/dbc.json -w '%{http_code}' -X POST -H "X-Vault-Token: ${pt}" \
+                      -H "Content-Type: application/json" --data-binary @- "${BAO_ADDR_LOCAL}/v1/database/config/${role}")
+                    body=""
+                    case "$c" in 200|204) ;; *) echo "[openbao-auto-init] FATAL: database/config/${role} returned HTTP $c: $(cat ${TMPD}/dbc.json)" >&2; exit 1 ;; esac
+                    cur=$(kv_get "$pt" "gibson-pg-engine") || exit 1
+                    kv_put "$pt" "gibson-pg-engine" "$(printf '%s' "$cur" | jq -c --arg r "$role" --arg h "$pg_su_hash" '.[$r] = $h')" || exit 1
+                    echo "[openbao-auto-init] database engine connection ${role} -> ${db} (as ${pg_su_user})" >&2
+                  fi
+                  body=$(jq -nc --arg o "$owner" --arg r "$role" '{
+                    db_name: $r,
+                    creation_statements: [
+                      "CREATE ROLE \"{{ "{{" }}name{{ "}}" }}\" WITH LOGIN PASSWORD '"'"'{{ "{{" }}password{{ "}}" }}'"'"' VALID UNTIL '"'"'{{ "{{" }}expiration{{ "}}" }}'"'"' IN ROLE \"" + $o + "\";",
+                      "ALTER ROLE \"{{ "{{" }}name{{ "}}" }}\" SET role = \"" + $o + "\";"],
+                    revocation_statements: [
+                      "REASSIGN OWNED BY \"{{ "{{" }}name{{ "}}" }}\" TO \"" + $o + "\";",
+                      "DROP OWNED BY \"{{ "{{" }}name{{ "}}" }}\";",
+                      "DROP ROLE IF EXISTS \"{{ "{{" }}name{{ "}}" }}\";"],
+                    default_ttl: "48h", max_ttl: "72h"}')
+                  c=$(printf '%s' "$body" | curl -sS -o ${TMPD}/dbr.json -w '%{http_code}' -X POST -H "X-Vault-Token: ${pt}" \
+                    -H "Content-Type: application/json" --data-binary @- "${BAO_ADDR_LOCAL}/v1/database/roles/${role}")
+                  case "$c" in 200|204) ;; *) echo "[openbao-auto-init] FATAL: database/roles/${role} returned HTTP $c: $(cat ${TMPD}/dbr.json)" >&2; exit 1 ;; esac
+                done
               }
 
               cg_key_rotate() {
@@ -1653,6 +1727,7 @@ spec:
                 # changed.
                 vault_write_policy "$tok" "$ESO_POLICY" \
                   'path "secret/data/*" { capabilities = ["read"] }
+              path "database/creds/*" { capabilities = ["read"] }
               path "secret/metadata/*" { capabilities = ["read", "list"] }
               path "sys/internal/ui/mounts/*" { capabilities = ["read"] }
               path "sys/mounts" { capabilities = ["read"] }
@@ -1901,6 +1976,10 @@ spec:
             # seeded empty.
             - name: bringup-inputs
               mountPath: /etc/openbao/inputs
+            # The CNPG superuser, for the database engine (pg_engine_ensure).
+            - name: pg-superuser
+              mountPath: /etc/openbao/pg-superuser
+              readOnly: true
             # The OpenBao CA only, never the key of the listener.
             {{- include "gibson.openbaoCAMount" . | nindent 12 }}
             # The ready marker and mktemp write here. The root filesystem is read-only.
@@ -1975,6 +2054,18 @@ spec:
               # Empty unless a rotation runs (scripts/keyring.sh rotate).
               - key: {{ $keyringPreviousKey | quote }}
                 path: openbao-seal-previous-key
+        # The CNPG superuser Secret, read by the database engine connection
+        # (ADR-0171). optional: CNPG writes it after the Cluster starts.
+        - name: pg-superuser
+          secret:
+            secretName: platform-postgres-superuser
+            defaultMode: 0440
+            optional: true
+            items:
+              - key: username
+                path: username
+              - key: password
+                path: password
         # The two keyring INPUTS for the sidecar (deploy#1732): the same
         # bringup keyring Secret, a different volume, and NEVER the seal key.
         # Item names follow scripts/keyring.sh: member GHCR_PULL_TOKEN is the

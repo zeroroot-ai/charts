@@ -28,6 +28,9 @@ path "secret/data/*" { capabilities = ["create", "read", "update"] }
 path "secret/metadata/*" { capabilities = ["read"] }
 path "transit/keys/*" { capabilities = ["create", "read", "update"] }
 path "transit/export/signing-key/*" { capabilities = ["read"] }
+path "sys/mounts/database" { capabilities = ["create", "update", "read"] }
+path "database/config/*" { capabilities = ["create", "update", "read"] }
+path "database/roles/*" { capabilities = ["create", "update", "read"] }
 {{- end -}}
 
 {{/*

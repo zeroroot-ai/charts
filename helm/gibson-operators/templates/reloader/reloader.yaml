@@ -108,7 +108,7 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]
     verbs: ["list", "get", "watch"]
-  {{- with .Values.reloader.rollouts.deployments }}
+  {{- with concat (.Values.reloader.rollouts.deployments | default list) (.Values.reloader.rollouts.extraDeployments | default list) }}
   - apiGroups: ["apps"]
     resources: ["deployments"]
     resourceNames: {{ toJson . }}

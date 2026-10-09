@@ -164,8 +164,10 @@ tenantOperator:
       host: ""
       port: 5432
       database: "gibson_platform"
-      username: "gibson_platform"
       sslMode: "require"
+      # The Secret holds the login role (key username) and its password: the
+      # OpenBao database engine issues a new login role every 24 hours
+      # (ADR-0171), so no value names the role.
       passwordSecretRef:
         name: ""
         key: "password"
@@ -369,8 +371,6 @@ platformPostgres:
   host: ""
   port: 5432
   database: gibson_platform
-  username: gibson_platform
-  user: ""  # alias accepted by some overlays; templates prefer `username`
   passwordSecretName: ""
   passwordSecretKey: PLATFORM_DB_PASSWORD
   sslMode: disable
@@ -379,7 +379,6 @@ platformPostgres:
     host: ""
     port: 5432
     database: gibson_platform
-    username: gibson_platform
     passwordSecretName: ""
     passwordSecretKey: PLATFORM_DB_PASSWORD
     sslMode: require
@@ -623,5 +622,13 @@ reloader:
       - gibson-tenant-operator
       - gibson-zitadel
       - gibson-zitadel-login
+    # The Deployments of another release in this namespace that carry a
+    # reload annotation, for example the billing-webhook and the
+    # entitlements service of the private billing component (hosted), which
+    # restart on a new Postgres login role (ADR-0171). This chart does not
+    # render them, so scripts/check-reloader-namespaced.py does not see them.
+    extraDeployments: []
     statefulsets:
       - gibson-gibson-workloads
+      # The SPIRE server: its datastore login role (ADR-0171).
+      - gibson-server

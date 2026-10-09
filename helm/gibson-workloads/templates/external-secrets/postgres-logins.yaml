@@ -1,0 +1,48 @@
+{{- /*
+The login roles of the platform databases (ADR-0171, row
+postgres-role-passwords). Each owner role (gibson_platform, tenant_admin,
+zitadel, openfga, spire) owns its database and logs in no more. A
+VaultDynamicSecret generator asks the OpenBao database engine
+(database/creds/<role>, written by the openbao-auto-init sidecar,
+pg_engine_ensure) for a new login role: a member of the owner that sets role
+to it at each login. The ExternalSecret of each owner asks again every 24
+hours and writes `username` and `password` into the Secret its consumers read.
+Reloader restarts each consumer on the change (the SPIRE server: the CronJob
+spire-postgres-rollout). The old login role works until its lease ends, 48
+hours after it was issued, and then the engine drops it.
+*/ -}}
+{{- $eso := .Values.externalSecrets }}
+{{- $css := $eso.clusterSecretStore | default dict }}
+{{- $sa := $css.serviceAccount | default dict }}
+{{- $openbao := $css.openbao | default dict }}
+{{- range $r := list "gibson-platform" "tenant-admin" "zitadel" "openfga" "spire" }}
+---
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: VaultDynamicSecret
+metadata:
+  name: postgres-login-{{ $r }}
+  namespace: {{ $.Release.Namespace }}
+  annotations:
+    # With the ClusterSecretStore (-10), before every ExternalSecret that
+    # names it (-8).
+    argocd.argoproj.io/sync-wave: "-9"
+  labels:
+    {{- include "gibson.labels" $ | nindent 4 }}
+spec:
+  path: "database/creds/{{ $r }}"
+  method: GET
+  resultType: Data
+  provider:
+    server: {{ include "gibson.openbaoAddr" $ | quote }}
+    caProvider:
+      type: Secret
+      name: {{ include "gibson.openbaoTLSSecret" $ | quote }}
+      namespace: {{ $.Release.Namespace | quote }}
+      key: ca.crt
+    auth:
+      kubernetes:
+        mountPath: {{ $openbao.authMount | default "kubernetes" | quote }}
+        role: {{ $openbao.esoRole | default "eso-reader" | quote }}
+        serviceAccountRef:
+          name: {{ $sa.name | default "external-secrets" | quote }}
+{{- end }}

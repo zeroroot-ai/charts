@@ -52,7 +52,9 @@ spec:
           gibson-tenant-operator-vault when it expires, and Reloader rolls
           this Deployment when that Secret changes.
         */}}
-        secret.reloader.stakater.com/reload: "gibson-tenant-operator-vault"
+        # The two login roles of the operator (ADR-0171, row
+        # postgres-role-passwords) and its OpenBao token.
+        secret.reloader.stakater.com/reload: "gibson-tenant-operator-vault,{{ include "gibson.tenantPostgres.passwordSecretName" . }},{{ .Values.tenantOperator.brokerConfig.platformPg.passwordSecretRef.name }}"
     spec:
       {{- include "gibson.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: gibson-tenant-operator
@@ -525,14 +527,21 @@ spec:
             # SQLSTATE 42501. The dedicated `gibson.tenantPostgres.*`
             # helpers route to the tenant_admin role's credentials and
             # fail-render if anyone re-introduces `gibson_platform` here.
+            # The login role of tenant_admin and its password, both from the
+            # Secret: the OpenBao database engine issues a new login role
+            # every 24 hours (ADR-0171), and Reloader restarts this pod.
+            - name: TENANT_POSTGRES_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.tenantPostgres.passwordSecretName" . }}
+                  key: {{ include "gibson.tenantPostgres.usernameSecretKey" . }}
             - name: TENANT_POSTGRES_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "gibson.tenantPostgres.passwordSecretName" . }}
                   key: {{ include "gibson.tenantPostgres.passwordSecretKey" . }}
             - name: DATAPLANE_PG_ADMIN_DSN
-              value: {{ printf "postgres://%s:$(TENANT_POSTGRES_ADMIN_PASSWORD)@%s:%v/%s?sslmode=%s"
-                  (include "gibson.tenantPostgres.username" .)
+              value: {{ printf "postgres://$(TENANT_POSTGRES_ADMIN_USERNAME):$(TENANT_POSTGRES_ADMIN_PASSWORD)@%s:%v/%s?sslmode=%s"
                   (include "gibson.tenantPostgres.host" .)
                   (include "gibson.tenantPostgres.port" .)
                   (.Values.dataPlane.postgres.admin_database | default "postgres")
@@ -631,14 +640,20 @@ spec:
             # Always emitted — broker config row is required for the
             # daemon to resolve per-tenant credentials. Missing
             # platformPg.host or KEK Secret fails chart render.
-            - name: PLATFORM_PG_PASSWORD
+            # The login role of gibson_platform, from the same Secret as its
+            # password (ADR-0171).
+            - name: PLATFORM_PG_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.tenantOperator.brokerConfig.platformPg.passwordSecretRef.name | required "tenantOperator.brokerConfig.platformPg.passwordSecretRef.name is required (one-code-path: WriteTenantBrokerConfig step is non-negotiable; set this to the platform-pg app Secret name)" | quote }}
+                  key: "username"
+            - name: PLATFORM_PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.tenantOperator.brokerConfig.platformPg.passwordSecretRef.name | quote }}
                   key: {{ .Values.tenantOperator.brokerConfig.platformPg.passwordSecretRef.key | default "password" | quote }}
             - name: PLATFORM_PG_DSN
-              value: {{ printf "postgres://%s:$(PLATFORM_PG_PASSWORD)@%s:%v/%s?sslmode=%s"
-                  .Values.tenantOperator.brokerConfig.platformPg.username
+              value: {{ printf "postgres://$(PLATFORM_PG_USERNAME):$(PLATFORM_PG_PASSWORD)@%s:%v/%s?sslmode=%s"
                   (.Values.tenantOperator.brokerConfig.platformPg.host | required "tenantOperator.brokerConfig.platformPg.host is required (one-code-path)")
                   .Values.tenantOperator.brokerConfig.platformPg.port
                   .Values.tenantOperator.brokerConfig.platformPg.database

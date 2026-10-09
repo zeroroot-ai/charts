@@ -818,7 +818,10 @@ zitadel:
           - name: PGCONNECT_TIMEOUT
             value: "5"
           - name: PGUSER
-            value: zitadel
+            valueFrom:
+              secretKeyRef:
+                name: zitadel-postgres-credentials
+                key: username
           - name: PGPASSWORD
             valueFrom:
               secretKeyRef:
@@ -1018,7 +1021,7 @@ zitadel:
   #
   # Reloader is already deployed; it just was not told to watch this Secret.
   annotations:
-    secret.reloader.stakater.com/reload: "gibson-zitadel-system-key,gibson-zitadel-masterkey"
+    secret.reloader.stakater.com/reload: "gibson-zitadel-system-key,gibson-zitadel-masterkey,zitadel-postgres-credentials"
 
   # Mount the public-key half of gibson-zitadel-system-key on
   # the Zitadel pods so the SystemAPIUsers Path: above resolves.
@@ -1041,12 +1044,26 @@ zitadel:
       mountPath: /etc/zitadel-system-keys
       readOnly: true
 
+  # The login role and its password (ADR-0171): the OpenBao database engine
+  # issues a new login role of the owner zitadel every 24 hours, and Reloader
+  # restarts Zitadel. The env names override Database.Postgres.User and Admin
+  # of the config map.
   env:
+    - name: ZITADEL_DATABASE_POSTGRES_USER_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: zitadel-postgres-credentials
+          key: username
     - name: ZITADEL_DATABASE_POSTGRES_USER_PASSWORD
       valueFrom:
         secretKeyRef:
           name: zitadel-postgres-credentials
           key: password
+    - name: ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: zitadel-postgres-credentials
+          key: username
     - name: ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD
       valueFrom:
         secretKeyRef:
@@ -1058,7 +1075,7 @@ zitadel:
     # the pod reloads the SystemAPIUsers public key from disk (#192).
     # Without this, Zitadel keeps the old in-memory key and rejects
     # platform-operator System API JWTs signed with the new private key.
-    secret.reloader.stakater.com/reload: "gibson-zitadel-system-key,gibson-zitadel-masterkey"
+    secret.reloader.stakater.com/reload: "gibson-zitadel-system-key,gibson-zitadel-masterkey,zitadel-postgres-credentials"
   replicaCount: 1
   service:
     type: ClusterIP
@@ -1319,6 +1336,14 @@ spire:
         drop: ["ALL"]
       seccompProfile:
         type: RuntimeDefault
+    # The login role of the datastore, for ${DBUSER} in its connection
+    # string (ADR-0171).
+    extraEnv:
+      - name: DBUSER
+        valueFrom:
+          secretKeyRef:
+            name: spire-postgres-credentials
+            key: username
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
     # No egress label: the server uses the disk KeyManager, no
     # UpstreamAuthority and no federation. It calls only the API server and
@@ -1332,6 +1357,11 @@ spire:
     # datastore volume) stays in the backup. scripts/check-velero-volume-excludes.sh.
     podAnnotations:
       backup.velero.io/backup-volumes-excludes: "server-tmp,spire-server-socket,spire-controller-manager-tmp"
+      # The login role of the datastore changes every 24 hours (ADR-0171).
+      # The server reads it at start, so Reloader restarts it. Reloader reads
+      # pod template annotations, and the vendored chart renders none on the
+      # StatefulSet itself (gibson-operators reloader.rollouts names it).
+      secret.reloader.stakater.com/reload: "spire-postgres-credentials"
     # Datastore: shared platform-postgres-rw, role spire, database spire.
     dataStore:
       sql:
@@ -1339,7 +1369,10 @@ spire:
         databaseName: spire
         host: platform-postgres-rw.gibson.svc.cluster.local
         port: 5432
-        username: spire
+        # The login role, which the OpenBao database engine issues every 24
+        # hours (ADR-0171). The server expands ${DBUSER} (-expandEnv) from
+        # the extraEnv below, as it expands ${DBPW}.
+        username: ${DBUSER}
         externalSecret:
           enabled: true
           name: spire-postgres-credentials

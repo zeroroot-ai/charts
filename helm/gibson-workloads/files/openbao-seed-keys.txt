@@ -47,11 +47,10 @@
 # a pod restart), and `svctoken` follows the token in the
 # gibson-platform-operator-vault Secret. Everything else is generated once
 # and kept, so an upgrade never rotates a credential under a workload.
-gibson-gibson-platform-postgres-password password:pw
-gibson-tenant-admin-postgres-password password:pw
-gibson-zitadel-postgres-password password:pw
-gibson-openfga-postgres-password password:pw
-gibson-spire-postgres-password password:pw
+# No Postgres password: the OpenBao database engine issues the login role of
+# each platform database (ADR-0171, row postgres-role-passwords;
+# pg_engine_ensure in the sidecar, which records in the KV key
+# gibson-pg-engine which superuser credential each connection holds).
 gibson-redis-password password:pw @720h
 # next: the masterkey of the next rotation, empty otherwise. The sidecar
 # writes it when value is older than its lifetime (mk_request), and the
