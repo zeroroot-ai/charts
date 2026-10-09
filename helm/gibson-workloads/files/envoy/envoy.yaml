@@ -166,7 +166,12 @@ static_resources:
                         json_format:
                           start_time: "%START_TIME%"
                           method: "%REQ(:METHOD)%"
-                          path: "%REQ(:PATH)%"
+                          # The path without its query string. A query can
+                          # carry a credential: the token of a query-token
+                          # extra route (charts#561), and the code and state
+                          # of a sign-in callback. The query never reaches
+                          # the log.
+                          path: "%PATH(NQ)%"
                           response_code: "%RESPONSE_CODE%"
                           response_flags: "%RESPONSE_FLAGS%"
                           duration_ms: "%DURATION%"

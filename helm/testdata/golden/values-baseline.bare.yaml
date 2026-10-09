@@ -1703,7 +1703,12 @@ data:
                             json_format:
                               start_time: "%START_TIME%"
                               method: "%REQ(:METHOD)%"
-                              path: "%REQ(:PATH)%"
+                              # The path without its query string. A query can
+                              # carry a credential: the token of a query-token
+                              # extra route (charts#561), and the code and state
+                              # of a sign-in callback. The query never reaches
+                              # the log.
+                              path: "%PATH(NQ)%"
                               response_code: "%RESPONSE_CODE%"
                               response_flags: "%RESPONSE_FLAGS%"
                               duration_ms: "%DURATION%"
@@ -12576,7 +12581,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 3e7dbe99648568fc9ea37407f211ad0b981be4bcc2b530b6c2a7aad24187310e
+        checksum/config: 2b65a66776935d11a8bd0009d6e0a3ae6c8645c09cf60517618863af11fdccda
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #

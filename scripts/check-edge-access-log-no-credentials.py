@@ -18,6 +18,9 @@ The rule, on every access log in every rendered Envoy config:
    and `%REQ(AUTHORIZATION):64%` fail.
 2. A Cookie or Set-Cookie header is never logged at all, truncated or not:
    its first characters are a cookie name and the start of its value.
+3. The request path is logged without its query string (%PATH(NQ)%), never
+   as %REQ(:PATH)% or %PATH% with the query. A query carries the token of a
+   query-token extra route (charts#561) and the code of a sign-in callback.
 
   check-edge-access-log-no-credentials.py             exit 1 on a finding, 0 when clean
   check-edge-access-log-no-credentials.py --selftest  prove each kind of finding fails
@@ -41,6 +44,10 @@ CREDENTIAL_SUFFIXES = ("-token", "-secret")
 # %REQ(NAME)% / %REQ(NAME?ALT)% / %RESP(NAME)% / %TRAILER(NAME)%, with an
 # optional :N truncation. Envoy upper-cases nothing; names are case-insensitive.
 OPERATOR = re.compile(r"%(REQ|RESP|TRAILER)\(([^)]*)\)(?::(\d+))?%")
+# A format operator that logs the request path with its query string:
+# %REQ(:PATH)% and %PATH% or %PATH(WQ...)%. %PATH(NQ...)% drops the query.
+PATH_WITH_QUERY = re.compile(r"%REQ\(\s*:PATH\s*(?:\?[^)]*)?\)(?::\d+)?%|%PATH(?:\((?!NQ)[^)]*\))?(?::\d+)?%",
+                             re.IGNORECASE)
 
 
 # ------------------------------------------------------------------ render
@@ -106,6 +113,9 @@ def audit(docs: list[dict]) -> list[str]:
     for cm, key, cfg in configs:
         for path, s in access_log_strings(cfg):
             logs += 1
+            if PATH_WITH_QUERY.search(s):
+                bad.append(f"{cm}/{key} {path}: logs the request path with its query string; "
+                           "log %PATH(NQ)% so a query token never reaches the log")
             for m in OPERATOR.finditer(s):
                 kind, names, trunc = m.group(1), m.group(2), m.group(3)
                 for name in names.split("?"):
@@ -179,6 +189,9 @@ def selftest(docs: list[dict]) -> int:
         ("Set-Cookie response header", _plant("cookie", "%RESP(SET-COOKIE)%"), "never logged"),
         ("a -token header", _plant("tok", "%REQ(X-CSRF-TOKEN)%"), "whole"),
         ("X-Api-Key", _plant("key", "%REQ(X-API-KEY):32%"), "reach into"),
+        ("the path with its query", _plant("path", "%REQ(:PATH)%"), "query string"),
+        ("the PATH operator with its query", _plant("path", "%PATH(WQ:ORIG)%"), "query string"),
+        ("the bare PATH operator", _plant("path", "%PATH%"), "query string"),
     ]
     rc = 0
     clean = audit(docs)
@@ -188,6 +201,7 @@ def selftest(docs: list[dict]) -> int:
     passes = [
         ("Authorization truncated to the scheme word", _plant("authz", "%REQ(AUTHORIZATION):6%")),
         ("a non-credential header in full", _plant("ua", "%REQ(USER-AGENT)%")),
+        ("the path without its query", _plant("path", "%PATH(NQ:ORIG)%")),
     ]
     for name, fn, needle in cases:
         findings = audit(_edit(docs, fn))
