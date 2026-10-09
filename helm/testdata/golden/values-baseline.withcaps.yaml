@@ -4643,6 +4643,63 @@ data:
     TLS:
       Enabled: false
 ---
+# Source: gibson/templates/jobs/zitadel-masterkey-guard.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gibson-zitadel-masterkey-guard
+  namespace: gibson
+  labels:
+    app.kubernetes.io/component: zitadel-masterkey-guard
+  annotations:
+    argocd.argoproj.io/sync-wave: "-8"
+data:
+  guard.sh: |
+    # The Zitadel masterkey guard: an init container of each Zitadel workload. It
+    # refuses to start Zitadel on a masterkey that does not open the marker, so
+    # no Zitadel process decrypts its keys to garbage after a rewrap (AES-CFB has
+    # no integrity check). A missing marker passes: the rotation CronJob writes it
+    # with the masterkey that Zitadel runs with.
+    set -euo pipefail
+    export PATH="/opt/bitnami/postgresql/bin:$PATH"
+    PSQL=(psql -X -q -t -A -v ON_ERROR_STOP=1)
+    # The Zitadel AESString of internal/crypto/aes.go, and the marker text. The
+    # rewrap step and the Zitadel masterkey guard use this one copy.
+    MARKER_TEXT="gibson-zitadel-masterkey-marker-v1"
+    hex_of() { od -An -v -tx1 | tr -d ' \n'; }
+    bin_of() { printf '%b' "$(printf '%s' "$1" | sed 's/../\\x&/g')"; }
+    # mk_decrypt_hex STRING KEY: the plaintext of a Zitadel AESString, as hex.
+    mk_decrypt_hex() {
+      local raw kh
+      raw="$(printf '%s' "$1" | tr '_-' '/+' | base64 -d | hex_of)"
+      [ "${#raw}" -ge 32 ] || return 1
+      kh="$(printf '%s' "$2" | hex_of)"
+      bin_of "${raw:32}" | openssl enc -d -aes-256-cfb -K "$kh" -iv "${raw:0:32}" -nopad | hex_of
+    }
+    # mk_encrypt_hex HEX KEY: a Zitadel AESString of the plaintext HEX.
+    mk_encrypt_hex() {
+      local iv kh ct
+      iv="$(openssl rand -hex 16)"
+      kh="$(printf '%s' "$2" | hex_of)"
+      ct="$(bin_of "$1" | openssl enc -aes-256-cfb -K "$kh" -iv "$iv" -nopad | hex_of)"
+      bin_of "${iv}${ct}" | base64 -w0 | tr '+/' '-_'
+    }
+    marker_hex="$(printf '%s' "$MARKER_TEXT" | hex_of)"
+    mk="${ZITADEL_MASTERKEY:-}"
+    [ "${#mk}" -ge 32 ] || { echo "[masterkey-guard] FATAL: the masterkey is shorter than 32 characters" >&2; exit 1; }
+    has=""
+    for _ in $(seq 1 60); do
+      has="$("${PSQL[@]}" -c "SELECT to_regclass('gibson_rotation.masterkey_marker') IS NOT NULL" 2>/dev/null)" && break
+      has=""; sleep 2
+    done
+    [ -n "$has" ] || { echo "[masterkey-guard] FATAL: cannot read the zitadel database" >&2; exit 1; }
+    if [ "$has" != t ]; then echo "[masterkey-guard] no marker yet; the rotation CronJob writes it"; exit 0; fi
+    marker="$("${PSQL[@]}" -c "SELECT marker FROM gibson_rotation.masterkey_marker WHERE id = 1")"
+    if [ -z "$marker" ]; then echo "[masterkey-guard] no marker yet; the rotation CronJob writes it"; exit 0; fi
+    [ "$(mk_decrypt_hex "$marker" "${mk:0:32}")" = "$marker_hex" ] \
+      || { echo "[masterkey-guard] FATAL: the masterkey of this pod does not open the marker; the Zitadel keys use another masterkey. Zitadel waits for the new Secret." >&2; exit 1; }
+    echo "[masterkey-guard] the masterkey opens the marker"
+---
 # Source: gibson/templates/zitadel-login-branding.yaml
 apiVersion: v1
 kind: ConfigMap
@@ -14310,10 +14367,53 @@ spec:
             readOnly: true
           resources:
               {}
+      initContainers:
+        - command:
+          - bash
+          - /guard/guard.sh
+          env:
+          - name: ZITADEL_MASTERKEY
+            valueFrom:
+              secretKeyRef:
+                key: masterkey
+                name: gibson-zitadel-masterkey
+          - name: PGHOST
+            value: platform-postgres-rw.gibson.svc.cluster.local
+          - name: PGPORT
+            value: "5432"
+          - name: PGDATABASE
+            value: zitadel
+          - name: PGSSLMODE
+            value: require
+          - name: PGCONNECT_TIMEOUT
+            value: "5"
+          - name: PGUSER
+            value: zitadel
+          - name: PGPASSWORD
+            valueFrom:
+              secretKeyRef:
+                key: password
+                name: zitadel-postgres-credentials
+          image: ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184
+          name: masterkey-guard
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+          - mountPath: /guard
+            name: zitadel-masterkey-guard
+            readOnly: true
       volumes:
       - name: zitadel-config-yaml
         configMap:
           name: gibson-zitadel-config-yaml
+      - configMap:
+          name: gibson-zitadel-masterkey-guard
+        name: zitadel-masterkey-guard
       - name: zitadel-system-key
         secret:
           items:
@@ -18667,7 +18767,9 @@ spec:
               medium: Memory
               sizeLimit: 1Mi
           - name: tmp
-            emptyDir: {}
+            emptyDir:
+              medium: Memory
+              sizeLimit: 16Mi
           initContainers:
           # 1. Read secret/zitadel-masterkey (curl and jq: the tool image).
           - name: read
@@ -18705,12 +18807,12 @@ spec:
             args:
             - |
               # Step 1: write value and next of secret/zitadel-masterkey to /work.
-              c="$(curl -sS -o /tmp/kv.json -w '%{http_code}' -H "X-Vault-Token: ${VAULT_TOKEN}" \
+              c="$(curl -sS -o /work/kv.json -w '%{http_code}' -H "X-Vault-Token: ${VAULT_TOKEN}" \
                 "${BAO_ADDR}/v1/secret/data/zitadel-masterkey")"
               [ "$c" = 200 ] || { echo "[masterkey] FATAL: read secret/zitadel-masterkey returned HTTP ${c}" >&2; exit 1; }
-              jq -j '.data.data.value // ""' /tmp/kv.json > /work/value
-              jq -j '.data.data.next // ""' /tmp/kv.json > /work/next
-              rm -f /tmp/kv.json
+              jq -j '.data.data.value // ""' /work/kv.json > /work/value
+              jq -j '.data.data.next // ""' /work/kv.json > /work/next
+              rm -f /work/kv.json
               echo none > /work/action
           # 2. Prove the marker and rewrap (psql and openssl: the client image).
           - name: rewrap
@@ -18751,9 +18853,11 @@ spec:
               # pending. It writes the action of step 3 to /work/action.
               set -euo pipefail
               export PATH="/opt/bitnami/postgresql/bin:$PATH"
-              MARKER_TEXT="gibson-zitadel-masterkey-marker-v1"
               PSQL=(psql -X -q -t -A -v ON_ERROR_STOP=1)
               
+              # The Zitadel AESString of internal/crypto/aes.go, and the marker text. The
+              # rewrap step and the Zitadel masterkey guard use this one copy.
+              MARKER_TEXT="gibson-zitadel-masterkey-marker-v1"
               hex_of() { od -An -v -tx1 | tr -d ' \n'; }
               bin_of() { printf '%b' "$(printf '%s' "$1" | sed 's/../\\x&/g')"; }
               # mk_decrypt_hex STRING KEY: the plaintext of a Zitadel AESString, as hex.
@@ -18813,9 +18917,16 @@ spec:
                 || { echo "[masterkey] FATAL: the marker decrypts with neither the current nor the next masterkey; nothing changes" >&2; exit 1; }
               
               # 3. Rewrap every row and the marker with next, in one transaction.
-              sql=/tmp/rewrap.sql
+              sql=/work/rewrap.sql
               : > "$sql"
+              # One snapshot for the rows and their digest.
+              "${PSQL[@]}" -F '|' -c "BEGIN ISOLATION LEVEL REPEATABLE READ" \
+                -c "SELECT md5(coalesce(string_agg(id || ':' || key, ',' ORDER BY id), '')) FROM system.encryption_keys" \
+                -c "SELECT id, key FROM system.encryption_keys ORDER BY id" -c "COMMIT" > /work/rows
+              rows_md5="$(head -n1 /work/rows)"
+              sed -i 1d /work/rows
               echo "BEGIN;" >> "$sql"
+              echo "LOCK TABLE system.encryption_keys IN EXCLUSIVE MODE;" >> "$sql"
               n=0
               while IFS='|' read -r id key; do
                 [ -n "$id" ] || continue
@@ -18825,7 +18936,11 @@ spec:
                 [ "$(mk_decrypt_hex "$new" "$nxt")" = "$plain" ] || { echo "[masterkey] FATAL: the rewrap of key ${id} does not round-trip" >&2; exit 1; }
                 printf "UPDATE system.encryption_keys SET key = '%s' WHERE id = '%s';\n" "$new" "$id" >> "$sql"
                 n=$((n + 1))
-              done < <("${PSQL[@]}" -F '|' -c "SELECT id, key FROM system.encryption_keys ORDER BY id")
+              done < /work/rows
+              rm -f /work/rows
+              # Zitadel can insert a key between the read and the COMMIT. The transaction
+              # locks the table and refuses to commit when its rows are not the rows read.
+              printf "DO \$\$ BEGIN IF (SELECT md5(coalesce(string_agg(id || ':' || key, ',' ORDER BY id), '')) FROM system.encryption_keys) <> '%s' THEN RAISE EXCEPTION 'system.encryption_keys changed after the read'; END IF; END \$\$;\n" "$rows_md5" >> "$sql"
               printf "UPDATE gibson_rotation.masterkey_marker SET marker = '%s' WHERE id = 1;\nCOMMIT;\n" \
                 "$(mk_encrypt_hex "$marker_hex" "$nxt")" >> "$sql"
               "${PSQL[@]}" -f "$sql"
@@ -18877,9 +18992,9 @@ spec:
                 exit 0
               fi
               c="$(jq -nc --rawfile v /work/next '{data:{value:$v,next:""}}' \
-                | curl -sS -o /tmp/kvw.json -w '%{http_code}' -X POST -H "X-Vault-Token: ${VAULT_TOKEN}" \
+                | curl -sS -o /work/kvw.json -w '%{http_code}' -X POST -H "X-Vault-Token: ${VAULT_TOKEN}" \
                     -H 'Content-Type: application/json' --data-binary @- "${BAO_ADDR}/v1/secret/data/zitadel-masterkey")"
-              rm -f /tmp/kvw.json
+              rm -f /work/kvw.json
               [ "$c" = 200 ] || [ "$c" = 204 ] || { echo "[masterkey] FATAL: write secret/zitadel-masterkey returned HTTP ${c}; the next run moves it" >&2; exit 1; }
               echo "[masterkey] moved the next masterkey to value"
 ---
@@ -25630,6 +25745,46 @@ spec:
         runAsUser: 1000
       enableServiceLinks: false
       restartPolicy: Never
+      initContainers:
+        - command:
+          - bash
+          - /guard/guard.sh
+          env:
+          - name: ZITADEL_MASTERKEY
+            valueFrom:
+              secretKeyRef:
+                key: masterkey
+                name: gibson-zitadel-masterkey
+          - name: PGHOST
+            value: platform-postgres-rw.gibson.svc.cluster.local
+          - name: PGPORT
+            value: "5432"
+          - name: PGDATABASE
+            value: zitadel
+          - name: PGSSLMODE
+            value: require
+          - name: PGCONNECT_TIMEOUT
+            value: "5"
+          - name: PGUSER
+            value: zitadel
+          - name: PGPASSWORD
+            valueFrom:
+              secretKeyRef:
+                key: password
+                name: zitadel-postgres-credentials
+          image: ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184
+          name: masterkey-guard
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+          - mountPath: /guard
+            name: zitadel-masterkey-guard
+            readOnly: true
       containers:
         - name: zitadel-init
           securityContext:
@@ -25682,6 +25837,9 @@ spec:
         configMap:
           name: gibson-zitadel-config-yaml
           defaultMode: 0440
+      - configMap:
+          name: gibson-zitadel-masterkey-guard
+        name: zitadel-masterkey-guard
       - name: zitadel-system-key
         secret:
           items:
@@ -25736,6 +25894,46 @@ spec:
         runAsUser: 1000
       enableServiceLinks: false
       restartPolicy: Never
+      initContainers:
+        - command:
+          - bash
+          - /guard/guard.sh
+          env:
+          - name: ZITADEL_MASTERKEY
+            valueFrom:
+              secretKeyRef:
+                key: masterkey
+                name: gibson-zitadel-masterkey
+          - name: PGHOST
+            value: platform-postgres-rw.gibson.svc.cluster.local
+          - name: PGPORT
+            value: "5432"
+          - name: PGDATABASE
+            value: zitadel
+          - name: PGSSLMODE
+            value: require
+          - name: PGCONNECT_TIMEOUT
+            value: "5"
+          - name: PGUSER
+            value: zitadel
+          - name: PGPASSWORD
+            valueFrom:
+              secretKeyRef:
+                key: password
+                name: zitadel-postgres-credentials
+          image: ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184
+          name: masterkey-guard
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+          - mountPath: /guard
+            name: zitadel-masterkey-guard
+            readOnly: true
       containers:
         - name: zitadel-setup
           securityContext:
@@ -25905,6 +26103,9 @@ spec:
         emptyDir: { }
       - name: login-client
         emptyDir: { }
+      - configMap:
+          name: gibson-zitadel-masterkey-guard
+        name: zitadel-masterkey-guard
       - name: zitadel-system-key
         secret:
           items:

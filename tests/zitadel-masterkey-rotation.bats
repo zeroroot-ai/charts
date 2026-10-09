@@ -22,8 +22,10 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
         ps = d["spec"]["jobTemplate"]["spec"]["template"]["spec"]
         for c in ps["initContainers"] + ps["containers"]:
             open(f"{sys.argv[2]}/{c['name']}.sh", "w").write(c["args"][0])
-        sys.exit(0)
-sys.exit("no masterkey rotation CronJob in the render")
+    if d and d.get("kind") == "ConfigMap" and d["metadata"]["name"] == "gibson-zitadel-masterkey-guard":
+        open(f"{sys.argv[2]}/guard.sh", "w").write(d["data"]["guard.sh"])
+for f in ("rewrap.sh", "write.sh", "guard.sh"):
+    open(f"{sys.argv[2]}/{f}")
 PY
 }
 
@@ -37,9 +39,12 @@ setup() {
   mkdir -p "$D/work" "$D/tmp" "$D/bin" "$D/db"
   # The rendered step reads /work and /tmp; point them at the test dirs.
   # /tmp first: the test dir itself lies under /tmp.
-  sed -e "s#/tmp/#$D/tmp/#g" -e "s#/work/#$D/work/#g" "$WORK_DIR/rewrap.sh" > "$D/rewrap.sh"
+  for f in rewrap write guard; do
+    sed -e "s#/tmp/#$D/tmp/#g" -e "s#/work/#$D/work/#g" "$WORK_DIR/$f.sh" > "$D/$f.sh"
+  done
+  export ROWS_MD5=0123456789abcdef0123456789abcdef
   # Helpers of the rendered step, for the test's own encryption.
-  sed -n '/^hex_of()/,/^marker_hex=/p' "$D/rewrap.sh" | sed '$d' > "$D/crypto.sh"
+  sed -n '/^hex_of()/,/^marker_hex=/p' "$D/rewrap.sh" > "$D/crypto.sh"
   cat > "$D/bin/psql" <<'SH'
 #!/usr/bin/env bash
 # A stub psql: the marker and the encryption keys live in files under $D/db.
@@ -49,7 +54,10 @@ case "$args" in
   *"SELECT marker"*) cat "$D/db/marker" 2>/dev/null; exit 0 ;;
   *"INSERT INTO gibson_rotation.masterkey_marker"*)
     printf '%s' "$args" | sed -n "s/.*VALUES (1, '\([^']*\)').*/\1/p" > "$D/db/marker"; exit 0 ;;
-  *"SELECT id, key"*) for f in "$D"/db/key.*; do [ -e "$f" ] && printf '%s|%s\n' "${f##*/key.}" "$(cat "$f")"; done; exit 0 ;;
+  *"to_regclass"*) [ -e "$D/db/marker" ] && echo t || echo f; exit 0 ;;
+  *"REPEATABLE READ"*)
+    echo "$ROWS_MD5"
+    for f in "$D"/db/key.*; do [ -e "$f" ] && printf '%s|%s\n' "${f##*/key.}" "$(cat "$f")"; done; exit 0 ;;
 esac
 # -f FILE: apply the UPDATEs of one transaction.
 file=""; while [ $# -gt 0 ]; do [ "$1" = -f ] && file="$2"; shift; done
@@ -104,7 +112,10 @@ marker_text="gibson-zitadel-masterkey-marker-v1"
   [ "$(dec "$(cat "$D/db/key.idB")" "$NXT")" = "second-zitadel-key-value-abcdef" ]
   [ "$(dec "$(cat "$D/db/marker")" "$NXT")" = "$marker_text" ]
   [ "$(head -n1 "$D/db/last.sql")" = "BEGIN;" ]
+  [ "$(sed -n 2p "$D/db/last.sql")" = "LOCK TABLE system.encryption_keys IN EXCLUSIVE MODE;" ]
+  grep -q "<> '${ROWS_MD5}' THEN RAISE EXCEPTION" "$D/db/last.sql"
   [ "$(tail -n1 "$D/db/last.sql")" = "COMMIT;" ]
+  [ ! -e "$D/work/rows" ]
 }
 
 @test "rows that already use the next masterkey only move next to value" {
@@ -139,7 +150,86 @@ marker_text="gibson-zitadel-masterkey-marker-v1"
   [ "$(cat "$D/work/action")" = none ]
 }
 
-@test "the write step moves next to value only on flip" {
-  grep -q 'if \[ "$action" != flip \]' "$WORK_DIR/write.sh"
-  grep -q '{data:{value:$v,next:""}}' "$WORK_DIR/write.sh"
+# A stub curl for the write step: it records the body of the POST.
+stub_curl() {
+  cat > "$D/bin/curl" <<'SH'
+#!/usr/bin/env bash
+for a in "$@"; do [ "$a" = "@-" ] && cat > "$D/posted"; done
+printf '%s' "${CURL_CODE:-200}"
+SH
+  chmod +x "$D/bin/curl"
+}
+run_write() { run env PATH="$D/bin:$PATH" VAULT_TOKEN=t BAO_ADDR=http://bao sh -ec "$(cat "$D/write.sh")"; }
+
+@test "the write step on flip writes value = next and an empty next" {
+  stub_curl; kv "$CUR" "$NXT"; echo flip > "$D/work/action"
+  run_write
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .data.value "$D/posted")" = "$NXT" ]
+  [ "$(jq -r .data.next "$D/posted")" = "" ]
+}
+
+@test "FAILING FIXTURE: the write step writes nothing when step 2 did not flip" {
+  stub_curl; kv "$CUR" "$NXT"
+  run_write
+  [ "$status" -eq 0 ]
+  [ ! -e "$D/posted" ]
+}
+
+@test "FAILING FIXTURE: a refused write fails the step" {
+  stub_curl; kv "$CUR" "$NXT"; echo flip > "$D/work/action"
+  CURL_CODE=403 run_write
+  [ "$status" -ne 0 ]
+}
+
+run_guard() { run env PATH="$D/bin:$PATH" ZITADEL_MASTERKEY="$1" bash "$D/guard.sh"; }
+
+@test "the guard passes a Zitadel workload when no marker exists yet" {
+  run_guard "$CUR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no marker yet"* ]]
+}
+
+@test "the guard passes the masterkey that opens the marker" {
+  enc "$marker_text" "$NXT" > "$D/db/marker"
+  run_guard "$NXT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"opens the marker"* ]]
+}
+
+@test "FAILING FIXTURE: the guard stops a Zitadel workload that starts with the old masterkey after a rewrap" {
+  kv "$CUR" "$NXT"
+  enc "$marker_text" "$CUR" > "$D/db/marker"
+  enc "first-zitadel-key-value-0123456" "$CUR" > "$D/db/key.idA"
+  run_step
+  [ "$status" -eq 0 ]
+  run_guard "$CUR"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"does not open the marker"* ]]
+  run_guard "$NXT"
+  [ "$status" -eq 0 ]
+}
+
+@test "FAILING FIXTURE: the guard refuses a masterkey shorter than 32 characters" {
+  run_guard "short"
+  [ "$status" -ne 0 ]
+}
+
+@test "each Zitadel workload runs the guard, with the image of postgresSetup" {
+  python3 - "$WORK_DIR/render.yaml" "$ROOT/helm/gibson/values.yaml" <<'PY'
+import sys, yaml
+v = yaml.safe_load(open(sys.argv[2]))
+want = "{repository}:{tag}".format(**v["postgresSetup"]["image"])
+seen = set()
+for d in yaml.safe_load_all(open(sys.argv[1])):
+    if not d or d.get("kind") not in ("Deployment", "Job"):
+        continue
+    ps = d["spec"]["template"]["spec"]
+    for c in ps.get("initContainers") or []:
+        if c["name"] == "masterkey-guard":
+            assert c["image"] == want, f"{d['metadata']['name']}: guard image {c['image']} is not {want}"
+            seen.add(d["metadata"]["name"])
+need = {"gibson-zitadel", "gibson-zitadel-init", "gibson-zitadel-setup"}
+assert need <= seen, f"no masterkey guard on {sorted(need - seen)}"
+PY
 }
