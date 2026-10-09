@@ -61,10 +61,13 @@ schedule:
 velero:
   # The network policy of the namespace is templates/network-policy.yaml:
   # a default deny with DNS, and an allow to the API server and the bucket
-  # host only. The role label meets rule 4 of the secure pod check. No egress
-  # label of the umbrella applies in this namespace.
+  # host only. The role label meets rule 4 of the secure pod check. The
+  # egress-fqdn label states that the pod reaches host names: the bucket host
+  # on AWS S3 or another store (charts#494). No egress policy of the umbrella
+  # selects pods in this namespace.
   podLabels:
     gibson.zeroroot.ai/net-role: system
+    gibson.zeroroot.ai/egress-fqdn: object-store
   image:
     repository: ghcr.io/zeroroot-ai/mirror/velero
     tag: "v1.18.1@sha256:11459094b1b21ec7c817b08f8067d9e89380835547915cac9c4132ff05b55b90"
@@ -176,6 +179,7 @@ velero:
   nodeAgent:
     podLabels:
       gibson.zeroroot.ai/net-role: system
+      gibson.zeroroot.ai/egress-fqdn: object-store
     resources:
       requests:
         cpu: 50m
