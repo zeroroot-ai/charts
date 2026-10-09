@@ -1358,6 +1358,7 @@ spec:
               $SEED_TABLE
               SEED_EOF
                 cg_key_rotate "$tok" || seed_failed=$((seed_failed + 1))
+                sys_key_rotate "$tok" || seed_failed=$((seed_failed + 1))
                 echo "[openbao-auto-init] seed pass complete: ${seed_checked} keys checked, ${seed_written} written, ${seed_failed} failed"
                 [ "$seed_failed" -eq 0 ]
               }
@@ -1434,6 +1435,57 @@ spec:
                 kv_put "$cgt" "${CG_KEY}-next" "$cg_body" || return 1
                 cg_body=""
                 echo "[openbao-auto-init] the CG signing key is older than its lifetime; published its next kid" >&2
+              }
+
+              # The rotation of the Zitadel System API key (ADR-0171, row
+              # platform-generated-secrets). The key has two slots, a and b,
+              # each with its own System API user, and Zitadel trusts both
+              # public keys. The platform-operator signs with the active slot
+              # (gibson-zitadel-system-active, property slot). One step at most
+              # runs on each pass:
+              #   1. the active slot's key is older than SYS_KEY_LIFETIME_S:
+              #      make the other slot active. Its key is already trusted.
+              #   2. the inactive slot's key is older than the last flip, and
+              #      the flip is older than SYS_REFRESH_WAIT_S: give that slot
+              #      a new key, from a new transit key. Zitadel restarts on the
+              #      new public key (Reloader), and the old key is refused.
+              # The monthly drill flips the slot with
+              # scripts/baseline-set-secret.sh, the same write as step 1.
+              SYS_ACTIVE_KEY="gibson-zitadel-system-active"
+              SYS_KEY_A="gibson-zitadel-system-bot-key"
+              SYS_KEY_B="gibson-zitadel-system-bot-key-b"
+              SYS_KEY_LIFETIME_S=2592000
+              # Longer than the ESO refresh, the kubelet sync of the operator
+              # mount and one operator reconcile together.
+              SYS_REFRESH_WAIT_S=900
+              sys_slot_key() { if [ "$1" = b ]; then echo "$SYS_KEY_B"; else echo "$SYS_KEY_A"; fi; }
+              sys_key_rotate() {
+                st="$1"
+                sys_act=$(kv_get "$st" "$SYS_ACTIVE_KEY" | jq -r '.slot // empty') || return 1
+                case "$sys_act" in
+                  a) sys_oth=b ;;
+                  b) sys_oth=a ;;
+                  '') return 0 ;;  # The seed pass writes the first slot.
+                  *) echo "[openbao-auto-init] FATAL: ${SYS_ACTIVE_KEY} names slot '${sys_act}', not a or b" >&2; return 1 ;;
+                esac
+                sys_now=$(date +%s)
+                sys_flip_t=$(kv_created_epoch "$st" "$SYS_ACTIVE_KEY") || return 1
+                sys_oth_t=$(kv_created_epoch "$st" "$(sys_slot_key "$sys_oth")") || return 1
+                if [ "${sys_oth_t:-0}" -lt "${sys_flip_t:-0}" ]; then
+                  [ $(( sys_now - sys_flip_t )) -ge "$SYS_REFRESH_WAIT_S" ] || return 0
+                  sys_name="zitadel-system-bot-${sys_oth}-${sys_now}"
+                  sys_priv=$(transit_private_pem "$st" "$sys_name" rsa-2048) || return 1
+                  sys_pub=$(transit_public_pem "$st" "$sys_name" rsa-2048) || return 1
+                  kv_put "$st" "$(sys_slot_key "$sys_oth")" \
+                    "$(jq -nc --arg k "$sys_priv" --arg p "$sys_pub" '{private_key:$k,public_key:$p}')" || return 1
+                  sys_priv=""
+                  echo "[openbao-auto-init] the System API key of slot ${sys_oth} is new; Zitadel no longer trusts its old key" >&2
+                  return 0
+                fi
+                sys_act_t=$(kv_created_epoch "$st" "$(sys_slot_key "$sys_act")") || return 1
+                [ $(( sys_now - ${sys_act_t:-$sys_now} )) -ge "$SYS_KEY_LIFETIME_S" ] || return 0
+                kv_put "$st" "$SYS_ACTIVE_KEY" "$(jq -nc --arg s "$sys_oth" '{slot:$s}')" || return 1
+                echo "[openbao-auto-init] the System API key of slot ${sys_act} is older than its lifetime; slot ${sys_oth} is active" >&2
               }
 
               vault_write_policy() {

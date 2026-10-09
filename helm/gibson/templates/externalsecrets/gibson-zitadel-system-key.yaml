@@ -16,16 +16,33 @@ metadata:
   {{- end }}
   name: gibson-zitadel-system-key
   namespace: gibson
+# The System API key has two slots, each with its own System API user
+# (ADR-0171, row platform-generated-secrets). Zitadel trusts the public key of
+# both users. The platform-operator gets the private key and the user of the
+# active slot only. A slot value that is not a or b renders both empty, and
+# the operator refuses to start: there is no default slot.
 spec:
   data:
   - remoteRef:
       key: gibson-zitadel-system-bot-key
       property: private_key
-    secretKey: private-key.pem
+    secretKey: a_private
   - remoteRef:
       key: gibson-zitadel-system-bot-key
       property: public_key
-    secretKey: public-key.pem
+    secretKey: a_public
+  - remoteRef:
+      key: gibson-zitadel-system-bot-key-b
+      property: private_key
+    secretKey: b_private
+  - remoteRef:
+      key: gibson-zitadel-system-bot-key-b
+      property: public_key
+    secretKey: b_public
+  - remoteRef:
+      key: gibson-zitadel-system-active
+      property: slot
+    secretKey: slot
   refreshInterval: 60s
   secretStoreRef:
     kind: ClusterSecretStore
@@ -33,3 +50,11 @@ spec:
   target:
     creationPolicy: Owner
     name: gibson-zitadel-system-key
+    template:
+      engineVersion: v2
+      type: Opaque
+      data:
+        private-key.pem: '{{ `{{ if eq .slot "a" }}{{ .a_private }}{{ else if eq .slot "b" }}{{ .b_private }}{{ end }}` }}'
+        user: '{{ `{{ if eq .slot "a" }}gibson-system-bot{{ else if eq .slot "b" }}gibson-system-bot-b{{ end }}` }}'
+        public-key.pem: '{{ `{{ .a_public }}` }}'
+        public-key-b.pem: '{{ `{{ .b_public }}` }}'

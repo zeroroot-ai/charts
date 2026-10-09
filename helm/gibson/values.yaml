@@ -878,6 +878,16 @@ zitadel:
                   # this key (charts#407, gibson#794), which needs IAM_OWNER.
                   - IAM_OWNER
             Path: /etc/zitadel-system-keys/system-bot-pub.pem
+        # Slot b of the System API key (ADR-0171). The same roles as
+        # gibson-system-bot. A rotation moves the platform-operator to the
+        # other user, then gives the old user a new key.
+        - gibson-system-bot-b:
+            Memberships:
+              - MemberType: System
+                Roles:
+                  - SYSTEM_OWNER
+                  - IAM_OWNER
+            Path: /etc/zitadel-system-keys/system-bot-b-pub.pem
 
   # deploy#1631: DO NOT LET ZITADEL BOOT WITHOUT ITS SYSTEM KEY.
   #
@@ -911,15 +921,16 @@ zitadel:
         - |
           set -eu
           KEY=/etc/zitadel-system-keys/system-bot-pub.pem
-          echo "waiting for ${KEY} (SystemAPIUsers is read once, at boot)"
+          KEY_B=/etc/zitadel-system-keys/system-bot-b-pub.pem
+          echo "waiting for ${KEY} and ${KEY_B} (SystemAPIUsers is read once, at boot)"
           for _ in $(seq 1 180); do
-            if [ -s "$KEY" ]; then
-              echo "system key present ($(wc -c < "$KEY") bytes)"
+            if [ -s "$KEY" ] && [ -s "$KEY_B" ]; then
+              echo "system keys present ($(wc -c < "$KEY") and $(wc -c < "$KEY_B") bytes)"
               exit 0
             fi
             sleep 2
           done
-          echo "FATAL: ${KEY} never appeared. Zitadel would boot trusting no" >&2
+          echo "FATAL: ${KEY} or ${KEY_B} never appeared. Zitadel would boot trusting no" >&2
           echo "system-bot key and reject every System API call, stalling the" >&2
           echo "platform-operator at AdminTokenReady (deploy#1631)." >&2
           exit 1
@@ -957,6 +968,8 @@ zitadel:
         items:
           - key: public-key.pem
             path: system-bot-pub.pem
+          - key: public-key-b.pem
+            path: system-bot-b-pub.pem
   extraVolumeMounts:
     - name: zitadel-system-key
       mountPath: /etc/zitadel-system-keys

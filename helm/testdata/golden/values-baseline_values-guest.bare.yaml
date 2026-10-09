@@ -3936,6 +3936,13 @@ data:
           - SYSTEM_OWNER
           - IAM_OWNER
         Path: /etc/zitadel-system-keys/system-bot-pub.pem
+    - gibson-system-bot-b:
+        Memberships:
+        - MemberType: System
+          Roles:
+          - SYSTEM_OWNER
+          - IAM_OWNER
+        Path: /etc/zitadel-system-keys/system-bot-b-pub.pem
     TLS:
       Enabled: false
 ---
@@ -7017,6 +7024,10 @@ spec:
             items:
               - key: private-key.pem
                 path: private-key.pem
+              # The System API user of the active slot, next to its key
+              # (ADR-0171). The operator reads both on each reconcile.
+              - key: user
+                path: user
       terminationGracePeriodSeconds: 30
 ---
 # Source: gibson/charts/gibson-operators/templates/reloader/reloader.yaml
@@ -10528,7 +10539,7 @@ spec:
     metadata:
       annotations:
         secret.reloader.stakater.com/reload: gibson-zitadel-system-key
-        checksum/configmap: 574eda3fcb550abf2acc68b2b279fa08709e18020b2929b0b8a937d10792da79
+        checksum/configmap: bf68f57edfc928f299f83402c2217f3220a1110a158a6963138e55704896f2bd
         checksum/secret-db-ssl-ca-crt: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         checksum/secret-zitadel-secrets: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
       labels:
@@ -10649,6 +10660,8 @@ spec:
           items:
           - key: public-key.pem
             path: system-bot-pub.pem
+          - key: public-key-b.pem
+            path: system-bot-b-pub.pem
           secretName: gibson-zitadel-system-key
 ---
 # Source: gibson/charts/gibson-workloads/templates/auth/openbao-deployment.yaml
@@ -11023,6 +11036,13 @@ spec:
               gibson-cg-signing-key-next kid:empty key:empty
               gibson-cg-signing-key-previous kid:empty key:empty
               gibson-zitadel-system-bot-key private_key:rsapem:zitadel-system-bot public_key:rsapub:zitadel-system-bot
+              # The System API key has two slots, a (above) and b, one System API user each.
+              # The platform-operator signs with the active slot. The sidecar flips the
+              # active slot when its key is older than its lifetime, then gives the other
+              # slot a new key (sys_key_rotate, ADR-0171). The active line comes before
+              # slot b, so the first seed pass does not read slot b as older than a flip.
+              gibson-zitadel-system-active slot:literal:a
+              gibson-zitadel-system-bot-key-b private_key:rsapem:zitadel-system-bot-b public_key:rsapub:zitadel-system-bot-b
               ghcr-pull-secret pat:input:ghcr-pull-token
               gibson-dashboard-auth-hardening captcha_secret_key:empty email_resend_api_key:empty
               gibson-stripe-credentials publishable_key:inputor:stripe-publishable-key:pk_test_placeholder secret_key:inputor:stripe-secret-key:sk_test_placeholder webhook_secret:inputor:stripe-webhook-secret:whsec_placeholder
@@ -11874,6 +11894,7 @@ spec:
               $SEED_TABLE
               SEED_EOF
                 cg_key_rotate "$tok" || seed_failed=$((seed_failed + 1))
+                sys_key_rotate "$tok" || seed_failed=$((seed_failed + 1))
                 echo "[openbao-auto-init] seed pass complete: ${seed_checked} keys checked, ${seed_written} written, ${seed_failed} failed"
                 [ "$seed_failed" -eq 0 ]
               }
@@ -11950,6 +11971,57 @@ spec:
                 kv_put "$cgt" "${CG_KEY}-next" "$cg_body" || return 1
                 cg_body=""
                 echo "[openbao-auto-init] the CG signing key is older than its lifetime; published its next kid" >&2
+              }
+
+              # The rotation of the Zitadel System API key (ADR-0171, row
+              # platform-generated-secrets). The key has two slots, a and b,
+              # each with its own System API user, and Zitadel trusts both
+              # public keys. The platform-operator signs with the active slot
+              # (gibson-zitadel-system-active, property slot). One step at most
+              # runs on each pass:
+              #   1. the active slot's key is older than SYS_KEY_LIFETIME_S:
+              #      make the other slot active. Its key is already trusted.
+              #   2. the inactive slot's key is older than the last flip, and
+              #      the flip is older than SYS_REFRESH_WAIT_S: give that slot
+              #      a new key, from a new transit key. Zitadel restarts on the
+              #      new public key (Reloader), and the old key is refused.
+              # The monthly drill flips the slot with
+              # scripts/baseline-set-secret.sh, the same write as step 1.
+              SYS_ACTIVE_KEY="gibson-zitadel-system-active"
+              SYS_KEY_A="gibson-zitadel-system-bot-key"
+              SYS_KEY_B="gibson-zitadel-system-bot-key-b"
+              SYS_KEY_LIFETIME_S=2592000
+              # Longer than the ESO refresh, the kubelet sync of the operator
+              # mount and one operator reconcile together.
+              SYS_REFRESH_WAIT_S=900
+              sys_slot_key() { if [ "$1" = b ]; then echo "$SYS_KEY_B"; else echo "$SYS_KEY_A"; fi; }
+              sys_key_rotate() {
+                st="$1"
+                sys_act=$(kv_get "$st" "$SYS_ACTIVE_KEY" | jq -r '.slot // empty') || return 1
+                case "$sys_act" in
+                  a) sys_oth=b ;;
+                  b) sys_oth=a ;;
+                  '') return 0 ;;  # The seed pass writes the first slot.
+                  *) echo "[openbao-auto-init] FATAL: ${SYS_ACTIVE_KEY} names slot '${sys_act}', not a or b" >&2; return 1 ;;
+                esac
+                sys_now=$(date +%s)
+                sys_flip_t=$(kv_created_epoch "$st" "$SYS_ACTIVE_KEY") || return 1
+                sys_oth_t=$(kv_created_epoch "$st" "$(sys_slot_key "$sys_oth")") || return 1
+                if [ "${sys_oth_t:-0}" -lt "${sys_flip_t:-0}" ]; then
+                  [ $(( sys_now - sys_flip_t )) -ge "$SYS_REFRESH_WAIT_S" ] || return 0
+                  sys_name="zitadel-system-bot-${sys_oth}-${sys_now}"
+                  sys_priv=$(transit_private_pem "$st" "$sys_name" rsa-2048) || return 1
+                  sys_pub=$(transit_public_pem "$st" "$sys_name" rsa-2048) || return 1
+                  kv_put "$st" "$(sys_slot_key "$sys_oth")" \
+                    "$(jq -nc --arg k "$sys_priv" --arg p "$sys_pub" '{private_key:$k,public_key:$p}')" || return 1
+                  sys_priv=""
+                  echo "[openbao-auto-init] the System API key of slot ${sys_oth} is new; Zitadel no longer trusts its old key" >&2
+                  return 0
+                fi
+                sys_act_t=$(kv_created_epoch "$st" "$(sys_slot_key "$sys_act")") || return 1
+                [ $(( sys_now - ${sys_act_t:-$sys_now} )) -ge "$SYS_KEY_LIFETIME_S" ] || return 0
+                kv_put "$st" "$SYS_ACTIVE_KEY" "$(jq -nc --arg s "$sys_oth" '{slot:$s}')" || return 1
+                echo "[openbao-auto-init] the System API key of slot ${sys_act} is older than its lifetime; slot ${sys_oth} is active" >&2
               }
 
               vault_write_policy() {
@@ -16955,16 +17027,33 @@ metadata:
     argocd.argoproj.io/sync-wave: "-8"
   name: gibson-zitadel-system-key
   namespace: gibson
+# The System API key has two slots, each with its own System API user
+# (ADR-0171, row platform-generated-secrets). Zitadel trusts the public key of
+# both users. The platform-operator gets the private key and the user of the
+# active slot only. A slot value that is not a or b renders both empty, and
+# the operator refuses to start: there is no default slot.
 spec:
   data:
   - remoteRef:
       key: gibson-zitadel-system-bot-key
       property: private_key
-    secretKey: private-key.pem
+    secretKey: a_private
   - remoteRef:
       key: gibson-zitadel-system-bot-key
       property: public_key
-    secretKey: public-key.pem
+    secretKey: a_public
+  - remoteRef:
+      key: gibson-zitadel-system-bot-key-b
+      property: private_key
+    secretKey: b_private
+  - remoteRef:
+      key: gibson-zitadel-system-bot-key-b
+      property: public_key
+    secretKey: b_public
+  - remoteRef:
+      key: gibson-zitadel-system-active
+      property: slot
+    secretKey: slot
   refreshInterval: 60s
   secretStoreRef:
     kind: ClusterSecretStore
@@ -16972,6 +17061,14 @@ spec:
   target:
     creationPolicy: Owner
     name: gibson-zitadel-system-key
+    template:
+      engineVersion: v2
+      type: Opaque
+      data:
+        private-key.pem: '{{ if eq .slot "a" }}{{ .a_private }}{{ else if eq .slot "b" }}{{ .b_private }}{{ end }}'
+        user: '{{ if eq .slot "a" }}gibson-system-bot{{ else if eq .slot "b" }}gibson-system-bot-b{{ end }}'
+        public-key.pem: '{{ .a_public }}'
+        public-key-b.pem: '{{ .b_public }}'
 ---
 # Source: gibson/templates/externalsecrets/openfga-postgres-credentials.yaml
 apiVersion: external-secrets.io/v1
@@ -17318,8 +17415,9 @@ spec:
       ensureExists: true
     loginBranding:
       configMap: "zitadel-login-branding"
+    # No systemUserName: the operator reads the System API user from the file
+    # "user" next to its key, the user of the active slot (ADR-0171).
     systemClient:
-      systemUserName: "gibson-system-bot"
       trustedClusterDomain: "gibson-zitadel.gibson.svc.cluster.local"
       apiURL: "http://gibson-zitadel.gibson.svc.cluster.local:8080"
   platformOwner:
@@ -20349,6 +20447,8 @@ spec:
           items:
           - key: public-key.pem
             path: system-bot-pub.pem
+          - key: public-key-b.pem
+            path: system-bot-b-pub.pem
           secretName: gibson-zitadel-system-key
 ---
 # Source: gibson/charts/zitadel/templates/job_setup.yaml
@@ -20570,6 +20670,8 @@ spec:
           items:
           - key: public-key.pem
             path: system-bot-pub.pem
+          - key: public-key-b.pem
+            path: system-bot-b-pub.pem
           secretName: gibson-zitadel-system-key
 ---
 # Source: gibson/templates/jobs/gibson-workloads-first-admin.yaml

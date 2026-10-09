@@ -73,10 +73,9 @@ spec:
       `<release>-zitadel` — so kind values explicitly pin
       trustedClusterDomain.
     */}}
+    # No systemUserName: the operator reads the System API user from the file
+    # "user" next to its key, the user of the active slot (ADR-0171).
     systemClient:
-      {{- with .systemUserName }}
-      systemUserName: {{ . | quote }}
-      {{- end }}
       {{- with .keyPath }}
       keyPath: {{ . | quote }}
       {{- end }}

@@ -61,6 +61,13 @@ gibson-cg-signing-key key:rand kid:rand8
 gibson-cg-signing-key-next kid:empty key:empty
 gibson-cg-signing-key-previous kid:empty key:empty
 gibson-zitadel-system-bot-key private_key:rsapem:zitadel-system-bot public_key:rsapub:zitadel-system-bot
+# The System API key has two slots, a (above) and b, one System API user each.
+# The platform-operator signs with the active slot. The sidecar flips the
+# active slot when its key is older than its lifetime, then gives the other
+# slot a new key (sys_key_rotate, ADR-0171). The active line comes before
+# slot b, so the first seed pass does not read slot b as older than a flip.
+gibson-zitadel-system-active slot:literal:a
+gibson-zitadel-system-bot-key-b private_key:rsapem:zitadel-system-bot-b public_key:rsapub:zitadel-system-bot-b
 ghcr-pull-secret pat:input:ghcr-pull-token
 gibson-dashboard-auth-hardening captcha_secret_key:empty email_resend_api_key:empty
 gibson-stripe-credentials publishable_key:inputor:stripe-publishable-key:pk_test_placeholder secret_key:inputor:stripe-secret-key:sk_test_placeholder webhook_secret:inputor:stripe-webhook-secret:whsec_placeholder
