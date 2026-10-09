@@ -24,8 +24,9 @@ WHAT IT CHECKS
   2. helm/testdata/golden/*.yaml, every rendered PlatformBootstrap: the same
      rule against spec.oidcClients[], so a template that hard-codes a role
      the values file does not carries the same failure.
-  3. helm/gibson/values.yaml, zitadel...SystemAPIUsers: exactly one entry,
-     named gibson-system-bot, holding exactly ["SYSTEM_OWNER", "IAM_OWNER"].
+  3. helm/gibson/values.yaml, zitadel...SystemAPIUsers: exactly two entries,
+     gibson-system-bot and gibson-system-bot-b (the two slots of the System
+     API key, ADR-0171), each holding exactly ["SYSTEM_OWNER", "IAM_OWNER"].
      This is the one bootstrap identity ADR-0093 decision 5 allows to hold
      instance ownership. IAM_OWNER lets the platform-operator mint the first
      IAM admin PAT itself (charts#407, gibson#794), so the Zitadel setup Job
@@ -66,7 +67,10 @@ INSTANCE_ADMIN_ROLES = {
 # bootstrap identity, never to silence this guard for an operational service.
 BOOTSTRAP_OIDC_CLIENT_NAMES: set[str] = set()
 
-EXPECTED_SYSTEM_API_USER = "gibson-system-bot"
+# The two slots of the System API key (ADR-0171): the platform-operator signs
+# as the active one, and a rotation moves it to the other. One identity, two
+# keys, the same roles.
+EXPECTED_SYSTEM_API_USERS = ["gibson-system-bot", "gibson-system-bot-b"]
 EXPECTED_SYSTEM_API_ROLES = ["SYSTEM_OWNER", "IAM_OWNER"]
 
 EXPECTED_PLATFORM_OPERATOR_SAS = {"gibson-iam-admin", "gibson-tenant-operator"}
@@ -136,13 +140,18 @@ def _system_api_users(node):
             yield from _system_api_users(item)
 
 
+def _sysuser(name: str, roles: list[str] | None = None) -> dict:
+    """One SystemAPIUsers entry, for the self-test."""
+    return {name: {"Memberships": [{"MemberType": "System", "Roles": roles or ["SYSTEM_OWNER", "IAM_OWNER"]}]}}
+
+
 def check_system_api_users(path: str) -> list[str]:
     problems: list[str] = []
     with open(path, encoding="utf-8") as f:
         values = yaml.safe_load(f)
     found_lists = list(_system_api_users(values))
     if not found_lists:
-        problems.append(f"{path}: no SystemAPIUsers entry found (expected exactly one: {EXPECTED_SYSTEM_API_USER})")
+        problems.append(f"{path}: no SystemAPIUsers entry found (expected exactly {EXPECTED_SYSTEM_API_USERS})")
         return problems
     for entries in found_lists:
         names = []
@@ -150,16 +159,17 @@ def check_system_api_users(path: str) -> list[str]:
             if not isinstance(entry, dict):
                 continue
             names.extend(entry.keys())
-        if names != [EXPECTED_SYSTEM_API_USER]:
-            problems.append(f"{path}: SystemAPIUsers names {names}, expected exactly [{EXPECTED_SYSTEM_API_USER}]")
+        if names != EXPECTED_SYSTEM_API_USERS:
+            problems.append(f"{path}: SystemAPIUsers names {names}, expected exactly {EXPECTED_SYSTEM_API_USERS}")
             continue
-        entry = entries[0][EXPECTED_SYSTEM_API_USER] or {}
-        roles = ((entry.get("Memberships") or [{}])[0] or {}).get("Roles") or []
-        if list(roles) != EXPECTED_SYSTEM_API_ROLES:
-            problems.append(
-                f"{path}: {EXPECTED_SYSTEM_API_USER} Memberships[0].Roles is {roles}, "
-                f"expected exactly {EXPECTED_SYSTEM_API_ROLES}"
-            )
+        for user, entry in zip(EXPECTED_SYSTEM_API_USERS, entries):
+            entry = entry[user] or {}
+            roles = ((entry.get("Memberships") or [{}])[0] or {}).get("Roles") or []
+            if list(roles) != EXPECTED_SYSTEM_API_ROLES:
+                problems.append(
+                    f"{path}: {user} Memberships[0].Roles is {roles}, "
+                    f"expected exactly {EXPECTED_SYSTEM_API_ROLES}"
+                )
     return problems
 
 
@@ -228,14 +238,15 @@ def selftest() -> int:
 
     # Rule 3: SystemAPIUsers bootstrap identity.
     sysusers_cases = {
-        "clean": ([{"gibson-system-bot": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER", "IAM_OWNER"]}]}}], True),
-        "second_entry": ([
-            {"gibson-system-bot": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER", "IAM_OWNER"]}]}},
+        "clean": ([_sysuser("gibson-system-bot"), _sysuser("gibson-system-bot-b")], True),
+        "third_entry": ([
+            _sysuser("gibson-system-bot"), _sysuser("gibson-system-bot-b"),
             {"gibson-side-door": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER"]}]}},
         ], False),
-        "extra_role": ([{"gibson-system-bot": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER", "IAM_OWNER", "IAM_END_USER_IMPERSONATOR"]}]}}], False),
-        "missing_role": ([{"gibson-system-bot": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER"]}]}}], False),
-        "renamed": ([{"gibson-renamed-bot": {"Memberships": [{"MemberType": "System", "Roles": ["SYSTEM_OWNER"]}]}}], False),
+        "one_slot_only": ([_sysuser("gibson-system-bot")], False),
+        "extra_role_on_slot_b": ([_sysuser("gibson-system-bot"), _sysuser("gibson-system-bot-b", ["SYSTEM_OWNER", "IAM_OWNER", "IAM_END_USER_IMPERSONATOR"])], False),
+        "missing_role": ([_sysuser("gibson-system-bot", ["SYSTEM_OWNER"]), _sysuser("gibson-system-bot-b")], False),
+        "renamed": ([_sysuser("gibson-renamed-bot"), _sysuser("gibson-system-bot-b")], False),
     }
     with tempfile.TemporaryDirectory() as d:
         for name, (entries, want_ok) in sysusers_cases.items():
