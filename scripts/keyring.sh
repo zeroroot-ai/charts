@@ -12,7 +12,9 @@
 # File format (mode 0600, one member per line, no quotes, no `export`):
 #
 #   OPENBAO_SEAL_KEY=<base64 of 32 random bytes, 44 chars>
+#   OPENBAO_SEAL_KEY_PREVIOUS=<the seal key before the last rotation, or empty>
 #   VELERO_REPO_PASSWORD=<base64 of 32 random bytes, 44 chars>
+#   VELERO_REPO_PASSWORD_PREVIOUS=<the repository password before the last rotation, or empty>
 #   SETEC_DISK_SIGNING_SEED=<base64 of 32 random bytes, 44 chars>
 #   BUCKET_ACCESS_KEY=<20 chars, A-Z0-9>
 #   BUCKET_SECRET_KEY=<base64 of 30 random bytes, 40 chars>
@@ -69,6 +71,36 @@
 #   keyring.sh set <keyring-file> <MEMBER> <value>     write an INPUT member (GHCR_PULL_TOKEN,
 #                                                      DNS_ACCESS_KEY, DNS_SECRET_KEY) into an
 #                                                      existing keyring
+#   keyring.sh rotate <keyring-file> <MEMBER>          keep the value as <MEMBER>_PREVIOUS and
+#                                                      generate a new one. Refuses while a
+#                                                      previous value is kept
+#   keyring.sh retire <keyring-file> <MEMBER>          clear <MEMBER>_PREVIOUS, after the
+#                                                      cluster runs on the new value
+#
+# ROTATION (ADR-0171, row keyring-generated-keys). Only a member with a
+# <MEMBER>_PREVIOUS member rotates in place: OPENBAO_SEAL_KEY and
+# VELERO_REPO_PASSWORD. It runs at stage 0 on the operator workstation, never
+# in a workflow (ADR-0083). The seal key:
+#   1. keyring.sh rotate <file> OPENBAO_SEAL_KEY
+#   2. keyring-to-cluster.sh, then restart OpenBao. The static seal unwraps
+#      with either key and wraps with the new one.
+#   3. After OpenBao runs unsealed on the new key, keyring.sh retire <file>
+#      OPENBAO_SEAL_KEY, keyring-to-cluster.sh, and restart OpenBao again.
+#   4. make substrate, so substrate.env records the new fingerprints.
+# rotate refuses while a previous value is kept: a second rotation before
+# step 3 would drop the key that still wraps the store, and the store would
+# stay sealed.
+# The Velero repository password: kopia cannot change the password of a
+# repository, so a new password starts a new repository at a new path.
+#   1. keyring.sh rotate <file> VELERO_REPO_PASSWORD
+#   2. Set the chart value bucket.prefix of gibson-velero to a new path under
+#      backups/velero/ (the one prefix where the platform credential may
+#      delete, for kopia) in the values of the environment, and merge it.
+#   3. keyring-to-cluster.sh. The next scheduled backup starts the new
+#      repository with the new password.
+#   4. The previous password reads the old repository, for a restore from a
+#      backup older than the rotation, until the bucket lifecycle expires the
+#      old path (180 days). Then keyring.sh retire <file> VELERO_REPO_PASSWORD.
 #
 # Exit codes: 0 ok, 1 the keyring fails a check, 2 the command could not run.
 
@@ -78,11 +110,15 @@ set -euo pipefail
 # means exactly <size> characters from A-Z0-9, kind opaque means at least
 # <size> characters with no whitespace (generated as base64 of 30 bytes),
 # kind input means any value without whitespace, empty and absent allowed,
-# never generated (size is unused and 0).
+# never generated (size is unused and 0). Kind prev means empty, or base64 of
+# exactly <size> bytes: the value of <MEMBER> before its last rotation. Empty
+# and absent are allowed, and generate writes it empty.
 # Order is the file order and the fingerprint order.
 MEMBERS=(
   OPENBAO_SEAL_KEY:b64:32
+  OPENBAO_SEAL_KEY_PREVIOUS:prev:32
   VELERO_REPO_PASSWORD:b64:32
+  VELERO_REPO_PASSWORD_PREVIOUS:prev:32
   SETEC_DISK_SIGNING_SEED:b64:32
   BUCKET_ACCESS_KEY:alnum:20
   BUCKET_SECRET_KEY:b64:30
@@ -125,6 +161,15 @@ is_input() {
   [ "$(member_kind "$spec")" = input ]
 }
 
+# is_optional NAME — true for a member that may be empty or absent: an input
+# member, or the previous value of a rotation.
+is_optional() {
+  local spec
+  spec="$(member_spec "$1")" || return 1
+  case "$(member_kind "$spec")" in input|prev) return 0 ;; esac
+  return 1
+}
+
 # member_expected_len SPEC — the character length a member must have: exact
 # for b64 and alnum, a floor for opaque.
 member_expected_len() {
@@ -133,6 +178,7 @@ member_expected_len() {
     alnum)  member_size "$1" ;;
     opaque) member_size "$1" ;;
     input)  echo 0 ;;
+    prev)   b64_len "$(member_size "$1")" ;;
   esac
 }
 
@@ -146,6 +192,10 @@ shape_error() {
       printf 'contains whitespace'; return
     fi
     return
+  fi
+  if [ "$(member_kind "$spec")" = prev ]; then
+    [ -z "$value" ] && return
+    spec="$(member_name "$spec"):b64:$(member_size "$spec")"
   fi
   if [ "$(member_kind "$spec")" = opaque ]; then
     if [ "$have" -lt "$want" ]; then
@@ -177,7 +227,7 @@ sha256_of() { printf '%s' "$1" | sha256sum | cut -d' ' -f1; }
 
 gen_value() {
   case "$(member_kind "$1")" in
-    input)  printf '' ;;
+    input|prev) printf '' ;;
     b64)    head -c "$(member_size "$1")" /dev/urandom | base64 -w0 ;;
     # base32 (A-Z2-7) of enough random bytes, cut to size. No pipe from an
     # endless reader, so no SIGPIPE under pipefail.
@@ -192,7 +242,7 @@ gen_value() {
 cmd_generate() {
   local file="${1:?usage: keyring.sh generate <keyring-file> [<provided>]}"
   local provided="${2:-}"
-  [ -e "$file" ] && die "$file exists. Rotation is a new keyring and a new cluster: generate into a new path, stand up a new cluster, and restore into it"
+  [ -e "$file" ] && die "$file exists. To rotate the seal key, run keyring.sh rotate. Another member is rotated with a new keyring and a new cluster"
   if [ -n "$provided" ]; then
     [ -r "$provided" ] || die "cannot read $provided"
     local key
@@ -234,8 +284,9 @@ check_shape() {
   local file="$1" spec name value err
   for spec in "${MEMBERS[@]}"; do
     name="$(member_name "$spec")"
-    if [ "$(member_kind "$spec")" = input ]; then
-      # Absent or empty is "not supplied" for an input member.
+    if is_optional "$name"; then
+      # Absent or empty is "not supplied" for an input member, and "no
+      # rotation runs" for a previous value.
       value="$(envfile_get "$file" "$name")" || value=""
       err="$(shape_error "$spec" "$value")"
       if [ -n "$err" ]; then
@@ -308,9 +359,12 @@ cmd_verify() {
   # images could not pull (deploy#1795). ADR-0083: a preflight that passes with
   # a missing input is a defect in preflight, so at minimum it must NAME what
   # is not there.
-  local unsupplied=() supplied=0
+  local unsupplied=() supplied=0 counted=0
   for spec in "${MEMBERS[@]}"; do
     name="$(member_name "$spec")"
+    # An empty previous value means no rotation runs, not a missing input.
+    [ "$(member_kind "$spec")" = prev ] && continue
+    counted=$((counted + 1))
     have="$(envfile_get "$file" "$name" 2>/dev/null || true)"
     if [ -n "$have" ]; then
       supplied=$((supplied + 1))
@@ -323,7 +377,7 @@ cmd_verify() {
       "${#MEMBERS[@]}" "${set_have:0:19}"
   else
     printf '%s of %s members supplied, lengths right, fingerprints match %s; NOT SUPPLIED: %s\n' \
-      "$supplied" "${#MEMBERS[@]}" "${set_have:0:19}" "$(IFS=, ; echo "${unsupplied[*]}")"
+      "$supplied" "$counted" "${set_have:0:19}" "$(IFS=, ; echo "${unsupplied[*]}")"
   fi
 }
 
@@ -333,8 +387,8 @@ cmd_get() {
   [ -r "$file" ] || die "cannot read $file"
   local value
   if ! value="$(envfile_get "$file" "$name")"; then
-    # An absent input member is "not supplied": print nothing, succeed.
-    is_input "$name" && return 0
+    # An absent input or previous member is empty: print nothing, succeed.
+    is_optional "$name" && return 0
     die "member $name missing from $file"
   fi
   printf '%s' "$value"
@@ -368,11 +422,63 @@ cmd_set() {
   fi
 }
 
+# write_members FILE NAME=VALUE... — replace the named members of FILE,
+# atomically, keeping mode 0600 and every other line.
+write_members() {
+  local file="$1"; shift
+  local tmp pair pattern=""
+  for pair in "$@"; do pattern="${pattern:+$pattern|}^${pair%%=*}="; done
+  tmp="$(umask 077 && mktemp "$(dirname "$file")/.keyring.XXXXXX")"
+  {
+    grep -vE "$pattern" "$file" || true
+    for pair in "$@"; do printf '%s\n' "$pair"; done
+  } > "$tmp"
+  chmod 0600 "$tmp"
+  mv "$tmp" "$file"
+}
+
+# cmd_rotate FILE MEMBER — keep MEMBER as MEMBER_PREVIOUS and generate a new
+# MEMBER. Refuses while a previous value is kept (see ROTATION above).
+cmd_rotate() {
+  local file="${1:?usage: keyring.sh rotate <keyring-file> <MEMBER>}"
+  local name="${2:?usage: keyring.sh rotate <keyring-file> <MEMBER>}"
+  [ -r "$file" ] || die "cannot read $file"
+  local spec pspec cur prev new miss
+  spec="$(member_spec "$name")" || die "$name is not a keyring member"
+  pspec="$(member_spec "${name}_PREVIOUS")" && [ "$(member_kind "$pspec")" = prev ] \
+    || die "$name has no ${name}_PREVIOUS member, so it does not rotate in place. Rotate it with a new keyring and a new cluster"
+  if ! miss="$(check_shape "$file")"; then die "$miss"; fi
+  cur="$(envfile_get "$file" "$name")"
+  prev="$(envfile_get "$file" "${name}_PREVIOUS" || true)"
+  [ -z "$prev" ] || die "${name}_PREVIOUS still holds the key of the last rotation. When the cluster runs on ${name}, run keyring.sh retire first"
+  new="$(gen_value "$spec")"
+  write_members "$file" "${name}=${new}" "${name}_PREVIOUS=${cur}"
+  printf 'keyring: rotated %s in %s (new sha256:%s, previous sha256:%s)\n' "$name" "$file" \
+    "$(sha256_of "$new" | cut -c1-16)" "$(sha256_of "$cur" | cut -c1-16)"
+}
+
+# cmd_retire FILE MEMBER — clear MEMBER_PREVIOUS, after the cluster runs on
+# the new value.
+cmd_retire() {
+  local file="${1:?usage: keyring.sh retire <keyring-file> <MEMBER>}"
+  local name="${2:?usage: keyring.sh retire <keyring-file> <MEMBER>}"
+  [ -r "$file" ] || die "cannot read $file"
+  local pspec prev
+  pspec="$(member_spec "${name}_PREVIOUS")" && [ "$(member_kind "$pspec")" = prev ] \
+    || die "$name has no ${name}_PREVIOUS member"
+  prev="$(envfile_get "$file" "${name}_PREVIOUS" || true)"
+  [ -n "$prev" ] || die "${name}_PREVIOUS is already empty"
+  write_members "$file" "${name}_PREVIOUS="
+  printf 'keyring: retired the previous %s in %s (sha256:%s)\n' "$name" "$file" "$(sha256_of "$prev" | cut -c1-16)"
+}
+
 case "${1:-}" in
   generate)     shift; cmd_generate "$@" ;;
   fingerprints) shift; cmd_fingerprints "$@" ;;
   verify)       shift; cmd_verify "$@" ;;
   get)          shift; cmd_get "$@" ;;
   set)          shift; cmd_set "$@" ;;
-  *) die "usage: keyring.sh generate|fingerprints|verify|get|set ..." ;;
+  rotate)       shift; cmd_rotate "$@" ;;
+  retire)       shift; cmd_retire "$@" ;;
+  *) die "usage: keyring.sh generate|fingerprints|verify|get|set|rotate|retire ..." ;;
 esac

@@ -1404,12 +1404,11 @@ data:
     # it at init and unwraps it on every start, so a pod restart returns
     # unsealed with no unseal key anywhere in the cluster.
     #
-    # current_key_id is a permanent label for THIS key. A key rotation adds
-    # previous_key / previous_key_id with a new id; it never renames this one.
-    seal "static" {
-      current_key_id = "bringup-keyring"
-      current_key    = "file:///etc/openbao/seal/openbao-seal-key"
-    }
+    # The seal "static" stanza is not here. The openbao container writes it
+    # at start into /tmp/seal.hcl (see its command): the key id is a
+    # fingerprint of the key, so each key keeps one id for its whole life,
+    # and a rotation adds the previous key with its own id (ADR-0171, row
+    # keyring-generated-keys).
 
     api_addr = "https://gibson-openbao:8200"
     cluster_addr = "https://gibson-openbao:8201"
@@ -14319,7 +14318,7 @@ spec:
         gibson.zeroroot.ai/datastore: openbao
         gibson.zeroroot.ai/kube-api: "true"
       annotations:
-        checksum/config: 49a08bef6b3e3932fc9110e517dae5e0faf71687e571974980a69a2e530598ae
+        checksum/config: 4693ee874265064b571322f49b6429dad699ea3de92d32fc67c713eca5dade13
         # Velero fs-backup skips the scratch volumes. scripts/check-velero-volume-excludes.sh.
         backup.velero.io/backup-volumes-excludes: "tmp,auto-init-tmp"
     spec:
@@ -14338,10 +14337,34 @@ spec:
         - name: openbao
           image: "ghcr.io/zeroroot-ai/mirror/openbao:2.5.3@sha256:fdc6da21ca6963560c32336fd7feb9cf2d5e52668f1a1647205a4b41171f0806"
           imagePullPolicy: IfNotPresent
+          # The seal stanza (ADR-0171, row keyring-generated-keys). Each key
+          # file holds the base64 of a 32-byte key. Its id is "keyring-" and
+          # the first 16 hex digits of the sha256 of that text, so the id
+          # follows the key and never needs a value. During a rotation the
+          # keyring Secret also holds the previous key: OpenBao unwraps with
+          # either and wraps with the current one. An empty previous file
+          # means no rotation runs. A missing or empty current file fails the
+          # start, as before.
           command:
-            - bao
-            - server
-            - -config=/etc/openbao/config/openbao.hcl
+            - /bin/sh
+            - -ec
+            - |
+              seal_id() { printf 'keyring-%s' "$(sha256sum "$1" | cut -c1-16)"; }
+              cur=/etc/openbao/seal/openbao-seal-key
+              prev=/etc/openbao/seal/openbao-seal-previous-key
+              [ -s "$cur" ] || { echo "FATAL: the seal key file is missing or empty" >&2; exit 1; }
+              {
+                echo 'seal "static" {'
+                echo "  current_key_id = \"$(seal_id "$cur")\""
+                echo "  current_key    = \"file://${cur}\""
+                if [ -s "$prev" ]; then
+                  echo "  previous_key_id = \"$(seal_id "$prev")\""
+                  echo "  previous_key    = \"file://${prev}\""
+                fi
+                echo '}'
+              } > /tmp/seal.hcl
+              echo "[openbao] seal key id $(seal_id "$cur")$([ -s "$prev" ] && echo ", previous $(seal_id "$prev")")"
+              exec bao server -config=/etc/openbao/config/openbao.hcl -config=/tmp/seal.hcl
           ports:
             - name: https
               containerPort: 8200
@@ -16015,7 +16038,7 @@ spec:
           configMap:
             name: gibson-openbao-config
         # The bringup keyring Secret (deploy#1731). Produced by the
-        # bringup, never by this chart. Only the seal key is projected, so a
+        # bringup, never by this chart. Only the two seal keys are projected, so a
         # keyring Secret that later carries other members exposes none of
         # them to this pod. A missing Secret or key keeps the pod in
         # ContainerCreating, which is the loud failure we want.
@@ -16026,6 +16049,9 @@ spec:
             items:
               - key: "openbao-seal-key"
                 path: openbao-seal-key
+              # Empty unless a rotation runs (scripts/keyring.sh rotate).
+              - key: "openbao-seal-previous-key"
+                path: openbao-seal-previous-key
         # The two keyring INPUTS for the sidecar (deploy#1732): the same
         # bringup keyring Secret, a different volume, and NEVER the seal key.
         # Item names follow scripts/keyring.sh: member GHCR_PULL_TOKEN is the

@@ -11,7 +11,8 @@
 # What it writes, from the keyring file substrate.env names:
 #
 #   Secret <NS>/bringup-keyring          bucket-access-key, bucket-secret-key,
-#                                        openbao-seal-key, velero-repo-password,
+#                                        openbao-seal-key, openbao-seal-previous-key,
+#                                        velero-repo-password,
 #                                        ghcr-pull-token, smtp-username,
 #                                        smtp-password
 #   Secret <NS>/route53-credential       access-key-id, secret-access-key: the
@@ -71,6 +72,11 @@ BUCKET_SECRET_KEY="$(keyring_get BUCKET_SECRET_KEY)"
 OPENBAO_SEAL_KEY="$(keyring_get OPENBAO_SEAL_KEY)"
 [ "${#OPENBAO_SEAL_KEY}" -eq 44 ] \
   || { echo "FATAL: ${KEYRING_FILE} has no 44-character OPENBAO_SEAL_KEY member (base64 of 32 bytes); generate a new keyring with scripts/keyring.sh generate" >&2; exit 1; }
+# The previous seal key during a rotation (scripts/keyring.sh rotate), empty
+# otherwise. The chart always mounts the key, so it is always written.
+OPENBAO_SEAL_KEY_PREVIOUS="$(keyring_get OPENBAO_SEAL_KEY_PREVIOUS)"
+[ -z "$OPENBAO_SEAL_KEY_PREVIOUS" ] || [ "${#OPENBAO_SEAL_KEY_PREVIOUS}" -eq 44 ] \
+  || { echo "FATAL: ${KEYRING_FILE} has an OPENBAO_SEAL_KEY_PREVIOUS member that is not 44 characters (base64 of 32 bytes)" >&2; exit 1; }
 
 # The Velero repository password (deploy#1734). Velero seals its kopia
 # repository with it. Velero's Role carries no create on secrets, so a
@@ -96,6 +102,9 @@ data:
 YAML
 
 log "OpenBao seal key -> Secret ${NS}/bringup-keyring key openbao-seal-key (sha256:$(printf '%s' "$OPENBAO_SEAL_KEY" | sha256sum | cut -c1-16))"
+if [ -n "$OPENBAO_SEAL_KEY_PREVIOUS" ]; then
+  log "previous OpenBao seal key -> key openbao-seal-previous-key (sha256:$(printf '%s' "$OPENBAO_SEAL_KEY_PREVIOUS" | sha256sum | cut -c1-16)); a rotation runs"
+fi
 kubectl apply --server-side --field-manager=bringup-openbao-seal -f - >/dev/null <<YAML
 apiVersion: v1
 kind: Secret
@@ -104,6 +113,7 @@ metadata:
   namespace: ${NS}
 data:
   openbao-seal-key: "$(printf '%s' "$OPENBAO_SEAL_KEY" | base64 -w0)"
+  openbao-seal-previous-key: "$(printf '%s' "$OPENBAO_SEAL_KEY_PREVIOUS" | base64 -w0)"
 YAML
 
 # The two seed inputs (deploy#1732), each value allowed to be empty.

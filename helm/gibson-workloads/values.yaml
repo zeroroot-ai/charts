@@ -2175,6 +2175,10 @@ openbao:
     seal:
       keyringSecretName: "bringup-keyring"
       keyringSecretKey: "openbao-seal-key"
+      # The previous seal key during a rotation, empty otherwise
+      # (scripts/keyring.sh rotate and retire, ADR-0171). The bringup always
+      # writes this key, so the volume always mounts.
+      keyringPreviousSecretKey: "openbao-seal-previous-key"
 
   # ServiceAccount annotations: workload identity where the substrate has it.
   # Empty in kind.
