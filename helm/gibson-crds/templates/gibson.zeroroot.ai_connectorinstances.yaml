@@ -31,9 +31,6 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .status.discoveredTools
-      name: Tools
-      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -128,7 +125,8 @@ spec:
                     targetEnv:
                       description: |-
                         TargetEnv is the environment variable the connector reads. Defaults to
-                        the vendor's conventional name when unset.
+                        the Key upper-cased with every non-alphanumeric run folded to one
+                        underscore (see EnvName).
                       type: string
                   required:
                   - key
@@ -155,12 +153,10 @@ spec:
                 type: string
               runtime:
                 default: pod
-                description: |-
-                  Runtime is where a Hosted connector runs. Defaults to pod. setec is a
-                  paid hardening upgrade.
+                description: Runtime is where a Hosted connector runs. The only value
+                  is pod.
                 enum:
                 - pod
-                - setec
                 type: string
               shape:
                 description: |-
@@ -244,12 +240,6 @@ spec:
                   - type
                   type: object
                 type: array
-              discoveredTools:
-                description: |-
-                  DiscoveredTools is the count of tools the daemon registered from this
-                  connector's tools/list.
-                format: int32
-                type: integer
               lastError:
                 description: LastError is the most recent human-readable failure,
                   with remediation.
