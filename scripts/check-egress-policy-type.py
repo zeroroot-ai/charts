@@ -87,7 +87,13 @@ def pods(docs: list) -> list[dict]:
         else:
             continue
         labels = (t.get("metadata") or {}).get("labels") or {}
-        out.append({**labels, NS_KEY: d["metadata"].get("namespace") or NAMESPACE})
+        ns = d["metadata"].get("namespace") or NAMESPACE
+        out.append({**labels, NS_KEY: ns})
+        if d.get("kind") == "Deployment" and labels.get("app.kubernetes.io/name") == "velero":
+            # The Velero server creates a repository maintenance Job at run
+            # time. Its pod carries velero.io/repo-name, and the velero policy
+            # selects it by that label (charts#494).
+            out.append({"velero.io/repo-name": "runtime", NS_KEY: ns})
     return out
 
 
@@ -146,6 +152,13 @@ def selftest() -> int:
     if judge([pod, cluster, pg]):
         print(f"SELFTEST FAIL: a policy for the pods of a CNPG Cluster must pass: {judge([pod, cluster, pg])}")
         return 1
+    velero = {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "velero", "namespace": NAMESPACE},
+              "spec": {"template": {"metadata": {"labels": {"app.kubernetes.io/name": "velero"}}}}}
+    repo = {"apiVersion": "cilium.io/v2", "kind": "CiliumNetworkPolicy", "metadata": {"name": "velero", "namespace": NAMESPACE},
+            "specs": [{"endpointSelector": {"matchExpressions": [{"key": "velero.io/repo-name", "operator": "Exists"}]}}]}
+    if judge([velero, repo]):
+        print(f"SELFTEST FAIL: a policy for the maintenance Jobs of a Velero server must pass: {judge([velero, repo])}")
+        return 1
     se = {"apiVersion": "networking.istio.io/v1", "kind": "ServiceEntry", "metadata": {"name": "se"}}
     typo = {**cnp, "metadata": {"name": "typo", "namespace": NAMESPACE},
             "specs": [{"endpointSelector": {"matchLabels": {"gibson.zeroroot.ai/net-role": "platfrom"}}}]}
@@ -154,12 +167,13 @@ def selftest() -> int:
     for what, docs in (("an Istio ServiceEntry", [pod, se]),
                        ("a Kubernetes NetworkPolicy in the release namespace", [pod, np_release]),
                        ("a label policy that selects no pod", [pod, typo]),
-                       ("a clusterwide policy for a namespace with no pod", [pod, other_ns])):
+                       ("a clusterwide policy for a namespace with no pod", [pod, other_ns]),
+                       ("a policy for maintenance Jobs with no Velero server", [pod, repo])):
         if len(judge(docs)) != 1:
             print(f"SELFTEST FAIL: {what} must give one finding, got {judge(docs)}")
             return 1
     print("  ✓ selftest: a second policy type, a NetworkPolicy in the release namespace and a Cilium rule "
-          "that selects no pod fail; the label policies pass")
+          "that selects no pod fail; the label policies and the Velero maintenance Jobs pass")
     return 0
 
 

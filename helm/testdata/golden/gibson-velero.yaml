@@ -4098,6 +4098,7 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/version: 1.18.1
         helm.sh/chart: velero-12.1.0
+        gibson.zeroroot.ai/egress-fqdn: object-store
         gibson.zeroroot.ai/net-role: system
       annotations:
         prometheus.io/path: /metrics
@@ -4201,6 +4202,7 @@ spec:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/version: 1.18.1
         helm.sh/chart: velero-12.1.0
+        gibson.zeroroot.ai/egress-fqdn: object-store
         gibson.zeroroot.ai/net-role: system
       annotations:
         prometheus.io/path: /metrics
@@ -4362,7 +4364,7 @@ spec:
     prefix: "backups/velero"
   config:
     region: "us-east-1"
-    s3ForcePathStyle: "true"
+    s3ForcePathStyle: "false"
 ---
 # Source: gibson-velero/templates/network-policy.yaml
 apiVersion: cilium.io/v2
@@ -4412,23 +4414,22 @@ metadata:
     app.kubernetes.io/component: network-velero
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
-spec:
-  description: "Velero reaches the API server and the backup bucket only."
-  specs:
-    - endpointSelector:
+specs:
+    - description: "Velero reaches the API server and the backup bucket only."
+      endpointSelector:
         matchLabels:
           app.kubernetes.io/name: velero
       egress:
         - toEntities:
             - kube-apiserver
         - toFQDNs:
-            - matchName: "s3.us-east-1.amazonaws.com"
             - matchName: "example-durable-bucket.s3.us-east-1.amazonaws.com"
           toPorts:
             - ports:
                 - port: "443"
                   protocol: TCP
-    - endpointSelector:
+    - description: "Velero reaches the API server and the backup bucket only."
+      endpointSelector:
         matchExpressions:
         - key: velero.io/repo-name
           operator: Exists
@@ -4436,7 +4437,6 @@ spec:
         - toEntities:
             - kube-apiserver
         - toFQDNs:
-            - matchName: "s3.us-east-1.amazonaws.com"
             - matchName: "example-durable-bucket.s3.us-east-1.amazonaws.com"
           toPorts:
             - ports:

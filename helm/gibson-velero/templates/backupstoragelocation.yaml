@@ -12,6 +12,14 @@ server reads down to exactly one, the kopia repository password.
 {{- if not $bucket.name }}
 {{- fail "bucket.name is required: Velero writes to the durable bucket stage 0 created. There is no default that is safe to invent." }}
 {{- end }}
+{{- $onAWS := not (trim $bucket.endpoint) }}
+{{- /* On AWS S3 the bucket is addressed by host, <bucket>.s3.<region>.amazonaws.com,
+       because the network policy opens only that host: the regional host
+       s3.<region>.amazonaws.com of path-style addressing reaches each bucket of
+       S3 (GHSA-3wg5). A name with a dot breaks the TLS name of that host. */}}
+{{- if and $onAWS (contains "." $bucket.name) }}
+{{- fail (printf "bucket.name (%s) has a dot: on AWS S3 the bucket is addressed by host, and a dot breaks the TLS name of <bucket>.s3.<region>.amazonaws.com" $bucket.name) }}
+{{- end }}
 {{- if not (hasPrefix "backups/" $bucket.prefix) }}
 {{- fail (printf "bucket.prefix (%s) must sit under backups/: retention is the bucket lifecycle rule on that prefix and nothing else." $bucket.prefix) }}
 {{- end }}
@@ -54,7 +62,7 @@ spec:
     prefix: {{ $bucket.prefix | quote }}
   config:
     region: {{ $bucket.region | quote }}
-    s3ForcePathStyle: {{ $bucket.forcePathStyle | quote }}
+    s3ForcePathStyle: {{ ternary "false" ($bucket.forcePathStyle | toString) $onAWS | quote }}
     {{- with $bucket.endpoint }}
     # Empty on AWS: the plugin then resolves the regional S3 endpoint itself.
     s3Url: {{ . | quote }}
