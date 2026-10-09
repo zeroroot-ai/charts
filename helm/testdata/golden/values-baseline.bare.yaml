@@ -10355,7 +10355,7 @@ spec:
             # cmd/main.go: an operator that cannot reach the daemon fails at
             # boot rather than leaving grants alive after every delete.
             - name: GIBSON_DAEMON_GRPC_ADDRESS
-              value: "gibson-gibson-workloads:50051"
+              value: "gibson-gibson-workloads.gibson.svc:50051"
             # the daemon SVID pinned at the mTLS handshake.
             - name: GIBSON_DAEMON_SPIFFE_ID
               value: "spiffe://zeroroot.ai/platform/daemon"
@@ -10546,7 +10546,7 @@ spec:
             # boot, so the daemon is not a start dependency: the records wait
             # in the status of each resource until the daemon answers.
             - name: GIBSON_DAEMON_GRPC_ADDRESS
-              value: "gibson-gibson-workloads:50051"
+              value: "gibson-gibson-workloads.gibson.svc:50051"
             - name: GIBSON_DAEMON_SPIFFE_ID
               value: "spiffe://zeroroot.ai/platform/daemon"
             # Zitadel System API user private key path (platform-operator#28).
@@ -11070,7 +11070,7 @@ spec:
               # gibson-common library helper (deploy#179): single source
               # of truth for the daemon dialing address. The default
               # (gibson-workloads:50051) was fixed in tenant-operator#70.
-              value: "gibson-gibson-workloads:50051"
+              value: "gibson-gibson-workloads.gibson.svc:50051"
             # the operator dials the daemon over SPIFFE mTLS and
             # authorises the daemon's SVID at the TLS handshake. The ID is the
             # trust domain of the install (global.spire.trustDomain) and the
