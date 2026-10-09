@@ -21146,12 +21146,15 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # No early sync-wave. The login comes from the OpenBao database engine,
-  # which the openbao-auto-init sidecar writes only after the Postgres
-  # superuser exists, and the platform operator at wave 0 makes the Postgres
-  # cluster. An ExternalSecret at wave -8 gates the operator and waits for a
-  # cluster that the operator makes: a from-zero install never ends.
-  # scripts/check-postgres-logins-wave.py fails on a wave below 0.
+  # Wave -5: after the Postgres cluster (-7) and the setup Jobs (-6) that make
+  # the owner role, and before zitadel-init (-4) and every consumer. The login
+  # comes from the OpenBao database engine. The openbao-auto-init sidecar
+  # writes the engine once the CNPG superuser Secret exists, and a login is a
+  # member of its owner role. Earlier than -6 the role does not exist. Later
+  # than -4 the Jobs that mount this Secret wait for it for ever.
+  # scripts/check-postgres-logins-wave.py holds the order.
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
   name: gibson-platform-postgres-credentials
   namespace: gibson
   labels:
@@ -21399,12 +21402,15 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # No early sync-wave. The login comes from the OpenBao database engine,
-  # which the openbao-auto-init sidecar writes only after the Postgres
-  # superuser exists, and the platform operator at wave 0 makes the Postgres
-  # cluster. An ExternalSecret at wave -8 gates the operator and waits for a
-  # cluster that the operator makes: a from-zero install never ends.
-  # scripts/check-postgres-logins-wave.py fails on a wave below 0.
+  # Wave -5: after the Postgres cluster (-7) and the setup Jobs (-6) that make
+  # the owner role, and before zitadel-init (-4) and every consumer. The login
+  # comes from the OpenBao database engine. The openbao-auto-init sidecar
+  # writes the engine once the CNPG superuser Secret exists, and a login is a
+  # member of its owner role. Earlier than -6 the role does not exist. Later
+  # than -4 the Jobs that mount this Secret wait for it for ever.
+  # scripts/check-postgres-logins-wave.py holds the order.
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
   name: openfga-postgres-credentials
   namespace: gibson
 spec:
@@ -21466,12 +21472,15 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # No early sync-wave. The login comes from the OpenBao database engine,
-  # which the openbao-auto-init sidecar writes only after the Postgres
-  # superuser exists, and the platform operator at wave 0 makes the Postgres
-  # cluster. An ExternalSecret at wave -8 gates the operator and waits for a
-  # cluster that the operator makes: a from-zero install never ends.
-  # scripts/check-postgres-logins-wave.py fails on a wave below 0.
+  # Wave -5: after the Postgres cluster (-7) and the setup Jobs (-6) that make
+  # the owner role, and before zitadel-init (-4) and every consumer. The login
+  # comes from the OpenBao database engine. The openbao-auto-init sidecar
+  # writes the engine once the CNPG superuser Secret exists, and a login is a
+  # member of its owner role. Earlier than -6 the role does not exist. Later
+  # than -4 the Jobs that mount this Secret wait for it for ever.
+  # scripts/check-postgres-logins-wave.py holds the order.
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
   name: spire-postgres-credentials
   namespace: gibson
 spec:
@@ -21495,12 +21504,15 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # No early sync-wave. The login comes from the OpenBao database engine,
-  # which the openbao-auto-init sidecar writes only after the Postgres
-  # superuser exists, and the platform operator at wave 0 makes the Postgres
-  # cluster. An ExternalSecret at wave -8 gates the operator and waits for a
-  # cluster that the operator makes: a from-zero install never ends.
-  # scripts/check-postgres-logins-wave.py fails on a wave below 0.
+  # Wave -5: after the Postgres cluster (-7) and the setup Jobs (-6) that make
+  # the owner role, and before zitadel-init (-4) and every consumer. The login
+  # comes from the OpenBao database engine. The openbao-auto-init sidecar
+  # writes the engine once the CNPG superuser Secret exists, and a login is a
+  # member of its owner role. Earlier than -6 the role does not exist. Later
+  # than -4 the Jobs that mount this Secret wait for it for ever.
+  # scripts/check-postgres-logins-wave.py holds the order.
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
   name: tenant-admin-postgres-credentials
   namespace: gibson
 spec:
@@ -21524,12 +21536,15 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # No early sync-wave. The login comes from the OpenBao database engine,
-  # which the openbao-auto-init sidecar writes only after the Postgres
-  # superuser exists, and the platform operator at wave 0 makes the Postgres
-  # cluster. An ExternalSecret at wave -8 gates the operator and waits for a
-  # cluster that the operator makes: a from-zero install never ends.
-  # scripts/check-postgres-logins-wave.py fails on a wave below 0.
+  # Wave -5: after the Postgres cluster (-7) and the setup Jobs (-6) that make
+  # the owner role, and before zitadel-init (-4) and every consumer. The login
+  # comes from the OpenBao database engine. The openbao-auto-init sidecar
+  # writes the engine once the CNPG superuser Secret exists, and a login is a
+  # member of its owner role. Earlier than -6 the role does not exist. Later
+  # than -4 the Jobs that mount this Secret wait for it for ever.
+  # scripts/check-postgres-logins-wave.py holds the order.
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
   name: zitadel-postgres-credentials
   namespace: gibson
 spec:
