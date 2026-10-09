@@ -43,7 +43,11 @@ assert len(pol) == 1, "no policy for the group"
 spec = pol[0]["spec"]
 assert spec["endpointSelector"]["matchLabels"] == {"gibson.zeroroot.ai/egress-fqdn": "payments"}, spec["endpointSelector"]
 got = []
+dns = [n for r in spec["egress"] if "toEndpoints" in r for tp in r["toPorts"] for n in tp["rules"]["dns"]]
+assert dns == [{"matchName": "api.payments.example"}, {"matchName": "app.example.com"}], dns
 for r in spec["egress"]:
+    if "toEndpoints" in r:
+        continue
     port = r["toPorts"][0]["ports"][0]["port"]
     if "toFQDNs" in r:
         got.append((r["toFQDNs"][0]["matchName"], port))
