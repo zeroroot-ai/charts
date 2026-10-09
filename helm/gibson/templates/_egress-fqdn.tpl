@@ -29,6 +29,11 @@ A host in the cluster (a name with no dot, or a name under .svc or
                    the install, never each bucket of S3. The Postgres
                    instances, the CloudNativePG Jobs and the Redis backup
                    CronJob use it.
+  <name>           Each group of global.networkPolicy.egressHostGroups: the
+                   hosts that the values of the install name, for a pod that
+                   another chart of the install deploys. Each entry is a URL,
+                   a host:port or a host outside the cluster. A name of a
+                   group above and a host in the cluster fail the render.
 
 Each entry is a Cilium FQDN selector, {matchName: <host>} or
 {matchPattern: <pattern>}, or {cidr: <address>/32} for a host that a value
@@ -136,7 +141,31 @@ only.
 {{- $obj = concat $obj $sts -}}
 {{- end -}}
 
-{{- toYaml (dict "zitadel" $zitadel "tenant-operator" $to "cert-manager" $cm "external-dns" $dns "object-store" $obj) -}}
+{{- $groups := dict "zitadel" $zitadel "tenant-operator" $to "cert-manager" $cm "external-dns" $dns "object-store" $obj -}}
+
+{{- /* The groups that the values of the install name. */ -}}
+{{- range $name, $entries := ((.Values.global).networkPolicy | default dict).egressHostGroups | default dict -}}
+{{- if hasKey $groups $name -}}
+{{- fail (printf "global.networkPolicy.egressHostGroups.%s: the chart owns the egress host group %q. Use another name." $name $name) -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$" $name) -}}
+{{- fail (printf "global.networkPolicy.egressHostGroups.%s: a group name is a label value: lower case letters, digits and dashes." $name) -}}
+{{- end -}}
+{{- $hosts := list -}}
+{{- range $e := $entries -}}
+{{- $host := include "gibson.externalHost" $e -}}
+{{- if not $host -}}
+{{- fail (printf "global.networkPolicy.egressHostGroups.%s: %q is not a host outside the cluster. A host in the cluster is not in an egress group: the shared label policies cover it." $name (toString $e)) -}}
+{{- end -}}
+{{- if contains "*" $host -}}
+{{- fail (printf "global.networkPolicy.egressHostGroups.%s: %q has a wildcard. Name each host." $name (toString $e)) -}}
+{{- end -}}
+{{- $hosts = append $hosts (include "gibson.egressHostEntry" (dict "host" $host "port" (include "gibson.urlPort" $e)) | fromYaml) -}}
+{{- end -}}
+{{- $_ := set $groups $name $hosts -}}
+{{- end -}}
+
+{{- toYaml $groups -}}
 {{- end -}}
 
 {{/*

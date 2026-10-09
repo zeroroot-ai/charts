@@ -135,6 +135,20 @@ global:
     # when cnpg.enabled is false. With cnpg.enabled true the operator of this
     # chart carries the Postgres client label and no rule reads this value.
     cnpgOperatorNamespace: ""
+    # Egress host groups of the install, for a pod that another chart of the
+    # install deploys (D76). Each key is a group name, and each entry is a
+    # URL, a host:port or a host outside the cluster. A pod with the label
+    # gibson.zeroroot.ai/egress-fqdn: <group> reaches only these hosts, each
+    # on its own port (443 when the entry names no port). The chart renders
+    # one policy for each group (templates/network-policies.yaml). A name of
+    # a group of the chart (zitadel, tenant-operator, cert-manager,
+    # external-dns, object-store) and a host in the cluster fail the render.
+    # Example:
+    #   egressHostGroups:
+    #     payments:
+    #       - https://api.payments.example
+    #       - app.example.com:443
+    egressHostGroups: {}
     # The cluster scraper that reads the metrics ports (the metrics policy of
     # templates/network-policies.yaml). The policy admits only a pod in this
     # namespace with these labels, and only to the metrics port of each pod
