@@ -969,7 +969,7 @@ zitadel:
   #
   # Reloader is already deployed; it just was not told to watch this Secret.
   annotations:
-    secret.reloader.stakater.com/reload: "gibson-zitadel-system-key"
+    secret.reloader.stakater.com/reload: "gibson-zitadel-system-key,gibson-zitadel-masterkey"
 
   # Mount the public-key half of gibson-zitadel-system-key on
   # the Zitadel pods so the SystemAPIUsers Path: above resolves.
@@ -1006,7 +1006,7 @@ zitadel:
     # the pod reloads the SystemAPIUsers public key from disk (#192).
     # Without this, Zitadel keeps the old in-memory key and rejects
     # platform-operator System API JWTs signed with the new private key.
-    secret.reloader.stakater.com/reload: "gibson-zitadel-system-key"
+    secret.reloader.stakater.com/reload: "gibson-zitadel-system-key,gibson-zitadel-masterkey"
   replicaCount: 1
   service:
     type: ClusterIP

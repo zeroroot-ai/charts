@@ -687,6 +687,14 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-6"
 ---
+# Source: gibson/templates/jobs/zitadel-masterkey-rotation.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: zitadel-masterkey-rotation
+  namespace: gibson
+automountServiceAccountToken: false
+---
 # Source: gibson/charts/external-secrets/templates/webhook-secret.yaml
 apiVersion: v1
 kind: Secret
@@ -7544,6 +7552,7 @@ rules:
 #   gibson-platform-operator-vault — policy platform-operator
 #   gibson-tenant-operator-vault   — policy tenant-operator
 #   gibson-openbao-iam-admin-escrow, gibson-openbao-jwt-auth-init,
+#   gibson-openbao-masterkey-rotation,
 #   gibson-openbao-approle-init, gibson-openbao-approle-reader — the Jobs
 # A non-renewable root token in either would cause VaultTransitReady=False,
 # because vaulttoken.Renewer calls renew-self and OpenBao rejects it with
@@ -7596,6 +7605,7 @@ rules:
       - gibson-tenant-operator-vault
       - gibson-openbao-iam-admin-escrow
       - gibson-openbao-jwt-auth-init
+      - gibson-openbao-masterkey-rotation
 ---
 # Source: gibson/charts/gibson-workloads/templates/databases/redis-rotation-controller.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -14175,7 +14185,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: start
   annotations:
-    secret.reloader.stakater.com/reload: gibson-zitadel-system-key
+    secret.reloader.stakater.com/reload: gibson-zitadel-system-key,gibson-zitadel-masterkey
 spec:
   revisionHistoryLimit: 10
   replicas: 1
@@ -14187,7 +14197,7 @@ spec:
   template:
     metadata:
       annotations:
-        secret.reloader.stakater.com/reload: gibson-zitadel-system-key
+        secret.reloader.stakater.com/reload: gibson-zitadel-system-key,gibson-zitadel-masterkey
         checksum/configmap: bf68f57edfc928f299f83402c2217f3220a1110a158a6963138e55704896f2bd
         checksum/secret-db-ssl-ca-crt: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         checksum/secret-zitadel-secrets: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
@@ -14609,7 +14619,7 @@ spec:
               TENANT_OP_POLICY="tenant-operator"
               # The token of each Job that configures the store, as
               # <Secret>:<policy>. Each Job mounts its own Secret and nothing else.
-              JOB_TOKENS="gibson-openbao-iam-admin-escrow:iam-admin-escrow gibson-openbao-jwt-auth-init:jwt-auth-init"
+              JOB_TOKENS="gibson-openbao-iam-admin-escrow:iam-admin-escrow gibson-openbao-jwt-auth-init:jwt-auth-init gibson-openbao-masterkey-rotation:zitadel-masterkey-rotation"
               ESO_ROLE="eso-reader"
               ESO_POLICY="eso-reader"
               ESO_SA_NAME="external-secrets"
@@ -14677,7 +14687,11 @@ spec:
               gibson-openfga-postgres-password password:pw
               gibson-spire-postgres-password password:pw
               gibson-redis-password password:pw @720h
-              zitadel-masterkey value:rand
+              # next: the masterkey of the next rotation, empty otherwise. The sidecar
+              # writes it when value is older than its lifetime (mk_request), and the
+              # CronJob zitadel-masterkey-rotation rewraps the Zitadel keys and moves it to
+              # value (ADR-0171).
+              zitadel-masterkey value:rand next:empty
               gibson-dashboard-session-secrets auth_secret:rand auth_secret_previous:prev:auth_secret server_actions_key:randb64 @720h
               gibson-cg-signing-key key:rand kid:rand8
               # The verify-only slots of the CG signing key set. Empty in steady state; the
@@ -15544,6 +15558,7 @@ spec:
               SEED_EOF
                 cg_key_rotate "$tok" || seed_failed=$((seed_failed + 1))
                 sys_key_rotate "$tok" || seed_failed=$((seed_failed + 1))
+                mk_request "$tok" || seed_failed=$((seed_failed + 1))
                 echo "[openbao-auto-init] seed pass complete: ${seed_checked} keys checked, ${seed_written} written, ${seed_failed} failed"
                 [ "$seed_failed" -eq 0 ]
               }
@@ -15677,6 +15692,28 @@ spec:
                 echo "[openbao-auto-init] the System API key of slot ${sys_act} is older than its lifetime; slot ${sys_oth} is active" >&2
               }
 
+              # The request of a Zitadel masterkey rotation (ADR-0171, row
+              # platform-generated-secrets). When value is older than its
+              # lifetime and no rotation is pending, write a new masterkey to
+              # next. The CronJob zitadel-masterkey-rotation does the rest: it
+              # proves the current key against its marker, rewraps every
+              # Zitadel encryption key in one transaction, and moves next to
+              # value. The monthly drill writes next with
+              # scripts/baseline-set-secret.sh, the same write.
+              MK_KEY="zitadel-masterkey"
+              MK_LIFETIME_S=7776000
+              mk_request() {
+                mt="$1"
+                mk_cur=$(kv_get "$mt" "$MK_KEY") || return 1
+                [ -n "$(printf '%s' "$mk_cur" | jq -r '.value // empty')" ] || return 0
+                [ -z "$(printf '%s' "$mk_cur" | jq -r '.next // empty')" ] || return 0
+                mk_t=$(kv_created_epoch "$mt" "$MK_KEY") || return 1
+                [ $(( $(date +%s) - ${mk_t:-$(date +%s)} )) -ge "$MK_LIFETIME_S" ] || return 0
+                kv_put "$mt" "$MK_KEY" "$(printf '%s' "$mk_cur" | jq -c --arg n "$(gen_rand 32)" '.next = $n')" || return 1
+                mk_cur=""
+                echo "[openbao-auto-init] the Zitadel masterkey is older than its lifetime; wrote the next masterkey" >&2
+              }
+
               vault_write_policy() {
                 # $1 token, $2 name, $3 HCL.
                 c=$(curl -sS -o ${TMPD}/pol.json -w '%{http_code}' \
@@ -15792,6 +15829,9 @@ spec:
                   '
               path "sys/auth/jwt" { capabilities = ["create", "update", "read", "sudo"] }
               path "auth/jwt/config" { capabilities = ["create", "update", "read"] }' || return 1
+                vault_write_policy "$tok" zitadel-masterkey-rotation \
+                  '
+              path "secret/data/zitadel-masterkey" { capabilities = ["read", "update"] }' || return 1
 
                 # tenant-operator: what the tenant-operator's code calls, and
                 # nothing in the root namespace's kv store, where the escrowed
@@ -18577,6 +18617,271 @@ spec:
                   # (deploy#858).
                   cpu: 100m
                   memory: 64Mi
+---
+# Source: gibson/templates/jobs/zitadel-masterkey-rotation.yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: gibson-zitadel-masterkey-rotation
+  namespace: gibson
+  labels:
+    app.kubernetes.io/component: zitadel-masterkey-rotation
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: zitadel-masterkey-rotation
+            gibson.zeroroot.ai/net-role: platform
+            gibson.zeroroot.ai/client-postgres: "true"
+            gibson.zeroroot.ai/client-openbao: "true"
+        spec:
+          restartPolicy: Never
+          serviceAccountName: zitadel-masterkey-rotation
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+          - name: openbao-ca
+            secret:
+              secretName: gibson-openbao-tls
+              defaultMode: 0444
+              items:
+                - key: ca.crt
+                  path: ca.crt
+          # The masterkeys pass between the three steps here, in memory only.
+          - name: work
+            emptyDir:
+              medium: Memory
+              sizeLimit: 1Mi
+          - name: tmp
+            emptyDir: {}
+          initContainers:
+          # 1. Read secret/zitadel-masterkey (curl and jq: the tool image).
+          - name: read
+            image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            volumeMounts:
+            - name: openbao-ca
+              mountPath: /etc/gibson/openbao-ca
+              readOnly: true
+            - name: work
+              mountPath: /work
+            - name: tmp
+              mountPath: /tmp
+            env:
+            - name: SSL_CERT_DIR
+              value: "/etc/ssl/certs:/etc/gibson/openbao-ca"
+            - name: CURL_CA_BUNDLE
+              value: "/etc/gibson/openbao-ca/ca.crt"
+            - name: HOME
+              value: /tmp
+            - name: BAO_ADDR
+              value: "https://gibson-openbao.gibson.svc:8200"
+            # The token of this Job alone, policy zitadel-masterkey-rotation: read and
+            # update secret/data/zitadel-masterkey. The openbao-auto-init sidecar mints it.
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-openbao-masterkey-rotation
+                  key: VAULT_ADMIN_TOKEN
+            command: [sh, -ec]
+            args:
+            - |
+              # Step 1: write value and next of secret/zitadel-masterkey to /work.
+              c="$(curl -sS -o /tmp/kv.json -w '%{http_code}' -H "X-Vault-Token: ${VAULT_TOKEN}" \
+                "${BAO_ADDR}/v1/secret/data/zitadel-masterkey")"
+              [ "$c" = 200 ] || { echo "[masterkey] FATAL: read secret/zitadel-masterkey returned HTTP ${c}" >&2; exit 1; }
+              jq -j '.data.data.value // ""' /tmp/kv.json > /work/value
+              jq -j '.data.data.next // ""' /tmp/kv.json > /work/next
+              rm -f /tmp/kv.json
+              echo none > /work/action
+          # 2. Prove the marker and rewrap (psql and openssl: the client image).
+          - name: rewrap
+            # psql and openssl 3 (the postgres-setup client image).
+            image: "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184"
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: tmp
+              mountPath: /tmp
+            env:
+            - name: PGHOST
+              value: platform-postgres-rw.gibson.svc
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: zitadel
+            - name: PGSSLMODE
+              value: require
+            - name: PGCONNECT_TIMEOUT
+              value: "5"
+            - name: PGUSER
+              value: zitadel
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: zitadel-postgres-credentials
+                  key: password
+            command: [bash, -ec]
+            args:
+            - |
+              # Step 2: prove the marker, and rewrap the Zitadel keys when a rotation is
+              # pending. It writes the action of step 3 to /work/action.
+              set -euo pipefail
+              export PATH="/opt/bitnami/postgresql/bin:$PATH"
+              MARKER_TEXT="gibson-zitadel-masterkey-marker-v1"
+              PSQL=(psql -X -q -t -A -v ON_ERROR_STOP=1)
+              
+              hex_of() { od -An -v -tx1 | tr -d ' \n'; }
+              bin_of() { printf '%b' "$(printf '%s' "$1" | sed 's/../\\x&/g')"; }
+              # mk_decrypt_hex STRING KEY: the plaintext of a Zitadel AESString, as hex.
+              mk_decrypt_hex() {
+                local raw kh
+                raw="$(printf '%s' "$1" | tr '_-' '/+' | base64 -d | hex_of)"
+                [ "${#raw}" -ge 32 ] || return 1
+                kh="$(printf '%s' "$2" | hex_of)"
+                bin_of "${raw:32}" | openssl enc -d -aes-256-cfb -K "$kh" -iv "${raw:0:32}" -nopad | hex_of
+              }
+              # mk_encrypt_hex HEX KEY: a Zitadel AESString of the plaintext HEX.
+              mk_encrypt_hex() {
+                local iv kh ct
+                iv="$(openssl rand -hex 16)"
+                kh="$(printf '%s' "$2" | hex_of)"
+                ct="$(bin_of "$1" | openssl enc -aes-256-cfb -K "$kh" -iv "$iv" -nopad | hex_of)"
+                bin_of "${iv}${ct}" | base64 -w0 | tr '+/' '-_'
+              }
+              marker_hex="$(printf '%s' "$MARKER_TEXT" | hex_of)"
+              
+              value="$(cat /work/value)"
+              next="$(cat /work/next)"
+              [ "${#value}" -ge 32 ] || { echo "[masterkey] FATAL: the masterkey is shorter than 32 characters" >&2; exit 1; }
+              cur="${value:0:32}"
+              
+              "${PSQL[@]}" -c "CREATE SCHEMA IF NOT EXISTS gibson_rotation;
+                CREATE TABLE IF NOT EXISTS gibson_rotation.masterkey_marker (id int PRIMARY KEY, marker text NOT NULL)"
+              marker="$("${PSQL[@]}" -c "SELECT marker FROM gibson_rotation.masterkey_marker WHERE id = 1")"
+              
+              # 1. No marker yet.
+              if [ -z "$marker" ]; then
+                m="$(mk_encrypt_hex "$marker_hex" "$cur")"
+                "${PSQL[@]}" -c "INSERT INTO gibson_rotation.masterkey_marker (id, marker) VALUES (1, '${m}')"
+                echo "[masterkey] wrote the marker with the current masterkey"
+                exit 0
+              fi
+              
+              # 2. No rotation pending.
+              if [ -z "$next" ]; then
+                [ "$(mk_decrypt_hex "$marker" "$cur")" = "$marker_hex" ] \
+                  || { echo "[masterkey] FATAL: the marker does not decrypt with the masterkey of the store; the Zitadel keys and secret/${MK_KEY} disagree" >&2; exit 1; }
+                echo "[masterkey] no rotation pending; the marker matches the current masterkey"
+                exit 0
+              fi
+              [ "${#next}" -ge 32 ] || { echo "[masterkey] FATAL: the next masterkey is shorter than 32 characters; nothing changes" >&2; exit 1; }
+              nxt="${next:0:32}"
+              
+              # 4. An earlier run rewrapped the rows and did not move next to value.
+              if [ "$(mk_decrypt_hex "$marker" "$nxt")" = "$marker_hex" ]; then
+                echo flip > /work/action
+                echo "[masterkey] the rows already use the next masterkey; step 3 moves it to value"
+                exit 0
+              fi
+              
+              # 5. The marker proves neither key.
+              [ "$(mk_decrypt_hex "$marker" "$cur")" = "$marker_hex" ] \
+                || { echo "[masterkey] FATAL: the marker decrypts with neither the current nor the next masterkey; nothing changes" >&2; exit 1; }
+              
+              # 3. Rewrap every row and the marker with next, in one transaction.
+              sql=/tmp/rewrap.sql
+              : > "$sql"
+              echo "BEGIN;" >> "$sql"
+              n=0
+              while IFS='|' read -r id key; do
+                [ -n "$id" ] || continue
+                case "$id" in *[!A-Za-z0-9_-]*) echo "[masterkey] FATAL: an encryption key id is not plain" >&2; exit 1 ;; esac
+                plain="$(mk_decrypt_hex "$key" "$cur")" || { echo "[masterkey] FATAL: key ${id} does not decrypt" >&2; exit 1; }
+                new="$(mk_encrypt_hex "$plain" "$nxt")"
+                [ "$(mk_decrypt_hex "$new" "$nxt")" = "$plain" ] || { echo "[masterkey] FATAL: the rewrap of key ${id} does not round-trip" >&2; exit 1; }
+                printf "UPDATE system.encryption_keys SET key = '%s' WHERE id = '%s';\n" "$new" "$id" >> "$sql"
+                n=$((n + 1))
+              done < <("${PSQL[@]}" -F '|' -c "SELECT id, key FROM system.encryption_keys ORDER BY id")
+              printf "UPDATE gibson_rotation.masterkey_marker SET marker = '%s' WHERE id = 1;\nCOMMIT;\n" \
+                "$(mk_encrypt_hex "$marker_hex" "$nxt")" >> "$sql"
+              "${PSQL[@]}" -f "$sql"
+              rm -f "$sql"
+              echo flip > /work/action
+              echo "[masterkey] rewrapped ${n} Zitadel encryption keys with the next masterkey; step 3 moves it to value"
+          containers:
+          # 3. Move next to value when step 2 rewrapped the rows.
+          - name: write
+            image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop: ["ALL"]
+            volumeMounts:
+            - name: openbao-ca
+              mountPath: /etc/gibson/openbao-ca
+              readOnly: true
+            - name: work
+              mountPath: /work
+            - name: tmp
+              mountPath: /tmp
+            env:
+            - name: SSL_CERT_DIR
+              value: "/etc/ssl/certs:/etc/gibson/openbao-ca"
+            - name: CURL_CA_BUNDLE
+              value: "/etc/gibson/openbao-ca/ca.crt"
+            - name: HOME
+              value: /tmp
+            - name: BAO_ADDR
+              value: "https://gibson-openbao.gibson.svc:8200"
+            # The token of this Job alone, policy zitadel-masterkey-rotation: read and
+            # update secret/data/zitadel-masterkey. The openbao-auto-init sidecar mints it.
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-openbao-masterkey-rotation
+                  key: VAULT_ADMIN_TOKEN
+            command: [sh, -ec]
+            args:
+            - |
+              # Step 3: when step 2 rewrapped the rows with next, write value = next and
+              # next = "". ESO then updates gibson-zitadel-masterkey, and Reloader restarts
+              # Zitadel on the new masterkey.
+              action="$(cat /work/action)"
+              if [ "$action" != flip ]; then
+                echo "[masterkey] ${action}: secret/zitadel-masterkey does not change"
+                exit 0
+              fi
+              c="$(jq -nc --rawfile v /work/next '{data:{value:$v,next:""}}' \
+                | curl -sS -o /tmp/kvw.json -w '%{http_code}' -X POST -H "X-Vault-Token: ${VAULT_TOKEN}" \
+                    -H 'Content-Type: application/json' --data-binary @- "${BAO_ADDR}/v1/secret/data/zitadel-masterkey")"
+              rm -f /tmp/kvw.json
+              [ "$c" = 200 ] || [ "$c" = 204 ] || { echo "[masterkey] FATAL: write secret/zitadel-masterkey returned HTTP ${c}; the next run moves it" >&2; exit 1; }
+              echo "[masterkey] moved the next masterkey to value"
 ---
 # Source: gibson/charts/cnpg/templates/deployment.yaml
 #

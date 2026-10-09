@@ -45,6 +45,15 @@ path "secret/data/gibson-zitadel-login-client-pat" { capabilities = ["create", "
 {{- end -}}
 
 {{/*
+gibson.openbaoPolicy.masterkeyRotation: the CronJob
+zitadel-masterkey-rotation. It reads the masterkey and its next value, and
+moves next to value after it rewraps the Zitadel keys (ADR-0171).
+*/}}
+{{- define "gibson.openbaoPolicy.masterkeyRotation" -}}
+path "secret/data/zitadel-masterkey" { capabilities = ["read", "update"] }
+{{- end -}}
+
+{{/*
 gibson.openbaoPolicy.iamAdminEscrow: the iam-admin-pat-escrow Job. It reads
 and writes the KV key of the one Secret the Zitadel setup Job mints. It has
 no path to the admin token entry: the platform-operator is its one writer,
