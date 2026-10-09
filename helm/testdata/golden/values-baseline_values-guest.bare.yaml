@@ -15931,7 +15931,14 @@ spec:
               protocol: TCP
           rules:
             dns:
-              - matchPattern: "*"
+              - matchPattern: '*.cluster.local'
+              - matchPattern: '*.*.cluster.local'
+              - matchPattern: '*.*.*.cluster.local'
+              - matchPattern: '*.*.*.*.cluster.local'
+              - matchPattern: '*.*.*.*.*.cluster.local'
+              - matchPattern: '*.*.*.*.*.*.cluster.local'
+              - matchName: localhost.zeroroot.ai
+              - matchPattern: '*.localhost.zeroroot.ai'
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/system-namespace-policy.yaml
 apiVersion: cilium.io/v2
@@ -16267,13 +16274,26 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "Pods with the egress-internet label reach hosts outside the cluster."
+  description: "Pods with the egress-internet label reach hosts outside the cluster, and resolve each name."
   endpointSelector:
     matchLabels:
       gibson.zeroroot.ai/egress-internet: "true"
   egress:
     - toEntities:
         - world
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: '*'
 ---
 # Source: gibson/templates/network-policies.yaml
 apiVersion: cilium.io/v2
@@ -16291,11 +16311,27 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "Pods of the object-store egress group reach only these host names, on their ports."
+  description: "Pods of the object-store egress group resolve and reach only these host names, on their ports."
   endpointSelector:
     matchLabels:
       gibson.zeroroot.ai/egress-fqdn: object-store
   egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchName: example-durable-bucket.s3.amazonaws.com
+              - matchPattern: example-durable-bucket.s3.*.amazonaws.com
+              - matchName: sts.amazonaws.com
+              - matchPattern: sts.*.amazonaws.com
     - toFQDNs:
         - matchName: example-durable-bucket.s3.amazonaws.com
       toPorts:

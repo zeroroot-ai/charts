@@ -159,6 +159,17 @@ for crd in ciliumnetworkpolicies.cilium.io ciliumclusterwidenetworkpolicies.cili
   fi
 done
 echo "  ✓ the Cilium policy CRDs exist"
+# Each pod resolves only the names it needs (charts#518). A pod tries each
+# search domain of its resolv.conf before a name itself, and Cilium answers a
+# lookup that no rule permits. With the default answer REFUSED, glibc and musl
+# stop at the first search domain of the node, and no outside host of an
+# egress group resolves. NXDOMAIN lets the resolver go on.
+reject="$(kubectl -n kube-system get configmap cilium-config -o jsonpath='{.data.tofqdns-dns-reject-response-code}' 2>/dev/null || true)"
+if [ "$reject" != "nameError" ]; then
+  echo "FATAL: the Cilium DNS proxy answers a denied lookup with '${reject:-refused}'. Gibson needs nameError: set the Cilium Helm value dnsProxy.dnsRejectResponseCode=nameError, then run this again (charts#518)." >&2
+  exit 2
+fi
+echo "  ✓ the Cilium DNS proxy answers a denied lookup with NXDOMAIN"
 
 # Each fleet node exposes /dev/kvm (ADR-0083, charts#413). Every sandbox is a
 # Firecracker machine, and the device plugin of setec hands /dev/kvm of the

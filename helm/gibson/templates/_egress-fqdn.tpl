@@ -169,6 +169,54 @@ only.
 {{- end -}}
 
 {{/*
+gibson.dnsNames: the DNS names that each pod of the release namespace may
+resolve (D76, charts#518), as Cilium DNS selectors:
+
+  - a name in the cluster: up to six labels under cluster.local. CoreDNS
+    answers the cluster zone itself and sends no such lookup out.
+  - the domain of the install and each name one label under it (app, api,
+    docs and www). CoreDNS can map them to the edge (ADR-0092).
+
+A pod that reaches an outside host resolves it through the DNS rule of its
+egress group, or of the egress-internet policy.
+*/}}
+{{- define "gibson.dnsNames" -}}
+{{- $names := list -}}
+{{- $p := "cluster.local" -}}
+{{- range $i := until 6 -}}
+{{- $p = printf "*.%s" $p -}}
+{{- $names = append $names (dict "matchPattern" $p) -}}
+{{- end -}}
+{{- with ((.Values.global).domain) -}}
+{{- $names = append $names (dict "matchName" .) -}}
+{{- $names = append $names (dict "matchPattern" (printf "*.%s" .)) -}}
+{{- end -}}
+{{- toYaml $names -}}
+{{- end -}}
+
+{{/*
+gibson.dnsRule: one Cilium egress rule that permits DNS lookups to kube-dns
+for the names of the list (Cilium DNS selectors). Each policy that opens an
+outside host adds the names of its hosts, and Cilium joins the DNS rules of
+all policies that select a pod.
+*/}}
+{{- define "gibson.dnsRule" -}}
+- toEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: kube-system
+        k8s:k8s-app: kube-dns
+  toPorts:
+    - ports:
+        - port: "53"
+          protocol: UDP
+        - port: "53"
+          protocol: TCP
+      rules:
+        dns:
+          {{- toYaml . | nindent 10 }}
+{{- end -}}
+
+{{/*
 gibson.externalHost: the host of a URL, a host:port or a host, when the host
 is outside the cluster. Empty for no input and for a host in the cluster.
 */}}

@@ -6,7 +6,14 @@ a new policy, and no policy lists each internal peer.
 
   1. default deny     One CiliumClusterwideNetworkPolicy selects each pod of the
                       release namespace. It allows DNS to kube-dns and nothing
-                      else, in both directions.
+                      else, in both directions. The DNS rule permits the names
+                      in the cluster and the hosts of the install only
+                      (gibson.dnsNames). A pod that reaches an outside host
+                      gets the names of its host group, or each name with the
+                      egress-internet label. Cilium answers each other lookup
+                      with NXDOMAIN (the substrate sets
+                      dnsRejectResponseCode: nameError), so the resolver tries
+                      its next search domain.
   2. platform         Platform pods reach each other.
   3. data stores      Postgres, Redis and OpenBao each admit only the
                       pods with their client label.
@@ -67,7 +74,7 @@ spec:
               protocol: TCP
           rules:
             dns:
-              - matchPattern: "*"
+              {{- include "gibson.dnsNames" . | nindent 14 }}
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -260,13 +267,14 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "Pods with the egress-internet label reach hosts outside the cluster."
+  description: "Pods with the egress-internet label reach hosts outside the cluster, and resolve each name."
   endpointSelector:
     matchLabels:
       gibson.zeroroot.ai/egress-internet: "true"
   egress:
     - toEntities:
         - world
+    {{- include "gibson.dnsRule" (list (dict "matchPattern" "*")) | nindent 4 }}
 {{- /* One policy for each egress host group with at least one host. The
        DNS rule of the default deny lets Cilium see each lookup, so it
        learns the addresses of these names. A value that names a host by
@@ -286,11 +294,20 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "Pods of the {{ $group }} egress group reach only these host names, on their ports."
+  description: "Pods of the {{ $group }} egress group resolve and reach only these host names, on their ports."
   endpointSelector:
     matchLabels:
       gibson.zeroroot.ai/egress-fqdn: {{ $group }}
   egress:
+    {{- $names := list }}
+    {{- range $h := $hosts }}
+    {{- if not $h.cidr }}
+    {{- $names = append $names (omit $h "ports") }}
+    {{- end }}
+    {{- end }}
+    {{- if $names }}
+    {{- include "gibson.dnsRule" $names | nindent 4 }}
+    {{- end }}
     {{- range $h := $hosts }}
     {{- if $h.cidr }}
     - toCIDR:
