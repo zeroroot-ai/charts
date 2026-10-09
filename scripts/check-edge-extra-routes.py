@@ -4,14 +4,15 @@
 envoy.extraRoutes is the one way a component outside the core chart gets an
 edge route (ADR-0060, ADR-0074). The edge adds no authentication to such a
 route, so each entry must state who authenticates the request:
-signed-request or own-sign-in. There is no default.
+signed-request, own-sign-in or query-token. There is no default.
 
 The check renders the umbrella:
 
   1. with no entry: the browser chain holds no extra route and no extra
      cluster, and no billing object renders;
   2. with one complete entry: exactly one route on the browser chain and one
-     cluster, with the stated rate-limit descriptor;
+     cluster, with the stated rate-limit descriptor, and an entry of each
+     other mode (own-sign-in, query-token) renders;
   3. with an entry that states no auth mode, an unknown mode, or no
      rate-limit class: the render fails.
 
@@ -70,6 +71,10 @@ def main() -> int:
             bad.append("a complete entry must render exactly one cluster")
         if cfg.count('path: "/api/billing/webhook"') != 1:
             bad.append("a complete entry must render exactly one route on the browser chain")
+    for mode in ("own-sign-in", "query-token"):
+        rc, _, err = render([dict(GOOD, auth=mode)])
+        if rc != 0:
+            bad.append(f"an entry with the auth mode {mode} does not render: {err[-300:]}")
     for what, entry in (("no auth mode", {k: v for k, v in GOOD.items() if k != "auth"}),
                         ("an unknown auth mode", dict(GOOD, auth="none")),
                         ("no rate-limit class", {k: v for k, v in GOOD.items() if k != "rateLimitClass"})):

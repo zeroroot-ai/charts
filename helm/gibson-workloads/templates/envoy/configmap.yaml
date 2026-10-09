@@ -157,9 +157,14 @@ unconditionally — there is no `envoy.enabled` opt-out.
     rateLimitClass  login | catch-all: the per-client quota it shares
     auth            signed-request: the service verifies a signature on each
                     request (a webhook); own-sign-in: the service signs the
-                    user in itself, as its own client of the identity provider.
-                    The edge adds no authentication for either, so the mode
-                    must be stated, never assumed.
+                    user in itself, as its own client of the identity provider;
+                    query-token: the request carries an opaque bearer token in
+                    its query string, and the service verifies the token (a
+                    link that the platform sent, for example the signup step).
+                    The edge adds no authentication for any of them, so the
+                    mode must be stated, never assumed. The access log records
+                    the path without its query, so a query token never reaches
+                    a log.
 
   One route and one cluster render for each entry, on the browser chain.
 */ -}}
@@ -178,8 +183,8 @@ unconditionally — there is no `envoy.enabled` opt-out.
 {{- if not (hasKey $rlClass (toString ($r.rateLimitClass | default ""))) -}}
 {{- fail (printf "envoy.extraRoutes[%d].rateLimitClass must be login or catch-all (charts#375)" $i) -}}
 {{- end -}}
-{{- if not (has (toString ($r.auth | default "")) (list "signed-request" "own-sign-in")) -}}
-{{- fail (printf "envoy.extraRoutes[%d].auth must be signed-request or own-sign-in: the edge adds no authentication to an extra route, so the entry states who authenticates the request (charts#375)" $i) -}}
+{{- if not (has (toString ($r.auth | default "")) (list "signed-request" "own-sign-in" "query-token")) -}}
+{{- fail (printf "envoy.extraRoutes[%d].auth must be signed-request, own-sign-in or query-token: the edge adds no authentication to an extra route, so the entry states who authenticates the request (charts#375, charts#561)" $i) -}}
 {{- end -}}
 {{- $extraRoutes = append $extraRoutes (dict
       "path" $r.path "rewrite" ($r.rewrite | default "") "service" $r.service "port" (int $r.port)
