@@ -16334,6 +16334,7 @@ spec:
             # seeded empty.
             - name: bringup-inputs
               mountPath: /etc/openbao/inputs
+              readOnly: true
             # The CNPG superuser, for the database engine (pg_engine_ensure).
             - name: pg-superuser
               mountPath: /etc/openbao/pg-superuser
@@ -16345,7 +16346,6 @@ spec:
             # The ready marker and mktemp write here. The root filesystem is read-only.
             - name: auto-init-tmp
               mountPath: /tmp
-              readOnly: true
           # Ready = the store serves its consumers (see the marker above).
           # A readiness probe never restarts the container; until the marker
           # exists the pod stays NotReady, which is the truth.
