@@ -4,8 +4,9 @@
 #                    platform-operator config/crd/bases/.
 
 # prometheus-operator-crds: only the CRDs the platform renders CRs for
-# (ServiceMonitor x5, PrometheusRule x5 in the umbrella). The other eight are
-# 3.8 MB of schema the platform never instantiates, and this release is a Helm
+# (ServiceMonitor x5, PrometheusRule x5 and the Envoy PodMonitor in the
+# umbrella). The other seven are
+# schema the platform never instantiates, and this release is a Helm
 # release: its record is one Secret with a 1 MiB cap, which the vendored
 # operator CRDs (files/crds/, deploy#1728) already fill most of. These are
 # not services and no code path reads them. A cluster that runs the
@@ -22,7 +23,7 @@ prometheus-operator-crds:
     alertmanagers:
       enabled: false
     podmonitors:
-      enabled: false
+      enabled: true
     probes:
       enabled: false
     prometheusagents:
