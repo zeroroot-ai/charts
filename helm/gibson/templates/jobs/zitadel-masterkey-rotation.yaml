@@ -117,8 +117,13 @@ spec:
               value: require
             - name: PGCONNECT_TIMEOUT
               value: "5"
+            # The login role of the zitadel owner (ADR-0171, row
+            # postgres-role-passwords): it sets role to zitadel.
             - name: PGUSER
-              value: zitadel
+              valueFrom:
+                secretKeyRef:
+                  name: zitadel-postgres-credentials
+                  key: username
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:

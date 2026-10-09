@@ -3865,8 +3865,10 @@ data:
       host: platform-postgres-rw.gibson.svc.cluster.local
       port: 5432
       database: "gibson_platform"
-      username: "gibson_platform"
-      # Password injected from DASHBOARD_DB_PASSWORD env var at runtime
+      # The login role and its password, from DASHBOARD_DB_USERNAME and
+      # DASHBOARD_DB_PASSWORD at runtime (ADR-0171: the OpenBao database
+      # engine issues a new login role every 24 hours).
+      username: ${DASHBOARD_DB_USERNAME}
       password: ${DASHBOARD_DB_PASSWORD}
       ssl_mode: "require"
       max_conns: 10
@@ -4417,7 +4419,7 @@ data:
           {
             "sql": {
               "plugin_data": {
-                "connection_string": "dbname=spire user=spire password=${DBPW} host=platform-postgres-rw.gibson.svc.cluster.local port=5432 sslmode=require",
+                "connection_string": "dbname=spire user=${DBUSER} password=${DBPW} host=platform-postgres-rw.gibson.svc.cluster.local port=5432 sslmode=require",
                 "database_type": "postgres",
                 "disable_migration": false,
                 "max_idle_conns": 2,
@@ -7510,7 +7512,7 @@ rules:
     verbs: ["patch"]
   - apiGroups: ["apps"]
     resources: ["statefulsets"]
-    resourceNames: ["gibson-gibson-workloads"]
+    resourceNames: ["gibson-gibson-workloads","gibson-server"]
     verbs: ["patch"]
   - apiGroups: ["batch"]
     resources: ["cronjobs"]
@@ -10879,7 +10881,9 @@ spec:
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket"
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
-        secret.reloader.stakater.com/reload: "gibson-tenant-operator-vault"
+        # The two login roles of the operator (ADR-0171, row
+        # postgres-role-passwords) and its OpenBao token.
+        secret.reloader.stakater.com/reload: "gibson-tenant-operator-vault,tenant-admin-postgres-credentials,gibson-platform-postgres-credentials"
     spec:
       
       imagePullSecrets:
@@ -11358,13 +11362,21 @@ spec:
             # SQLSTATE 42501. The dedicated `gibson.tenantPostgres.*`
             # helpers route to the tenant_admin role's credentials and
             # fail-render if anyone re-introduces `gibson_platform` here.
+            # The login role of tenant_admin and its password, both from the
+            # Secret: the OpenBao database engine issues a new login role
+            # every 24 hours (ADR-0171), and Reloader restarts this pod.
+            - name: TENANT_POSTGRES_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: tenant-admin-postgres-credentials
+                  key: username
             - name: TENANT_POSTGRES_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: tenant-admin-postgres-credentials
                   key: password
             - name: DATAPLANE_PG_ADMIN_DSN
-              value: "postgres://tenant_admin:$(TENANT_POSTGRES_ADMIN_PASSWORD)@platform-postgres-rw.gibson.svc.cluster.local:5432/postgres?sslmode=disable"
+              value: "postgres://$(TENANT_POSTGRES_ADMIN_USERNAME):$(TENANT_POSTGRES_ADMIN_PASSWORD)@platform-postgres-rw.gibson.svc.cluster.local:5432/postgres?sslmode=disable"
             - name: DATAPLANE_REDIS_ADDR
               value: "gibson-redis-stack:6379"
             # one-code-path #203: DATAPLANE_REDIS_PASSWORD was `optional: true`.
@@ -11450,13 +11462,20 @@ spec:
             # Always emitted — broker config row is required for the
             # daemon to resolve per-tenant credentials. Missing
             # platformPg.host or KEK Secret fails chart render.
+            # The login role of gibson_platform, from the same Secret as its
+            # password (ADR-0171).
+            - name: PLATFORM_PG_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: "gibson-platform-postgres-credentials"
+                  key: "username"
             - name: PLATFORM_PG_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: "gibson-platform-postgres-credentials"
                   key: "password"
             - name: PLATFORM_PG_DSN
-              value: "postgres://gibson_platform:$(PLATFORM_PG_PASSWORD)@platform-postgres-rw.gibson.svc.cluster.local:5432/gibson_platform?sslmode=require"
+              value: "postgres://$(PLATFORM_PG_USERNAME):$(PLATFORM_PG_PASSWORD)@platform-postgres-rw.gibson.svc.cluster.local:5432/gibson_platform?sslmode=require"
             # System-tenant KEK delivered ONLY as a file mount. The legacy
             # env-injection path was removed in deploy#194 because raw
             # 32-byte KEKs commonly contain nul bytes which crash env-var
@@ -11853,7 +11872,7 @@ spec:
         # rotated. Reloader runs cluster-wide and watches the explicitly-
         # named Secrets below; when any of them changes, Reloader triggers
         # a rolling restart of this Deployment.
-        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-gibson-workloads-dashboard-secrets"
+        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-gibson-workloads-dashboard-secrets,gibson-platform-postgres-credentials"
     spec:
       
       imagePullSecrets:
@@ -12313,13 +12332,21 @@ spec:
             # helm-eks-readiness-and-pg-split. In dev the helper resolves
             # to the existing dashboard-postgresql alias; in prod it points
             # at RDS via platformPostgres.external.host.
+            # The login role and its password, from one Secret: the OpenBao
+            # database engine issues a new login role every 24 hours
+            # (ADR-0171), and Reloader restarts the dashboard.
+            - name: DASHBOARD_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-platform-postgres-credentials
+                  key: username
             - name: DASHBOARD_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: gibson-platform-postgres-credentials
                   key: password
             - name: DATABASE_URL
-              value: postgres://gibson_platform:$(DASHBOARD_DB_PASSWORD)@platform-postgres-rw.gibson.svc.cluster.local:5432/gibson_platform?sslmode=require
+              value: postgres://$(DASHBOARD_DB_USERNAME):$(DASHBOARD_DB_PASSWORD)@platform-postgres-rw.gibson.svc.cluster.local:5432/gibson_platform?sslmode=require
 
             # NO REDIS_URL and NO REDIS_PASSWORD. The dashboard does not speak to
             # Redis: at v0.127.2 it carries no redis client dependency of any
@@ -14214,7 +14241,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: start
   annotations:
-    secret.reloader.stakater.com/reload: gibson-zitadel-system-key,gibson-zitadel-masterkey
+    secret.reloader.stakater.com/reload: gibson-zitadel-system-key,gibson-zitadel-masterkey,zitadel-postgres-credentials
 spec:
   revisionHistoryLimit: 10
   replicas: 1
@@ -14226,7 +14253,7 @@ spec:
   template:
     metadata:
       annotations:
-        secret.reloader.stakater.com/reload: gibson-zitadel-system-key,gibson-zitadel-masterkey
+        secret.reloader.stakater.com/reload: gibson-zitadel-system-key,gibson-zitadel-masterkey,zitadel-postgres-credentials
         checksum/configmap: bf68f57edfc928f299f83402c2217f3220a1110a158a6963138e55704896f2bd
         checksum/secret-db-ssl-ca-crt: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         checksum/secret-zitadel-secrets: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
@@ -14284,10 +14311,20 @@ spec:
             - name: ZITADEL_DATABASE_POSTGRES_AWAITINITIALCONN
               value: "5m"
             
+            - name: ZITADEL_DATABASE_POSTGRES_USER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  key: username
+                  name: zitadel-postgres-credentials
             - name: ZITADEL_DATABASE_POSTGRES_USER_PASSWORD
               valueFrom:
                 secretKeyRef:
                   key: password
+                  name: zitadel-postgres-credentials
+            - name: ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  key: username
                   name: zitadel-postgres-credentials
             - name: ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD
               valueFrom:
@@ -14360,7 +14397,10 @@ spec:
           - name: PGCONNECT_TIMEOUT
             value: "5"
           - name: PGUSER
-            value: zitadel
+            valueFrom:
+              secretKeyRef:
+                key: username
+                name: zitadel-postgres-credentials
           - name: PGPASSWORD
             valueFrom:
               secretKeyRef:
@@ -14443,6 +14483,7 @@ spec:
         app.kubernetes.io/component: openbao
         gibson.zeroroot.ai/net-role: datastore
         gibson.zeroroot.ai/datastore: openbao
+        gibson.zeroroot.ai/client-postgres: "true"
         gibson.zeroroot.ai/kube-api: "true"
       annotations:
         checksum/config: 4693ee874265064b571322f49b6429dad699ea3de92d32fc67c713eca5dade13
@@ -14755,11 +14796,10 @@ spec:
               # a pod restart), and `svctoken` follows the token in the
               # gibson-platform-operator-vault Secret. Everything else is generated once
               # and kept, so an upgrade never rotates a credential under a workload.
-              gibson-gibson-platform-postgres-password password:pw
-              gibson-tenant-admin-postgres-password password:pw
-              gibson-zitadel-postgres-password password:pw
-              gibson-openfga-postgres-password password:pw
-              gibson-spire-postgres-password password:pw
+              # No Postgres password: the OpenBao database engine issues the login role of
+              # each platform database (ADR-0171, row postgres-role-passwords;
+              # pg_engine_ensure in the sidecar, which records in the KV key
+              # gibson-pg-engine which superuser credential each connection holds).
               gibson-redis-password password:pw @720h
               # next: the masterkey of the next rotation, empty otherwise. The sidecar
               # writes it when value is older than its lifetime (mk_request), and the
@@ -15633,6 +15673,7 @@ spec:
                 cg_key_rotate "$tok" || seed_failed=$((seed_failed + 1))
                 sys_key_rotate "$tok" || seed_failed=$((seed_failed + 1))
                 mk_request "$tok" || seed_failed=$((seed_failed + 1))
+                pg_engine_ensure "$tok" || seed_failed=$((seed_failed + 1))
                 echo "[openbao-auto-init] seed pass complete: ${seed_checked} keys checked, ${seed_written} written, ${seed_failed} failed"
                 [ "$seed_failed" -eq 0 ]
               }
@@ -15670,6 +15711,77 @@ spec:
                 cg_b=$(printf '%s' "$cg_k" | tr -- '-_' '+/' | tr -d '=')
                 while [ $(( ${#cg_b} % 4 )) -ne 0 ]; do cg_b="${cg_b}="; done
                 [ $(( $(printf '%s' "$cg_b" | base64 -d 2>/dev/null | wc -c) )) -eq 32 ]
+              }
+
+              # The database engine that issues the login roles of the
+              # platform databases (ADR-0171, row postgres-role-passwords).
+              # Each owner role (gibson_platform, tenant_admin, zitadel,
+              # openfga, spire) owns its database and logs in no more. ESO
+              # asks database/creds/<role> for a login role, which is a member
+              # of the owner and sets role to it at each login, so each object
+              # stays owned by the owner. A lease lives 48 hours; ESO asks
+              # for a new one every 24 hours, and the revocation statements
+              # drop the old role when its lease ends. Each owner has its own
+              # connection to its own database, so REASSIGN OWNED and DROP
+              # OWNED run where its grants are. The engine logs in as the CNPG
+              # superuser (platform-postgres-superuser, mounted read-only).
+              PG_ENGINE_HOST="platform-postgres-rw.gibson.svc"
+              PG_SU_DIR="/etc/openbao/pg-superuser"
+              # <owner role> <database> <OpenBao role name>
+              PG_ENGINE_ROLES="gibson_platform gibson_platform gibson-platform
+              tenant_admin postgres tenant-admin
+              zitadel zitadel zitadel
+              openfga openfga openfga
+              spire spire spire"
+              pg_engine_ensure() {
+                pt="$1"
+                [ -s "${PG_SU_DIR}/username" ] && [ -s "${PG_SU_DIR}/password" ] || {
+                  echo "[openbao-auto-init] the CNPG superuser Secret is not mounted yet; the database engine waits" >&2; return 0; }
+                c=$(curl -sS -o ${TMPD}/mnt.json -w '%{http_code}' -H "X-Vault-Token: ${pt}" "${BAO_ADDR_LOCAL}/v1/sys/mounts/database")
+                if [ "$c" != 200 ]; then
+                  c=$(curl -sS -o ${TMPD}/mnt.json -w '%{http_code}' -X POST -H "X-Vault-Token: ${pt}" \
+                    -H "Content-Type: application/json" -d '{"type":"database"}' "${BAO_ADDR_LOCAL}/v1/sys/mounts/database")
+                  case "$c" in 200|204) ;; *) echo "[openbao-auto-init] FATAL: enable the database engine returned HTTP $c: $(cat ${TMPD}/mnt.json)" >&2; return 1 ;; esac
+                fi
+                pg_su_user=$(cat "${PG_SU_DIR}/username")
+                pg_su_hash=$(cat "${PG_SU_DIR}/username" "${PG_SU_DIR}/password" | sha256sum | cut -c1-16)
+                # The loop runs in a subshell (the pipe): exit, not return,
+                # carries a failure out, as the status of the pipe.
+                printf '%s\n' "$PG_ENGINE_ROLES" | while read -r owner db role; do
+                  [ -n "$owner" ] || continue
+                  # The connection, written again only when it is missing or
+                  # the superuser credential changed (the hash rides on the
+                  # connection as a verification-free plugin option).
+                  have=$(curl -sS -H "X-Vault-Token: ${pt}" "${BAO_ADDR_LOCAL}/v1/database/config/${role}" \
+                    | jq -r '.data.connection_details.username // empty')
+                  mark=$(kv_get "$pt" "gibson-pg-engine" | jq -r --arg r "$role" '.[$r] // empty') || exit 1
+                  if [ "$have" != "$pg_su_user" ] || [ "$mark" != "$pg_su_hash" ]; then
+                    body=$(jq -nc --arg u "$pg_su_user" --rawfile p "${PG_SU_DIR}/password" --arg r "$role" \
+                      --arg url "postgresql://{{username}}:{{password}}@${PG_ENGINE_HOST}:5432/${db}?sslmode=require" \
+                      '{plugin_name:"postgresql-database-plugin", connection_url:$url, username:$u, password:($p|rtrimstr("\n")),
+                        allowed_roles:[$r], verify_connection:false, password_authentication:"scram-sha-256"}')
+                    c=$(printf '%s' "$body" | curl -sS -o ${TMPD}/dbc.json -w '%{http_code}' -X POST -H "X-Vault-Token: ${pt}" \
+                      -H "Content-Type: application/json" --data-binary @- "${BAO_ADDR_LOCAL}/v1/database/config/${role}")
+                    body=""
+                    case "$c" in 200|204) ;; *) echo "[openbao-auto-init] FATAL: database/config/${role} returned HTTP $c: $(cat ${TMPD}/dbc.json)" >&2; exit 1 ;; esac
+                    cur=$(kv_get "$pt" "gibson-pg-engine") || exit 1
+                    kv_put "$pt" "gibson-pg-engine" "$(printf '%s' "$cur" | jq -c --arg r "$role" --arg h "$pg_su_hash" '.[$r] = $h')" || exit 1
+                    echo "[openbao-auto-init] database engine connection ${role} -> ${db} (as ${pg_su_user})" >&2
+                  fi
+                  body=$(jq -nc --arg o "$owner" --arg r "$role" '{
+                    db_name: $r,
+                    creation_statements: [
+                      "CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '"'"'{{password}}'"'"' VALID UNTIL '"'"'{{expiration}}'"'"' IN ROLE \"" + $o + "\";",
+                      "ALTER ROLE \"{{name}}\" SET role = \"" + $o + "\";"],
+                    revocation_statements: [
+                      "REASSIGN OWNED BY \"{{name}}\" TO \"" + $o + "\";",
+                      "DROP OWNED BY \"{{name}}\";",
+                      "DROP ROLE IF EXISTS \"{{name}}\";"],
+                    default_ttl: "48h", max_ttl: "72h"}')
+                  c=$(printf '%s' "$body" | curl -sS -o ${TMPD}/dbr.json -w '%{http_code}' -X POST -H "X-Vault-Token: ${pt}" \
+                    -H "Content-Type: application/json" --data-binary @- "${BAO_ADDR_LOCAL}/v1/database/roles/${role}")
+                  case "$c" in 200|204) ;; *) echo "[openbao-auto-init] FATAL: database/roles/${role} returned HTTP $c: $(cat ${TMPD}/dbr.json)" >&2; exit 1 ;; esac
+                done
               }
 
               cg_key_rotate() {
@@ -15873,7 +15985,10 @@ spec:
               path "secret/data/*" { capabilities = ["create", "read", "update"] }
               path "secret/metadata/*" { capabilities = ["read"] }
               path "transit/keys/*" { capabilities = ["create", "read", "update"] }
-              path "transit/export/signing-key/*" { capabilities = ["read"] }' || return 1
+              path "transit/export/signing-key/*" { capabilities = ["read"] }
+              path "sys/mounts/database" { capabilities = ["create", "update", "read"] }
+              path "database/config/*" { capabilities = ["create", "update", "read"] }
+              path "database/roles/*" { capabilities = ["create", "update", "read"] }' || return 1
 
                 # platform-operator: gibson operators/platform/internal/clients/vault.
                 #   sys/mounts               mountExists reads the mount table
@@ -15942,6 +16057,7 @@ spec:
                 # changed.
                 vault_write_policy "$tok" "$ESO_POLICY" \
                   'path "secret/data/*" { capabilities = ["read"] }
+              path "database/creds/*" { capabilities = ["read"] }
               path "secret/metadata/*" { capabilities = ["read", "list"] }
               path "sys/internal/ui/mounts/*" { capabilities = ["read"] }
               path "sys/mounts" { capabilities = ["read"] }
@@ -16190,6 +16306,10 @@ spec:
             # seeded empty.
             - name: bringup-inputs
               mountPath: /etc/openbao/inputs
+            # The CNPG superuser, for the database engine (pg_engine_ensure).
+            - name: pg-superuser
+              mountPath: /etc/openbao/pg-superuser
+              readOnly: true
             # The OpenBao CA only, never the key of the listener.
             - name: openbao-ca
               mountPath: /etc/gibson/openbao-ca
@@ -16272,6 +16392,18 @@ spec:
               # Empty unless a rotation runs (scripts/keyring.sh rotate).
               - key: "openbao-seal-previous-key"
                 path: openbao-seal-previous-key
+        # The CNPG superuser Secret, read by the database engine connection
+        # (ADR-0171). optional: CNPG writes it after the Cluster starts.
+        - name: pg-superuser
+          secret:
+            secretName: platform-postgres-superuser
+            defaultMode: 0440
+            optional: true
+            items:
+              - key: username
+                path: username
+              - key: password
+                path: password
         # The two keyring INPUTS for the sidecar (deploy#1732): the same
         # bringup keyring Secret, a different volume, and NEVER the seal key.
         # Item names follow scripts/keyring.sh: member GHCR_PULL_TOKEN is the
@@ -16572,7 +16704,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "tmp,spire-agent-socket"
-        checksum/config: 978165bfca7b61cd0d21cae9c562cd922c4986f4bca31113a81c5ce78e04859f
+        checksum/config: 6d67711c5ecb918e74c715468eac61cff9008f1d799295055b16ccbe0f7a96b8
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). Consumer envFrom
         # resolution is frozen for the pod's lifetime; Reloader watches the
         # named Secrets and triggers a rolling restart when any changes.
@@ -16587,7 +16719,10 @@ spec:
         # gibson-daemon-metrics-tls: the metrics listener loads its cert one
         # time at start, so a cert-manager renewal restarts the daemon
         # (ADR-0171, row component-tls).
-        secret.reloader.stakater.com/reload: "gibson-gibson-workloads-db-secrets,gibson-platform-postgres-credentials,gibson-native-login-oidc,gibson-daemon-metrics-tls"
+        # gibson-platform-postgres-credentials: the login role of
+        # gibson_platform, which the OpenBao database engine issues every
+        # 24 hours (ADR-0171, row postgres-role-passwords).
+        secret.reloader.stakater.com/reload: "gibson-platform-postgres-credentials,gibson-native-login-oidc,gibson-daemon-metrics-tls"
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
     spec:
       serviceAccountName: gibson
@@ -16915,6 +17050,13 @@ spec:
             # gibson.platformPostgres.passwordSecret{Name,Key} helpers so
             # prod overlays can point at an externally-managed RDS secret.
             # Spec helm-eks-readiness-and-pg-split Phase 2.
+            # The login role of gibson_platform (ADR-0171): the config file
+            # reads it as ${DASHBOARD_DB_USERNAME}.
+            - name: DASHBOARD_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: gibson-platform-postgres-credentials
+                  key: username
             - name: DASHBOARD_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -17339,11 +17481,12 @@ spec:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: spire-server
-        checksum/config: f2bb6a7a4aba3af5bdb7c891a12d913fb8383348cf7a9682717d6fbf107873d0
+        checksum/config: 05c6d6b278c5f3bfe564d37f9b8f7f6e9a9c61a33f64f2d23a11b423d063b62e
         checksum/config2: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         checksum/config3: 967569fd565458246292b70c701e9d3834656c8ce3bfc35a15cab1d2d6ded536
         checksum/configTornjak: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         backup.velero.io/backup-volumes-excludes: server-tmp,spire-server-socket,spire-controller-manager-tmp
+        secret.reloader.stakater.com/reload: spire-postgres-credentials
       labels:
         app.kubernetes.io/name: server
         app.kubernetes.io/instance: gibson
@@ -17384,6 +17527,11 @@ spec:
           env:
           - name: PATH
             value: "/opt/spire/bin:/bin"
+          - name: DBUSER
+            valueFrom:
+              secretKeyRef:
+                key: username
+                name: spire-postgres-credentials
           - name: DBPW
             valueFrom:
               secretKeyRef:
@@ -18807,8 +18955,13 @@ spec:
               value: require
             - name: PGCONNECT_TIMEOUT
               value: "5"
+            # The login role of the zitadel owner (ADR-0171, row
+            # postgres-role-passwords): it sets role to zitadel.
             - name: PGUSER
-              value: zitadel
+              valueFrom:
+                secretKeyRef:
+                  name: zitadel-postgres-credentials
+                  key: username
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
@@ -21071,40 +21224,6 @@ spec:
       remoteRef: { key: gibson-zitadel-login-client-pat, property: pat }
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/missing-secrets.yaml
-# gibson-workloads-db-secrets — referenced by gibson daemon for tenant
-# admin DB password and the SPIRE datastore password
-# (Aurora/RDS spire role; deploy#572).
-apiVersion: external-secrets.io/v1
-kind: ExternalSecret
-metadata:
-  name: gibson-gibson-workloads-db-secrets
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-spec:
-  refreshInterval: 60s
-  secretStoreRef:
-    name: "gibson-secrets"
-    kind: ClusterSecretStore
-  target:
-    name: gibson-gibson-workloads-db-secrets
-    creationPolicy: Owner
-    template:
-      type: Opaque
-      data:
-        TENANT_POSTGRES_ADMIN_PASSWORD: "{{ .tenant_admin_password }}"
-        SPIRE_DB_PASSWORD: "{{ .spire_password }}"
-  data:
-    - secretKey: tenant_admin_password
-      remoteRef: { key: gibson-tenant-admin-postgres-password, property: password }
-    - secretKey: spire_password
-      remoteRef: { key: gibson-spire-postgres-password, property: password }
----
-# Source: gibson/charts/gibson-workloads/templates/external-secrets/missing-secrets.yaml
 # gibson-workloads-redis-stack — Redis auth password. Consumer wiring is
 # routed through gibson.redisPasswordSecretName / gibson.redisPasswordSecretKey
 # helpers; daemon + dashboard + redis-backup CronJob + the redis-stack
@@ -21152,24 +21271,16 @@ spec:
 # 2 times" validation on multi-source Apps.
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/missing-secrets.yaml
-# gibson-platform-postgres-credentials — the platform DB password the daemon +
-# platform/tenant operators mount (key resolved via
-# `gibson.platformPostgres.passwordSecretKey`, which the kind AND aws-prod overlays
-# both set to "password") AND the CNPG postgres-setup Job reads from
-# `.data.password` to set the gibson_platform role password (epic-447 #729).
-# SOLE producer across both render paths: the subchart-direct path (kind) and the
-# umbrella path (EKS). The umbrella-only copy (deploy#911/PR#912) was a duplicate
-# Owner ExternalSecret (same name+namespace) and was deleted (deploy#960); its EKS
-# cold-bringup sync-wave ordering is folded in below.
+# gibson-platform-postgres-credentials — the login role of gibson_platform that
+# the daemon, the dashboard and the tenant-operator read (keys username and
+# password). The OpenBao database engine issues it (ADR-0171, row
+# postgres-role-passwords; the generator postgres-login-gibson-platform in
+# postgres-logins.yaml). ESO asks for a new login role every 24 hours.
+# SOLE producer across both render paths (deploy#960).
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # Deterministic cold-bringup ordering (deploy#820, folded from the deleted
-  # umbrella copy in deploy#960): STANDING infrastructure that owns its target
-  # Secret (creationPolicy: Owner) — must NOT be an Argo hook (hook lifecycle would
-  # cascade-delete the owned Secret), and must sync at wave -8 (after the
-  # ClusterSecretStore at -10, before the postgres-setup Jobs at -6) so the
-  # Job's `.data.password` wait resolves instead of deadlocking.
+  # Standing infrastructure at an early sync-wave (deploy#820), never a hook.
   annotations:
     argocd.argoproj.io/sync-wave: "-8"
   name: gibson-platform-postgres-credentials
@@ -21181,24 +21292,21 @@ metadata:
     app.kubernetes.io/version: "0.154.0"
     app.kubernetes.io/managed-by: Helm
 spec:
-  refreshInterval: 60s
-  secretStoreRef:
-    name: "gibson-secrets"
-    kind: ClusterSecretStore
+  refreshInterval: 24h
+  dataFrom:
+  - sourceRef:
+      generatorRef:
+        apiVersion: generators.external-secrets.io/v1alpha1
+        kind: VaultDynamicSecret
+        name: postgres-login-gibson-platform
   target:
     name: gibson-platform-postgres-credentials
     creationPolicy: Owner
     template:
       type: Opaque
       data:
+        username: "{{ .username }}"
         password: "{{ .password }}"
-  data:
-    - secretKey: password
-      # NOTE: the doubled gibson- prefix is a known wart. It is the name the
-      # seed table carries, so this remoteRef matches it verbatim. Renaming it
-      # to gibson-platform-postgres-password means one coordinated change to
-      # the seed table, this template and secret-contract.yaml — see deploy#965.
-      remoteRef: { key: gibson-gibson-platform-postgres-password, property: password }
 # NOTE: gibson-zitadel-system-key is intentionally NOT produced here. It has a
 # single canonical producer — the gitops `standalone-externalsecrets` app
 # (apps/overlays/{base,kind,prod} zitadel-system-key) — which maps BOTH
@@ -21422,36 +21530,27 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # Deterministic cold-bringup ordering (deploy#820): this ExternalSecret is
-  # STANDING infrastructure — it owns its target Secret for the life of the
-  # install (creationPolicy: Owner), so it must NOT be an Argo hook: hook
-  # lifecycle (BeforeHookCreation deletes, operation-retry cleanup) deletes the
-  # ExternalSecret and cascade-deletes the owned Secret out from under running
-  # workloads (observed live on staging, 2026-06-11). A regular resource at an
-  # early sync-wave (-8, after the store at -10, before the zitadel init chain
-  # at -6/-4/-3) gives the same cold-sync ordering with a durable object.
+  # Standing infrastructure at an early sync-wave (deploy#820), never a hook.
   annotations:
     argocd.argoproj.io/sync-wave: "-8"
   name: openfga-postgres-credentials
   namespace: gibson
 spec:
-  data:
-  - remoteRef:
-      key: gibson-openfga-postgres-password
-      property: password
-    secretKey: password
-  refreshInterval: 60s
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: gibson-secrets
+  refreshInterval: 24h
+  dataFrom:
+  - sourceRef:
+      generatorRef:
+        apiVersion: generators.external-secrets.io/v1alpha1
+        kind: VaultDynamicSecret
+        name: postgres-login-openfga
   target:
     creationPolicy: Owner
     name: openfga-postgres-credentials
     template:
-      data:
-        password: '{{ .password }}'
-        username: openfga
       type: kubernetes.io/basic-auth
+      data:
+        username: '{{ .username }}'
+        password: '{{ .password }}'
 ---
 # Source: gibson/templates/externalsecrets/registry-credentials.yaml
 apiVersion: external-secrets.io/v1
@@ -21495,91 +21594,79 @@ spec:
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # Deterministic cold-bringup ordering (deploy#820): this ExternalSecret is
-  # STANDING infrastructure — it owns its target Secret for the life of the
-  # install (creationPolicy: Owner), so it must NOT be an Argo hook: hook
-  # lifecycle (BeforeHookCreation deletes, operation-retry cleanup) deletes the
-  # ExternalSecret and cascade-deletes the owned Secret out from under running
-  # workloads (observed live on staging, 2026-06-11). A regular resource at an
-  # early sync-wave (-8, after the store at -10, before the zitadel init chain
-  # at -6/-4/-3) gives the same cold-sync ordering with a durable object.
+  # Standing infrastructure at an early sync-wave (deploy#820), never a hook.
   annotations:
     argocd.argoproj.io/sync-wave: "-8"
   name: spire-postgres-credentials
   namespace: gibson
 spec:
-  data:
-  - remoteRef:
-      key: gibson-spire-postgres-password
-      property: password
-    secretKey: password
-  refreshInterval: 60s
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: gibson-secrets
+  refreshInterval: 24h
+  dataFrom:
+  - sourceRef:
+      generatorRef:
+        apiVersion: generators.external-secrets.io/v1alpha1
+        kind: VaultDynamicSecret
+        name: postgres-login-spire
   target:
     creationPolicy: Owner
     name: spire-postgres-credentials
+    template:
+      type: Opaque
+      data:
+        username: '{{ .username }}'
+        password: '{{ .password }}'
 ---
 # Source: gibson/templates/externalsecrets/tenant-admin-postgres-credentials.yaml
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # Deterministic cold-bringup ordering (deploy#820): this ExternalSecret is
-  # STANDING infrastructure — it owns its target Secret for the life of the
-  # install (creationPolicy: Owner), so it must NOT be an Argo hook: hook
-  # lifecycle (BeforeHookCreation deletes, operation-retry cleanup) deletes the
-  # ExternalSecret and cascade-deletes the owned Secret out from under running
-  # workloads (observed live on staging, 2026-06-11). A regular resource at an
-  # early sync-wave (-8, after the store at -10, before the zitadel init chain
-  # at -6/-4/-3) gives the same cold-sync ordering with a durable object.
+  # Standing infrastructure at an early sync-wave (deploy#820), never a hook.
   annotations:
     argocd.argoproj.io/sync-wave: "-8"
   name: tenant-admin-postgres-credentials
   namespace: gibson
 spec:
-  data:
-  - remoteRef:
-      key: gibson-tenant-admin-postgres-password
-      property: password
-    secretKey: password
-  refreshInterval: 60s
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: gibson-secrets
+  refreshInterval: 24h
+  dataFrom:
+  - sourceRef:
+      generatorRef:
+        apiVersion: generators.external-secrets.io/v1alpha1
+        kind: VaultDynamicSecret
+        name: postgres-login-tenant-admin
   target:
     creationPolicy: Owner
     name: tenant-admin-postgres-credentials
+    template:
+      type: Opaque
+      data:
+        username: '{{ .username }}'
+        password: '{{ .password }}'
 ---
 # Source: gibson/templates/externalsecrets/zitadel-postgres-credentials.yaml
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  # Deterministic cold-bringup ordering (deploy#820): this ExternalSecret is
-  # STANDING infrastructure — it owns its target Secret for the life of the
-  # install (creationPolicy: Owner), so it must NOT be an Argo hook: hook
-  # lifecycle (BeforeHookCreation deletes, operation-retry cleanup) deletes the
-  # ExternalSecret and cascade-deletes the owned Secret out from under running
-  # workloads (observed live on staging, 2026-06-11). A regular resource at an
-  # early sync-wave (-8, after the store at -10, before the zitadel init chain
-  # at -6/-4/-3) gives the same cold-sync ordering with a durable object.
+  # Standing infrastructure at an early sync-wave (deploy#820), never a hook.
   annotations:
     argocd.argoproj.io/sync-wave: "-8"
   name: zitadel-postgres-credentials
   namespace: gibson
 spec:
-  data:
-  - remoteRef:
-      key: gibson-zitadel-postgres-password
-      property: password
-    secretKey: password
-  refreshInterval: 60s
-  secretStoreRef:
-    kind: ClusterSecretStore
-    name: gibson-secrets
+  refreshInterval: 24h
+  dataFrom:
+  - sourceRef:
+      generatorRef:
+        apiVersion: generators.external-secrets.io/v1alpha1
+        kind: VaultDynamicSecret
+        name: postgres-login-zitadel
   target:
     creationPolicy: Owner
     name: zitadel-postgres-credentials
+    template:
+      type: Opaque
+      data:
+        username: '{{ .username }}'
+        password: '{{ .password }}'
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/webhook.yaml
 apiVersion: cert-manager.io/v1
@@ -23098,6 +23185,176 @@ webhooks:
         operations: ["CREATE", "UPDATE"]
         resources: ["clusterspiffeids"]
     sideEffects: None
+---
+# Source: gibson/charts/gibson-workloads/templates/external-secrets/postgres-logins.yaml
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: VaultDynamicSecret
+metadata:
+  name: postgres-login-gibson-platform
+  namespace: gibson
+  annotations:
+    # With the ClusterSecretStore (-10), before every ExternalSecret that
+    # names it (-8).
+    argocd.argoproj.io/sync-wave: "-9"
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  path: "database/creds/gibson-platform"
+  method: GET
+  resultType: Data
+  provider:
+    server: "https://gibson-openbao.gibson.svc:8200"
+    caProvider:
+      type: Secret
+      name: "gibson-openbao-tls"
+      namespace: "gibson"
+      key: ca.crt
+    auth:
+      kubernetes:
+        mountPath: "kubernetes"
+        role: "eso-reader"
+        serviceAccountRef:
+          name: "external-secrets"
+---
+# Source: gibson/charts/gibson-workloads/templates/external-secrets/postgres-logins.yaml
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: VaultDynamicSecret
+metadata:
+  name: postgres-login-tenant-admin
+  namespace: gibson
+  annotations:
+    # With the ClusterSecretStore (-10), before every ExternalSecret that
+    # names it (-8).
+    argocd.argoproj.io/sync-wave: "-9"
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  path: "database/creds/tenant-admin"
+  method: GET
+  resultType: Data
+  provider:
+    server: "https://gibson-openbao.gibson.svc:8200"
+    caProvider:
+      type: Secret
+      name: "gibson-openbao-tls"
+      namespace: "gibson"
+      key: ca.crt
+    auth:
+      kubernetes:
+        mountPath: "kubernetes"
+        role: "eso-reader"
+        serviceAccountRef:
+          name: "external-secrets"
+---
+# Source: gibson/charts/gibson-workloads/templates/external-secrets/postgres-logins.yaml
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: VaultDynamicSecret
+metadata:
+  name: postgres-login-zitadel
+  namespace: gibson
+  annotations:
+    # With the ClusterSecretStore (-10), before every ExternalSecret that
+    # names it (-8).
+    argocd.argoproj.io/sync-wave: "-9"
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  path: "database/creds/zitadel"
+  method: GET
+  resultType: Data
+  provider:
+    server: "https://gibson-openbao.gibson.svc:8200"
+    caProvider:
+      type: Secret
+      name: "gibson-openbao-tls"
+      namespace: "gibson"
+      key: ca.crt
+    auth:
+      kubernetes:
+        mountPath: "kubernetes"
+        role: "eso-reader"
+        serviceAccountRef:
+          name: "external-secrets"
+---
+# Source: gibson/charts/gibson-workloads/templates/external-secrets/postgres-logins.yaml
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: VaultDynamicSecret
+metadata:
+  name: postgres-login-openfga
+  namespace: gibson
+  annotations:
+    # With the ClusterSecretStore (-10), before every ExternalSecret that
+    # names it (-8).
+    argocd.argoproj.io/sync-wave: "-9"
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  path: "database/creds/openfga"
+  method: GET
+  resultType: Data
+  provider:
+    server: "https://gibson-openbao.gibson.svc:8200"
+    caProvider:
+      type: Secret
+      name: "gibson-openbao-tls"
+      namespace: "gibson"
+      key: ca.crt
+    auth:
+      kubernetes:
+        mountPath: "kubernetes"
+        role: "eso-reader"
+        serviceAccountRef:
+          name: "external-secrets"
+---
+# Source: gibson/charts/gibson-workloads/templates/external-secrets/postgres-logins.yaml
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: VaultDynamicSecret
+metadata:
+  name: postgres-login-spire
+  namespace: gibson
+  annotations:
+    # With the ClusterSecretStore (-10), before every ExternalSecret that
+    # names it (-8).
+    argocd.argoproj.io/sync-wave: "-9"
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  path: "database/creds/spire"
+  method: GET
+  resultType: Data
+  provider:
+    server: "https://gibson-openbao.gibson.svc:8200"
+    caProvider:
+      type: Secret
+      name: "gibson-openbao-tls"
+      namespace: "gibson"
+      key: ca.crt
+    auth:
+      kubernetes:
+        mountPath: "kubernetes"
+        role: "eso-reader"
+        serviceAccountRef:
+          name: "external-secrets"
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/02-bootstrap-secrets.yaml
 apiVersion: v1
@@ -25199,7 +25456,10 @@ spec:
           - name: PGCONNECT_TIMEOUT
             value: "5"
           - name: PGUSER
-            value: zitadel
+            valueFrom:
+              secretKeyRef:
+                key: username
+                name: zitadel-postgres-credentials
           - name: PGPASSWORD
             valueFrom:
               secretKeyRef:
@@ -25248,10 +25508,20 @@ spec:
             - name: ZITADEL_DATABASE_POSTGRES_AWAITINITIALCONN
               value: "5m"
             
+            - name: ZITADEL_DATABASE_POSTGRES_USER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  key: username
+                  name: zitadel-postgres-credentials
             - name: ZITADEL_DATABASE_POSTGRES_USER_PASSWORD
               valueFrom:
                 secretKeyRef:
                   key: password
+                  name: zitadel-postgres-credentials
+            - name: ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  key: username
                   name: zitadel-postgres-credentials
             - name: ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD
               valueFrom:
@@ -25350,7 +25620,10 @@ spec:
           - name: PGCONNECT_TIMEOUT
             value: "5"
           - name: PGUSER
-            value: zitadel
+            valueFrom:
+              secretKeyRef:
+                key: username
+                name: zitadel-postgres-credentials
           - name: PGPASSWORD
             valueFrom:
               secretKeyRef:
@@ -25412,10 +25685,20 @@ spec:
             - name: ZITADEL_DATABASE_POSTGRES_AWAITINITIALCONN
               value: "5m"
             
+            - name: ZITADEL_DATABASE_POSTGRES_USER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  key: username
+                  name: zitadel-postgres-credentials
             - name: ZITADEL_DATABASE_POSTGRES_USER_PASSWORD
               valueFrom:
                 secretKeyRef:
                   key: password
+                  name: zitadel-postgres-credentials
+            - name: ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  key: username
                   name: zitadel-postgres-credentials
             - name: ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD
               valueFrom:
@@ -25960,16 +26243,6 @@ spec:
             secretKeyRef:
               name: platform-postgres-superuser
               key: password
-        - name: PGSETUP_PW_GIBSON_PLATFORM
-          valueFrom:
-            secretKeyRef:
-              name: gibson-platform-postgres-credentials
-              key: password
-        - name: PGSETUP_PW_TENANT_ADMIN
-          valueFrom:
-            secretKeyRef:
-              name: tenant-admin-postgres-credentials
-              key: password
         command: [bash, -ec]
         args:
         - |
@@ -25988,18 +26261,13 @@ spec:
           done
           PSQL=(psql -X -q -v ON_ERROR_STOP=1)
     
-          # setup <role> <database> <role options> <env var that holds the password>
+          # setup <owner role> <database> <role options>
           setup() {
-            echo "[$1] role, database and schema..."
-            if [ -z "${!4:-}" ]; then
-              echo "[$1] ERROR: the password in $4 is empty"
-              exit 1
-            fi
-            "${PSQL[@]}" -d postgres -v role="$1" -v db="$2" -v opts="$3" -v pwenv="$4" <<'SQL'
-          \getenv pw :pwenv
+            echo "[$1] owner role, database and schema..."
+            "${PSQL[@]}" -d postgres -v role="$1" -v db="$2" -v opts="$3" <<'SQL'
           SELECT format('CREATE ROLE %I', :'role')
             WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = :'role') \gexec
-          SELECT format('ALTER ROLE %I WITH %s PASSWORD %L', :'role', :'opts', :'pw') \gexec
+          SELECT format('ALTER ROLE %I WITH %s PASSWORD NULL', :'role', :'opts') \gexec
           SELECT format('CREATE DATABASE %I OWNER %I', :'db', :'role')
             WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_database WHERE datname = :'db') \gexec
           SELECT format('ALTER DATABASE %I OWNER TO %I', :'db', :'role') \gexec
@@ -26010,8 +26278,8 @@ spec:
           SQL
             echo "[$1] setup complete"
           }
-          setup "gibson_platform" "gibson_platform" "LOGIN" PGSETUP_PW_GIBSON_PLATFORM
-          setup "tenant_admin" "tenant_admin" "LOGIN CREATEDB CREATEROLE" PGSETUP_PW_TENANT_ADMIN
+          setup "gibson_platform" "gibson_platform" "NOLOGIN"
+          setup "tenant_admin" "tenant_admin" "NOLOGIN CREATEDB CREATEROLE"
           # gitops#101: per-tenant databases need pg_trgm for the
           # missions_name_trgm_idx GIN index in migration 003. CREATE DATABASE copies
           # template1, so the extension goes there for every NEW tenant database, and
@@ -26140,11 +26408,6 @@ spec:
             secretKeyRef:
               name: platform-postgres-superuser
               key: password
-        - name: PGSETUP_PW_OPENFGA
-          valueFrom:
-            secretKeyRef:
-              name: openfga-postgres-credentials
-              key: password
         command: [bash, -ec]
         args:
         - |
@@ -26163,18 +26426,13 @@ spec:
           done
           PSQL=(psql -X -q -v ON_ERROR_STOP=1)
     
-          # setup <role> <database> <role options> <env var that holds the password>
+          # setup <owner role> <database> <role options>
           setup() {
-            echo "[$1] role, database and schema..."
-            if [ -z "${!4:-}" ]; then
-              echo "[$1] ERROR: the password in $4 is empty"
-              exit 1
-            fi
-            "${PSQL[@]}" -d postgres -v role="$1" -v db="$2" -v opts="$3" -v pwenv="$4" <<'SQL'
-          \getenv pw :pwenv
+            echo "[$1] owner role, database and schema..."
+            "${PSQL[@]}" -d postgres -v role="$1" -v db="$2" -v opts="$3" <<'SQL'
           SELECT format('CREATE ROLE %I', :'role')
             WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = :'role') \gexec
-          SELECT format('ALTER ROLE %I WITH %s PASSWORD %L', :'role', :'opts', :'pw') \gexec
+          SELECT format('ALTER ROLE %I WITH %s PASSWORD NULL', :'role', :'opts') \gexec
           SELECT format('CREATE DATABASE %I OWNER %I', :'db', :'role')
             WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_database WHERE datname = :'db') \gexec
           SELECT format('ALTER DATABASE %I OWNER TO %I', :'db', :'role') \gexec
@@ -26185,7 +26443,7 @@ spec:
           SQL
             echo "[$1] setup complete"
           }
-          setup "openfga" "openfga" "LOGIN" PGSETUP_PW_OPENFGA
+          setup "openfga" "openfga" "NOLOGIN"
           echo "[postgres-setup] ALL_ROLES_SETUP_OK"
 ---
 # Source: gibson/templates/jobs/spire-postgres-setup-job.yaml
@@ -26279,11 +26537,6 @@ spec:
             secretKeyRef:
               name: platform-postgres-superuser
               key: password
-        - name: PGSETUP_PW_SPIRE
-          valueFrom:
-            secretKeyRef:
-              name: spire-postgres-credentials
-              key: password
         command: [bash, -ec]
         args:
         - |
@@ -26302,18 +26555,13 @@ spec:
           done
           PSQL=(psql -X -q -v ON_ERROR_STOP=1)
     
-          # setup <role> <database> <role options> <env var that holds the password>
+          # setup <owner role> <database> <role options>
           setup() {
-            echo "[$1] role, database and schema..."
-            if [ -z "${!4:-}" ]; then
-              echo "[$1] ERROR: the password in $4 is empty"
-              exit 1
-            fi
-            "${PSQL[@]}" -d postgres -v role="$1" -v db="$2" -v opts="$3" -v pwenv="$4" <<'SQL'
-          \getenv pw :pwenv
+            echo "[$1] owner role, database and schema..."
+            "${PSQL[@]}" -d postgres -v role="$1" -v db="$2" -v opts="$3" <<'SQL'
           SELECT format('CREATE ROLE %I', :'role')
             WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = :'role') \gexec
-          SELECT format('ALTER ROLE %I WITH %s PASSWORD %L', :'role', :'opts', :'pw') \gexec
+          SELECT format('ALTER ROLE %I WITH %s PASSWORD NULL', :'role', :'opts') \gexec
           SELECT format('CREATE DATABASE %I OWNER %I', :'db', :'role')
             WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_database WHERE datname = :'db') \gexec
           SELECT format('ALTER DATABASE %I OWNER TO %I', :'db', :'role') \gexec
@@ -26324,7 +26572,7 @@ spec:
           SQL
             echo "[$1] setup complete"
           }
-          setup "spire" "spire" "LOGIN" PGSETUP_PW_SPIRE
+          setup "spire" "spire" "NOLOGIN"
           echo "[postgres-setup] ALL_ROLES_SETUP_OK"
 ---
 # Source: gibson/templates/jobs/zitadel-postgres-setup-job.yaml
@@ -26418,11 +26666,6 @@ spec:
             secretKeyRef:
               name: platform-postgres-superuser
               key: password
-        - name: PGSETUP_PW_ZITADEL
-          valueFrom:
-            secretKeyRef:
-              name: zitadel-postgres-credentials
-              key: password
         command: [bash, -ec]
         args:
         - |
@@ -26441,18 +26684,13 @@ spec:
           done
           PSQL=(psql -X -q -v ON_ERROR_STOP=1)
     
-          # setup <role> <database> <role options> <env var that holds the password>
+          # setup <owner role> <database> <role options>
           setup() {
-            echo "[$1] role, database and schema..."
-            if [ -z "${!4:-}" ]; then
-              echo "[$1] ERROR: the password in $4 is empty"
-              exit 1
-            fi
-            "${PSQL[@]}" -d postgres -v role="$1" -v db="$2" -v opts="$3" -v pwenv="$4" <<'SQL'
-          \getenv pw :pwenv
+            echo "[$1] owner role, database and schema..."
+            "${PSQL[@]}" -d postgres -v role="$1" -v db="$2" -v opts="$3" <<'SQL'
           SELECT format('CREATE ROLE %I', :'role')
             WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = :'role') \gexec
-          SELECT format('ALTER ROLE %I WITH %s PASSWORD %L', :'role', :'opts', :'pw') \gexec
+          SELECT format('ALTER ROLE %I WITH %s PASSWORD NULL', :'role', :'opts') \gexec
           SELECT format('CREATE DATABASE %I OWNER %I', :'db', :'role')
             WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_database WHERE datname = :'db') \gexec
           SELECT format('ALTER DATABASE %I OWNER TO %I', :'db', :'role') \gexec
@@ -26463,7 +26701,7 @@ spec:
           SQL
             echo "[$1] setup complete"
           }
-          setup "zitadel" "zitadel" "LOGIN CREATEDB" PGSETUP_PW_ZITADEL
+          setup "zitadel" "zitadel" "NOLOGIN CREATEDB"
           echo "[postgres-setup] ALL_ROLES_SETUP_OK"
 ---
 # Source: gibson/templates/webhook-gate.yaml

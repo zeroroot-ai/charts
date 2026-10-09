@@ -15,6 +15,9 @@ store that `spec.secretStoreRef` names:
     matches), or by `namespaceSelector.matchLabels`
     against a Namespace object of the same render.
 
+An ExternalSecret whose every source is a generator (dataFrom
+sourceRef.generatorRef, and no data) reads no store, so it needs none.
+
 A ClusterSecretStore with no conditions serves every namespace. The platform
 store holds the Zitadel owner credentials, so that fails too.
 
@@ -62,7 +65,11 @@ def judge(docs: list) -> list[str]:
         if d.get("kind") != "ExternalSecret":
             continue
         ns, es = ns_of(d), f"ExternalSecret {ns_of(d)}/{d['metadata']['name']}"
-        ref = (d.get("spec") or {}).get("secretStoreRef") or {}
+        spec = d.get("spec") or {}
+        if (not spec.get("secretStoreRef") and not spec.get("data") and spec.get("dataFrom")
+                and all(((f.get("sourceRef") or {}).get("generatorRef")) for f in spec["dataFrom"])):
+            continue
+        ref = spec.get("secretStoreRef") or {}
         kind, store = ref.get("kind") or "SecretStore", ref.get("name")
         if kind == "SecretStore":
             if (ns, store) not in local:
@@ -111,6 +118,9 @@ def selftest() -> int:
         ("a selector that matches a rendered Namespace",
          [store(conds=[{"namespaceSelector": {"matchLabels": {"a": "b"}}}]), es("x"),
           {"kind": "Namespace", "metadata": {"name": "x", "labels": {"a": "b"}}}]),
+        ("an ExternalSecret fed by a generator only",
+         [store(conds=gibson), {"kind": "ExternalSecret", "metadata": {"name": "g", "namespace": "gibson"},
+                                "spec": {"dataFrom": [{"sourceRef": {"generatorRef": {"kind": "VaultDynamicSecret", "name": "v"}}}]}}]),
         ("a SecretStore in the same namespace",
          [{"kind": "SecretStore", "metadata": {"name": "l", "namespace": "x"}}, es("x", "l", "SecretStore")]),
     )
@@ -126,6 +136,10 @@ def selftest() -> int:
          [store(conds=[{"namespaceSelector": {"matchLabels": {"a": "b"}}}]), es("x")]),
         ("a ClusterSecretStore with no conditions", [store(), es("gibson")]),
         ("a ClusterSecretStore that is not rendered", [store(conds=gibson), es("gibson", "other")]),
+        ("a generator next to a data entry, with no store",
+         [store(conds=gibson), {"kind": "ExternalSecret", "metadata": {"name": "g", "namespace": "gibson"},
+                                "spec": {"data": [{"secretKey": "k", "remoteRef": {"key": "k"}}],
+                                         "dataFrom": [{"sourceRef": {"generatorRef": {"kind": "VaultDynamicSecret", "name": "v"}}}]}}]),
         ("a SecretStore in another namespace",
          [{"kind": "SecretStore", "metadata": {"name": "l", "namespace": "y"}}, es("x", "l", "SecretStore")]),
     )
@@ -133,7 +147,7 @@ def selftest() -> int:
         if len(judge(docs)) != 1:
             print(f"SELFTEST FAIL: {what} must give one finding, got {judge(docs)}")
             return 1
-    print("  ✓ selftest: an ExternalSecret outside its store, an open store and a missing store fail")
+    print("  ✓ selftest: an ExternalSecret outside its store, an open store, a missing store and a store-less data entry fail")
     return 0
 
 

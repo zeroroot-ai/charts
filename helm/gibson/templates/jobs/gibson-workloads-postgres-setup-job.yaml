@@ -41,8 +41,8 @@ tenant-operator's per-tenant Postgres provisioner creates both the
 per-tenant database and a per-tenant `<tenant>_app` role inside it.
 */}}
 {{- $entries := list
-  (dict "role" "gibson_platform" "db" "gibson_platform" "opts" "LOGIN" "secret" "gibson-platform-postgres-credentials")
-  (dict "role" "tenant_admin" "db" "tenant_admin" "opts" "LOGIN CREATEDB CREATEROLE" "secret" "tenant-admin-postgres-credentials") }}
+  (dict "role" "gibson_platform" "db" "gibson_platform" "opts" "NOLOGIN")
+  (dict "role" "tenant_admin" "db" "tenant_admin" "opts" "NOLOGIN CREATEDB CREATEROLE") }}
 {{- $extra := `# gitops#101: per-tenant databases need pg_trgm for the
 # missions_name_trgm_idx GIN index in migration 003. CREATE DATABASE copies
 # template1, so the extension goes there for every NEW tenant database, and

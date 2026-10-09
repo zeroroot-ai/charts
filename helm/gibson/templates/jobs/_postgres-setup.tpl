@@ -1,17 +1,19 @@
 {{- /*
 gibson.postgresSetup.podTemplate — the pod of every postgres-setup Job.
 
-Each Job creates one or more login roles and their databases on the
-platform Postgres (the CNPG Cluster platform-postgres), sets each role's
-password from its ESO-materialized Secret, and gives the role its database's
-public schema. It is a plain Postgres client:
+Each Job creates one or more owner roles and their databases on the
+platform Postgres (the CNPG Cluster platform-postgres), and gives each owner
+its database's public schema. An owner role logs in no more (NOLOGIN, no
+password): the OpenBao database engine issues the login roles, members of the
+owner that set role to it at each login (ADR-0171, row
+postgres-role-passwords). It is a plain Postgres client:
 
   - It connects to the platform-postgres-rw Service as the CNPG superuser,
     with the password CNPG writes to platform-postgres-superuser
     (enableSuperuserAccess: true), over TLS (sslmode=require, the mode every
     other platform client uses).
-  - The kubelet hands it every password through secretKeyRef, so the pod
-    waits in CreateContainerConfigError until ESO or CNPG has written the
+  - The kubelet hands it the superuser password through secretKeyRef, so the
+    pod waits in CreateContainerConfigError until CNPG has written the
     Secret, and the Job never reads a Secret through the API.
   - Its ServiceAccount holds no RBAC and mounts no token.
 
@@ -25,18 +27,18 @@ credentials included (scripts/check-owner-credential-readers.py).
 Every step is idempotent, so a re-run (an upgrade, a retry) converges:
 
   1. create the role if it is missing
-  2. set its options and its password (always, so a changed option or a
-     rotated password lands on the next run)
+  2. set its options (always, so a changed option lands on the next run),
+     and remove any password it had: an owner logs in no more
   3. create the database with the role as owner if it is missing, else make
      the role its owner
   4. grant the role every privilege on the database
   5. make the role the owner of the database's public schema (PostgreSQL 15
      and later no longer grant CREATE on it to everyone)
 
-The SQL takes every name and the password through psql variables and
-format(%I, %L), so no value is ever spliced into SQL text by the shell.
+The SQL takes every name through psql variables and format(%I, %L), so no
+value is ever spliced into SQL text by the shell.
 
-Input: (dict "root" $ "entries" (list (dict "role" "db" "opts" "secret")) "extra" "<bash>")
+Input: (dict "root" $ "entries" (list (dict "role" "db" "opts")) "extra" "<bash>")
 */ -}}
 {{- define "gibson.postgresSetup.podTemplate" -}}
 {{- $root := .root }}
@@ -92,13 +94,6 @@ spec:
         secretKeyRef:
           name: platform-postgres-superuser
           key: password
-    {{- range .entries }}
-    - name: {{ printf "PGSETUP_PW_%s" (upper .role) }}
-      valueFrom:
-        secretKeyRef:
-          name: {{ .secret }}
-          key: password
-    {{- end }}
     command: [bash, -ec]
     args:
     - |
@@ -117,18 +112,13 @@ spec:
       done
       PSQL=(psql -X -q -v ON_ERROR_STOP=1)
 
-      # setup <role> <database> <role options> <env var that holds the password>
+      # setup <owner role> <database> <role options>
       setup() {
-        echo "[$1] role, database and schema..."
-        if [ -z "${!4:-}" ]; then
-          echo "[$1] ERROR: the password in $4 is empty"
-          exit 1
-        fi
-        "${PSQL[@]}" -d postgres -v role="$1" -v db="$2" -v opts="$3" -v pwenv="$4" <<'SQL'
-      \getenv pw :pwenv
+        echo "[$1] owner role, database and schema..."
+        "${PSQL[@]}" -d postgres -v role="$1" -v db="$2" -v opts="$3" <<'SQL'
       SELECT format('CREATE ROLE %I', :'role')
         WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = :'role') \gexec
-      SELECT format('ALTER ROLE %I WITH %s PASSWORD %L', :'role', :'opts', :'pw') \gexec
+      SELECT format('ALTER ROLE %I WITH %s PASSWORD NULL', :'role', :'opts') \gexec
       SELECT format('CREATE DATABASE %I OWNER %I', :'db', :'role')
         WHERE NOT EXISTS (SELECT FROM pg_catalog.pg_database WHERE datname = :'db') \gexec
       SELECT format('ALTER DATABASE %I OWNER TO %I', :'db', :'role') \gexec
@@ -141,7 +131,7 @@ spec:
       }
 
       {{- range .entries }}
-      setup {{ .role | quote }} {{ .db | quote }} {{ .opts | quote }} {{ printf "PGSETUP_PW_%s" (upper .role) }}
+      setup {{ .role | quote }} {{ .db | quote }} {{ .opts | quote }}
       {{- end }}
       {{- with .extra }}
 

@@ -55,8 +55,10 @@ declared, and no overlay set it.
 {{- include "gibson.platformPostgres.port" . -}}
 {{- end }}
 
-{{- define "gibson.tenantPostgres.username" -}}
-tenant_admin
+{{- /* The key of the tenant_admin Secret that holds its login role, which the
+       OpenBao database engine issues (ADR-0171). */ -}}
+{{- define "gibson.tenantPostgres.usernameSecretKey" -}}
+username
 {{- end }}
 
 {{- define "gibson.tenantPostgres.passwordSecretName" -}}

@@ -47,7 +47,7 @@ spec:
         # rotated. Reloader runs cluster-wide and watches the explicitly-
         # named Secrets below; when any of them changes, Reloader triggers
         # a rolling restart of this Deployment.
-        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,{{ include "gibson.dashboardSecrets.name" . }}"
+        secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,{{ include "gibson.dashboardSecrets.name" . }}{{ if .Values.dashboard.postgres.enabled }},{{ include "gibson.platformPostgres.passwordSecretName" . }}{{ end }}"
     spec:
       {{- include "gibson.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ .Values.dashboard.serviceAccount.name | default "gibson-dashboard" }}
@@ -495,14 +495,21 @@ spec:
             # to the existing dashboard-postgresql alias; in prod it points
             # at RDS via platformPostgres.external.host.
             {{- if .Values.dashboard.postgres.enabled }}
+            # The login role and its password, from one Secret: the OpenBao
+            # database engine issues a new login role every 24 hours
+            # (ADR-0171), and Reloader restarts the dashboard.
+            - name: DASHBOARD_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gibson.platformPostgres.passwordSecretName" . }}
+                  key: {{ include "gibson.platformPostgres.usernameSecretKey" . }}
             - name: DASHBOARD_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "gibson.platformPostgres.passwordSecretName" . }}
                   key: {{ include "gibson.platformPostgres.passwordSecretKey" . }}
             - name: DATABASE_URL
-              value: {{ printf "postgres://%s:$(DASHBOARD_DB_PASSWORD)@%s:%v/%s?sslmode=%s"
-                (include "gibson.platformPostgres.username" .)
+              value: {{ printf "postgres://$(DASHBOARD_DB_USERNAME):$(DASHBOARD_DB_PASSWORD)@%s:%v/%s?sslmode=%s"
                 (include "gibson.platformPostgres.host" .)
                 (include "gibson.platformPostgres.port" .)
                 (include "gibson.platformPostgres.database" .)

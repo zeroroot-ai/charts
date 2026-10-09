@@ -1175,7 +1175,8 @@ platformPostgres:
   host: ""
   port: 5432
   database: ""   # defaults to gibson_platform in the helper when empty
-  user: ""       # alias accepted by some overlays; helper prefers `username`
+  # No username: the Secret holds the login role, which the OpenBao database
+  # engine issues every 24 hours (ADR-0171).
   # passwordSecretName MUST be set in every overlay; helper fails render otherwise.
   passwordSecretName: ""
   passwordSecretKey: PLATFORM_DB_PASSWORD
@@ -1194,7 +1195,6 @@ platformPostgres:
     host: ""
     port: 5432
     database: ""
-    username: ""
     sslMode: "require"
     passwordSecretName: ""
     passwordSecretKey: "password"
