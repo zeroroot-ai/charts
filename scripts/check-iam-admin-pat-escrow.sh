@@ -49,6 +49,16 @@ def check(docs):
         tmpl = (pat[0]["spec"]["target"].get("template") or {}).get("data") or {}
         if (KEY, "userId") not in props or "userId" not in tmpl:
             bad.append(f"the iam-admin-pat ExternalSecret must read property userId of {KEY} and write the key userId: the platform-operator reads the iam-admin user id there")
+    # The platform-operator mints the PAT at wave 0 and the ExternalSecret reads
+    # it back. At a wave before the operator the key does not exist on a fresh
+    # install: the ExternalSecret is Degraded and Argo never applies wave 0.
+    ops = [d for d in docs if d.get("kind") == "Deployment" and d["metadata"]["name"].endswith("-platform-operator")]
+    if pat and ops:
+        def w(d):
+            x = (d["metadata"].get("annotations") or {}).get("argocd.argoproj.io/sync-wave")
+            return int(x) if x is not None else 0
+        if w(pat[0]) < min(w(o) for o in ops):
+            bad.append(f"the iam-admin-pat ExternalSecret (wave {w(pat[0])}) is ahead of the platform-operator (wave {min(w(o) for o in ops)}) that mints the PAT it reads: a fresh install never ends")
     for d in docs:
         if d.get("kind") == "ConfigMap" and "zitadel" in d["metadata"]["name"]:
             for v in (d.get("data") or {}).values():
@@ -152,6 +162,13 @@ for d in nouid:
         d["spec"]["target"]["template"]["data"].pop("userId", None)
 if not any("userId" in b for b in check(nouid)):
     sys.exit("self-test broken: an iam-admin-pat ExternalSecret with no userId was not detected")
+# The deadlock of 2026-10-09, planted: the iam-admin-pat ExternalSecret ahead of the operator.
+early = copy.deepcopy(docs)
+for d in early:
+    if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == "iam-admin-pat":
+        d["metadata"].setdefault("annotations", {})["argocd.argoproj.io/sync-wave"] = "-1"
+if not any("ahead of the platform-operator" in b for b in check(early)):
+    sys.exit("self-test broken: the iam-admin-pat ExternalSecret ahead of the operator was not detected")
 # The deadlock of 2026-09-08, planted: the ExternalSecret at wave 1.
 late = copy.deepcopy(docs)
 for d in late:
@@ -225,5 +242,5 @@ if bad:
     print("✗ check-iam-admin-pat-escrow:", file=sys.stderr)
     for b in bad: print("   " + b, file=sys.stderr)
     sys.exit(1)
-print("✅ self-test: each removed ExternalSecret, a Role that does not name login-client, a wave-1 ExternalSecret, a wave-0 gibson-openbao-keys, a PAT ExternalSecret on Orphan, a machine key of iam-admin and an iam-admin ExternalSecret are detected; login-client is escrowed by a covered Job and read back by an Orphan ExternalSecret, iam-admin-pat has one writer, its Owner ExternalSecret, and the setup Job mints no machine key")
+print("✅ self-test: each removed ExternalSecret, a Role that does not name login-client, a wave-1 login-client ExternalSecret, an iam-admin-pat ExternalSecret ahead of the platform-operator, a wave-0 gibson-openbao-keys, a PAT ExternalSecret on Orphan, a machine key of iam-admin and an iam-admin ExternalSecret are detected; login-client is escrowed by a covered Job and read back by an Orphan ExternalSecret, iam-admin-pat has one writer, its Owner ExternalSecret, and the setup Job mints no machine key")
 PY
