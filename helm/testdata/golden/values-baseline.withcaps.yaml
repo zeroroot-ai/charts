@@ -7611,7 +7611,7 @@ rules:
 #   gibson-platform-operator-vault — policy platform-operator
 #   gibson-tenant-operator-vault   — policy tenant-operator
 #   gibson-openbao-iam-admin-escrow, gibson-openbao-jwt-auth-init,
-#   gibson-openbao-masterkey-rotation,
+#   gibson-openbao-masterkey-rotation, gibson-openbao-pg-logins,
 #   gibson-openbao-approle-init, gibson-openbao-approle-reader — the Jobs
 # A non-renewable root token in either would cause VaultTransitReady=False,
 # because vaulttoken.Renewer calls renew-self and OpenBao rejects it with
@@ -7665,6 +7665,7 @@ rules:
       - gibson-openbao-iam-admin-escrow
       - gibson-openbao-jwt-auth-init
       - gibson-openbao-masterkey-rotation
+      - gibson-openbao-pg-logins
 ---
 # Source: gibson/charts/gibson-workloads/templates/databases/redis-rotation-controller.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -14762,7 +14763,7 @@ spec:
               TENANT_OP_POLICY="tenant-operator"
               # The token of each Job that configures the store, as
               # <Secret>:<policy>. Each Job mounts its own Secret and nothing else.
-              JOB_TOKENS="gibson-openbao-iam-admin-escrow:iam-admin-escrow gibson-openbao-jwt-auth-init:jwt-auth-init gibson-openbao-masterkey-rotation:zitadel-masterkey-rotation"
+              JOB_TOKENS="gibson-openbao-iam-admin-escrow:iam-admin-escrow gibson-openbao-jwt-auth-init:jwt-auth-init gibson-openbao-masterkey-rotation:zitadel-masterkey-rotation gibson-openbao-pg-logins:postgres-logins"
               ESO_ROLE="eso-reader"
               ESO_POLICY="eso-reader"
               ESO_SA_NAME="external-secrets"
@@ -16049,6 +16050,10 @@ spec:
                 vault_write_policy "$tok" zitadel-masterkey-rotation \
                   '
               path "secret/data/zitadel-masterkey" { capabilities = ["read", "update"] }' || return 1
+                vault_write_policy "$tok" postgres-logins \
+                  '
+              path "database/creds/*" { capabilities = ["read"] }
+              path "sys/leases/revoke" { capabilities = ["update"] }' || return 1
 
                 # tenant-operator: what the tenant-operator's code calls, and
                 # nothing in the root namespace's kv store, where the escrowed
@@ -23847,11 +23852,17 @@ spec:
       namespace: "gibson"
       key: ca.crt
     auth:
-      kubernetes:
-        mountPath: "kubernetes"
-        role: "eso-reader"
-        serviceAccountRef:
-          name: "external-secrets"
+      # Token auth with a standing token of its own (policy postgres-logins,
+      # minted and renewed by the openbao-auto-init sidecar), NOT the
+      # kubernetes-auth mount. With the kubernetes auth External Secrets
+      # revokes its OpenBao token after each read, OpenBao revokes the leases
+      # of a token with it, and the login role is dropped at once: the pod
+      # then fails with "password authentication failed" for a role that does
+      # not exist (kind exit tests, 2026-10-10). A token from a Secret is
+      # never revoked by External Secrets.
+      tokenSecretRef:
+        name: gibson-openbao-pg-logins
+        key: VAULT_ADMIN_TOKEN
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/postgres-logins.yaml
 apiVersion: generators.external-secrets.io/v1alpha1
@@ -23881,11 +23892,17 @@ spec:
       namespace: "gibson"
       key: ca.crt
     auth:
-      kubernetes:
-        mountPath: "kubernetes"
-        role: "eso-reader"
-        serviceAccountRef:
-          name: "external-secrets"
+      # Token auth with a standing token of its own (policy postgres-logins,
+      # minted and renewed by the openbao-auto-init sidecar), NOT the
+      # kubernetes-auth mount. With the kubernetes auth External Secrets
+      # revokes its OpenBao token after each read, OpenBao revokes the leases
+      # of a token with it, and the login role is dropped at once: the pod
+      # then fails with "password authentication failed" for a role that does
+      # not exist (kind exit tests, 2026-10-10). A token from a Secret is
+      # never revoked by External Secrets.
+      tokenSecretRef:
+        name: gibson-openbao-pg-logins
+        key: VAULT_ADMIN_TOKEN
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/postgres-logins.yaml
 apiVersion: generators.external-secrets.io/v1alpha1
@@ -23915,11 +23932,17 @@ spec:
       namespace: "gibson"
       key: ca.crt
     auth:
-      kubernetes:
-        mountPath: "kubernetes"
-        role: "eso-reader"
-        serviceAccountRef:
-          name: "external-secrets"
+      # Token auth with a standing token of its own (policy postgres-logins,
+      # minted and renewed by the openbao-auto-init sidecar), NOT the
+      # kubernetes-auth mount. With the kubernetes auth External Secrets
+      # revokes its OpenBao token after each read, OpenBao revokes the leases
+      # of a token with it, and the login role is dropped at once: the pod
+      # then fails with "password authentication failed" for a role that does
+      # not exist (kind exit tests, 2026-10-10). A token from a Secret is
+      # never revoked by External Secrets.
+      tokenSecretRef:
+        name: gibson-openbao-pg-logins
+        key: VAULT_ADMIN_TOKEN
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/postgres-logins.yaml
 apiVersion: generators.external-secrets.io/v1alpha1
@@ -23949,11 +23972,17 @@ spec:
       namespace: "gibson"
       key: ca.crt
     auth:
-      kubernetes:
-        mountPath: "kubernetes"
-        role: "eso-reader"
-        serviceAccountRef:
-          name: "external-secrets"
+      # Token auth with a standing token of its own (policy postgres-logins,
+      # minted and renewed by the openbao-auto-init sidecar), NOT the
+      # kubernetes-auth mount. With the kubernetes auth External Secrets
+      # revokes its OpenBao token after each read, OpenBao revokes the leases
+      # of a token with it, and the login role is dropped at once: the pod
+      # then fails with "password authentication failed" for a role that does
+      # not exist (kind exit tests, 2026-10-10). A token from a Secret is
+      # never revoked by External Secrets.
+      tokenSecretRef:
+        name: gibson-openbao-pg-logins
+        key: VAULT_ADMIN_TOKEN
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/postgres-logins.yaml
 apiVersion: generators.external-secrets.io/v1alpha1
@@ -23983,11 +24012,17 @@ spec:
       namespace: "gibson"
       key: ca.crt
     auth:
-      kubernetes:
-        mountPath: "kubernetes"
-        role: "eso-reader"
-        serviceAccountRef:
-          name: "external-secrets"
+      # Token auth with a standing token of its own (policy postgres-logins,
+      # minted and renewed by the openbao-auto-init sidecar), NOT the
+      # kubernetes-auth mount. With the kubernetes auth External Secrets
+      # revokes its OpenBao token after each read, OpenBao revokes the leases
+      # of a token with it, and the login role is dropped at once: the pod
+      # then fails with "password authentication failed" for a role that does
+      # not exist (kind exit tests, 2026-10-10). A token from a Secret is
+      # never revoked by External Secrets.
+      tokenSecretRef:
+        name: gibson-openbao-pg-logins
+        key: VAULT_ADMIN_TOKEN
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/02-bootstrap-secrets.yaml
 apiVersion: v1

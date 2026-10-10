@@ -22,6 +22,11 @@ WHAT IT CHECKS, on a rendered golden (helm/testdata/golden/values-baseline.bare.
     2. its sync-wave is at or below the wave of each hook Job whose pod
        reads the Secret it writes.
 
+A second rule, same file: a generator that reads a leased path
+(database/creds/*) uses tokenSecretRef. With the kubernetes auth External
+Secrets revokes its OpenBao token after each read, OpenBao drops the leases
+of that token, and the login role is gone before the pod connects.
+
 USAGE
   scripts/check-postgres-logins-wave.py             check the golden
   scripts/check-postgres-logins-wave.py --selftest  prove an early and a late login fail
@@ -97,6 +102,12 @@ def judge(docs: list[dict]) -> list[str]:
             if target in secret_names(j) and wave(j) < w:
                 out.append(f"ExternalSecret/{name} is at wave {w}, after Job/{j['metadata']['name']} (wave {wave(j)}) that mounts {target}: "
                            "the Job waits for a Secret that a later wave makes")
+    for d in docs:
+        if d.get("kind") == "VaultDynamicSecret" and str((d.get("spec") or {}).get("path", "")).startswith("database/creds/"):
+            auth = ((d["spec"].get("provider") or {}).get("auth")) or {}
+            if "tokenSecretRef" not in auth:
+                out.append(f"VaultDynamicSecret/{d['metadata']['name']} reads {d['spec']['path']} without tokenSecretRef: "
+                           "the lease dies with the token that External Secrets revokes after the read")
     return out
 
 
@@ -122,7 +133,16 @@ def selftest() -> int:
         if not hit or not got or any(want not in g for g in got):
             print(f"SELFTEST FAIL: a login ExternalSecret {label} must fail with '{want}', got {got}")
             return 2
-    print("selftest ok: a login ExternalSecret too early and one too late fail")
+    bad = copy.deepcopy(docs)
+    for d in bad:
+        if isinstance(d, dict) and d.get("kind") == "VaultDynamicSecret" and d["spec"]["path"].startswith("database/creds/"):
+            d["spec"]["provider"]["auth"] = {"kubernetes": {"role": "eso-reader"}}
+            break
+    got = judge(bad)
+    if len(got) != 1 or "tokenSecretRef" not in got[0]:
+        print(f"SELFTEST FAIL: a generator of database/creds on the kubernetes auth must fail once, got {got}")
+        return 2
+    print("selftest ok: a login ExternalSecret too early, one too late, and a generator on the kubernetes auth fail")
     return 0
 
 

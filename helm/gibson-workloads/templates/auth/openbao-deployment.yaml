@@ -501,7 +501,7 @@ spec:
               TENANT_OP_POLICY="tenant-operator"
               # The token of each Job that configures the store, as
               # <Secret>:<policy>. Each Job mounts its own Secret and nothing else.
-              JOB_TOKENS="gibson-openbao-iam-admin-escrow:iam-admin-escrow gibson-openbao-jwt-auth-init:jwt-auth-init gibson-openbao-masterkey-rotation:zitadel-masterkey-rotation{{ if $cmVault }} gibson-openbao-approle-init:cert-manager-approle-init gibson-openbao-approle-reader:cert-manager-approle-reader{{ end }}"
+              JOB_TOKENS="gibson-openbao-iam-admin-escrow:iam-admin-escrow gibson-openbao-jwt-auth-init:jwt-auth-init gibson-openbao-masterkey-rotation:zitadel-masterkey-rotation gibson-openbao-pg-logins:postgres-logins{{ if $cmVault }} gibson-openbao-approle-init:cert-manager-approle-init gibson-openbao-approle-reader:cert-manager-approle-reader{{ end }}"
               ESO_ROLE="eso-reader"
               ESO_POLICY="eso-reader"
               ESO_SA_NAME="{{ $esoSA.name | default "external-secrets" }}"
@@ -1685,6 +1685,8 @@ spec:
                   '{{- include "gibson.openbaoPolicy.jwtAuthInit" . | nindent 14 }}' || return 1
                 vault_write_policy "$tok" zitadel-masterkey-rotation \
                   '{{- include "gibson.openbaoPolicy.masterkeyRotation" . | nindent 14 }}' || return 1
+                vault_write_policy "$tok" postgres-logins \
+                  '{{- include "gibson.openbaoPolicy.postgresLogins" . | nindent 14 }}' || return 1
                 {{- if $cmVault }}
                 vault_write_policy "$tok" cert-manager-approle-init \
                   '{{- include "gibson.openbaoPolicy.approleInit" . | nindent 14 }}' || return 1
@@ -2183,7 +2185,7 @@ metadata:
 #   gibson-platform-operator-vault — policy platform-operator
 #   gibson-tenant-operator-vault   — policy tenant-operator
 #   gibson-openbao-iam-admin-escrow, gibson-openbao-jwt-auth-init,
-#   gibson-openbao-masterkey-rotation,
+#   gibson-openbao-masterkey-rotation, gibson-openbao-pg-logins,
 #   gibson-openbao-approle-init, gibson-openbao-approle-reader — the Jobs
 # A non-renewable root token in either would cause VaultTransitReady=False,
 # because vaulttoken.Renewer calls renew-self and OpenBao rejects it with
@@ -2235,6 +2237,7 @@ rules:
       - gibson-openbao-iam-admin-escrow
       - gibson-openbao-jwt-auth-init
       - gibson-openbao-masterkey-rotation
+      - gibson-openbao-pg-logins
       {{- if $cmVault }}
       - gibson-openbao-approle-init
       - gibson-openbao-approle-reader
