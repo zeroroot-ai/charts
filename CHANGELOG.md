@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.143.0](https://github.com/zeroroot-ai/charts/compare/v0.142.0...v0.143.0) (2026-10-10)
+
+
+### Features
+
+* **admission:** only the tenant operator sets the managed-by label on a Namespace ([#585](https://github.com/zeroroot-ai/charts/issues/585)) ([b86d7b4](https://github.com/zeroroot-ai/charts/commit/b86d7b47d754e686f53e8c27aef5353569744877)), closes [#527](https://github.com/zeroroot-ai/charts/issues/527)
+* **edge:** a query-token auth mode for an extra route, and no query in the access log ([#584](https://github.com/zeroroot-ai/charts/issues/584)) ([6b31c02](https://github.com/zeroroot-ai/charts/commit/6b31c02507c1d508ebb747b353105e152938e6f9))
+* **network:** egress host groups from the values of the install ([#577](https://github.com/zeroroot-ai/charts/issues/577)) ([488fa8b](https://github.com/zeroroot-ai/charts/commit/488fa8b977a36a2beb460f40f23f32bb8450ca1d))
+* **openbao:** the static seal takes a previous key, and the keyring rotates the seal key and the Velero password ([#568](https://github.com/zeroroot-ai/charts/issues/568)) ([1ea74ea](https://github.com/zeroroot-ai/charts/commit/1ea74eac53ded51cd178ad17f3224bd2936791f9)), closes [#567](https://github.com/zeroroot-ai/charts/issues/567)
+* **postgres:** each platform database login is a dynamic role from the OpenBao database engine ([#583](https://github.com/zeroroot-ai/charts/issues/583)) ([7ecb6bb](https://github.com/zeroroot-ai/charts/commit/7ecb6bb11b8bec745f2b20fa8c7036daf6e18fc6)), closes [#582](https://github.com/zeroroot-ai/charts/issues/582)
+* **zitadel:** the masterkey rotates, proved by a marker and rewrapped in one transaction ([#572](https://github.com/zeroroot-ai/charts/issues/572)) ([d4bc0f5](https://github.com/zeroroot-ai/charts/commit/d4bc0f543a12cdc9c6f5a6e9e5d0b514bb5cd30e))
+* **zitadel:** the System API key rotates between two System API users ([#570](https://github.com/zeroroot-ai/charts/issues/570)) ([2822662](https://github.com/zeroroot-ai/charts/commit/28226620da57338641d8d3d840a58413f03b0076))
+
+
+### Bug Fixes
+
+* **crds:** gibson-crds ships the PodMonitor CRD that the Envoy template renders ([#590](https://github.com/zeroroot-ai/charts/issues/590)) ([7f162b8](https://github.com/zeroroot-ai/charts/commit/7f162b8d2de52cbc21c7df60aab7df1b591f47c9)), closes [#589](https://github.com/zeroroot-ai/charts/issues/589)
+* **crds:** the ConnectorInstance CRD copy matches gibson main ([#580](https://github.com/zeroroot-ai/charts/issues/580)) ([57f9b21](https://github.com/zeroroot-ai/charts/commit/57f9b212b0e5d652a4c641545b2b33945161b7d8)), closes [#521](https://github.com/zeroroot-ai/charts/issues/521)
+* **guard:** check-secure-pod matches the CNPG API group exactly ([#581](https://github.com/zeroroot-ai/charts/issues/581)) ([ee81f5a](https://github.com/zeroroot-ai/charts/commit/ee81f5a1ee868914fc1de93e0df832be3594677e)), closes [#546](https://github.com/zeroroot-ai/charts/issues/546)
+* **network:** each pod resolves only the names it needs ([#586](https://github.com/zeroroot-ai/charts/issues/586)) ([f7630c6](https://github.com/zeroroot-ai/charts/commit/f7630c689f9ab98e0f3be8362354bbdc089f3671))
+* **openbao:** the sidecar scratch volume is writable ([#592](https://github.com/zeroroot-ai/charts/issues/592)) ([e4eed51](https://github.com/zeroroot-ai/charts/commit/e4eed514f72ed2f101abab8bed8e1db4a1cb8328)), closes [#591](https://github.com/zeroroot-ai/charts/issues/591)
+* **operators:** the daemon address names its namespace ([#579](https://github.com/zeroroot-ai/charts/issues/579)) ([014a0e7](https://github.com/zeroroot-ai/charts/commit/014a0e75b103f5639cc75a0ca643d3f7c02f80c4)), closes [#526](https://github.com/zeroroot-ai/charts/issues/526)
+* **postgres:** the database login ExternalSecrets no longer gate the operator ([#594](https://github.com/zeroroot-ai/charts/issues/594)) ([5d39f67](https://github.com/zeroroot-ai/charts/commit/5d39f67c2181a75c865e72ac55f42c98777622b0)), closes [#593](https://github.com/zeroroot-ai/charts/issues/593)
+* **postgres:** the database login ExternalSecrets sit at wave -5 ([#596](https://github.com/zeroroot-ai/charts/issues/596)) ([11cb167](https://github.com/zeroroot-ai/charts/commit/11cb16792d4e99de1c478446f094821e98902c53))
+* **postgres:** the login generators read with a standing token ([#600](https://github.com/zeroroot-ai/charts/issues/600)) ([70fe0f7](https://github.com/zeroroot-ai/charts/commit/70fe0f7897c0f672b3aced6043d3a85fadc4d796))
+* **tenant-operator:** set BELIEF_TRAINER_IMAGE from a chart value ([#578](https://github.com/zeroroot-ai/charts/issues/578)) ([fb8be4b](https://github.com/zeroroot-ai/charts/commit/fb8be4b498ef226ba9b80212a5e0157950f041f9))
+* **zitadel:** the iam-admin-pat ExternalSecret sits at wave 0 with the operator ([#598](https://github.com/zeroroot-ai/charts/issues/598)) ([5fe1fab](https://github.com/zeroroot-ai/charts/commit/5fe1faba7981e975dbb600d97c20c2a0d5909015)), closes [#597](https://github.com/zeroroot-ai/charts/issues/597)
+
 ## [0.142.0](https://github.com/zeroroot-ai/charts/compare/v0.141.0...v0.142.0) (2026-10-09)
 
 
