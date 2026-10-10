@@ -101,3 +101,14 @@ cert-manager AppRole credential. A fresh secret_id and the role_id.
 path "auth/{{ $p.approle }}/role/cert-manager/secret-id" { capabilities = ["create", "update"] }
 path "auth/{{ $p.approle }}/role/cert-manager/role-id" { capabilities = ["read"] }
 {{- end -}}
+
+{{/*
+gibson.openbaoPolicy.postgresLogins: the five generators of the database
+logins (postgres-logins.yaml). A new login role for each read of
+database/creds/<role>, and the revoke of the previous lease of a generator that
+makes a new one.
+*/}}
+{{- define "gibson.openbaoPolicy.postgresLogins" -}}
+path "database/creds/*" { capabilities = ["read"] }
+path "sys/leases/revoke" { capabilities = ["update"] }
+{{- end -}}
