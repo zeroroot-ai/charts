@@ -29,6 +29,11 @@ A host in the cluster (a name with no dot, or a name under .svc or
                    the install, never each bucket of S3. The Postgres
                    instances, the CloudNativePG Jobs and the Redis backup
                    CronJob use it.
+  external-secrets The ECR API of the region of the setec disk repository
+                   (gibson-workloads.setec.launcher.diskRepo), when that
+                   repository is on ECR: the ECRAuthorizationToken generator
+                   of the disk builder push credential (charts#574).
+                   Nothing for another registry.
   <name>           Each group of global.networkPolicy.egressHostGroups: the
                    hosts that the values of the install name, for a pod that
                    another chart of the install deploys. Each entry is a URL,
@@ -141,7 +146,14 @@ only.
 {{- $obj = concat $obj $sts -}}
 {{- end -}}
 
-{{- $groups := dict "zitadel" $zitadel "tenant-operator" $to "cert-manager" $cm "external-dns" $dns "object-store" $obj -}}
+{{- /* external-secrets: the ECR API of the setec disk repository. */ -}}
+{{- $eso := list -}}
+{{- $ecr := include "gibson.ecrRepo" ((($wl.setec | default dict).launcher | default dict).diskRepo) | fromJson -}}
+{{- if $ecr.region -}}
+{{- $eso = append $eso (dict "matchName" (printf "api.ecr.%s.amazonaws.com" $ecr.region) "ports" $https) -}}
+{{- end -}}
+
+{{- $groups := dict "zitadel" $zitadel "tenant-operator" $to "cert-manager" $cm "external-dns" $dns "object-store" $obj "external-secrets" $eso -}}
 
 {{- /* The groups that the values of the install name. */ -}}
 {{- range $name, $entries := ((.Values.global).networkPolicy | default dict).egressHostGroups | default dict -}}

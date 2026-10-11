@@ -2931,6 +2931,14 @@ setec:
       # at secret/data/setec-disk-signing (files/openbao-seed-keys.txt), and
       # templates/setec/disk-signing-externalsecret.yaml renders it here.
       signingSecret: "setec-disk-signing"
+      # registrySecret names the dockerconfigjson Secret with the push
+      # credential of diskRepo. On an ECR repository it MUST be
+      # "setec-disk-registry": templates/setec/disk-registry.yaml writes that
+      # Secret from the stage 0 push user (charts#574). Any other registry
+      # takes no credential from the chart, and the value stays empty. The
+      # render fails on any other pair. A hosted env sets it in its overlay
+      # with diskRepo.
+      registrySecret: ""
       # publicKeys are the base64 ed25519 public keys of the seed. Each
       # launcher refuses a disk that none of them signed. REQUIRED: the
       # setec chart fails the render when the list is empty. The install

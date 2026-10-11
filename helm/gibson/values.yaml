@@ -1649,11 +1649,15 @@ external-secrets:
     repository: "ghcr.io/zeroroot-ai/mirror/external-secrets"
     tag: "v2.10.0@sha256:814117b0fd6d121b03e8ba3b6db1cecbe7449a354fc0fc9c4faf73a37aa221b1"
   # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  # egress-fqdn external-secrets: the ECR API of the setec disk repository,
+  # for the ECRAuthorizationToken generator (charts#574). The group is empty,
+  # and opens nothing, when that repository is not on ECR.
   podLabels:
     gibson.zeroroot.ai/net-role: system
     gibson.zeroroot.ai/metrics-port: "8080"
     gibson.zeroroot.ai/client-openbao: "true"
     gibson.zeroroot.ai/kube-api: "true"
+    gibson.zeroroot.ai/egress-fqdn: external-secrets
   # Canonical name: the ClusterSecretStore (gibson-workloads) authenticates to
   # OpenBao as ServiceAccount `external-secrets` in the release namespace, and
   # the OpenBao kubernetes auth role binds exactly that name.

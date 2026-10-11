@@ -584,6 +584,23 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+gibson.ecrRepo: the registry host and region of an ECR repository reference
+(<account>.dkr.ecr.<region>.amazonaws.com/<name>), as JSON. Both are empty
+for a repository that is not on ECR. The argument is the reference itself.
+The setec disk registry (charts#574) reads it in gibson-workloads, and the
+egress host group external-secrets reads it in the umbrella.
+*/}}
+{{- define "gibson.ecrRepo" -}}
+{{- $m := regexFind "^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/" (toString .) -}}
+{{- if $m -}}
+{{- $host := trimSuffix "/" $m -}}
+{{- dict "host" $host "region" (index (splitList "." $host) 3) | toJson -}}
+{{- else -}}
+{{- dict "host" "" "region" "" | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 gibson.openbaoAddr: the one address of the in-chart OpenBao, always https
 (the listener serves only TLS). The OpenBao clients of every chart read it.
 */}}
@@ -1417,7 +1434,7 @@ gibson.zeroroot.ai/kube-api: "true"
 gibson.zeroroot.ai/egress-internet: "true"
 {{- end }}
 {{- with .fqdn }}
-{{- $groups := list "zitadel" "tenant-operator" "cert-manager" "external-dns" "object-store" }}
+{{- $groups := list "zitadel" "tenant-operator" "cert-manager" "external-dns" "object-store" "external-secrets" }}
 {{- if not (has . $groups) }}
 {{- fail (printf "gibson.netLabels: egress host group %v is not one of %s" . (join ", " $groups)) }}
 {{- end }}
