@@ -1,0 +1,118 @@
+{{/*
+The push credential of the setec disk builder (D85, charts#574).
+
+Each AWS environment keeps its signed sandbox disks in one private ECR
+repository (setec.launcher.diskRepo, made by stage 0 of hosted). The disk
+builder Job of the setec subchart pushes there with the Docker config that
+setec.launcher.diskBuilder.registrySecret names. An ECR password is a token
+of GetAuthorizationToken that lives 12 hours, so no static Secret can hold it.
+
+The chain, in the setec namespace:
+
+  1. ExternalSecret setec-disk-push-credential: the access key pair of the
+     stage 0 IAM user <prefix>-<env>-setec-disk-builder (push on the disk
+     repository only). The bringup writes the pair from the keyring members
+     SETEC_DISK_PUSH_ACCESS_KEY and SETEC_DISK_PUSH_SECRET_KEY into the
+     Secret setec-disk-push-credential of the release namespace (hosted
+     scripts/keyring-to-cluster.sh). The OpenBao seeder stores it at
+     secret/data/setec-disk-push-credential (files/openbao-seed-keys.txt).
+     No key sits in a values file.
+  2. ECRAuthorizationToken setec-disk-registry: the External Secrets
+     generator that calls GetAuthorizationToken with that pair, in the region
+     of the repository.
+  3. ExternalSecret setec-disk-registry: a kubernetes.io/dockerconfigjson
+     Secret for the registry host of diskRepo, refreshed every 6 hours, half
+     the life of the token.
+
+It renders only when diskRepo is an ECR repository
+(<account>.dkr.ecr.<region>.amazonaws.com/<name>). The kind registry is
+plain HTTP with no credential, so kind renders none of it. registrySecret
+must name setec-disk-registry exactly when the chain renders: the render
+fails otherwise, so a disk builder never runs with no credential on ECR, or
+mounts a Secret that nothing writes elsewhere. A key rotation
+(make substrate-rotate CREDENTIAL=setec-disk-builder in hosted) reaches the
+generator through the five-minute keyring pass of the seeder and the
+refresh of the first ExternalSecret.
+*/}}
+{{- if .Values.setec.enabled }}
+{{- $ecr := include "gibson.ecrRepo" .Values.setec.launcher.diskRepo | fromJson }}
+{{- $registrySecret := .Values.setec.launcher.diskBuilder.registrySecret }}
+{{- if $ecr.host }}
+{{- if ne $registrySecret "setec-disk-registry" }}
+{{- fail (printf "setec.launcher.diskBuilder.registrySecret is %q: the disk repository %s is on ECR, and the chart writes its push credential into the Secret setec-disk-registry. Set registrySecret to setec-disk-registry (charts#574)." $registrySecret .Values.setec.launcher.diskRepo) }}
+{{- end }}
+{{- $ns := include "gibson.setecNamespace" . }}
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: setec-disk-push-credential
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: setec-disk-builder
+spec:
+  refreshInterval: 60s
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: gibson-secrets
+  target:
+    name: setec-disk-push-credential
+    creationPolicy: Owner
+  data:
+    - secretKey: access-key-id
+      remoteRef:
+        key: setec-disk-push-credential
+        property: access_key_id
+    - secretKey: secret-access-key
+      remoteRef:
+        key: setec-disk-push-credential
+        property: secret_access_key
+---
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: ECRAuthorizationToken
+metadata:
+  name: setec-disk-registry
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: setec-disk-builder
+spec:
+  region: {{ $ecr.region | quote }}
+  auth:
+    secretRef:
+      accessKeyIDSecretRef:
+        name: setec-disk-push-credential
+        key: access-key-id
+      secretAccessKeySecretRef:
+        name: setec-disk-push-credential
+        key: secret-access-key
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: setec-disk-registry
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: setec-disk-builder
+spec:
+  # Half the 12-hour life of an ECR token.
+  refreshInterval: 6h
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: ECRAuthorizationToken
+          name: setec-disk-registry
+  target:
+    name: setec-disk-registry
+    creationPolicy: Owner
+    template:
+      type: kubernetes.io/dockerconfigjson
+      engineVersion: v2
+      data:
+        .dockerconfigjson: {{ printf "{\"auths\":{\"%s\":{\"username\":\"{{ .username }}\",\"password\":\"{{ .password }}\"}}}" $ecr.host | quote }}
+{{- else if $registrySecret }}
+{{- fail (printf "setec.launcher.diskBuilder.registrySecret is %q, but the disk repository %q is not on ECR, and nothing writes that Secret. Leave registrySecret empty: a registry that is not ECR takes no credential from the chart (charts#574)." $registrySecret .Values.setec.launcher.diskRepo) }}
+{{- end }}
+{{- end }}

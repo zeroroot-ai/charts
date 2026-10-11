@@ -254,6 +254,11 @@ zitadel-masterkey-rotation: ## The masterkey rotation proves the marker, rewraps
 	@$(MAKE) -s chart-deps >/dev/null
 	@bats tests/zitadel-masterkey-rotation.bats
 
+setec-disk-registry: ## An ECR disk repository renders the push credential chain of the setec disk builder, and kind renders none (charts#574)
+	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
+	@$(MAKE) -s chart-deps >/dev/null
+	@bats tests/setec-disk-registry.bats
+
 openbao-pg-engine: ## The database engine issues one login role for each owner of a platform database, and rewrites a connection only when the superuser credential changes (ADR-0171)
 	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
 	@$(MAKE) -s chart-deps >/dev/null

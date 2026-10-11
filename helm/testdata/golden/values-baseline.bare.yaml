@@ -10194,6 +10194,7 @@ spec:
         app.kubernetes.io/version: "v2.10.0"
         app.kubernetes.io/managed-by: Helm
         gibson.zeroroot.ai/client-openbao: "true"
+        gibson.zeroroot.ai/egress-fqdn: external-secrets
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/metrics-port: "8080"
         gibson.zeroroot.ai/net-role: system
@@ -14871,6 +14872,10 @@ spec:
               # token now. 0 asks for nothing (ADR-0171).
               gibson-service-token-rotation requested_at:literal:0
               setec-disk-signing seed:input:setec-disk-signing-seed
+              # The push credential of the setec disk builder (D85, charts#574): an access
+              # key pair with push on the ECR disk repository of the env. Empty where the
+              # registry takes no credential (kind). templates/setec/disk-registry.yaml.
+              setec-disk-push-credential access_key_id:input:setec-disk-push-access-key-id secret_access_key:input:setec-disk-push-secret-access-key
               
               '
               # Token rotates; re-read at use time.
@@ -16457,30 +16462,45 @@ spec:
         # and smtp-password. optional so a keyring that carries none still
         # starts the pod.
         - name: bringup-inputs
-          secret:
-            secretName: "bringup-keyring"
+          projected:
             defaultMode: 0440
-            optional: true
-            items:
-              - key: ghcr-pull-token
-                path: ghcr-pull-token
-              - key: smtp-username
-                path: smtp-username
-              - key: smtp-password
-                path: smtp-password
-              # The Stripe account (charts#486): written by the bringup from
-              # the keyring members STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY
-              # and STRIPE_WEBHOOK_SECRET, the empty string when not supplied.
-              - key: stripe-secret-key
-                path: stripe-secret-key
-              - key: stripe-publishable-key
-                path: stripe-publishable-key
-              - key: stripe-webhook-secret
-                path: stripe-webhook-secret
-              # The sandbox disk signing seed (ADR-0166): the keyring member
-              # SETEC_DISK_SIGNING_SEED, seeded to secret/data/setec-disk-signing.
-              - key: setec-disk-signing-seed
-                path: setec-disk-signing-seed
+            sources:
+              - secret:
+                  name: "bringup-keyring"
+                  optional: true
+                  items:
+                    - key: ghcr-pull-token
+                      path: ghcr-pull-token
+                    - key: smtp-username
+                      path: smtp-username
+                    - key: smtp-password
+                      path: smtp-password
+                    # The Stripe account (charts#486): written by the bringup from
+                    # the keyring members STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY
+                    # and STRIPE_WEBHOOK_SECRET, the empty string when not supplied.
+                    - key: stripe-secret-key
+                      path: stripe-secret-key
+                    - key: stripe-publishable-key
+                      path: stripe-publishable-key
+                    - key: stripe-webhook-secret
+                      path: stripe-webhook-secret
+                    # The sandbox disk signing seed (ADR-0166): the keyring member
+                    # SETEC_DISK_SIGNING_SEED, seeded to secret/data/setec-disk-signing.
+                    - key: setec-disk-signing-seed
+                      path: setec-disk-signing-seed
+              # The push credential of the setec disk builder (D85, charts#574):
+              # the Secret setec-disk-push-credential that the bringup writes
+              # from the keyring members SETEC_DISK_PUSH_ACCESS_KEY and
+              # SETEC_DISK_PUSH_SECRET_KEY, empty where the registry takes no
+              # credential. Seeded to secret/data/setec-disk-push-credential.
+              - secret:
+                  name: setec-disk-push-credential
+                  optional: true
+                  items:
+                    - key: access-key-id
+                      path: setec-disk-push-access-key-id
+                    - key: secret-access-key
+                      path: setec-disk-push-secret-access-key
   volumeClaimTemplates:
     - metadata:
         name: data
