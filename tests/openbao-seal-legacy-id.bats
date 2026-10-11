@@ -128,6 +128,10 @@ start_rendered() {
   legacy_store
   start_rendered "$T/empty"
   [ "$(sealed)" = true ] || { cat "$T/start.log"; false; }
+  # The cause, not only the state: the static seal does not know the id in
+  # the wrapped entries.
+  for _ in $(seq 1 50); do grep -q 'unknown key id' "$T/start.log" && break; sleep 0.1; done
+  grep -q 'unknown key id for data: `bringup-keyring`' "$T/start.log" || { cat "$T/start.log"; false; }
 }
 
 @test "a rotation after the upgrade rewraps the store, and a retire starts with the current key alone" {
