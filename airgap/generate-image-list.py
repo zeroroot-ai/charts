@@ -134,7 +134,9 @@ NOTES: dict[str, dict[str, str]] = {
     "ghcr.io/zeroroot-ai/mirror/alpine": {"role": "shell base for init containers"},
     "ghcr.io/zeroroot-ai/mirror/busybox": {"role": "shell base for wait-for init containers"},
     "ghcr.io/zeroroot-ai/mirror/curl": {"role": "probe/wait-for tooling"},
-    "ghcr.io/zeroroot-ai/mirror/neo4j": {"role": "graph store"},
+    "ghcr.io/zeroroot-ai/mirror/neo4j": {
+        "role": "graph store of each tenant data plane (the tenant operator deploys it, TENANT_NEO4J_IMAGE)"
+    },
     "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql": {"role": "psql client for setup Jobs"},
     "ghcr.io/zeroroot-ai/mirror/redis": {"role": "redis CLI for setup Jobs and helm tests"},
     "ghcr.io/zeroroot-ai/mirror/redis-stack-server": {
@@ -261,8 +263,39 @@ def render_images() -> dict[str, set[str]]:
             if "{{" in ref or not ref:
                 continue
             found.setdefault(repo_of(ref), set()).add(ref)
+        # An image that a workload starts from an env var, not from an
+        # image: field, for example the tenant Neo4j of TENANT_NEO4J_IMAGE
+        # that the tenant operator deploys (charts#608).
+        for ref in env_images(out):
+            found.setdefault(repo_of(ref), set()).add(ref)
         del name
     return found
+
+
+ENV_IMAGE_NAME_RX = re.compile(r"^[A-Z0-9_]+_IMAGE$")
+IMAGE_REF_RX = re.compile(r"^ghcr\.io/[^\s:@]+(?::[^\s@]+)?(?:@sha256:[0-9a-f]{64})?$")
+
+
+def env_images(rendered: str) -> set[str]:
+    """Each image reference in an env var named *_IMAGE of a container."""
+    import yaml  # noqa: PLC0415  (only this pass reads the render as YAML)
+
+    refs: set[str] = set()
+    for doc in yaml.safe_load_all(rendered):
+        if not isinstance(doc, dict):
+            continue
+        stack = [doc]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                name, value = node.get("name"), node.get("value")
+                if (isinstance(name, str) and ENV_IMAGE_NAME_RX.match(name)
+                        and isinstance(value, str) and IMAGE_REF_RX.match(value)):
+                    refs.add(value)
+                stack.extend(node.values())
+            elif isinstance(node, list):
+                stack.extend(node)
+    return refs
 
 
 def github_get(path: str) -> bytes:

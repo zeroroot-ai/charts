@@ -69,6 +69,12 @@ data:
           role: {{ $vk.role | quote }}
           {{- end }}
         {{- end }}
+      # The platform OpenBao. The start gate of the daemon asks its health
+      # (GET /v1/sys/health) and is not Ready until it answers (gibson#1078,
+      # gibson#1079). The address is the one every OpenBao client of the
+      # chart reads. The daemon trusts its CA through SSL_CERT_DIR.
+      secret_source:
+        address: {{ include "gibson.openbaoAddr" . | quote }}
 
     # Authentication and Authorization Configuration
     # Mode determines the authentication strategy
