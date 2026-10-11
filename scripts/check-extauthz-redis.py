@@ -11,6 +11,10 @@ The check reads the committed golden renders (helm/testdata/golden/), which
 Deployment where:
 
   - the ext-authz container has no non-empty EXT_AUTHZ_REDIS_URL value,
+  - that value is not a plain redis://<host>:<port> URL. ext-authz parses it
+    as it is and takes the password from REDIS_PASSWORD. Kubernetes does not
+    expand ${VAR} in an env value, so a `${REDIS_PASSWORD}` in the URL reached
+    the parser as text, and ext-authz crash-looped at start (charts#622),
   - the ext-authz container has no REDIS_PASSWORD from a secretKeyRef, or
   - the pod has no wait-for-redis init container.
 
@@ -21,12 +25,15 @@ It fails as blind when no golden file holds an ext-authz Deployment.
 """
 import glob
 import os
+import re
 import sys
 
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GOLDEN = os.path.join("helm", "testdata", "golden")
+# The address only: no userinfo, no variable, no path.
+PLAIN_REDIS_URL = re.compile(r"^rediss?://[a-z0-9.-]+:[0-9]+$")
 
 
 def extauthz(docs):
@@ -44,8 +51,13 @@ def judge(d: dict) -> list[str]:
     if main is None:
         return [f"{name}: no ext-authz container"]
     env = {e.get("name"): e for e in main.get("env") or []}
-    if not (env.get("EXT_AUTHZ_REDIS_URL") or {}).get("value"):
+    url = (env.get("EXT_AUTHZ_REDIS_URL") or {}).get("value")
+    if not url:
         out.append(f"{name}: the ext-authz container has no EXT_AUTHZ_REDIS_URL value")
+    elif not PLAIN_REDIS_URL.match(url):
+        # The value is not printed: it may hold a password.
+        out.append(f"{name}: EXT_AUTHZ_REDIS_URL is not a plain redis://<host>:<port>; ext-authz parses it as it "
+                   "is, and the password comes from REDIS_PASSWORD")
     if not ((env.get("REDIS_PASSWORD") or {}).get("valueFrom") or {}).get("secretKeyRef"):
         out.append(f"{name}: the ext-authz container has no REDIS_PASSWORD from a Secret")
     if not any(c.get("name") == "wait-for-redis" for c in spec.get("initContainers") or []):
@@ -70,18 +82,21 @@ def selftest() -> int:
                 "spec": {"template": {"spec": {
                     "initContainers": [{"name": "wait-for-redis"}] if init else [],
                     "containers": [{"name": "ext-authz", "env": env}]}}}}
-    url = {"name": "EXT_AUTHZ_REDIS_URL", "value": "redis://:${REDIS_PASSWORD}@r:6379"}
+    url = {"name": "EXT_AUTHZ_REDIS_URL", "value": "redis://gibson-redis-stack:6379"}
     pw = {"name": "REDIS_PASSWORD", "valueFrom": {"secretKeyRef": {"name": "s", "key": "k"}}}
     if judge(dep([url, pw])):
         print("SELFTEST FAIL: a complete ext-authz pod must pass")
         return 1
     for what, d in (("no URL", dep([pw])), ("an empty URL", dep([dict(url, value=""), pw])),
                     ("no password", dep([url])), ("a literal password", dep([url, {"name": "REDIS_PASSWORD", "value": "x"}])),
-                    ("no wait", dep([url, pw], init=False))):
+                    ("no wait", dep([url, pw], init=False)),
+                    ("a variable in the URL (charts#622)",
+                     dep([dict(url, value="redis://:${REDIS_PASSWORD}@r:6379"), pw]))):
         if len(judge(d)) != 1:
             print(f"SELFTEST FAIL: {what} must give one finding, got {judge(d)}")
             return 1
-    print("  ✓ selftest: no URL, an empty URL, no password, a literal password and no Redis wait each fail")
+    print("  ✓ selftest: no URL, an empty URL, a variable in the URL, no password, a literal password and no Redis "
+          "wait each fail")
     return 0
 
 

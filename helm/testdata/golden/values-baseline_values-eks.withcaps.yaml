@@ -13258,8 +13258,12 @@ spec:
             # (hosted#204) on the channel gibson:fga.write. Same Redis and the
             # same password Secret as the daemon. make extauthz-redis fails a
             # profile whose ext-authz pod lacks either variable.
+            # The address only. ext-authz parses the URL as it is and takes
+            # the password from REDIS_PASSWORD. Kubernetes does not expand
+            # ${VAR} in an env value, so the daemon form of gibson.redis.url
+            # reached the parser as text (charts#622).
             - name: EXT_AUTHZ_REDIS_URL
-              value: "redis://:${REDIS_PASSWORD}@gibson-redis-stack:6379"
+              value: "redis://gibson-redis-stack:6379"
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
