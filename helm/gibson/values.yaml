@@ -790,9 +790,52 @@ zitadel:
     # is postgresSetup.image (psql and openssl): tests/zitadel-masterkey-rotation.bats
     # fails when the two pins differ.
     initContainers:
-      # The list is zitadel.zitadel.initContainers: the Zitadel chart 9.34.1
+      - name: masterkey-guard
+        image: ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184
+        command: [bash, /guard/guard.sh]
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+          capabilities:
+            drop: ["ALL"]
+        env:
+          - name: ZITADEL_MASTERKEY
+            valueFrom:
+              secretKeyRef:
+                name: gibson-zitadel-masterkey
+                key: masterkey
+          - name: PGHOST
+            value: platform-postgres-rw.gibson.svc.cluster.local
+          - name: PGPORT
+            value: "5432"
+          - name: PGDATABASE
+            value: zitadel
+          - name: PGSSLMODE
+            value: require
+          - name: PGCONNECT_TIMEOUT
+            value: "5"
+          - name: PGUSER
+            valueFrom:
+              secretKeyRef:
+                name: zitadel-postgres-credentials
+                key: username
+          - name: PGPASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: zitadel-postgres-credentials
+                key: password
+        volumeMounts:
+          - name: zitadel-masterkey-guard
+            mountPath: /guard
+            readOnly: true
+      # This list is zitadel.zitadel.initContainers: the Zitadel chart 9.34.1
       # reads only this key, for the Deployment and the init and setup Jobs.
       # A top-level zitadel.initContainers renders nowhere (charts#576).
+      # It is the second entry: the version links of .github key the
+      # masterkey-guard image as entry 0 and this image as entry 1.
       #
       # deploy#1631: DO NOT LET ZITADEL BOOT WITHOUT ITS SYSTEM KEY.
       #
@@ -850,47 +893,6 @@ zitadel:
         volumeMounts:
           - name: zitadel-system-key
             mountPath: /etc/zitadel-system-keys
-            readOnly: true
-      - name: masterkey-guard
-        image: ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184
-        command: [bash, /guard/guard.sh]
-        securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          runAsNonRoot: true
-          seccompProfile:
-            type: RuntimeDefault
-          capabilities:
-            drop: ["ALL"]
-        env:
-          - name: ZITADEL_MASTERKEY
-            valueFrom:
-              secretKeyRef:
-                name: gibson-zitadel-masterkey
-                key: masterkey
-          - name: PGHOST
-            value: platform-postgres-rw.gibson.svc.cluster.local
-          - name: PGPORT
-            value: "5432"
-          - name: PGDATABASE
-            value: zitadel
-          - name: PGSSLMODE
-            value: require
-          - name: PGCONNECT_TIMEOUT
-            value: "5"
-          - name: PGUSER
-            valueFrom:
-              secretKeyRef:
-                name: zitadel-postgres-credentials
-                key: username
-          - name: PGPASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: zitadel-postgres-credentials
-                key: password
-        volumeMounts:
-          - name: zitadel-masterkey-guard
-            mountPath: /guard
             readOnly: true
 
     # NOTE: `masterkeyAnnotations` was deleted with the literal. It only ever
