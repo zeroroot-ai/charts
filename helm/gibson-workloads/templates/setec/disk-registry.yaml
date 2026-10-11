@@ -35,6 +35,14 @@ no install sets a value for it (charts#574). It has two shapes:
 
 Another value of registrySecret names a Secret that the operator of the
 install writes. The chart then renders nothing here.
+
+When the ECR push key pair is missing (the keyring members
+SETEC_DISK_PUSH_ACCESS_KEY and SETEC_DISK_PUSH_SECRET_KEY are empty), the
+generator cannot call ECR. The env owner then sees the ExternalSecret
+setec-system/setec-disk-registry not synced (Ready False, SecretSyncedError)
+and the hosted alert ExternalSecretNotReady for it. On a new install the
+Secret setec-disk-registry never exists, so each disk builder pod waits in
+ContainerCreating with "secret not found" and never reaches the push.
 */}}
 {{- if .Values.setec.enabled }}
 {{- $ecr := include "gibson.ecrRepo" .Values.setec.launcher.diskRepo | fromJson }}
