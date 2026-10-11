@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.145.1](https://github.com/zeroroot-ai/charts/compare/v0.145.0...v0.145.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **ext-authz:** EXT_AUTHZ_REDIS_URL is the Redis address only, so ext-authz starts ([#638](https://github.com/zeroroot-ai/charts/issues/638)) ([e63b8e4](https://github.com/zeroroot-ai/charts/commit/e63b8e4ab4e2149c198156cb204ceac89a081e1b))
+* **openfga:** the helm test pod meets the restricted level, with a read-only root and no token ([#629](https://github.com/zeroroot-ai/charts/issues/629)) ([137d1ac](https://github.com/zeroroot-ai/charts/commit/137d1ac151c48649a26f477249ffbd5e35ab72fb))
+
 ## [0.145.0](https://github.com/zeroroot-ai/charts/compare/v0.144.0...v0.145.0) (2026-10-11)
 
 
