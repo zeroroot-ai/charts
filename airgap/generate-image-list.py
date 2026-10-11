@@ -127,9 +127,6 @@ NOTES: dict[str, dict[str, str]] = {
         "hardening": "closed seam; federal/air-gap typically disables billing (no-op provider)",
     },
     "ghcr.io/zeroroot-ai/mirror/envoy": {"role": "edge proxy (auth chain)"},
-    "ghcr.io/zeroroot-ai/mirror/neo4j": {
-        "role": "Neo4j of each tenant data plane (the tenant operator deploys it, TENANT_NEO4J_IMAGE)"
-    },
     "ghcr.io/zeroroot-ai/mirror/ratelimit": {"role": "shared per-client edge quota service"},
     "ghcr.io/zeroroot-ai/mirror/coraza-proxy-wasm": {"role": "Edge WAF module: Coraza + OWASP CRS as an Envoy WASM filter"},
     "ghcr.io/zeroroot-ai/mirror/alpine-k8s": {"role": "kubectl/curl/jq job + init tooling"},
@@ -137,7 +134,9 @@ NOTES: dict[str, dict[str, str]] = {
     "ghcr.io/zeroroot-ai/mirror/alpine": {"role": "shell base for init containers"},
     "ghcr.io/zeroroot-ai/mirror/busybox": {"role": "shell base for wait-for init containers"},
     "ghcr.io/zeroroot-ai/mirror/curl": {"role": "probe/wait-for tooling"},
-    "ghcr.io/zeroroot-ai/mirror/neo4j": {"role": "graph store"},
+    "ghcr.io/zeroroot-ai/mirror/neo4j": {
+        "role": "graph store of each tenant data plane (the tenant operator deploys it, TENANT_NEO4J_IMAGE)"
+    },
     "ghcr.io/zeroroot-ai/mirror/bitnami-postgresql": {"role": "psql client for setup Jobs"},
     "ghcr.io/zeroroot-ai/mirror/redis": {"role": "redis CLI for setup Jobs and helm tests"},
     "ghcr.io/zeroroot-ai/mirror/redis-stack-server": {
