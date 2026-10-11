@@ -831,6 +831,69 @@ zitadel:
           - name: zitadel-masterkey-guard
             mountPath: /guard
             readOnly: true
+      # This list is zitadel.zitadel.initContainers: the Zitadel chart 9.34.1
+      # reads only this key, for the Deployment and the init and setup Jobs.
+      # A top-level zitadel.initContainers renders nowhere (charts#576).
+      # It is the second entry: the version links of .github key the
+      # masterkey-guard image as entry 0 and this image as entry 1.
+      #
+      # deploy#1631: DO NOT LET ZITADEL BOOT WITHOUT ITS SYSTEM KEY.
+      #
+      # SystemAPIUsers.Path is read from disk ONCE, at boot. Measured on two
+      # separate baseline installs, ESO materialises gibson-zitadel-system-key about
+      # two minutes AFTER Zitadel starts:
+      #
+      #   zitadel started 21:41:25 / secret created 21:43:34
+      #
+      # A Zitadel that booted without the file registers no system-bot key, so it
+      # verifies the operator's self-signed assertion as an ordinary OIDC access
+      # token and rejects it:
+      #
+      #   issuer does not match: Expected: https://<domain>, got: gibson-system-bot
+      #
+      # which stalls the platform-operator at AdminTokenReady, so it never
+      # reaches the master-key step, so gibson-master-key is never created, so the
+      # daemon never leaves init, and nobody can log in.
+      #
+      # The Reloader annotation (zitadel.annotations) is NOT sufficient on its own: Reloader reacts
+      # to updates of Secrets it is already tracking, and here the Secret is
+      # CREATED after the pod exists — observed doing nothing on a fresh install.
+      # This init container closes the hole deterministically: the pod cannot start
+      # until the key is on disk and non-empty.
+      - name: wait-for-system-key
+        image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
+        command:
+          - sh
+          - -c
+          - |
+            set -eu
+            KEY=/etc/zitadel-system-keys/system-bot-pub.pem
+            KEY_B=/etc/zitadel-system-keys/system-bot-b-pub.pem
+            echo "waiting for ${KEY} and ${KEY_B} (SystemAPIUsers is read once, at boot)"
+            for _ in $(seq 1 180); do
+              if [ -s "$KEY" ] && [ -s "$KEY_B" ]; then
+                echo "system keys present ($(wc -c < "$KEY") and $(wc -c < "$KEY_B") bytes)"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "FATAL: ${KEY} or ${KEY_B} never appeared. Zitadel would boot trusting no" >&2
+            echo "system-bot key and reject every System API call, stalling the" >&2
+            echo "platform-operator at AdminTokenReady (deploy#1631)." >&2
+            exit 1
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          seccompProfile:
+            type: RuntimeDefault
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+          - name: zitadel-system-key
+            mountPath: /etc/zitadel-system-keys
+            readOnly: true
 
     # NOTE: `masterkeyAnnotations` was deleted with the literal. It only ever
     # annotated the Secret the upstream chart renders from an inline
@@ -954,56 +1017,6 @@ zitadel:
                   - SYSTEM_OWNER
                   - IAM_OWNER
             Path: /etc/zitadel-system-keys/system-bot-b-pub.pem
-
-  # deploy#1631: DO NOT LET ZITADEL BOOT WITHOUT ITS SYSTEM KEY.
-  #
-  # SystemAPIUsers.Path is read from disk ONCE, at boot. Measured on two
-  # separate baseline installs, ESO materialises gibson-zitadel-system-key about
-  # two minutes AFTER Zitadel starts:
-  #
-  #   zitadel started 21:41:25 / secret created 21:43:34
-  #
-  # A Zitadel that booted without the file registers no system-bot key, so it
-  # verifies the operator's self-signed assertion as an ordinary OIDC access
-  # token and rejects it:
-  #
-  #   issuer does not match: Expected: https://<domain>, got: gibson-system-bot
-  #
-  # which stalls the platform-operator at AdminTokenReady, so it never
-  # reaches the master-key step, so gibson-master-key is never created, so the
-  # daemon never leaves init, and nobody can log in.
-  #
-  # The Reloader annotation below is NOT sufficient on its own: Reloader reacts
-  # to updates of Secrets it is already tracking, and here the Secret is
-  # CREATED after the pod exists — observed doing nothing on a fresh install.
-  # This init container closes the hole deterministically: the pod cannot start
-  # until the key is on disk and non-empty.
-  initContainers:
-    - name: wait-for-system-key
-      image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
-      command:
-        - sh
-        - -c
-        - |
-          set -eu
-          KEY=/etc/zitadel-system-keys/system-bot-pub.pem
-          KEY_B=/etc/zitadel-system-keys/system-bot-b-pub.pem
-          echo "waiting for ${KEY} and ${KEY_B} (SystemAPIUsers is read once, at boot)"
-          for _ in $(seq 1 180); do
-            if [ -s "$KEY" ] && [ -s "$KEY_B" ]; then
-              echo "system keys present ($(wc -c < "$KEY") and $(wc -c < "$KEY_B") bytes)"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "FATAL: ${KEY} or ${KEY_B} never appeared. Zitadel would boot trusting no" >&2
-          echo "system-bot key and reject every System API call, stalling the" >&2
-          echo "platform-operator at AdminTokenReady (deploy#1631)." >&2
-          exit 1
-      volumeMounts:
-        - name: zitadel-system-key
-          mountPath: /etc/zitadel-system-keys
-          readOnly: true
 
   # Belt and braces: if the key is ever ROTATED, Reloader restarts the pod so
   # the new public key is loaded. It does not cover first creation (above).
