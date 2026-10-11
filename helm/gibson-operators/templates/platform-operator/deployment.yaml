@@ -117,6 +117,9 @@ spec:
             {{- else }}
               value: "/etc/ssl/certs:/etc/ssl/fga-ca:{{ include "gibson.openbaoCADir" . }}"
             {{- end }}
+            # The OpenFGA preshared key (charts#637): the model load and the
+            # platform owner tuple call OpenFGA.
+            {{- include "gibson.fgaKey.env" $ | nindent 12 }}
             {{- /*
               Zitadel addressing (ADR-0092, gibson#223). The operator connects
               to the Zitadel Service (ZITADEL_URL) and claims the public host
@@ -179,6 +182,7 @@ spec:
             - name: fga-http-ca
               mountPath: /etc/ssl/fga-ca
               readOnly: true
+            {{- include "gibson.fgaKey.mount" $ | nindent 12 }}
             {{- if .Values.envoy.tls.secretName }}
             - name: envoy-ca
               mountPath: /etc/ssl/envoy-ca
@@ -204,6 +208,7 @@ spec:
               - key: ca.crt
                 path: ca.crt
             defaultMode: 0444
+        {{- include "gibson.fgaKey.volume" $ | nindent 8 }}
         {{- if .Values.envoy.tls.secretName }}
         - name: envoy-ca
           secret:

@@ -58,6 +58,12 @@ gibson-redis-password password:pw @720h
 # value (ADR-0171).
 zitadel-masterkey value:rand next:empty
 gibson-dashboard-session-secrets auth_secret:rand auth_secret_previous:prev:auth_secret server_actions_key:randb64 @720h
+# The OpenFGA preshared key, one for each install (ADR-0171). OpenFGA accepts
+# key and key_previous. Each client sends key, and sends key_previous again
+# after a 401, so a rotation keeps service while the pods take the new key.
+# rand is URL-safe base64, so it has no comma: OpenFGA reads its key list
+# split on commas (templates/external-secrets/openfga-preshared-key.yaml).
+gibson-openfga-preshared-key key:rand key_previous:prev:key @720h
 gibson-cg-signing-key key:rand kid:rand8
 # The verify-only slots of the CG signing key set. Empty in steady state; the
 # sidecar fills and clears them during a rotation (cg_key_rotate, ADR-0171).

@@ -1,0 +1,38 @@
+{{- /*
+OpenFGA authentication guard (charts#637).
+
+OpenFGA authenticates each client with a preshared key. Its HTTP and gRPC
+APIs must refuse a call that carries no valid preshared key. The key list
+comes from the Secret gibson.fgaKey.secretName, which gibson-workloads writes
+from the platform OpenBao: one key for each install, and never a key in
+values or in a repository.
+
+This template renders no resource. It fails the render when:
+
+  - openfga.authn.method is not preshared (no method means no
+    authentication),
+  - openfga.authn.preshared.keysSecret is not gibson.fgaKey.secretName,
+  - openfga.authn.preshared.keys holds a literal key, or
+  - openfga.authn.oidc is set (a second method).
+
+scripts/check-openfga-authn.sh renders each case and proves the failure.
+scripts/check-openfga-authn.py checks the renders: the OpenFGA container reads
+the key list from the Secret, and each OpenFGA client mounts the key.
+*/ -}}
+{{- $authn := (.Values.openfga | default dict).authn | default dict -}}
+{{- $pre := $authn.preshared | default dict -}}
+{{- $want := include "gibson.fgaKey.secretName" . -}}
+{{- $method := printf "%v" $authn.method -}}
+{{- $keysSecret := printf "%v" $pre.keysSecret -}}
+{{- if ne $method "preshared" -}}
+{{- fail (printf "openfga.authn.method is %q: OpenFGA must run with the preshared key method (charts#637)" $method) -}}
+{{- end -}}
+{{- if ne $keysSecret $want -}}
+{{- fail (printf "openfga.authn.preshared.keysSecret is %q: it must be %q, the Secret that the chart writes from OpenBao (charts#637)" $keysSecret $want) -}}
+{{- end -}}
+{{- if $pre.keys -}}
+{{- fail "openfga.authn.preshared.keys holds a literal key: a key in values is a key in a repository. The key comes from OpenBao through the Secret of openfga.authn.preshared.keysSecret (charts#637)" -}}
+{{- end -}}
+{{- if or (($authn.oidc | default dict).issuer) (($authn.oidc | default dict).audience) -}}
+{{- fail "openfga.authn.oidc is set: OpenFGA runs with one method, the preshared key (charts#637)" -}}
+{{- end -}}

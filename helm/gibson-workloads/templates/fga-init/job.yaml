@@ -208,13 +208,31 @@ spec:
 
               echo "=== FGA Init: ${FGA} ==="
 
+              # OpenFGA refuses a call with no preshared key (charts#637).
+              # The header goes in a file, so the key is in no argv. fcurl
+              # sends it on each call to OpenFGA. After a 401 the previous
+              # key is used: OpenFGA can still run with the key list from
+              # before a rotation.
+              umask 077
+              fga_header() {
+                printf 'Authorization: Bearer %s\n' "$(cat "${GIBSON_FGA_KEY_DIR}/$1" 2>/dev/null)" > /tmp/fga-auth
+              }
+              fcurl() { curl -H @/tmp/fga-auth "$@"; }
+              fga_header key
+              grep -q 'Bearer .' /tmp/fga-auth || { echo "FATAL: no OpenFGA preshared key at ${GIBSON_FGA_KEY_DIR}/key"; exit 1; }
+              AUTH_HTTP=$(fcurl -sS -o /dev/null -w '%{http_code}' "${FGA}/stores") || AUTH_HTTP=000
+              if [ "$AUTH_HTTP" = "401" ] && [ -s "${GIBSON_FGA_KEY_DIR}/key_previous" ]; then
+                echo "  OpenFGA refused the current key; the previous key is used"
+                fga_header key_previous
+              fi
+
               echo "--- Step 1: ensure store 'gibson' ---"
-              RESP=$(curl -sS "${FGA}/stores") || { echo "FATAL: cannot list stores"; exit 1; }
+              RESP=$(fcurl -sS "${FGA}/stores") || { echo "FATAL: cannot list stores"; exit 1; }
               STORE_ID=$(echo "$RESP" | jq -r '.stores[] | select(.name=="gibson") | .id' | head -1)
 
               if [ -z "$STORE_ID" ]; then
                 echo "  creating store ..."
-                RESP=$(curl -sS -H 'Content-Type: application/json' -d '{"name":"gibson"}' "${FGA}/stores") \
+                RESP=$(fcurl -sS -H 'Content-Type: application/json' -d '{"name":"gibson"}' "${FGA}/stores") \
                   || { echo "FATAL: create store failed"; exit 1; }
                 STORE_ID=$(echo "$RESP" | jq -r '.id')
               fi
@@ -226,7 +244,7 @@ spec:
 
               echo "--- Step 2: write authorization model ---"
               MODEL_JSON=$(cat /model/model.json)
-              RESP=$(curl -sS -H 'Content-Type: application/json' --data-binary "$MODEL_JSON" \
+              RESP=$(fcurl -sS -H 'Content-Type: application/json' --data-binary "$MODEL_JSON" \
                 "${FGA}/stores/${STORE_ID}/authorization-models") \
                 || { echo "FATAL: write model failed"; echo "$RESP"; exit 1; }
               MODEL_ID=$(echo "$RESP" | jq -r '.authorization_model_id')
@@ -416,7 +434,7 @@ spec:
                 fi
                 KEEP="${KEEP} user:${numeric}"
                 TUPLE_BODY=$(jq -cn --arg u "user:${numeric}" --arg r "$relation" '{writes:{tuple_keys:[{user:$u,relation:$r,object:"system_tenant:_system"}]}}')
-                TUPLE_HTTP=$(curl -sS -o /tmp/tuple.json -w '%{http_code}' \
+                TUPLE_HTTP=$(fcurl -sS -o /tmp/tuple.json -w '%{http_code}' \
                   -H 'Content-Type: application/json' \
                   -X POST --data "$TUPLE_BODY" \
                   "${FGA}/stores/${STORE_ID}/write")
@@ -450,7 +468,7 @@ spec:
                 CONT=""
                 while :; do
                   READ_BODY=$(jq -cn --arg r "$relation" --arg c "$CONT" '{tuple_key:{relation:$r,object:"system_tenant:_system"},page_size:100} + (if $c == "" then {} else {continuation_token:$c} end)')
-                  READ_HTTP=$(curl -sS -o /tmp/read.json -w '%{http_code}' \
+                  READ_HTTP=$(fcurl -sS -o /tmp/read.json -w '%{http_code}' \
                     -H 'Content-Type: application/json' \
                     -X POST --data "$READ_BODY" \
                     "${FGA}/stores/${STORE_ID}/read")
@@ -466,7 +484,7 @@ spec:
                 for holder in $HOLDERS; do
                   case " ${KEEP} " in *" ${holder} "*) continue ;; esac
                   DEL_BODY=$(jq -cn --arg u "$holder" --arg r "$relation" '{deletes:{tuple_keys:[{user:$u,relation:$r,object:"system_tenant:_system"}]}}')
-                  DEL_HTTP=$(curl -sS -o /tmp/del.json -w '%{http_code}' \
+                  DEL_HTTP=$(fcurl -sS -o /tmp/del.json -w '%{http_code}' \
                     -H 'Content-Type: application/json' \
                     -X POST --data "$DEL_BODY" \
                     "${FGA}/stores/${STORE_ID}/write")
@@ -541,6 +559,8 @@ spec:
             # reads CURL_CA_BUNDLE for every call that has no --cacert.
             - name: CURL_CA_BUNDLE
               value: /etc/gibson/tls/fga-ca/ca.crt
+            # The OpenFGA preshared key (charts#637).
+            {{- include "gibson.fgaKey.env" $ | nindent 12 }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -550,6 +570,7 @@ spec:
             - name: fga-http-ca
               mountPath: /etc/gibson/tls/fga-ca
               readOnly: true
+            {{- include "gibson.fgaKey.mount" $ | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir: {}
@@ -564,6 +585,7 @@ spec:
               - key: ca.crt
                 path: ca.crt
             defaultMode: 0444
+        {{- include "gibson.fgaKey.volume" $ | nindent 8 }}
 ---
 apiVersion: v1
 kind: ServiceAccount

@@ -2534,45 +2534,6 @@ tenantOperator:
     annotations: {}
 
 # =============================================================================
-# activeSessionBackfill — one-shot repair Job (SECURITY, deploy#1186)
-#
-# Spec: instant-session-revocation (gibson#627 Slice 2).
-#
-# Runs the gibson image's `/usr/local/bin/active-session-backfill` binary as a
-# PostSync / post-upgrade hook, AFTER fga-init has seeded the store+model and
-# the tenant-operator has provisioned members. For every existing human tenant
-# member it writes the FGA `active_session` conditional tuple if missing.
-#
-# WHY IT MATTERS: `active_session` is a standalone direct relation
-# (model.fga:155) with no path into the role hierarchy — an ABSENT tuple DENIES
-# every tenant-scoped RPC with a 403. The tuple is normally written by the
-# tenant-operator TenantMember controller on membership creation, but that
-# write is non-fatal ("backfill will repair"), and several role-grant paths
-# (SetTenantRole, AcceptInvitation, TransferOwnership) write NO tuple at all.
-# Without this Job a transient operator write failure — or any existing-tenant
-# migration — locks users out at cutover, reading as an authz bug.
-#
-# The binary is IDEMPOTENT and exits zero unconditionally (per-member failures
-# are logged as outcome=write_failed and skipped; already-present tuples log
-# outcome=already_seeded). Re-running it every sync/upgrade is a safe no-op —
-# it is a pure repair net, so there is no enable toggle (one-code-path /
-# deploy#187), exactly like fga-init and tenantOwnerBackfill. Renders in ALL
-# profiles: active_session gating is authz, not billing, so self-hosted needs
-# the repair too.
-activeSessionBackfill:
-  # OpenFGA HTTP endpoint the backfill writes tuples to. Defaults to the same
-  # sibling OpenFGA service fga-init and ext-authz use.
-  openfgaService: ""      # empty → falls back to .Values.fgaInit.openfgaService
-  openfgaHttpPort: 0      # 0     → falls back to .Values.fgaInit.openfgaHttpPort
-  resources:
-    requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 200m
-      memory: 128Mi
-
-# =============================================================================
 # dataPlane — external store overrides for database-per-tenant-data-plane
 #
 # Spec: database-per-tenant-data-plane Phase I Task 9.4, Requirement 16.2.

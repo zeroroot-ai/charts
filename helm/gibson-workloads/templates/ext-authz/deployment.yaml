@@ -263,6 +263,7 @@ spec:
                 configMapKeyRef:
                   name: gibson-fga-config
                   key: model_id
+            {{- include "gibson.fgaKey.env" $ | nindent 12 }}
             {{- /*
               Capability-Grant JWT claim pins (deploy#1155, deploy#1311).
 
@@ -483,6 +484,8 @@ spec:
             - name: fga-http-ca
               mountPath: /etc/extauthz/tls/fga-ca
               readOnly: true
+            # The OpenFGA preshared key (charts#637).
+            {{- include "gibson.fgaKey.mount" $ | nindent 12 }}
             - name: tmp
               mountPath: /tmp
           # The /healthz endpoint is served over HTTPS with mandatory client
@@ -560,6 +563,7 @@ spec:
               - key: ca.crt
                 path: ca.crt
             defaultMode: 0444
+        {{- include "gibson.fgaKey.volume" $ | nindent 8 }}
         {{- /*
           registry volume: only the air-gapped path mounts one (ConfigMap).
           The default daemon-fetch path (deploy#852) keeps the registry in
