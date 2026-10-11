@@ -14769,6 +14769,12 @@ spec:
               PG_LOGINS_TOKEN_SECRET="gibson-openbao-pg-logins"
               PG_LEASE_MAX_S=259200
               PG_LOGINS_PERIOD_S=$(( PG_LEASE_MAX_S + 86400 ))
+              # A periodic token has no end of its own, and a holder of a copy
+              # could renew the old token with no limit. So the login token
+              # also has an explicit maximum: a rotation at TOKEN_LIFETIME_S
+              # plus one period. The old token then ends at that cap at the
+              # latest, after its last lease, whoever renews it.
+              PG_LOGINS_MAX_TTL_S=$(( TOKEN_LIFETIME_S + PG_LOGINS_PERIOD_S ))
               # The KV key that the monthly drill writes to ask for a rotation
               # now. Its property requested_at is a Unix time. A token created
               # before it is rotated on the next pass.
@@ -15148,7 +15154,9 @@ spec:
                 # secret.reloader.stakater.com/reload annotation on each).
                 minter="$1"; policy="$2"; secret="$3"
                 period="$(token_period_s "$secret")s"
-                body=$(jq -nc --arg p "$policy" --arg t "$period" '{"policies":[$p],"period":$t,"renewable":true,"no_parent":true}')
+                body=$(jq -nc --arg p "$policy" --arg t "$period" --argjson m "$(token_max_ttl_s "$secret")" \
+                  '{"policies":[$p],"period":$t,"renewable":true,"no_parent":true}
+                   + (if $m > 0 then {"explicit_max_ttl": ($m | tostring + "s")} else {} end)')
                 code=$(curl -sS -o ${TMPD}/svc_tok.json -w '%{http_code}' \
                   -X POST -H "X-Vault-Token: ${minter}" -H "Content-Type: application/json" \
                   -d "$body" \
@@ -15264,6 +15272,12 @@ spec:
               token_period_s() {
                 # $1 the Secret. The period of the token it holds, in seconds.
                 if [ "$1" = "$PG_LOGINS_TOKEN_SECRET" ]; then echo "$PG_LOGINS_PERIOD_S"; else echo 3600; fi
+              }
+
+              token_max_ttl_s() {
+                # $1 the Secret. The explicit maximum TTL of the token it
+                # holds, in seconds, or 0 for none.
+                if [ "$1" = "$PG_LOGINS_TOKEN_SECRET" ]; then echo "$PG_LOGINS_MAX_TTL_S"; else echo 0; fi
               }
 
               token_renew_below_s() {
@@ -15401,8 +15415,9 @@ spec:
                   erc=0
                   if [ "$rotating" = 1 ] && [ -n "$rotate_old" ] && [ "$secret" = "$PG_LOGINS_TOKEN_SECRET" ]; then
                     # Never revoked: a revoke drops each login role it issued
-                    # (charts#602). Nothing renews it now, so it ends with its
-                    # period, a day after its last lease.
+                    # (charts#602). Nothing here renews it now, so it ends with
+                    # its period, a day after its last lease, and at its
+                    # explicit maximum at the latest, whoever renews it.
                     echo "[openbao-auto-init] the old token of ${secret} is not revoked; it ends with its period, after the login roles it issued" >&2
                   elif [ "$rotating" = 1 ] && [ -n "$rotate_old" ]; then
                     secret_set_revoke "$secret" "$rotate_old" "$(( $(date +%s) + TOKEN_REVOKE_GRACE_S ))" \

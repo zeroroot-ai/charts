@@ -30,7 +30,7 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
                     continue
                 out = []
                 for v in ("TOKEN_LIFETIME_S", "TOKEN_REVOKE_GRACE_S", "PG_LOGINS_TOKEN_SECRET", "PG_LEASE_MAX_S",
-                          "PG_LOGINS_PERIOD_S", "TOKEN_ROTATION_KEY", "REVOKE_ACCESSOR_ANN", "REVOKE_AFTER_ANN"):
+                          "PG_LOGINS_PERIOD_S", "PG_LOGINS_MAX_TTL_S", "TOKEN_ROTATION_KEY", "REVOKE_ACCESSOR_ANN", "REVOKE_AFTER_ANN"):
                     out.append(re.search(r"^\s*%s=.*$" % v, a, re.M).group(0).strip())
                 out.append(a[a.index("vault_mint_token() {"):a.index("vault_ensure_tokens() {")])
                 open(sys.argv[2], "w").write("\n".join(out) + "\n")
@@ -53,6 +53,8 @@ simulate() {
     FAKE="$ROOT/tests/fixtures/pg-login-lease/fake.py"; STATE="$TMPD/state.json"; NOW=1000000
     . "$WORK/tokens.sh"
     if [ -n "${OLD_DESIGN:-}" ]; then PG_LOGINS_TOKEN_SECRET=no-such-secret; fi
+    MAX_TTL="$PG_LOGINS_MAX_TTL_S"
+    if [ -n "${NO_MAX:-}" ]; then token_max_ttl_s() { echo 0; }; fi
     date() { if [ "${1:-}" = "+%s" ]; then echo "$NOW"; else command date "$@"; fi; }
     req() { # <bao|kube> <args...>: run curl-like args against the fake
       kind="$1"; shift
@@ -93,6 +95,13 @@ simulate() {
         lease=$(python3 "$FAKE" "$STATE" "$NOW" creds gibson-platform) || { echo "FAIL at hour $h: $lease"; tail -20 "$TMPD/log"; exit 1; }
       fi
       if [ "$h" -lt "$STOP_FROM" ] || [ "$h" -ge "$STOP_TO" ]; then pass; fi
+      if [ -n "${HOLDER:-}" ]; then
+        python3 "$FAKE" "$STATE" "$NOW" holder
+        age=$(python3 "$FAKE" "$STATE" "$NOW" oldest)
+        if [ "$age" -gt "$MAX_TTL" ]; then
+          echo "FAIL at hour $h: a token renewed by a holder is live at age ${age}s, past ${MAX_TTL}s"; exit 1
+        fi
+      fi
       if [ -n "$lease" ]; then
         msg=$(python3 "$FAKE" "$STATE" "$NOW" alive "$lease") || { echo "FAIL at hour $h: the login role of the Secret dropped: $msg"; exit 1; }
       fi
@@ -113,6 +122,17 @@ simulate() {
 @test "the login role of the Secret stays live while the sidecar is stopped for 48 hours" {
   simulate 96 30 78
   [ "$status" -eq 0 ] || { echo "$output"; false; }
+}
+
+@test "a holder that renews each old token cannot keep one past its explicit maximum" {
+  HOLDER=1 simulate 168
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+}
+
+@test "FAILING FIXTURE: with no explicit maximum, a holder keeps an old token alive" {
+  HOLDER=1 NO_MAX=1 simulate 168
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"renewed by a holder is live at age"* ]] || { echo "$output"; false; }
 }
 
 @test "FAILING FIXTURE: a token with a period of 1h that a rotation revokes drops the login role" {

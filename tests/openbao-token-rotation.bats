@@ -25,7 +25,7 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
                     continue
                 out = []
                 for v in ("TOKEN_LIFETIME_S", "TOKEN_REVOKE_GRACE_S", "PG_LOGINS_TOKEN_SECRET", "PG_LEASE_MAX_S",
-                          "PG_LOGINS_PERIOD_S", "TOKEN_ROTATION_KEY", "REVOKE_ACCESSOR_ANN", "REVOKE_AFTER_ANN"):
+                          "PG_LOGINS_PERIOD_S", "PG_LOGINS_MAX_TTL_S", "TOKEN_ROTATION_KEY", "REVOKE_ACCESSOR_ANN", "REVOKE_AFTER_ANN"):
                     m = re.search(r"^\s*%s=.*$" % v, a, re.M)
                     out.append(m.group(0).strip())
                 out.append(a[a.index("token_rotation_requested_at() {"):a.index("vault_ensure_tokens() {")])

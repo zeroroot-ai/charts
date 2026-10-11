@@ -10,6 +10,10 @@ with its TTL or with its token, the way OpenBao revokes the leases of a token.
   fake.py <state.json> <now> kube <METHOD> <secret name or ""> <body> <out file>
   fake.py <state.json> <now> creds <role>      ESO reads a login role with the Secret token
   fake.py <state.json> <now> alive <lease id>  exit 0 when the lease is live
+  fake.py <state.json> <now> holder            a holder of a copy of each token renews it
+  fake.py <state.json> <now> oldest            print the age of the oldest live token
+A token with an explicit maximum TTL never lives past it, and a lease never
+outlives the maximum of its token, as in OpenBao.
 Each request form prints the HTTP status.
 """
 import base64
@@ -59,7 +63,7 @@ if kind == "bao":
             code = 403
     elif path == "auth/token/renew-self":
         if t:
-            t["expires"] = now + t["period"]
+            t["expires"] = min(now + t["period"], t["max_end"])
             code = 200
         else:
             code = 403
@@ -67,8 +71,10 @@ if kind == "bao":
         b = json.loads(body)
         st["n"] += 1
         tid, acc = f"tok-{st['n']}", f"acc-{st['n']}"
+        max_end = now + secs(b["explicit_max_ttl"]) if b.get("explicit_max_ttl") else 2**62
         st["tokens"][tid] = {"accessor": acc, "policies": b["policies"], "period": secs(b["period"]),
-                             "created": now, "expires": now + secs(b["period"]), "live": True}
+                             "created": now, "expires": min(now + secs(b["period"]), max_end),
+                             "max_end": max_end, "live": True}
         code, resp = 200, {"auth": {"client_token": tid}}
     elif path == "auth/token/revoke-accessor":
         acc = json.loads(body)["accessor"]
@@ -112,9 +118,18 @@ elif kind == "creds":
         sys.exit(f"ESO read {sys.argv[4]} with a token that is not live: {tid}")
     st["n"] += 1
     lid = f"lease-{st['n']}"
-    st["leases"][lid] = {"token": tid, "expires": now + LEASE_TTL, "live": True}
+    st["leases"][lid] = {"token": tid, "expires": min(now + LEASE_TTL, st["tokens"][tid]["max_end"]),
+                         "live": True}
     save()
     print(lid)
+elif kind == "holder":
+    for t in st["tokens"].values():
+        if t["live"]:
+            t["expires"] = min(now + t["period"], t["max_end"])
+    save()
+elif kind == "oldest":
+    ages = [now - t["created"] for t in st["tokens"].values() if t["live"]]
+    print(max(ages) if ages else 0)
 elif kind == "alive":
     lease = st["leases"][sys.argv[4]]
     if not lease["live"]:
