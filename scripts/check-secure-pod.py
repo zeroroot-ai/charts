@@ -40,6 +40,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 import yaml
 
@@ -56,9 +57,10 @@ PROFILES = (
     ("values-baseline.yaml", "values-eks.yaml"),
     ("values-baseline.yaml", "values-guest.yaml"),
 )
-# gibson-velero is its own release in the same namespace. The guard adds its
-# pods to each profile, so the policies of the umbrella apply to them.
-SIDE_RELEASES = ("helm/gibson-velero",)
+# gibson-velero is its own release in its own namespace, velero, on every
+# install (scripts/baseline-up.sh, hosted gitops). The guard renders it there
+# and adds its pods to each profile.
+SIDE_RELEASES = (("helm/gibson-velero", "velero"),)
 WORKLOADS = ("Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Pod")
 POLICIES = ("NetworkPolicy", "CiliumNetworkPolicy", "CiliumClusterwideNetworkPolicy")
 NET = "gibson.zeroroot.ai/"
@@ -81,20 +83,27 @@ SELINUX_TYPES = {None, "", "container_t", "container_init_t", "container_kvm_t",
 
 # ------------------------------------------------------------------ render
 
-def template(chart: str, values: tuple[str, ...]) -> list[dict]:
-    args = ["helm", "template", os.path.basename(chart), chart, "--namespace", NAMESPACE]
+def template(chart: str, values: tuple[str, ...], namespace: str = NAMESPACE) -> list[dict]:
+    args = ["helm", "template", os.path.basename(chart), chart, "--namespace", namespace]
     inputs = f"helm/testdata/render-inputs/{os.path.basename(chart)}.yaml"
     if os.path.exists(os.path.join(ROOT, inputs)):
         args += ["-f", inputs]
     for v in values:
         args += ["-f", f"{chart}/{v}"]
     text = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, check=True).stdout
-    return [d for d in yaml.safe_load_all(text) if d]
+    docs = [d for d in yaml.safe_load_all(text) if d]
+    if namespace != NAMESPACE:
+        # A document with no namespace lands in the namespace of its release.
+        for d in docs:
+            meta = d.setdefault("metadata", {})
+            if d.get("kind") in WORKLOADS + POLICIES[:2] + ("ServiceAccount",) and not meta.get("namespace"):
+                meta["namespace"] = namespace
+    return docs
 
 
 def render() -> list[list[dict]]:
     """One list of documents for each profile."""
-    side = [d for chart in SIDE_RELEASES for d in template(chart, ())]
+    side = [d for chart, ns in SIDE_RELEASES for d in template(chart, (), ns)]
     return [template("helm/gibson", values) + side for values in PROFILES]
 
 
@@ -286,10 +295,20 @@ def granted_accounts(path: str = RBAC_ALLOWLIST) -> set[str]:
     return {key.split(" -> ")[0] for key in data.get("grants") or {}}
 
 
+LEVELS = ("privileged", "baseline", "restricted")
+
+
 def install_enforce_label(path: str = INSTALL_SCRIPT) -> str | None:
-    """The Pod Security level that the install script sets on the release namespace."""
-    m = re.search(re.escape(ENFORCE) + r"=([a-z]+)", open(path).read())
-    return m.group(1) if m else None
+    """The Pod Security level that the install script sets on the release namespace.
+
+    The script is the one place that labels the release namespace on an
+    install with no gitops (hosted#438). When it names the level more than
+    once, the weakest one counts, so a second, weaker line cannot hide.
+    """
+    found = re.findall(re.escape(ENFORCE) + r"=([a-z]+)", open(path).read())
+    if not found:
+        return None
+    return min(found, key=lambda lv: LEVELS.index(lv) if lv in LEVELS else -1)
 
 
 def findings(renders: list[list[dict]], granted: set[str], release_label: str | None) -> dict[str, set[str]]:
@@ -633,8 +652,33 @@ def selftest() -> int:
     if not audit([[]], none, set(), None):
         print("SELFTEST FAIL: a render with no pod must fail as blind")
         return 1
+    # The release namespace: the chart does not render it, so its level comes
+    # from the install script. A weaker level or no label fails (hosted#438).
+    docs = [d for d in copy.deepcopy(base) if d["kind"] != "Namespace"]
+    for d in docs:
+        if (d.get("metadata") or {}).get("namespace") == "fixture":
+            d["metadata"]["namespace"] = NAMESPACE
+    for level in ("baseline", "privileged", None):
+        if not any(" namespace-label: " in x for x in audit([docs], none, set(), level)):
+            print(f"SELFTEST FAIL: the release namespace at level {level} must fail")
+            return 1
+    if any(" namespace-label: " in x for x in audit([docs], none, set(), "restricted")):
+        print("SELFTEST FAIL: the release namespace at the restricted level must pass")
+        return 1
+    for text, want in (
+        ("kubectl label ns gibson " + ENFORCE + "=restricted\n", "restricted"),
+        ("kubectl label ns gibson " + ENFORCE + "=restricted\nkubectl label ns gibson " + ENFORCE + "=baseline\n", "baseline"),
+        ("kubectl create namespace gibson\n", None),
+    ):
+        with tempfile.NamedTemporaryFile("w", suffix=".sh") as f:
+            f.write(text)
+            f.flush()
+            if install_enforce_label(f.name) != want:
+                print(f"SELFTEST FAIL: the install script {text!r} must read as {want}")
+                return 1
     print(f"  ✓ selftest: {len(FIXTURES_THAT_MUST_FAIL)} insecure pods fail, a moved digest fails, a stale entry fails, "
-          "a stale runtime entry fails, a blind render fails, the secure pod passes")
+          "a stale runtime entry fails, a blind render fails, a weaker release namespace label fails, "
+          "the secure pod passes")
     return 0
 
 

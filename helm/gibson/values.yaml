@@ -1425,8 +1425,11 @@ spire:
     # spire-system, and the tenant operator and the OpenBao JWT auth Job
     # read it in the release namespace. The chart publisher writes one
     # namespace, so the k8s_configmap plugin is configured here with one
-    # in-cluster entry for each. templates/spire-bundle-rbac.yaml gives the
-    # server the same grant as the chart Role, in both namespaces.
+    # in-cluster entry for each. templates/spire-node-namespace.yaml gives
+    # the server the same grant as the chart Role, in both namespaces. The
+    # first entry names the release namespace as a literal, gibson, like the
+    # other in-cluster addresses of this file: an install in another
+    # namespace restates this list, and the render fails until it does.
     bundlePublisher:
       k8sConfigMap:
         enabled: false
