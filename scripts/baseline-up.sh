@@ -355,6 +355,15 @@ wait_crd_established mcpservers.toolhive.stacklok.dev
 
 log "phase 1 — CRDs"
 kubectl get namespace "$NS" >/dev/null 2>&1 || kubectl create namespace "$NS"
+# The release namespace enforces the restricted Pod Security level (D8,
+# ADR-0165, hosted#438). Each pod of the chart here meets it. The pods with an
+# expected exception run in their own namespaces: spire-system, setec-system
+# and velero. scripts/check-secure-pod.py reads the level from this line.
+kubectl label namespace "$NS" --overwrite \
+  pod-security.kubernetes.io/enforce=restricted \
+  pod-security.kubernetes.io/enforce-version=latest \
+  pod-security.kubernetes.io/audit=restricted \
+  pod-security.kubernetes.io/warn=restricted >/dev/null
 # The operator CRDs are their OWN release, not a dependency of gibson-crds.
 # A Helm release record is one Secret with a 1 MiB cap, and the two together
 # rendered to 1131 KB of it: `helm install gibson-crds` failed outright on

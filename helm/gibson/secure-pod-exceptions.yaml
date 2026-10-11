@@ -37,9 +37,9 @@ runtime:
       registry, with a digest (ADR-0114). The platform owner approves the
       image when the catalog entry merges. The entry covers rule 5 only.
 pods:
-  'Namespace/gibson namespace-label':
-    digest: c00f8736a37861fe
-    reason: "scripts/baseline-up.sh sets no enforce label on the release namespace yet, and this guard renders the gibson-velero release (node agent with host paths) in the release namespace. The install puts Velero in its own namespace velero. hosted#438 removes this entry."
+  'Namespace/velero namespace-label':
+    digest: 5e2e8b7ce582457d
+    reason: "Named exception of ADR-0165 (D8): the namespace of the vendored Velero release. Its node agent mounts the host paths of the kubelet pods and plugins to back up volumes, so the namespace cannot enforce the restricted level. The install creates the namespace (scripts/baseline-up.sh, the hosted gitops) and runs only the Velero server and node agent in it (hosted#438)."
   'Namespace/spire-system namespace-label':
     digest: c00f8736a37861fe
     reason: "Named privileged exception of ADR-0165 (D8): the namespace of the SPIRE agent and the SPIFFE CSI driver. The agent runs on the host network with the host PID namespace and a host path, and the CSI driver is privileged. The chart labels the namespace privileged on purpose, and only these two DaemonSets run in it (hosted#438)."
@@ -76,7 +76,7 @@ pods:
   'DaemonSet/spire-system/gibson-spiffe-csi-driver read-only':
     digest: 11ea229adb46b8e3
     reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths. They run in the namespace spire-system, which has the named privileged exception (hosted#438)."
-  'DaemonSet/gibson/node-agent read-only':
+  'DaemonSet/velero/node-agent read-only':
     digest: 3b74e134c6bcaaad
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
   'Deployment/gibson/gibson-docs-svc read-only':
@@ -88,14 +88,14 @@ pods:
   'DaemonSet/spire-system/gibson-spiffe-csi-driver restricted':
     digest: b925d3d195bb22d0
     reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths. They run in the namespace spire-system, which has the named privileged exception (hosted#438)."
-  'DaemonSet/gibson/node-agent restricted':
+  'DaemonSet/velero/node-agent restricted':
     digest: d6fc811bbe059e20
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
   'DaemonSet/spire-system/gibson-spiffe-csi-driver token':
     digest: fb834f23af6e768e
     reason: "The SPIFFE CSI driver chart gives the pod a ServiceAccount with no grant. The chart has no value that turns the token mount off."
-  'DaemonSet/gibson/node-agent token':
-    digest: b91d468512d5e74a
+  'DaemonSet/velero/node-agent token':
+    digest: 5ab7d93a3431f72e
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
   'Deployment/gibson/external-secrets-webhook token':
     digest: 5401b028ab76cfef
@@ -106,8 +106,8 @@ pods:
   'Deployment/gibson/gibson-zitadel-login token':
     digest: 4bf5b735032c4641
     reason: "The ZITADEL chart has no value that turns the token mount of the login pod off."
-  'Deployment/gibson/velero token':
-    digest: b91d468512d5e74a
+  'Deployment/velero/velero token':
+    digest: 5ab7d93a3431f72e
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
   'Pod/gibson/gibson-server-test-connection token':
     digest: f905b201ea835d99
