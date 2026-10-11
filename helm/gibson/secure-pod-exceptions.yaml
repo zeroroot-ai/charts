@@ -79,9 +79,6 @@ pods:
   'Deployment/gibson/gibson-docs-svc read-only':
     digest: f645e1e6ef183e3d
     reason: "The image rewrites its own index.html at start, so its root cannot be read-only. docs-site#79 changes the image."
-  'Pod/gibson/gibson-openfga-test-connection read-only':
-    digest: 1eb6b295da1171fb
-    reason: "An upstream OpenFGA helm test pod. The chart sets no security context for it and has no value for one."
   'DaemonSet/gibson/gibson-agent restricted':
     digest: 58a63912eaf1ea86
     reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths."
@@ -91,9 +88,6 @@ pods:
   'DaemonSet/gibson/node-agent restricted':
     digest: d6fc811bbe059e20
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
-  'Pod/gibson/gibson-openfga-test-connection restricted':
-    digest: 964949eb904251bb
-    reason: "An upstream OpenFGA helm test pod. The chart sets no security context for it and has no value for one."
   'DaemonSet/gibson/gibson-spiffe-csi-driver token':
     digest: 24ae7871ca615480
     reason: "The SPIFFE CSI driver chart gives the pod a ServiceAccount with no grant. The chart has no value that turns the token mount off."
@@ -112,9 +106,6 @@ pods:
   'Deployment/gibson/velero token':
     digest: b91d468512d5e74a
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
-  'Pod/gibson/gibson-openfga-test-connection token':
-    digest: f905b201ea835d99
-    reason: "An upstream OpenFGA helm test pod on the default ServiceAccount. The chart has no value that turns the token mount off."
   'Pod/gibson/gibson-server-test-connection token':
     digest: f905b201ea835d99
     reason: "An upstream SPIRE helm test pod on the default ServiceAccount. The chart has no value for its ServiceAccount."

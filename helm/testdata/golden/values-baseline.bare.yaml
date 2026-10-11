@@ -25117,7 +25117,23 @@ spec:
       image: "ghcr.io/zeroroot-ai/mirror/openfga:v1.21.0@sha256:2113c664a486b5da8d7a2cdab479e0d4e30639c80fd2c000540f645c1dbc1e55"
       imagePullPolicy: Always
       command: ["grpc_health_probe", '-addr=gibson-openfga:8081']
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
   restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    seccompProfile:
+      type: RuntimeDefault
 ---
 # Source: gibson/charts/spire/charts/spiffe-oidc-discovery-provider/templates/tests/test-connection.yaml
 apiVersion: v1
