@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.144.0](https://github.com/zeroroot-ai/charts/compare/v0.143.0...v0.144.0) (2026-10-11)
+
+
+### Features
+
+* **setec:** the disk builder pushes to the ECR disk repository with a refreshed token ([#621](https://github.com/zeroroot-ai/charts/issues/621)) ([01b5918](https://github.com/zeroroot-ai/charts/commit/01b5918e4d4b3038912d9c150ff1d0903c21142d))
+
+
+### Bug Fixes
+
+* **admission:** the tenant-operator ClusterSPIFFEID policy compiles in the API server ([#609](https://github.com/zeroroot-ai/charts/issues/609)) ([371e181](https://github.com/zeroroot-ai/charts/commit/371e181c59bd9d32748b8ac58360a333d51a9b48))
+* **ci:** a push to main no longer cancels a running exit test ([#626](https://github.com/zeroroot-ai/charts/issues/626)) ([f9fa34c](https://github.com/zeroroot-ai/charts/commit/f9fa34cebdcf79b228e250786e570b53d095f9d7)), closes [#625](https://github.com/zeroroot-ai/charts/issues/625)
+* **network:** the dashboard pod carries no kube-api label ([#606](https://github.com/zeroroot-ai/charts/issues/606)) ([f55be39](https://github.com/zeroroot-ai/charts/commit/f55be39e994e2631ca67b6d3b7ed8620bf4aed45)), closes [#575](https://github.com/zeroroot-ai/charts/issues/575)
+* **openbao:** a store sealed under the legacy key id unseals after the upgrade ([#620](https://github.com/zeroroot-ai/charts/issues/620)) ([67e8017](https://github.com/zeroroot-ai/charts/commit/67e8017ae6bd38eb63e230776c1aab72a1a4888a))
+* **postgres:** the token that issues the login roles outlives each of them ([#611](https://github.com/zeroroot-ai/charts/issues/611)) ([df196ac](https://github.com/zeroroot-ai/charts/commit/df196acfdfac1f2a895ccb153fd287eec0750a89))
+* **setec:** an ECR install renders with no registrySecret value, so the pin moves alone ([#624](https://github.com/zeroroot-ai/charts/issues/624)) ([ab0f0d7](https://github.com/zeroroot-ai/charts/commit/ab0f0d793403c40dcbe4c8f66a2fb249dd05b16d)), closes [#574](https://github.com/zeroroot-ai/charts/issues/574)
+* **zitadel:** the init container wait-for-system-key renders on each Zitadel workload ([#607](https://github.com/zeroroot-ai/charts/issues/607)) ([5a3dc22](https://github.com/zeroroot-ai/charts/commit/5a3dc227b7f65b5b9e3373001e12430b65a09834))
+
 ## [0.143.0](https://github.com/zeroroot-ai/charts/compare/v0.142.0...v0.143.0) (2026-10-10)
 
 
