@@ -37,7 +37,7 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
     k, n, ns = d.get("kind"), d["metadata"]["name"], d["metadata"].get("namespace", "")
     if k == "ECRAuthorizationToken":
         print(f"generator {ns}/{n} region={d['spec']['region']}")
-    elif k == "ExternalSecret" and n in ("setec-disk-registry", "setec-disk-push-credential"):
+    elif k == "ExternalSecret" and n in ("setec-disk-registry", "setec-disk-push-key"):
         t = d["spec"]["target"]
         tpl = (t.get("template") or {})
         print(f"externalsecret {ns}/{n} refresh={d['spec']['refreshInterval']} type={tpl.get('type', '-')}")
@@ -64,7 +64,7 @@ PY
   [ "$status" -eq 0 ] || { echo "$output"; false; }
   echo "$output"
   [[ "$output" == *"generator setec-system/setec-disk-registry region=us-east-1"* ]]
-  [[ "$output" == *"externalsecret setec-system/setec-disk-push-credential refresh=60s type=-"* ]]
+  [[ "$output" == *"externalsecret setec-system/setec-disk-push-key refresh=60s type=-"* ]]
   [[ "$output" == *"externalsecret setec-system/setec-disk-registry refresh=6h type=kubernetes.io/dockerconfigjson"* ]]
   [[ "$output" == *"dockerconfig 123456789012.dkr.ecr.us-east-1.amazonaws.com"* ]]
   [[ "$output" == *"operator --disk-registry-secret=setec-disk-registry"* ]]

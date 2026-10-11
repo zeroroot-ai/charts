@@ -9,7 +9,7 @@ of GetAuthorizationToken that lives 12 hours, so no static Secret can hold it.
 
 The chain, in the setec namespace:
 
-  1. ExternalSecret setec-disk-push-credential: the access key pair of the
+  1. ExternalSecret setec-disk-push-key: the access key pair of the
      stage 0 IAM user <prefix>-<env>-setec-disk-builder (push on the disk
      repository only). The bringup writes the pair from the keyring members
      SETEC_DISK_PUSH_ACCESS_KEY and SETEC_DISK_PUSH_SECRET_KEY into the
@@ -45,7 +45,7 @@ refresh of the first ExternalSecret.
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: setec-disk-push-credential
+  name: setec-disk-push-key
   namespace: {{ $ns }}
   labels:
     {{- include "gibson.labels" . | nindent 4 }}
@@ -56,7 +56,9 @@ spec:
     kind: ClusterSecretStore
     name: gibson-secrets
   target:
-    name: setec-disk-push-credential
+    # Not the name of the bringup Secret of the release namespace: one
+    # name, one writer (D40).
+    name: setec-disk-push-key
     creationPolicy: Owner
   data:
     - secretKey: access-key-id
@@ -81,10 +83,10 @@ spec:
   auth:
     secretRef:
       accessKeyIDSecretRef:
-        name: setec-disk-push-credential
+        name: setec-disk-push-key
         key: access-key-id
       secretAccessKeySecretRef:
-        name: setec-disk-push-credential
+        name: setec-disk-push-key
         key: secret-access-key
 ---
 apiVersion: external-secrets.io/v1
