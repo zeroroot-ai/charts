@@ -13,10 +13,12 @@ The exit tests turn Hubble on in the Cilium of their kind or k3d cluster
 
   check-hubble-drops.py --namespace gibson [--since 2026-10-07T00:00:00Z]
         exit 1 when a flow to or from the namespace is dropped by policy
-  check-hubble-drops.py --namespace gibson --since T --expect-drop <pod prefix>[:<port>]
+  check-hubble-drops.py --namespace gibson --since T --expect-drop <pod prefix>[:<port>] [--direction EGRESS]
         the live fixture: exit 0 only when a policy drop from a pod whose name
-        starts with the prefix (to the port, when one is given) is in the
-        flows, and print it
+        starts with the prefix (to the port, and on the side of the
+        direction, when given) is in the flows, and print it. EGRESS means
+        the policy of the source refused the flow; INGRESS means the policy
+        of the destination did
   check-hubble-drops.py --namespace gibson --since T --expect-forward <pod prefix>:<port>
         a caller fixture: exit 0 only when a forwarded flow from a pod whose
         name starts with the prefix to the port is in the flows, and no
@@ -120,14 +122,16 @@ def forwarded(lines: list[str], prefix: str, port: str) -> list[dict]:
     return out
 
 
-def expected_drops(drops: list[dict], spec: str) -> list[dict]:
+def expected_drops(drops: list[dict], spec: str, direction: str = "") -> list[dict]:
     """The policy drops from a pod whose name starts with the prefix of spec,
-    to the port of spec when spec is <prefix>:<port>."""
+    to the port of spec when spec is <prefix>:<port>, on the side of
+    direction when one is given."""
     prefix, _, port = spec.rpartition(":")
     if not prefix or not port.isdigit():
         prefix, port = spec, ""
     return [d for d in drops if d["source_pod"].startswith(prefix)
-            and (not port or d["port"] == f"{port}/TCP")]
+            and (not port or d["port"] == f"{port}/TCP")
+            and (not direction or d["direction"] == direction)]
 
 
 def live_flows(namespace: str, since: str, verdict: str = "DROPPED") -> list[str]:
@@ -219,6 +223,16 @@ def selftest() -> int:
         if expected_drops(runner, spec):
             print(f"SELFTEST FAIL: {what} must not count as the expected drop")
             return 1
+    # The fixture drop is on the EGRESS side. A drop at the daemon (INGRESS)
+    # means a policy of the source let the flow out: the connector rule that
+    # gibson#1065 deletes did that for the daemon ports 8080 and 50100.
+    if len(expected_drops(runner, "hubble-proof-connector-runner:50001", "EGRESS")) != 1:
+        print("SELFTEST FAIL: the EGRESS drop of the runner fixture must be found")
+        return 1
+    ingress = [{**runner[0], "direction": "INGRESS"}]
+    if expected_drops(ingress, "hubble-proof-connector-runner:50001", "EGRESS"):
+        print("SELFTEST FAIL: a drop at the destination must not count as an EGRESS drop")
+        return 1
     print("  ✓ selftest: a policy drop fails and names its source, destination and port; a forwarded flow, "
           "another drop reason and other namespaces pass; a caller fixture needs its forwarded flow to its port; "
           "an expected drop matches its pod and port only")
@@ -233,6 +247,7 @@ def main() -> int:
     ap.add_argument("--flows", nargs="*")
     ap.add_argument("--expect-drop", default="")
     ap.add_argument("--expect-forward", default="")
+    ap.add_argument("--direction", default="", choices=["", "EGRESS", "INGRESS"])
     a = ap.parse_args()
     if a.selftest:
         return selftest()
@@ -261,10 +276,11 @@ def main() -> int:
         lines = live_flows(a.namespace, a.since)
     drops = policy_drops(lines, a.namespace)
     if a.expect_drop:
-        mine = expected_drops(drops, a.expect_drop)
+        mine = expected_drops(drops, a.expect_drop, a.direction)
         if not mine:
-            print(f"::error::no policy drop that matches {a.expect_drop} (<pod prefix>[:<port>]): the policy did not "
-                  "refuse the fixture, "
+            print(f"::error::no policy drop that matches {a.expect_drop} (<pod prefix>[:<port>]) "
+                  f"{('on the ' + a.direction + ' side') if a.direction else ''}: the policy did not "
+                  "refuse the fixture there, "
                   f"or Hubble did not record it. {len(drops)} other policy drop(s).", file=sys.stderr)
             return 1
         for d in mine:
