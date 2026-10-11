@@ -88,6 +88,17 @@ jobs:
           echo "${pv_sha}  /tmp/prometheus.tgz" | sha256sum -c -
           sudo tar -xzf /tmp/prometheus.tgz -C /usr/local/bin --strip-components=1 "prometheus-${pv}.linux-amd64/promtool"
           promtool --version
+          # bao, for `make check`'s openbao-seal-legacy-id gate: a real
+          # OpenBao server with file storage, the version of the chart image
+          # (charts#605). Pinned by the checksum of the release archive
+          # (checksums-linux.txt of the release).
+          bv=2.5.3
+          bv_sha=74e8ce7753ac205528f93148c47c91f417bea1ce21ddb126969bf3ef5598cadd
+          curl -fsSL "https://github.com/openbao/openbao/releases/download/v${bv}/bao_${bv}_Linux_x86_64.tar.gz" -o /tmp/bao.tgz
+          echo "${bv_sha}  /tmp/bao.tgz" | sha256sum -c -
+          sudo tar -xzf /tmp/bao.tgz -C /usr/local/bin bao
+          echo "BAO_BIN=/usr/local/bin/bao" >> "$GITHUB_ENV"
+          bao version
 
       # Go, for `make check`'s admission-cel gate: it compiles the CEL of each
       # rendered ValidatingAdmissionPolicy with the API server compiler
