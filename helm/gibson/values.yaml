@@ -76,6 +76,23 @@ global:
     # empty. A trust domain cannot change on a running install: every SVID and
     # every agent belongs to it.
     trustDomain: ""
+    # The namespace of the SPIRE node components: the agent and the SPIFFE
+    # CSI driver (hosted#438). They mount host paths and the agent runs on
+    # the host network, so they cannot meet the restricted level. They run
+    # here, with the named privileged exception of ADR-0165, and the release
+    # namespace enforces restricted. The chart renders the namespace with its
+    # Pod Security labels. templates/spire-node-namespace.yaml fails the
+    # render when the agent, the CSI driver or the node attestor names
+    # another namespace.
+    namespaces:
+      system:
+        name: spire-system
+        create: true
+        labels:
+          pod-security.kubernetes.io/enforce: privileged
+          pod-security.kubernetes.io/enforce-version: latest
+          pod-security.kubernetes.io/audit: privileged
+          pod-security.kubernetes.io/warn: privileged
   # Host every first-party image resolves against, unless its own
   # `repository` names one. The pull credential follows this by default.
   registry: ghcr.io
@@ -1295,6 +1312,8 @@ zitadel:
 
 spire:
   spiffe-csi-driver:
+    # The namespace of the SPIRE node components (global.spire.namespaces.system).
+    namespaceOverride: spire-system
     # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
     image:
       registry: "ghcr.io"
@@ -1396,6 +1415,36 @@ spire:
       # pod template annotations, and the vendored chart renders none on the
       # StatefulSet itself (gibson-operators reloader.rollouts names it).
       secret.reloader.stakater.com/reload: "spire-postgres-credentials"
+    # The agent attests with the token of its ServiceAccount, which lives
+    # in the namespace of the SPIRE node components.
+    nodeAttestor:
+      k8sPSAT:
+        serviceAccountAllowList:
+          - spire-system:gibson-agent
+    # The trust bundle goes to two namespaces: the agent reads it in
+    # spire-system, and the tenant operator and the OpenBao JWT auth Job
+    # read it in the release namespace. The chart publisher writes one
+    # namespace, so the k8s_configmap plugin is configured here with one
+    # in-cluster entry for each. templates/spire-bundle-rbac.yaml gives the
+    # server the same grant as the chart Role, in both namespaces.
+    bundlePublisher:
+      k8sConfigMap:
+        enabled: false
+    unsupportedBuiltInPlugins:
+      bundlePublisher:
+        k8s_configmap:
+          plugin_data:
+            clusters:
+              - release-namespace:
+                  format: spiffe
+                  namespace: gibson
+                  configmap_name: spire-bundle
+                  configmap_key: bundle.spiffe
+              - spire-system:
+                  format: spiffe
+                  namespace: spire-system
+                  configmap_name: spire-bundle
+                  configmap_key: bundle.spiffe
     # Datastore: shared platform-postgres-rw, role spire, database spire.
     dataStore:
       sql:
@@ -1484,6 +1533,9 @@ spire:
 # and are never refused by a webhook whose pod is not up yet.
 # =============================================================================
   spire-agent:
+    # The namespace of the SPIRE node components (global.spire.namespaces.system).
+    # The server stays in the release namespace, and the agent finds it there.
+    namespaceOverride: spire-system
     # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
     image:
       registry: "ghcr.io"

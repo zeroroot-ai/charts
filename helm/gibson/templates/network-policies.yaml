@@ -42,20 +42,28 @@ Each policy applies in wave -20, before each hook Job (check-netpol-before-hooks
 {{- $ns := .Release.Namespace }}
 {{- $rel := .Release.Name }}
 {{- $role := "gibson.zeroroot.ai/net-role" }}
+{{- /* The default deny covers the release namespace and the namespace of the
+       SPIRE node components (hosted#438). The SPIRE agent runs on the host
+       network, so no policy applies to it. The CSI driver talks to the
+       kubelet and the agent over unix sockets and needs no network. */}}
+{{- range $i, $dns := list $ns .Values.global.spire.namespaces.system.name }}
+{{- if $i }}
+---
+{{- end }}
 apiVersion: cilium.io/v2
 kind: CiliumClusterwideNetworkPolicy
 metadata:
-  name: {{ $rel }}-{{ $ns }}-default-deny
+  name: {{ $rel }}-{{ $dns }}-default-deny
   labels:
-    {{- include "gibson.labels" . | nindent 4 }}
+    {{- include "gibson.labels" $ | nindent 4 }}
     app.kubernetes.io/component: network-default-deny
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "Each pod of the namespace {{ $ns }} denies all traffic, except DNS (ADR-0165 rule 4)."
+  description: "Each pod of the namespace {{ $dns }} denies all traffic, except DNS (ADR-0165 rule 4)."
   endpointSelector:
     matchLabels:
-      k8s:io.kubernetes.pod.namespace: {{ $ns }}
+      k8s:io.kubernetes.pod.namespace: {{ $dns }}
   enableDefaultDeny:
     ingress: true
     egress: true
@@ -74,7 +82,8 @@ spec:
               protocol: TCP
           rules:
             dns:
-              {{- include "gibson.dnsNames" . | nindent 14 }}
+              {{- include "gibson.dnsNames" $ | nindent 14 }}
+{{- end }}
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

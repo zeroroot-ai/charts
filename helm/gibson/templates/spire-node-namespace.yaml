@@ -1,0 +1,88 @@
+{{- /*
+The namespace of the SPIRE node components (hosted#438, D8, ADR-0165).
+
+The SPIRE agent runs on the host network and mounts host paths, and the
+SPIFFE CSI driver is privileged. Neither can meet the restricted level, so
+they run in global.spire.namespaces.system with the named privileged
+exception, and the release namespace enforces restricted. The SPIRE chart
+renders the Namespace with its Pod Security labels.
+
+One name, four readers. The render fails when the agent, the CSI driver,
+the node attestor of the server or the bundle publisher names another
+namespace.
+
+The server stays in the release namespace. The k8s_configmap bundle
+publisher (values: spire.spire-server.unsupportedBuiltInPlugins) writes the
+trust bundle to both namespaces, so the server gets the grant of the chart
+Role in both. The grant is the one the SPIRE chart renders when its own
+publisher is on: get, patch and create on the one ConfigMap.
+*/ -}}
+{{- $sys := .Values.global.spire.namespaces.system -}}
+{{- $ns := required "global.spire.namespaces.system.name is required: the SPIRE agent and the CSI driver run there (hosted#438)" $sys.name -}}
+{{- if eq $ns .Release.Namespace -}}
+{{- fail (printf "global.spire.namespaces.system.name is %q, the release namespace. The SPIRE node components need a namespace of their own, so the release namespace can enforce the restricted level (hosted#438)" $ns) -}}
+{{- end -}}
+{{- if not $sys.create -}}
+{{- fail "global.spire.namespaces.system.create must be true: the chart renders the namespace of the SPIRE node components with its Pod Security labels (hosted#438)" -}}
+{{- end -}}
+{{- $spire := .Values.spire -}}
+{{- range $sub := list "spire-agent" "spiffe-csi-driver" -}}
+{{- $got := (index $spire $sub).namespaceOverride -}}
+{{- if ne $got $ns -}}
+{{- fail (printf "spire.%s.namespaceOverride is %q, want %q (global.spire.namespaces.system.name)" $sub $got $ns) -}}
+{{- end -}}
+{{- end -}}
+{{- $server := index $spire "spire-server" -}}
+{{- $allow := $server.nodeAttestor.k8sPSAT.serviceAccountAllowList -}}
+{{- if not $allow -}}
+{{- fail (printf "spire.spire-server.nodeAttestor.k8sPSAT.serviceAccountAllowList must name the agent ServiceAccount in %s" $ns) -}}
+{{- end -}}
+{{- range $sa := $allow -}}
+{{- if not (hasPrefix (printf "%s:" $ns) $sa) -}}
+{{- fail (printf "spire.spire-server.nodeAttestor.k8sPSAT.serviceAccountAllowList names %q: the agent runs in %s" $sa $ns) -}}
+{{- end -}}
+{{- end -}}
+{{- $published := list -}}
+{{- range $c := $server.unsupportedBuiltInPlugins.bundlePublisher.k8s_configmap.plugin_data.clusters -}}
+{{- range $_, $v := $c -}}
+{{- $published = append $published $v.namespace -}}
+{{- end -}}
+{{- end -}}
+{{- range $want := list .Release.Namespace $ns -}}
+{{- if not (has $want $published) -}}
+{{- fail (printf "the SPIRE trust bundle is not published to the namespace %q: the agent reads it in %s, and the tenant operator and the OpenBao JWT auth Job read it in %s" $want $ns $.Release.Namespace) -}}
+{{- end -}}
+{{- end -}}
+{{- range $target := list .Release.Namespace $ns }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spire-bundle
+  namespace: {{ $target }}
+  labels:
+    {{- include "gibson.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: spire-bundle
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [spire-bundle]
+    verbs: [get, patch, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spire-bundle
+  namespace: {{ $target }}
+  labels:
+    {{- include "gibson.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: spire-bundle
+subjects:
+  - kind: ServiceAccount
+    name: {{ $.Release.Name }}-server
+    namespace: {{ $.Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spire-bundle
+{{- end }}
