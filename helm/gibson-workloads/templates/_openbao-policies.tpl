@@ -105,10 +105,9 @@ path "auth/{{ $p.approle }}/role/cert-manager/role-id" { capabilities = ["read"]
 {{/*
 gibson.openbaoPolicy.postgresLogins: the five generators of the database
 logins (postgres-logins.yaml). A new login role for each read of
-database/creds/<role>, and the revoke of the previous lease of a generator that
-makes a new one.
+database/creds/<role>, and nothing else. External Secrets never revokes a
+generator lease, so the token needs no revoke grant: a lease ends with its TTL.
 */}}
 {{- define "gibson.openbaoPolicy.postgresLogins" -}}
 path "database/creds/*" { capabilities = ["read"] }
-path "sys/leases/revoke" { capabilities = ["update"] }
 {{- end -}}
