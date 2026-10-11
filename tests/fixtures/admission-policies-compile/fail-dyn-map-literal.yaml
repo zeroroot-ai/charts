@@ -1,0 +1,22 @@
+# FAILS: the map literal mixes a string value and a dyn value (variables.v), so the type check refuses it (charts#588).
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: fixture-map-literal
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["spire.spiffe.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE"]
+        resources: ["clusterspiffeids"]
+  variables:
+    - name: labels
+      expression: "has(object.metadata.labels) ? object.metadata.labels : {}"
+    - name: v
+      expression: "'gibson.zeroroot.ai/plugin' in variables.labels ? variables.labels['gibson.zeroroot.ai/plugin'] : ''"
+  validations:
+    - expression: >-
+        has(object.spec.podSelector) && has(object.spec.podSelector.matchLabels)
+          && object.spec.podSelector.matchLabels == {'app.kubernetes.io/component': 'plugin', 'gibson.zeroroot.ai/plugin': variables.v}

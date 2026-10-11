@@ -104,7 +104,7 @@ spec:
           && object.spec.namespaceSelector.matchLabels == {'kubernetes.io/metadata.name': variables.pluginNs}
           && has(object.spec.podSelector) && has(object.spec.podSelector.matchLabels)
           && !has(object.spec.podSelector.matchExpressions)
-          && object.spec.podSelector.matchLabels == {'app.kubernetes.io/component': 'plugin', 'gibson.zeroroot.ai/plugin': variables.v}
+          && object.spec.podSelector.matchLabels == {'app.kubernetes.io/component': 'plugin', 'gibson.zeroroot.ai/plugin': string(variables.v)}
           && has(object.spec.workloadSelectorTemplates)
           && object.spec.workloadSelectorTemplates == ['k8s:ns:' + variables.pluginNs, 'k8s:sa:gibson-plugin-' + variables.v])
       reason: Forbidden

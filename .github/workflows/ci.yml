@@ -85,6 +85,18 @@ jobs:
           echo "${pv_sha}  /tmp/prometheus.tgz" | sha256sum -c -
           sudo tar -xzf /tmp/prometheus.tgz -C /usr/local/bin --strip-components=1 "prometheus-${pv}.linux-amd64/promtool"
           promtool --version
+          # envtest (etcd, kube-apiserver, kubectl), for `make check`'s
+          # admission-policies-compile gate: the API server type-checks the CEL
+          # of each admission policy (charts#588). Kubernetes 1.31.0, the
+          # version kind runs (helm/kind-config.yaml). Pinned by the checksum
+          # of the release archive.
+          ev=v1.31.0
+          ev_sha=b72c0c764c797e6b2cfd6d417abdad7b25d4fbc9f8475edeb44c8dd598999b76
+          curl -fsSL "https://github.com/kubernetes-sigs/controller-tools/releases/download/envtest-${ev}/envtest-${ev}-linux-amd64.tar.gz" -o /tmp/envtest.tgz
+          echo "${ev_sha}  /tmp/envtest.tgz" | sha256sum -c -
+          mkdir -p "$HOME/envtest"
+          tar -xzf /tmp/envtest.tgz -C "$HOME/envtest" --strip-components=2
+          echo "ENVTEST_BIN=$HOME/envtest" >> "$GITHUB_ENV"
 
       # `make check` runs `chart-deps`, which pulls subcharts from ghcr. The
       # packages are public, but an unauthenticated pull is rate-limited by IP
