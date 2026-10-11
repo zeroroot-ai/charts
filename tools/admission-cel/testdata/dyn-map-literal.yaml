@@ -1,0 +1,22 @@
+# The shape of charts#601: labels is dyn, so v is dyn, and a map literal with
+# a string value and a dyn value does not compile. The API server refused the
+# whole release with this. admission-cel must fail on this file.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: fixture-dyn-map-literal
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["spire.spiffe.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE"]
+        resources: ["clusterspiffeids"]
+  variables:
+    - name: labels
+      expression: "has(object.metadata.labels) ? object.metadata.labels : {}"
+    - name: v
+      expression: "'gibson.zeroroot.ai/plugin' in variables.labels ? variables.labels['gibson.zeroroot.ai/plugin'] : ''"
+  validations:
+    - expression: "object.spec.podSelector.matchLabels == {'app.kubernetes.io/component': 'plugin', 'gibson.zeroroot.ai/plugin': variables.v}"

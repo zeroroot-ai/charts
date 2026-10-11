@@ -13,7 +13,7 @@
 # exit-test-published-upgrade-kind. A chart that renders and does not install
 # is found there, after the merge, and fixed forward.
 #
-# What it runs is `make check`, the offline gate set, unchanged: the golden
+# What it runs is `make check`, the offline gate set: the golden
 # snapshots for every profile, the vendored-attribution guard, and the
 # cloud-free assertion. Those already existed and already passed. The defect
 # was that nothing invoked them before a merge.
@@ -42,7 +42,10 @@ jobs:
   ci-required:
     name: ci-required
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # `make check` took 13.5 minutes before the admission-cel gate. A cold
+    # download of its Go modules adds about 1.5 minutes. The 15-minute cap
+    # cancelled a run 10 ms after every gate passed (charts#609).
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
@@ -85,6 +88,14 @@ jobs:
           echo "${pv_sha}  /tmp/prometheus.tgz" | sha256sum -c -
           sudo tar -xzf /tmp/prometheus.tgz -C /usr/local/bin --strip-components=1 "prometheus-${pv}.linux-amd64/promtool"
           promtool --version
+
+      # Go, for `make check`'s admission-cel gate: it compiles the CEL of each
+      # rendered ValidatingAdmissionPolicy with the API server compiler
+      # (k8s.io/apiserver), offline (charts#601).
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: tools/admission-cel/go.mod
+          cache-dependency-path: tools/admission-cel/go.sum
 
       # `make check` runs `chart-deps`, which pulls subcharts from ghcr. The
       # packages are public, but an unauthenticated pull is rate-limited by IP
