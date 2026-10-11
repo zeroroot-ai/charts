@@ -40,7 +40,9 @@ on:
 
 concurrency:
   group: exit-test-published-install-k3d-${{ github.ref }}
-  cancel-in-progress: true
+  # A run that started finishes. On main an exit test is the proof (ADR-0080),
+  # so a newer push queues behind it and does not cancel it (charts#625).
+  cancel-in-progress: false
 
 permissions:
   contents: read
