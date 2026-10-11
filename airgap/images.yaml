@@ -49,11 +49,11 @@ chart:
 
 # The gibson commit whose component catalog the dispatchTime group is
 # derived from (airgap/gibson-catalog.ref).
-gibsonCatalogRef: 8f746be775b2398b140f1645219cbae77eeb1c74
+gibsonCatalogRef: 5d2f0107495c2cc157fef2f2a1a2928d792b31c0
 
 # First-party platform images (private; ELv2 + the closed billing seam).
 firstParty:
-  - ref: ghcr.io/zeroroot-ai/connector-operator:v0.158.0@sha256:c31538df739b9e931be5209c4fbb5e6141d27cac67f1a383f4324c6c296a2ca6
+  - ref: ghcr.io/zeroroot-ai/connector-operator:v0.159.0@sha256:ac0e2c4c3b0f22d99aec9de05d0ec7622e2513c6adadb93bea020ed16190adb3
     digest: ""
     role: ""
   - ref: ghcr.io/zeroroot-ai/dashboard:v0.131.0@sha256:b2255e6b30730558c4251942c7afd477ce4f3c4251548654b98167b96a58d570
@@ -62,16 +62,16 @@ firstParty:
   - ref: ghcr.io/zeroroot-ai/docs-site:v0.6.14@sha256:e1d62016f19c485df8749fb0e65faf8b6f5f6f791739eb0ea6208c957c553a7c
     digest: ""
     role: "customer documentation site"
-  - ref: ghcr.io/zeroroot-ai/ext-authz:v0.158.0@sha256:b22ad20a4bf559e8590e4cf6d6db27c00a03854478b29426ce66a19587f14d1b
+  - ref: ghcr.io/zeroroot-ai/ext-authz:v0.159.0@sha256:e477dda44bce0251014ce23a4287e5be963bef4ce1c3919e5b4779fd15df7907
     digest: ""
     role: "Envoy ext_authz (auth edge — DO NOT replace with Istio AuthZ)"
   - ref: ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-2f91a7b@sha256:90405ce6d9a3eb79dc3f46605d075f986079850cd1e9d5549055ac07ee3301f2
     digest: ""
     role: ""
-  - ref: ghcr.io/zeroroot-ai/gibson:v0.158.0@sha256:fd59ec6f2bdc1f91a3e901f65a22597844a41835151464f0e30bf2760b29419b
+  - ref: ghcr.io/zeroroot-ai/gibson:v0.159.0@sha256:a4d53e9cb31b7e5330a682772d532b69ff583060016c920e2aedaba8d09deb6a
     digest: ""
     role: "daemon (run/execute + platform RPCs)"
-  - ref: ghcr.io/zeroroot-ai/platform-operator:v0.158.0@sha256:264d077fb09b900b53b7dff8287d82718620c3723dc2a0ed62e7eb855cb09230
+  - ref: ghcr.io/zeroroot-ai/platform-operator:v0.159.0@sha256:daaded39fb6833c75bf5a878d23ab5738a4492a876c0c14503aba29dd1e8e382
     digest: ""
     role: "platform operator (Zitadel OIDC apps, FGA aggregate root)"
   - ref: ghcr.io/zeroroot-ai/setec-device-plugin:v0.126.0@sha256:46d5d2b6393e88e6c2d418c36fa018fdff7f817da1240e3ef5268809151f97c9
@@ -83,7 +83,7 @@ firstParty:
   - ref: ghcr.io/zeroroot-ai/setec:v0.126.0@sha256:bffd1a4f5228510d0061571179856a864d52d41b6cee86c34ff215c9a15f88c6
     digest: ""
     role: "setec microVM operator (untrusted-exec boundary)"
-  - ref: ghcr.io/zeroroot-ai/tenant-operator:v0.158.0@sha256:b62723e7b650fcc2c091dd8aa82240f9caecc41a9927851c1fda2fc2a2d0635b
+  - ref: ghcr.io/zeroroot-ai/tenant-operator:v0.159.0@sha256:eab335c0039fee5b5472fbb13db5c4c3a2a7b52bcb93aa515cabae7d596aaa5e
     digest: ""
     role: "tenant operator"
   - ref: ghcr.io/zeroroot-ai/zitadel-login:v4.19.4@sha256:56b1d6a039156a4dd486c095d3a6d604780d08890af83388e7425ee654ef80d3
@@ -148,6 +148,9 @@ mirrored:
   - ref: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
     digest: ""
     role: "kubectl for hook Jobs and helm tests"
+  - ref: ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community@sha256:5a015e53de1895e7eee1574ae0325cf8c4b89587222778108c594bdd45a474b5
+    digest: ""
+    role: "graph store"
   - ref: ghcr.io/zeroroot-ai/mirror/oidc-discovery-provider:1.14.5@sha256:553704280654f49ba58bf52d5e84d8deca8daf5d91ff8b34dbd47dd3cc325eca
     digest: ""
     role: ""
@@ -207,7 +210,7 @@ dispatchTime:
   - ref: ghcr.io/zeroroot-ai/gibson-executor@sha256:9b22942410cb12517334f3705256ed77fd0fa9f356334ac1aee85e495ba27054
     digest: ""
     role: "tool runner: one image hosting every CLI parser (nmap, nuclei, trivy, ...)"
-  - ref: ghcr.io/zeroroot-ai/gibson-plugin-github@sha256:345bcf9596762ad607659042de15c831b812de29e9c945390068e5a248fe9207
+  - ref: ghcr.io/zeroroot-ai/gibson-plugin-github@sha256:523c12ec8ee5d0fb3b172534f2298643967b22a972c4919d0af55066e680f25e
     digest: ""
     role: ""
   - ref: ghcr.io/zeroroot-ai/zerocool-agent@sha256:37f6fecc5577de79c7632e03361d23f98cbe16abe7855f0913c5b35dcaf877ab
