@@ -13,9 +13,10 @@ The exit tests turn Hubble on in the Cilium of their kind or k3d cluster
 
   check-hubble-drops.py --namespace gibson [--since 2026-10-07T00:00:00Z]
         exit 1 when a flow to or from the namespace is dropped by policy
-  check-hubble-drops.py --namespace gibson --since T --expect-drop <pod prefix>
+  check-hubble-drops.py --namespace gibson --since T --expect-drop <pod prefix>[:<port>]
         the live fixture: exit 0 only when a policy drop from a pod whose name
-        starts with the prefix is in the flows, and print it
+        starts with the prefix (to the port, when one is given) is in the
+        flows, and print it
   check-hubble-drops.py --namespace gibson --since T --expect-forward <pod prefix>:<port>
         a caller fixture: exit 0 only when a forwarded flow from a pod whose
         name starts with the prefix to the port is in the flows, and no
@@ -119,6 +120,16 @@ def forwarded(lines: list[str], prefix: str, port: str) -> list[dict]:
     return out
 
 
+def expected_drops(drops: list[dict], spec: str) -> list[dict]:
+    """The policy drops from a pod whose name starts with the prefix of spec,
+    to the port of spec when spec is <prefix>:<port>."""
+    prefix, _, port = spec.rpartition(":")
+    if not prefix or not port.isdigit():
+        prefix, port = spec, ""
+    return [d for d in drops if d["source_pod"].startswith(prefix)
+            and (not port or d["port"] == f"{port}/TCP")]
+
+
 def live_flows(namespace: str, since: str, verdict: str = "DROPPED") -> list[str]:
     pods = subprocess.run(
         ["kubectl", "-n", "kube-system", "get", "pods", "-l", "k8s-app=cilium", "-o",
@@ -194,8 +205,23 @@ def selftest() -> int:
         if forwarded([json.dumps({"flow": f})], "belief-trainer-proof", "50051"):
             print(f"SELFTEST FAIL: {what} must not count as the forwarded flow of the caller")
             return 1
+    runner = policy_drops([json.dumps({"flow": {**FIXTURE_UNLABELED_TO_POSTGRES["flow"],
+                                                 "l4": {"TCP": {"destination_port": 50001}},
+                                                 "source": {"namespace": "tenant-primary",
+                                                            "pod_name": "hubble-proof-connector-runner"},
+                                                 "destination": {"namespace": "gibson",
+                                                                 "pod_name": "gibson-gibson-workloads-0"}}})],
+                          "tenant-primary")
+    if len(expected_drops(runner, "hubble-proof-connector-runner:50001")) != 1:
+        print("SELFTEST FAIL: the drop of the runner fixture on its port must be found")
+        return 1
+    for what, spec in (("another port", "hubble-proof-connector-runner:50051"), ("another pod", "other:50001")):
+        if expected_drops(runner, spec):
+            print(f"SELFTEST FAIL: {what} must not count as the expected drop")
+            return 1
     print("  ✓ selftest: a policy drop fails and names its source, destination and port; a forwarded flow, "
-          "another drop reason and other namespaces pass; a caller fixture needs its forwarded flow to its port")
+          "another drop reason and other namespaces pass; a caller fixture needs its forwarded flow to its port; "
+          "an expected drop matches its pod and port only")
     return 0
 
 
@@ -235,9 +261,10 @@ def main() -> int:
         lines = live_flows(a.namespace, a.since)
     drops = policy_drops(lines, a.namespace)
     if a.expect_drop:
-        mine = [d for d in drops if d["source_pod"].startswith(a.expect_drop)]
+        mine = expected_drops(drops, a.expect_drop)
         if not mine:
-            print(f"::error::no policy drop from a pod named {a.expect_drop}*: the policy did not refuse the fixture, "
+            print(f"::error::no policy drop that matches {a.expect_drop} (<pod prefix>[:<port>]): the policy did not "
+                  "refuse the fixture, "
                   f"or Hubble did not record it. {len(drops)} other policy drop(s).", file=sys.stderr)
             return 1
         for d in mine:

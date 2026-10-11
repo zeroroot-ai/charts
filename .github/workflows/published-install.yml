@@ -587,6 +587,60 @@ jobs:
             --expect-drop hubble-proof-unlabeled
           kubectl -n "$NS" delete pod hubble-proof-unlabeled --wait=false
 
+          # The connector runner fixture (charts#519). A connector runs
+          # third-party MCP server code in the tenant namespace, and no runner
+          # calls the daemon: the connector-operator opens no daemon egress
+          # (gibson#1065), and daemon-tenant-callers admits the belief trainer
+          # only. A pod with the label that ToolHive sets on each connector pod
+          # dials the daemon callback port and gRPC port. A policy must drop
+          # both flows, and Hubble must record each drop.
+          echo "▶ the fixture: a connector runner pod dials the daemon callback and gRPC ports"
+          tns="$(kubectl get tenant primary -o jsonpath='{.status.namespace}')"
+          [ -n "$tns" ] || { echo "::error::the tenant primary reports no namespace"; exit 1; }
+          addr="$(kubectl -n "$NS" get deploy/gibson-tenant-operator \
+                    -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="GIBSON_DAEMON_GRPC_ADDRESS")].value}')"
+          host="${addr%:*}"; grpc="${addr##*:}"
+          svc="${host%%.*}"
+          callback="$(kubectl -n "$NS" get svc "$svc" -o jsonpath='{.spec.ports[?(@.name=="callback")].port}')"
+          # The Service address, not its name: the claim is the TCP flow, and
+          # a DNS rule of the tenant namespace must not decide it.
+          ip="$(kubectl -n "$NS" get svc "$svc" -o jsonpath='{.spec.clusterIP}')"
+          if [ -z "$host" ] || [ -z "$grpc" ] || [ -z "$callback" ] || [ -z "$ip" ]; then
+            echo "::error::no daemon address (${addr:-<none>}) or no callback port on Service ${svc}"; exit 1
+          fi
+          runner_since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          kubectl -n "$tns" apply -f - <<YAML
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: hubble-proof-connector-runner
+            labels:
+              toolhive-name: hubble-proof-connector-runner
+          spec:
+            restartPolicy: Never
+            automountServiceAccountToken: false
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 65532
+              seccompProfile:
+                type: RuntimeDefault
+            containers:
+              - name: dial
+                image: ghcr.io/zeroroot-ai/mirror/curl:8.10.1
+                command: ["sh", "-c", "curl -sS --max-time 10 telnet://${ip}:${callback} </dev/null; curl -sS --max-time 10 telnet://${ip}:${grpc} </dev/null; exit 0"]
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  capabilities:
+                    drop: ["ALL"]
+          YAML
+          kubectl -n "$tns" wait --for=jsonpath='{.status.phase}'=Succeeded pod/hubble-proof-connector-runner --timeout=180s
+          for p in "$callback" "$grpc"; do
+            python3 scripts/check-hubble-drops.py --namespace "$tns" --since "$runner_since" \
+              --expect-drop "hubble-proof-connector-runner:${p}"
+          done
+          kubectl -n "$tns" delete pod hubble-proof-connector-runner --wait=false
+
       - name: Diagnose a failure
         if: failure()
         run: |
