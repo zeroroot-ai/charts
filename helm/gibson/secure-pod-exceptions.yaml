@@ -39,7 +39,10 @@ runtime:
 pods:
   'Namespace/gibson namespace-label':
     digest: c00f8736a37861fe
-    reason: "The SPIRE agent and the SPIFFE CSI driver run in the release namespace and mount host paths (expected exception of ADR-0165). The namespace cannot enforce the restricted level while they run there."
+    reason: "scripts/baseline-up.sh sets no enforce label on the release namespace yet, and this guard renders the gibson-velero release (node agent with host paths) in the release namespace. The install puts Velero in its own namespace velero. hosted#438 removes this entry."
+  'Namespace/spire-system namespace-label':
+    digest: c00f8736a37861fe
+    reason: "Named privileged exception of ADR-0165 (D8): the namespace of the SPIRE agent and the SPIFFE CSI driver. The agent runs on the host network with the host PID namespace and a host path, and the CSI driver is privileged. The chart labels the namespace privileged on purpose, and only these two DaemonSets run in it (hosted#438)."
   'Namespace/setec-system namespace-label':
     digest: c00f8736a37861fe
     reason: "Expected exception of ADR-0165: the setec node agent mounts host paths, so its namespace cannot enforce the restricted level."
@@ -67,29 +70,29 @@ pods:
   'Pod/gibson/gibson-spiffe-oidc-discovery-provider-test-keys network':
     digest: 8e5fbbdfc80276c6
     reason: "An upstream SPIRE helm test pod. The upstream chart takes no pod labels for it, so the default deny of the release isolates it."
-  'DaemonSet/gibson/gibson-agent read-only':
+  'DaemonSet/spire-system/gibson-agent read-only':
     digest: eb9676462f099991
-    reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths."
-  'DaemonSet/gibson/gibson-spiffe-csi-driver read-only':
+    reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths. They run in the namespace spire-system, which has the named privileged exception (hosted#438)."
+  'DaemonSet/spire-system/gibson-spiffe-csi-driver read-only':
     digest: 11ea229adb46b8e3
-    reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths."
+    reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths. They run in the namespace spire-system, which has the named privileged exception (hosted#438)."
   'DaemonSet/gibson/node-agent read-only':
     digest: 3b74e134c6bcaaad
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
   'Deployment/gibson/gibson-docs-svc read-only':
     digest: f645e1e6ef183e3d
     reason: "The image rewrites its own index.html at start, so its root cannot be read-only. docs-site#79 changes the image."
-  'DaemonSet/gibson/gibson-agent restricted':
+  'DaemonSet/spire-system/gibson-agent restricted':
     digest: 58a63912eaf1ea86
-    reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths."
-  'DaemonSet/gibson/gibson-spiffe-csi-driver restricted':
+    reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths. They run in the namespace spire-system, which has the named privileged exception (hosted#438)."
+  'DaemonSet/spire-system/gibson-spiffe-csi-driver restricted':
     digest: b925d3d195bb22d0
-    reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths."
+    reason: "Expected exception of ADR-0165: the SPIRE agent and the SPIFFE CSI driver are node agents and mount host paths. They run in the namespace spire-system, which has the named privileged exception (hosted#438)."
   'DaemonSet/gibson/node-agent restricted':
     digest: d6fc811bbe059e20
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
-  'DaemonSet/gibson/gibson-spiffe-csi-driver token':
-    digest: 24ae7871ca615480
+  'DaemonSet/spire-system/gibson-spiffe-csi-driver token':
+    digest: fb834f23af6e768e
     reason: "The SPIFFE CSI driver chart gives the pod a ServiceAccount with no grant. The chart has no value that turns the token mount off."
   'DaemonSet/gibson/node-agent token':
     digest: b91d468512d5e74a

@@ -100,6 +100,17 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-10"
 ---
+# Source: gibson/charts/spire/templates/namespaces.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spire-system
+  labels:
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: privileged
+---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/sandbox-namespace-baseline-netpol.yaml
 # Namespace-wide default-deny for setec-sandboxes.
 #
@@ -479,7 +490,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: gibson-spiffe-csi-driver
-  namespace: gibson
+  namespace: spire-system
   labels:
     helm.sh/chart: spiffe-csi-driver-0.1.0
     app.kubernetes.io/name: spiffe-csi-driver
@@ -505,7 +516,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: "gibson-agent"
-  namespace: "gibson"
+  namespace: "spire-system"
   labels:
     helm.sh/chart: "spire-agent-0.1.0"
     app.kubernetes.io/name: "agent"
@@ -3646,7 +3657,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: "gibson-agent"
-  namespace: "gibson"
+  namespace: "spire-system"
 data:
   agent.conf: |
     {
@@ -3725,11 +3736,19 @@ data:
               "plugin_data": {
                 "clusters": [
                   {
-                    "chart-internal": {
+                    "release-namespace": {
                       "configmap_key": "bundle.spiffe",
                       "configmap_name": "spire-bundle",
                       "format": "spiffe",
                       "namespace": "gibson"
+                    }
+                  },
+                  {
+                    "spire-system": {
+                      "configmap_key": "bundle.spiffe",
+                      "configmap_name": "spire-bundle",
+                      "format": "spiffe",
+                      "namespace": "spire-system"
                     }
                   }
                 ]
@@ -3772,7 +3791,7 @@ data:
                         "spire-server"
                       ],
                       "service_account_allow_list": [
-                        "gibson:gibson-agent"
+                        "spire-system:gibson-agent"
                       ]
                     }
                   }
@@ -4926,7 +4945,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: "gibson-agent"
-    namespace: "gibson"
+    namespace: "spire-system"
 roleRef:
   kind: ClusterRole
   name: "gibson-agent"
@@ -5413,22 +5432,6 @@ rules:
     resources: ["events"]
     verbs: ["create", "patch"]
 ---
-# Source: gibson/charts/spire/charts/spire-server/templates/roles.yaml
-# Role to be able to push certificate bundles to a configmap
-kind: Role
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: spire-bundle
-  namespace: gibson
-rules:
-  - apiGroups: [""]
-    resources: [configmaps]
-    resourceNames: [spire-bundle]
-    verbs:
-      - get
-      - patch
-      - create
----
 # Source: gibson/charts/zitadel/templates/rbac_zitadel.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -5450,6 +5453,44 @@ rules:
   - apiGroups: [ "" ]
     resources: [ "pods" ]
     verbs: [ "get" ]
+---
+# Source: gibson/templates/spire-node-namespace.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spire-bundle
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: spire-bundle
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [spire-bundle]
+    verbs: [get, patch, create]
+---
+# Source: gibson/templates/spire-node-namespace.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spire-bundle
+  namespace: spire-system
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: spire-bundle
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [spire-bundle]
+    verbs: [get, patch, create]
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5798,22 +5839,6 @@ subjects:
   name: gibson-server
   namespace: gibson
 ---
-# Source: gibson/charts/spire/charts/spire-server/templates/roles.yaml
-kind: RoleBinding
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: spire-bundle
-  namespace: gibson
-
-subjects:
-- kind: ServiceAccount
-  name: gibson-server
-  namespace: gibson
-roleRef:
-  kind: Role
-  name: spire-bundle
-  apiGroup: rbac.authorization.k8s.io
----
 # Source: gibson/charts/zitadel/templates/rbac_zitadel.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -5835,6 +5860,50 @@ roleRef:
   kind: Role
   name: gibson-zitadel
   apiGroup: rbac.authorization.k8s.io
+---
+# Source: gibson/templates/spire-node-namespace.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spire-bundle
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: spire-bundle
+subjects:
+  - kind: ServiceAccount
+    name: gibson-server
+    namespace: gibson
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spire-bundle
+---
+# Source: gibson/templates/spire-node-namespace.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spire-bundle
+  namespace: spire-system
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: spire-bundle
+subjects:
+  - kind: ServiceAccount
+    name: gibson-server
+    namespace: gibson
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spire-bundle
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
 apiVersion: v1
@@ -6478,7 +6547,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: gibson-spiffe-csi-driver
-  namespace: gibson
+  namespace: spire-system
   labels:
     helm.sh/chart: spiffe-csi-driver-0.1.0
     app.kubernetes.io/name: spiffe-csi-driver
@@ -6600,7 +6669,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: "gibson-agent"
-  namespace: "gibson"
+  namespace: "spire-system"
   labels:
     helm.sh/chart: "spire-agent-0.1.0"
     app.kubernetes.io/name: "agent"
@@ -6622,7 +6691,7 @@ spec:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: spire-agent
-        checksum/config: "28aa29846f84788fee6403060720ae661a5669fea528b98f4833fc34ca4da934"
+        checksum/config: "69865e3cee539f52a7b25b448d78ae736a4d70642fdab85af26745c4898595c2"
         backup.velero.io/backup-volumes-excludes: spire-agent-admin-socket-dir,spire-agent-persistence
       labels:
         app.kubernetes.io/name: "agent"
@@ -14033,7 +14102,7 @@ spec:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: spire-server
-        checksum/config: 05c6d6b278c5f3bfe564d37f9b8f7f6e9a9c61a33f64f2d23a11b423d063b62e
+        checksum/config: 59cd7248386eea596026764308bdca26b55e113de33636e59f01277579d5de66
         checksum/config2: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         checksum/config3: 967569fd565458246292b70c701e9d3834656c8ce3bfc35a15cab1d2d6ded536
         checksum/configTornjak: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
@@ -16071,6 +16140,52 @@ spec:
   endpointSelector:
     matchLabels:
       k8s:io.kubernetes.pod.namespace: gibson
+  enableDefaultDeny:
+    ingress: true
+    egress: true
+  ingress:
+    - {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: '*.cluster.local'
+              - matchPattern: '*.*.cluster.local'
+              - matchPattern: '*.*.*.cluster.local'
+              - matchPattern: '*.*.*.*.cluster.local'
+              - matchPattern: '*.*.*.*.*.cluster.local'
+              - matchPattern: '*.*.*.*.*.*.cluster.local'
+              - matchName: localhost.zeroroot.ai
+              - matchPattern: '*.localhost.zeroroot.ai'
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: gibson-spire-system-default-deny
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-default-deny
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Each pod of the namespace spire-system denies all traffic, except DNS (ADR-0165 rule 4)."
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: spire-system
   enableDefaultDeny:
     ingress: true
     egress: true
