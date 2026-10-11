@@ -689,6 +689,27 @@ openfga:
   telemetry:
     metrics:
       enabled: false
+  # The helm test pod (test-connection) runs the server image. It gets the
+  # same restricted settings and read-only root as the server, and no
+  # ServiceAccount token: it dials the gRPC health port and nothing else
+  # (ADR-0165 rules 1 to 3, hosted#438).
+  testPodSpec:
+    automountServiceAccountToken: false
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65532
+      seccompProfile:
+        type: RuntimeDefault
+  testContainerSpec:
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65532
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
+      seccompProfile:
+        type: RuntimeDefault
 
 zitadel:
   # The restricted Pod Security Standard (ADR-0165, charts#394). Helm merges
