@@ -62,33 +62,85 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
 PY
 }
 
+# has <text> <needle>: 0 when the text holds the needle, else 1 with a reason.
+has() { [[ "$1" == *"$2"* ]] || { echo "missing: $2"; return 1; }; }
+lacks() { [[ "$1" != *"$2"* ]] || { echo "must not hold: $2"; return 1; }; }
+
+# assert_ecr_chain <render>: the ECR chain is whole. Each check returns 1
+# with its reason, so a broken render fails here (FAILING FIXTURE below).
+assert_ecr_chain() {
+  local out; out="$(chain "$1")" || { echo "the render does not parse"; return 1; }
+  has "$out" "generator setec-system/setec-disk-registry region=us-east-1" || return 1
+  has "$out" "externalsecret setec-system/setec-disk-push-key refresh=60s type=-" || return 1
+  has "$out" "externalsecret setec-system/setec-disk-registry refresh=6h type=kubernetes.io/dockerconfigjson" || return 1
+  has "$out" "dockerconfig 123456789012.dkr.ecr.us-east-1.amazonaws.com" || return 1
+  has "$out" "operator --disk-registry-secret=setec-disk-registry" || return 1
+  has "$out" 'egress {"matchName": "api.ecr.us-east-1.amazonaws.com"}' || return 1
+  lacks "$out" "fake " || return 1
+}
+
+# assert_kind_chain <render>: the config with no credential is whole, with
+# no ECR part.
+assert_kind_chain() {
+  local out; out="$(chain "$1")" || { echo "the render does not parse"; return 1; }
+  has "$out" 'fake setec-system/setec-disk-registry config={"auths":{}}' || return 1
+  has "$out" "externalsecret setec-system/setec-disk-registry refresh=6h type=kubernetes.io/dockerconfigjson" || return 1
+  has "$out" "dockerconfig from-generator" || return 1
+  has "$out" "operator --disk-registry-secret=setec-disk-registry" || return 1
+  lacks "$out" "generator " || return 1
+  lacks "$out" "setec-disk-push-key" || return 1
+  lacks "$out" "egress " || return 1
+}
+
+# drop <in> <out> <kind> <name>: the render with one object removed, the
+# broken chain of a failing fixture.
+drop() {
+  python3 - "$@" <<'PY'
+import sys, yaml
+src, dst, kind, name = sys.argv[1:5]
+docs = [d for d in yaml.safe_load_all(open(src)) if d]
+keep = [d for d in docs if not (d.get("kind") == kind and d["metadata"]["name"] == name)]
+assert len(keep) == len(docs) - 1, f"no {kind}/{name} in the render"
+yaml.safe_dump_all(keep, open(dst, "w"))
+PY
+}
+
 @test "an ECR disk repository renders the push credential chain and its egress, with no value set" {
   render "$WORK/ecr.yaml" --set-string "gibson-workloads.setec.launcher.diskRepo=$ECR_REPO"
   [ -s "$WORK/ecr.yaml" ] || { cat "$WORK/ecr.yaml.err"; false; }
-  run chain "$WORK/ecr.yaml"
+  run assert_ecr_chain "$WORK/ecr.yaml"
   [ "$status" -eq 0 ] || { echo "$output"; false; }
-  echo "$output"
-  [[ "$output" == *"generator setec-system/setec-disk-registry region=us-east-1"* ]]
-  [[ "$output" == *"externalsecret setec-system/setec-disk-push-key refresh=60s type=-"* ]]
-  [[ "$output" == *"externalsecret setec-system/setec-disk-registry refresh=6h type=kubernetes.io/dockerconfigjson"* ]]
-  [[ "$output" == *"dockerconfig 123456789012.dkr.ecr.us-east-1.amazonaws.com"* ]]
-  [[ "$output" == *"operator --disk-registry-secret=setec-disk-registry"* ]]
-  [[ "$output" == *'egress {"matchName": "api.ecr.us-east-1.amazonaws.com"}'* ]]
-  [[ "$output" != *"fake "* ]]
+}
+
+@test "FAILING FIXTURE: an ECR render with no ECRAuthorizationToken fails the chain check" {
+  render "$WORK/ecr-b.yaml" --set-string "gibson-workloads.setec.launcher.diskRepo=$ECR_REPO"
+  drop "$WORK/ecr-b.yaml" "$WORK/ecr-broken.yaml" ECRAuthorizationToken setec-disk-registry
+  run assert_ecr_chain "$WORK/ecr-broken.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"missing: generator setec-system/setec-disk-registry"* ]] || { echo "$output"; false; }
+}
+
+@test "FAILING FIXTURE: an ECR render with no key pair ExternalSecret fails the chain check" {
+  render "$WORK/ecr-c.yaml" --set-string "gibson-workloads.setec.launcher.diskRepo=$ECR_REPO"
+  drop "$WORK/ecr-c.yaml" "$WORK/ecr-broken2.yaml" ExternalSecret setec-disk-push-key
+  run assert_ecr_chain "$WORK/ecr-broken2.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"missing: externalsecret setec-system/setec-disk-push-key"* ]] || { echo "$output"; false; }
 }
 
 @test "the baseline (kind) renders a registry config with no credential, and no ECR part" {
   render "$WORK/kind.yaml"
   [ -s "$WORK/kind.yaml" ] || { cat "$WORK/kind.yaml.err"; false; }
-  run chain "$WORK/kind.yaml"
+  run assert_kind_chain "$WORK/kind.yaml"
   [ "$status" -eq 0 ] || { echo "$output"; false; }
-  echo "$output"
-  [[ "$output" == *'fake setec-system/setec-disk-registry config={"auths":{}}'* ]]
-  [[ "$output" == *"dockerconfig from-generator"* ]]
-  [[ "$output" == *"operator --disk-registry-secret=setec-disk-registry"* ]]
-  [[ "$output" != *"generator "* ]]
-  [[ "$output" != *"setec-disk-push-key"* ]]
-  [[ "$output" != *"egress "* ]]
+}
+
+@test "FAILING FIXTURE: a kind render with no Fake generator fails the chain check" {
+  render "$WORK/kind-b.yaml"
+  drop "$WORK/kind-b.yaml" "$WORK/kind-broken.yaml" Fake setec-disk-registry
+  run assert_kind_chain "$WORK/kind-broken.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'missing: fake setec-system/setec-disk-registry'* ]] || { echo "$output"; false; }
 }
 
 @test "a registrySecret of the operator renders nothing of the chain" {
@@ -96,12 +148,4 @@ PY
   run chain "$WORK/own.yaml"
   [ "$status" -eq 0 ]
   [[ "$output" == "operator --disk-registry-secret=my-registry" ]] || { echo "$output"; false; }
-}
-
-@test "FAILING FIXTURE: the chain check fails on a render with no chain" {
-  render "$WORK/own2.yaml" --set-string "gibson-workloads.setec.launcher.diskBuilder.registrySecret=my-registry"
-  run chain "$WORK/own2.yaml"
-  [[ "$output" != *"dockerconfig"* ]]
-  run bash -c '[[ "$1" == *"dockerconfig from-generator"* ]]' _ "$output"
-  [ "$status" -ne 0 ]
 }
