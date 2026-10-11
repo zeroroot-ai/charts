@@ -1,12 +1,14 @@
 #!/usr/bin/env bats
 # The push credential of the setec disk builder (D85, charts#574).
 #
-# An AWS env keeps its sandbox disks in an ECR repository. The chart then
-# renders, in the setec namespace, the key pair ExternalSecret, the
-# ECRAuthorizationToken generator and the dockerconfigjson ExternalSecret
-# that setec.launcher.diskBuilder.registrySecret names, and the External
-# Secrets controller reaches the ECR API of that region only. kind and every
-# other registry render none of it.
+# registrySecret defaults to setec-disk-registry, so no install sets it.
+# An ECR disk repository (an AWS env) renders, in the setec namespace, the
+# key pair ExternalSecret, the ECRAuthorizationToken generator and the
+# dockerconfigjson ExternalSecret setec-disk-registry, and the External
+# Secrets controller reaches the ECR API of that region only. Any other
+# registry (kind) renders a Fake generator with a config that holds no
+# credential. Another registrySecret is a Secret of the operator, and the
+# chart renders nothing.
 
 ECR_REPO="123456789012.dkr.ecr.us-east-1.amazonaws.com/zeroroot-ai-staging-setec-disks"
 
@@ -37,12 +39,17 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
     k, n, ns = d.get("kind"), d["metadata"]["name"], d["metadata"].get("namespace", "")
     if k == "ECRAuthorizationToken":
         print(f"generator {ns}/{n} region={d['spec']['region']}")
+    elif k == "Fake" and n == "setec-disk-registry":
+        print(f"fake {ns}/{n} config={d['spec']['data']['config']}")
     elif k == "ExternalSecret" and n in ("setec-disk-registry", "setec-disk-push-key"):
         t = d["spec"]["target"]
         tpl = (t.get("template") or {})
         print(f"externalsecret {ns}/{n} refresh={d['spec']['refreshInterval']} type={tpl.get('type', '-')}")
         for v in (tpl.get("data") or {}).values():
-            print("dockerconfig " + ",".join(json.loads(v.replace("{{ .username }}", "u").replace("{{ .password }}", "p"))["auths"]))
+            if v == "{{ .config }}":
+                print("dockerconfig from-generator")
+            else:
+                print("dockerconfig " + ",".join(json.loads(v.replace("{{ .username }}", "u").replace("{{ .password }}", "p"))["auths"]))
     elif k == "Deployment" and n == "setec":
         for c in d["spec"]["template"]["spec"]["containers"]:
             for a in c.get("args") or []:
@@ -55,10 +62,8 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
 PY
 }
 
-@test "an ECR disk repository renders the push credential chain and its egress" {
-  render "$WORK/ecr.yaml" \
-    --set-string "gibson-workloads.setec.launcher.diskRepo=$ECR_REPO" \
-    --set-string "gibson-workloads.setec.launcher.diskBuilder.registrySecret=setec-disk-registry"
+@test "an ECR disk repository renders the push credential chain and its egress, with no value set" {
+  render "$WORK/ecr.yaml" --set-string "gibson-workloads.setec.launcher.diskRepo=$ECR_REPO"
   [ -s "$WORK/ecr.yaml" ] || { cat "$WORK/ecr.yaml.err"; false; }
   run chain "$WORK/ecr.yaml"
   [ "$status" -eq 0 ] || { echo "$output"; false; }
@@ -69,26 +74,34 @@ PY
   [[ "$output" == *"dockerconfig 123456789012.dkr.ecr.us-east-1.amazonaws.com"* ]]
   [[ "$output" == *"operator --disk-registry-secret=setec-disk-registry"* ]]
   [[ "$output" == *'egress {"matchName": "api.ecr.us-east-1.amazonaws.com"}'* ]]
+  [[ "$output" != *"fake "* ]]
 }
 
-@test "the baseline (kind) renders no part of the chain" {
+@test "the baseline (kind) renders a registry config with no credential, and no ECR part" {
   render "$WORK/kind.yaml"
   [ -s "$WORK/kind.yaml" ] || { cat "$WORK/kind.yaml.err"; false; }
   run chain "$WORK/kind.yaml"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  echo "$output"
+  [[ "$output" == *'fake setec-system/setec-disk-registry config={"auths":{}}'* ]]
+  [[ "$output" == *"dockerconfig from-generator"* ]]
+  [[ "$output" == *"operator --disk-registry-secret=setec-disk-registry"* ]]
+  [[ "$output" != *"generator "* ]]
+  [[ "$output" != *"setec-disk-push-key"* ]]
+  [[ "$output" != *"egress "* ]]
+}
+
+@test "a registrySecret of the operator renders nothing of the chain" {
+  render "$WORK/own.yaml" --set-string "gibson-workloads.setec.launcher.diskBuilder.registrySecret=my-registry"
+  run chain "$WORK/own.yaml"
   [ "$status" -eq 0 ]
-  [ -z "$output" ] || { echo "$output"; false; }
+  [[ "$output" == "operator --disk-registry-secret=my-registry" ]] || { echo "$output"; false; }
 }
 
-@test "FAILING FIXTURE: an ECR disk repository with no registrySecret fails the render" {
-  run render "$WORK/ecr-nosecret.yaml" \
-    --set-string "gibson-workloads.setec.launcher.diskRepo=$ECR_REPO"
+@test "FAILING FIXTURE: the chain check fails on a render with no chain" {
+  render "$WORK/own2.yaml" --set-string "gibson-workloads.setec.launcher.diskBuilder.registrySecret=my-registry"
+  run chain "$WORK/own2.yaml"
+  [[ "$output" != *"dockerconfig"* ]]
+  run bash -c '[[ "$1" == *"dockerconfig from-generator"* ]]' _ "$output"
   [ "$status" -ne 0 ]
-  grep -q "Set registrySecret to setec-disk-registry" "$WORK/ecr-nosecret.yaml.err"
-}
-
-@test "FAILING FIXTURE: a registrySecret on a registry that is not ECR fails the render" {
-  run render "$WORK/kind-secret.yaml" \
-    --set-string "gibson-workloads.setec.launcher.diskBuilder.registrySecret=setec-disk-registry"
-  [ "$status" -ne 0 ]
-  grep -q "is not on ECR" "$WORK/kind-secret.yaml.err"
 }
