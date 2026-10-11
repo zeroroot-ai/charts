@@ -37,6 +37,16 @@ setup() {
 }
 teardown() { rm -rf "$S"; }
 
+# no_write <pattern>: fails when a line of the write log matches. Bats runs a
+# test under set -e, which ignores a command negated with `!`, so a negative
+# check returns its status explicitly (charts#603).
+no_write() {
+  if grep -q "$1" "$S/log"; then
+    echo "the log holds a write that matches $1"
+    return 1
+  fi
+}
+
 # run_engine [MOUNT_STATUS] [CONFIG_USER]: the mount answers MOUNT_STATUS
 # (200 = enabled), and each database/config read names CONFIG_USER.
 run_engine() {
@@ -86,8 +96,18 @@ run_engine() {
   rm -f "$S/log"
   MOUNT=200 CFG_USER=postgres run_engine
   [[ "$output" == *"rc=0"* ]] || { echo "$output"; false; }
-  ! grep -q '^POST database/config/' "$S/log"
-  ! grep -q '^POST sys/mounts' "$S/log"
+  no_write '^POST database/config/'
+  no_write '^POST sys/mounts'
+}
+
+@test "FAILING FIXTURE: no_write fails when the log holds the write" {
+  printf 'POST sys/mounts/database\nPOST database/config/zitadel\n' > "$S/log"
+  run no_write '^POST database/config/'
+  [ "$status" -ne 0 ]
+  run no_write '^POST sys/mounts'
+  [ "$status" -ne 0 ]
+  run no_write '^POST database/roles/'
+  [ "$status" -eq 0 ]
 }
 
 @test "FAILING FIXTURE: a new superuser password writes each connection again" {
