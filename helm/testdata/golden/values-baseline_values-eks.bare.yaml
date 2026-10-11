@@ -22234,12 +22234,17 @@ spec:
           || (has(oldObject.metadata.labels)
               && 'app.kubernetes.io/managed-by' in oldObject.metadata.labels
               && oldObject.metadata.labels['app.kubernetes.io/managed-by'] == 'gibson-tenant-operator')
+    # labels is dyn (the empty map literal of its else branch has no value
+    # type), so a label read from it is dyn too. string() gives v and t the
+    # type string. Without it the map and list literals of the shape check
+    # below mix string and dyn, and the API server refuses to compile the
+    # policy (charts#601).
     - name: v
       expression: >-
-        'gibson.zeroroot.ai/plugin' in variables.labels ? variables.labels['gibson.zeroroot.ai/plugin'] : ''
+        string('gibson.zeroroot.ai/plugin' in variables.labels ? variables.labels['gibson.zeroroot.ai/plugin'] : '')
     - name: t
       expression: >-
-        'gibson.zeroroot.ai/tenant' in variables.labels ? variables.labels['gibson.zeroroot.ai/tenant'] : ''
+        string('gibson.zeroroot.ai/tenant' in variables.labels ? variables.labels['gibson.zeroroot.ai/tenant'] : '')
     - name: pluginNs
       expression: "'tenant-' + variables.t + '-plugins'"
   validations:

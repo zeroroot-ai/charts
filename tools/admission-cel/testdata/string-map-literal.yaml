@@ -1,0 +1,21 @@
+# The fix of charts#601: string() gives v the type string, so the map
+# literal has one value type. admission-cel must pass this file.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: fixture-string-map-literal
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["spire.spiffe.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE"]
+        resources: ["clusterspiffeids"]
+  variables:
+    - name: labels
+      expression: "has(object.metadata.labels) ? object.metadata.labels : {}"
+    - name: v
+      expression: "string('gibson.zeroroot.ai/plugin' in variables.labels ? variables.labels['gibson.zeroroot.ai/plugin'] : '')"
+  validations:
+    - expression: "object.spec.podSelector.matchLabels == {'app.kubernetes.io/component': 'plugin', 'gibson.zeroroot.ai/plugin': variables.v}"
