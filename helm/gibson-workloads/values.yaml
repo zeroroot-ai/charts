@@ -2943,11 +2943,19 @@ setec:
   # names the release namespace as a literal, because a subchart value
   # cannot read .Release.Namespace; gibson.validateSetecDispatch fails the
   # render when the entry and the release namespace disagree.
+  # webhookCallers admits the webhook gate of the umbrella
+  # (helm/gibson/templates/webhook-gate.yaml) on the operator webhook port,
+  # so it can prove the setec webhook serves before a SandboxClass is
+  # applied (charts#644). The same validator checks its namespace.
   systemPolicy:
     frontendCallers:
       - namespace: gibson
         podLabels:
           app.kubernetes.io/component: daemon
+    webhookCallers:
+      - namespace: gibson
+        podLabels:
+          app.kubernetes.io/component: webhook-gate
 
   # ---------------------------------------------------------------------
   # SANDBOX CONTAINMENT

@@ -27747,6 +27747,7 @@ spec:
         # webhook ports (templates/network-policies.yaml). Without the label
         # each probe reads as a dead webhook (deploy#1631).
         gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/egress-namespaces: "true"
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false
@@ -27829,6 +27830,11 @@ spec:
           pending=/tmp/pending
           cp /tmp/probes "$pending"
           : >/tmp/last
+          # The deadline is wall-clock time. Each probe that does not answer
+          # also spends up to 5 seconds in curl, so a count of the sleeps
+          # alone ran far past the deadline and past the Helm timeout, and
+          # the report below never printed (charts#644).
+          began=$(date +%s)
           start=0
           while [ "$start" -lt "$DEADLINE" ]; do
             : >/tmp/next
@@ -27846,7 +27852,7 @@ spec:
             [ -s "$pending" ] || break
             echo "[webhook-gate] $(wc -l <"$pending") webhook(s) not serving yet; ${start}s of ${DEADLINE}s used"
             sleep "$INTERVAL"
-            start=$((start + INTERVAL))
+            start=$(( $(date +%s) - began ))
           done
 
           if [ -s "$pending" ]; then
