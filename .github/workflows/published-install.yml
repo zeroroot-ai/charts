@@ -628,9 +628,9 @@ jobs:
           echo "=== pods of the release that are not Ready ==="
           for p in $(kubectl -n "$NS" get pods -o jsonpath='{range .items[?(@.status.phase!="Succeeded")]}{.metadata.name}{" "}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{"\n"}{end}' 2>/dev/null | awk '$2!="True"{print $1}'); do
             echo "--- logs pod/$p"
-            kubectl -n "$NS" logs "pod/$p" --all-containers --tail=80 --ignore-errors=true 2>&1 | tail -80 || true
+            kubectl -n "$NS" logs "pod/$p" --all-containers --tail=80 --ignore-errors=true 2>&1 || true
             echo "--- previous logs pod/$p (empty when it never restarted)"
-            kubectl -n "$NS" logs "pod/$p" --all-containers --previous --tail=80 --ignore-errors=true 2>&1 | tail -80 || true
+            kubectl -n "$NS" logs "pod/$p" --all-containers --previous --tail=80 --ignore-errors=true 2>&1 || true
           done
           echo "=== secret plane ==="
           kubectl get externalsecrets -A || true
