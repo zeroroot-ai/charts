@@ -15,13 +15,14 @@ setup_file() {
     -f "$ROOT/helm/gibson/values-baseline.yaml" -f "$ROOT/helm/testdata/render-inputs/gibson.yaml" \
     > "$WORK/render.yaml" 2>/dev/null
   python3 - "$WORK/render.yaml" "$WORK/pg.sh" <<'PY'
-import sys, yaml
+import re, sys, yaml
 for d in yaml.safe_load_all(open(sys.argv[1])):
     if d and d.get("kind") == "StatefulSet" and d["metadata"]["name"].endswith("-openbao"):
         for c in d["spec"]["template"]["spec"]["containers"]:
             for a in (c.get("command") or []) + (c.get("args") or []):
                 if "pg_engine_ensure()" in a:
-                    open(sys.argv[2], "w").write(a[a.index('PG_ENGINE_HOST="'):a.index("cg_key_rotate() {")])
+                    lease = re.search(r"^\s*PG_LEASE_MAX_S=.*$", a, re.M).group(0).strip()
+                    open(sys.argv[2], "w").write(lease + "\n" + a[a.index('PG_ENGINE_HOST="'):a.index("cg_key_rotate() {")])
                     sys.exit(0)
 sys.exit("no pg_engine_ensure in the rendered openbao sidecar")
 PY
@@ -88,7 +89,7 @@ run_engine() {
   jq -e '.db_name == "tenant-admin"' "$S/body.database_roles_tenant-admin"
   jq -e '.creation_statements[0] | endswith("IN ROLE \"tenant_admin\";")' "$S/body.database_roles_tenant-admin"
   jq -e '.revocation_statements == ["REASSIGN OWNED BY \"{{name}}\" TO \"spire\";", "DROP OWNED BY \"{{name}}\";", "DROP ROLE IF EXISTS \"{{name}}\";"]' "$S/body.database_roles_spire"
-  jq -e '.default_ttl == "48h"' "$S/body.database_roles_openfga"
+  jq -e '.default_ttl == "48h" and .max_ttl == "259200s"' "$S/body.database_roles_openfga"
 }
 
 @test "an unchanged superuser credential writes no connection again" {

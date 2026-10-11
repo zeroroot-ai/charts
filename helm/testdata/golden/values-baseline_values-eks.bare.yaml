@@ -14758,6 +14758,17 @@ spec:
               # minutes, and a Reloader restart of the tenant-operator.
               TOKEN_LIFETIME_S=86400
               TOKEN_REVOKE_GRACE_S=900
+              # The token of the five Postgres login generators
+              # (postgres-logins.yaml) issues each login role as a lease of
+              # the token, and OpenBao revokes the leases of a token when the
+              # token ends. A revoke drops the login role that a Secret still
+              # holds (charts#602). So this token outlives each of its leases:
+              # its period is the longest lease plus a day, the sidecar renews
+              # it each hour, and a rotation never revokes the old token. The
+              # old token ends with its period, after its last lease.
+              PG_LOGINS_TOKEN_SECRET="gibson-openbao-pg-logins"
+              PG_LEASE_MAX_S=259200
+              PG_LOGINS_PERIOD_S=$(( PG_LEASE_MAX_S + 86400 ))
               # The KV key that the monthly drill writes to ask for a rotation
               # now. Its property requested_at is a Unix time. A token created
               # before it is rotated on the next pass.
@@ -15136,7 +15147,8 @@ spec:
                 # operator when the Secret it reads changes (the
                 # secret.reloader.stakater.com/reload annotation on each).
                 minter="$1"; policy="$2"; secret="$3"
-                body=$(jq -nc --arg p "$policy" '{"policies":[$p],"period":"1h","renewable":true,"no_parent":true}')
+                period="$(token_period_s "$secret")s"
+                body=$(jq -nc --arg p "$policy" --arg t "$period" '{"policies":[$p],"period":$t,"renewable":true,"no_parent":true}')
                 code=$(curl -sS -o ${TMPD}/svc_tok.json -w '%{http_code}' \
                   -X POST -H "X-Vault-Token: ${minter}" -H "Content-Type: application/json" \
                   -d "$body" \
@@ -15152,7 +15164,7 @@ spec:
                   echo "[openbao-auto-init] FATAL: renewable service token response missing client_token" >&2
                   return 1
                 fi
-                echo "[openbao-auto-init] minted renewable service token (policy=${policy}, period=1h, renewable=true) for Secret ${secret}"
+                echo "[openbao-auto-init] minted renewable service token (policy=${policy}, period=${period}, renewable=true) for Secret ${secret}"
                 # Idempotent: tries POST first (create); on 409 (already
                 # exists) falls back to PATCH (update).
                 svc_tok_b64=$(printf '%s' "$svc_token" | base64 | tr -d '\n')
@@ -15249,6 +15261,19 @@ spec:
                 [ "$c" = "200" ]
               }
 
+              token_period_s() {
+                # $1 the Secret. The period of the token it holds, in seconds.
+                if [ "$1" = "$PG_LOGINS_TOKEN_SECRET" ]; then echo "$PG_LOGINS_PERIOD_S"; else echo 3600; fi
+              }
+
+              token_renew_below_s() {
+                # $1 the Secret. The sidecar renews the token when its TTL is
+                # below this. The login token keeps a TTL longer than the
+                # longest lease at all times, so a stopped sidecar cannot end
+                # it before a login role that it issued.
+                if [ "$1" = "$PG_LOGINS_TOKEN_SECRET" ]; then echo $(( PG_LOGINS_PERIOD_S - 3600 )); else echo 1800; fi
+              }
+
               token_revoke_pending() {
                 # $1 the Secret, $2 a seeder token. Revokes the old token of a
                 # rotation once its grace is over, by accessor, so this
@@ -15341,11 +15366,11 @@ spec:
                          && { [ $(( now - created )) -ge "$TOKEN_LIFETIME_S" ] || [ "${requested:-0}" -gt "$created" ]; }; then
                         echo "[openbao-auto-init] ${secret} token is older than its lifetime or a rotation request; minting its successor" >&2
                         rotating=1; rotate_old="$old_accessor"
-                      elif [ "$ttl" -gt 1800 ] 2>/dev/null; then
+                      elif [ "$ttl" -gt "$(token_renew_below_s "$secret")" ] 2>/dev/null; then
                         return 0
                       fi
                       if [ "$rotating" = 0 ]; then
-                        echo "[openbao-auto-init] ${secret} token TTL=${ttl}s below 1800s threshold — renewing"
+                        echo "[openbao-auto-init] ${secret} token TTL=${ttl}s below $(token_renew_below_s "$secret")s — renewing"
                         renew_code=$(curl -sS -o /dev/null -w '%{http_code}' \
                           -X POST -H "X-Vault-Token: ${current_tok}" \
                           "${BAO_ADDR_LOCAL}/v1/auth/token/renew-self")
@@ -15374,7 +15399,12 @@ spec:
                 if vault_mint_token "$minter" "$policy" "$secret"; then
                   echo "[openbao-auto-init] re-minted ${secret} with the ${SEEDER_ROLE} role (ServiceAccount ${OWN_SA}); no root token was involved"
                   erc=0
-                  if [ "$rotating" = 1 ] && [ -n "$rotate_old" ]; then
+                  if [ "$rotating" = 1 ] && [ -n "$rotate_old" ] && [ "$secret" = "$PG_LOGINS_TOKEN_SECRET" ]; then
+                    # Never revoked: a revoke drops each login role it issued
+                    # (charts#602). Nothing renews it now, so it ends with its
+                    # period, a day after its last lease.
+                    echo "[openbao-auto-init] the old token of ${secret} is not revoked; it ends with its period, after the login roles it issued" >&2
+                  elif [ "$rotating" = 1 ] && [ -n "$rotate_old" ]; then
                     secret_set_revoke "$secret" "$rotate_old" "$(( $(date +%s) + TOKEN_REVOKE_GRACE_S ))" \
                       || { echo "[openbao-auto-init] could not record the old token of ${secret} for its revoke" >&2; erc=1; }
                   fi
@@ -15808,7 +15838,7 @@ spec:
                     kv_put "$pt" "gibson-pg-engine" "$(printf '%s' "$cur" | jq -c --arg r "$role" --arg h "$pg_su_hash" '.[$r] = $h')" || exit 1
                     echo "[openbao-auto-init] database engine connection ${role} -> ${db} (as ${pg_su_user})" >&2
                   fi
-                  body=$(jq -nc --arg o "$owner" --arg r "$role" '{
+                  body=$(jq -nc --arg o "$owner" --arg r "$role" --arg m "${PG_LEASE_MAX_S}s" '{
                     db_name: $r,
                     creation_statements: [
                       "CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '"'"'{{password}}'"'"' VALID UNTIL '"'"'{{expiration}}'"'"' IN ROLE \"" + $o + "\";",
@@ -15817,7 +15847,7 @@ spec:
                       "REASSIGN OWNED BY \"{{name}}\" TO \"" + $o + "\";",
                       "DROP OWNED BY \"{{name}}\";",
                       "DROP ROLE IF EXISTS \"{{name}}\";"],
-                    default_ttl: "48h", max_ttl: "72h"}')
+                    default_ttl: "48h", max_ttl: $m}')
                   c=$(printf '%s' "$body" | curl -sS -o ${TMPD}/dbr.json -w '%{http_code}' -X POST -H "X-Vault-Token: ${pt}" \
                     -H "Content-Type: application/json" --data-binary @- "${BAO_ADDR_LOCAL}/v1/database/roles/${role}")
                   case "$c" in 200|204) ;; *) echo "[openbao-auto-init] FATAL: database/roles/${role} returned HTTP $c: $(cat ${TMPD}/dbr.json)" >&2; exit 1 ;; esac
@@ -16063,8 +16093,7 @@ spec:
               path "secret/data/zitadel-masterkey" { capabilities = ["read", "update"] }' || return 1
                 vault_write_policy "$tok" postgres-logins \
                   '
-              path "database/creds/*" { capabilities = ["read"] }
-              path "sys/leases/revoke" { capabilities = ["update"] }' || return 1
+              path "database/creds/*" { capabilities = ["read"] }' || return 1
 
                 # tenant-operator: what the tenant-operator's code calls, and
                 # nothing in the root namespace's kv store, where the escrowed
