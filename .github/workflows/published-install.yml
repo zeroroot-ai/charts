@@ -604,7 +604,10 @@ jobs:
           # what SURVIVES the pod: the Job object, and the namespace's events.
           echo "=== the hook Jobs ==="
           kubectl -n "$NS" get jobs || true
-          for j in $(kubectl -n "$NS" get jobs -o jsonpath='{range .items[?(@.status.failed)]}{.metadata.name}{"\n"}{end}' 2>/dev/null); do
+          # A failed Job, and a Job that still runs at the failure: a hook
+          # that never ends (the webhook gate of run 38182173162) is Running
+          # and Ready, so the not-Ready loop below does not print it.
+          for j in $(kubectl -n "$NS" get jobs -o jsonpath='{range .items[?(@.status.failed)]}{.metadata.name}{"\n"}{end}{range .items[?(@.status.active)]}{.metadata.name}{"\n"}{end}' 2>/dev/null | sort -u); do
             echo "--- describe job/$j (survives the pod)"
             kubectl -n "$NS" describe "job/$j" || true
             echo "--- logs job/$j (empty if the pod was already reaped)"
