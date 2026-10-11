@@ -14399,6 +14399,41 @@ spec:
               {}
       initContainers:
         - command:
+          - sh
+          - -c
+          - |
+            set -eu
+            KEY=/etc/zitadel-system-keys/system-bot-pub.pem
+            KEY_B=/etc/zitadel-system-keys/system-bot-b-pub.pem
+            echo "waiting for ${KEY} and ${KEY_B} (SystemAPIUsers is read once, at boot)"
+            for _ in $(seq 1 180); do
+              if [ -s "$KEY" ] && [ -s "$KEY_B" ]; then
+                echo "system keys present ($(wc -c < "$KEY") and $(wc -c < "$KEY_B") bytes)"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "FATAL: ${KEY} or ${KEY_B} never appeared. Zitadel would boot trusting no" >&2
+            echo "system-bot key and reject every System API call, stalling the" >&2
+            echo "platform-operator at AdminTokenReady (deploy#1631)." >&2
+            exit 1
+          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
+          name: wait-for-system-key
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+          - mountPath: /etc/zitadel-system-keys
+            name: zitadel-system-key
+            readOnly: true
+        - command:
           - bash
           - /guard/guard.sh
           env:
@@ -26315,6 +26350,41 @@ spec:
       restartPolicy: Never
       initContainers:
         - command:
+          - sh
+          - -c
+          - |
+            set -eu
+            KEY=/etc/zitadel-system-keys/system-bot-pub.pem
+            KEY_B=/etc/zitadel-system-keys/system-bot-b-pub.pem
+            echo "waiting for ${KEY} and ${KEY_B} (SystemAPIUsers is read once, at boot)"
+            for _ in $(seq 1 180); do
+              if [ -s "$KEY" ] && [ -s "$KEY_B" ]; then
+                echo "system keys present ($(wc -c < "$KEY") and $(wc -c < "$KEY_B") bytes)"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "FATAL: ${KEY} or ${KEY_B} never appeared. Zitadel would boot trusting no" >&2
+            echo "system-bot key and reject every System API call, stalling the" >&2
+            echo "platform-operator at AdminTokenReady (deploy#1631)." >&2
+            exit 1
+          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
+          name: wait-for-system-key
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+          - mountPath: /etc/zitadel-system-keys
+            name: zitadel-system-key
+            readOnly: true
+        - command:
           - bash
           - /guard/guard.sh
           env:
@@ -26478,6 +26548,41 @@ spec:
       enableServiceLinks: false
       restartPolicy: Never
       initContainers:
+        - command:
+          - sh
+          - -c
+          - |
+            set -eu
+            KEY=/etc/zitadel-system-keys/system-bot-pub.pem
+            KEY_B=/etc/zitadel-system-keys/system-bot-b-pub.pem
+            echo "waiting for ${KEY} and ${KEY_B} (SystemAPIUsers is read once, at boot)"
+            for _ in $(seq 1 180); do
+              if [ -s "$KEY" ] && [ -s "$KEY_B" ]; then
+                echo "system keys present ($(wc -c < "$KEY") and $(wc -c < "$KEY_B") bytes)"
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "FATAL: ${KEY} or ${KEY_B} never appeared. Zitadel would boot trusting no" >&2
+            echo "system-bot key and reject every System API call, stalling the" >&2
+            echo "platform-operator at AdminTokenReady (deploy#1631)." >&2
+            exit 1
+          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
+          name: wait-for-system-key
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+          - mountPath: /etc/zitadel-system-keys
+            name: zitadel-system-key
+            readOnly: true
         - command:
           - bash
           - /guard/guard.sh
