@@ -14549,25 +14549,49 @@ spec:
           # either and wraps with the current one. An empty previous file
           # means no rotation runs. A missing or empty current file fails the
           # start, as before.
+          #
+          # A store from a chart before charts#568 is wrapped under the fixed
+          # id "bringup-keyring". The static seal unwraps by the id in each
+          # wrapped entry, so that store stays sealed under a new id
+          # (charts#605). The start reads the wrapped entries of core/hsm
+          # (the file storage keeps each value as base64 JSON). When they
+          # name the legacy id, the key that wrapped them keeps that id: the
+          # previous key during a rotation, else the current key. The first
+          # rotation after the upgrade rewraps the store under the new id.
           command:
             - /bin/sh
             - -ec
             - |
               seal_id() { printf 'keyring-%s' "$(sha256sum "$1" | cut -c1-16)"; }
+              legacy_id=bringup-keyring
               cur=/etc/openbao/seal/openbao-seal-key
               prev=/etc/openbao/seal/openbao-seal-previous-key
+              hsm=/etc/openbao/data/core/hsm
               [ -s "$cur" ] || { echo "FATAL: the seal key file is missing or empty" >&2; exit 1; }
+              cur_id="$(seal_id "$cur")"
+              prev_id=""
+              [ -s "$prev" ] && prev_id="$(seal_id "$prev")"
+              wrapped_ids() {
+                for f in "$hsm"/_*; do
+                  [ -f "$f" ] || continue
+                  sed -n 's/.*"Value":"\([^"]*\)".*/\1/p' "$f" | base64 -d 2>/dev/null || true
+                done
+              }
+              if wrapped_ids | grep -qaF "$legacy_id"; then
+                if [ -n "$prev_id" ]; then prev_id="$legacy_id"; else cur_id="$legacy_id"; fi
+                echo "[openbao] the store is wrapped under the legacy seal key id ${legacy_id} (charts#605)"
+              fi
               {
                 echo 'seal "static" {'
-                echo "  current_key_id = \"$(seal_id "$cur")\""
+                echo "  current_key_id = \"${cur_id}\""
                 echo "  current_key    = \"file://${cur}\""
-                if [ -s "$prev" ]; then
-                  echo "  previous_key_id = \"$(seal_id "$prev")\""
+                if [ -n "$prev_id" ]; then
+                  echo "  previous_key_id = \"${prev_id}\""
                   echo "  previous_key    = \"file://${prev}\""
                 fi
                 echo '}'
               } > /tmp/seal.hcl
-              echo "[openbao] seal key id $(seal_id "$cur")$([ -s "$prev" ] && echo ", previous $(seal_id "$prev")")"
+              echo "[openbao] seal key id ${cur_id}$([ -n "$prev_id" ] && echo ", previous ${prev_id}")"
               exec bao server -config=/etc/openbao/config/openbao.hcl -config=/tmp/seal.hcl
           ports:
             - name: https
