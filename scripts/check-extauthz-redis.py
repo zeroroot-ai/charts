@@ -55,8 +55,9 @@ def judge(d: dict) -> list[str]:
     if not url:
         out.append(f"{name}: the ext-authz container has no EXT_AUTHZ_REDIS_URL value")
     elif not PLAIN_REDIS_URL.match(url):
-        out.append(f"{name}: EXT_AUTHZ_REDIS_URL {url!r} is not redis://<host>:<port>; ext-authz parses it as it is, "
-                   "and the password comes from REDIS_PASSWORD")
+        # The value is not printed: it may hold a password.
+        out.append(f"{name}: EXT_AUTHZ_REDIS_URL is not a plain redis://<host>:<port>; ext-authz parses it as it "
+                   "is, and the password comes from REDIS_PASSWORD")
     if not ((env.get("REDIS_PASSWORD") or {}).get("valueFrom") or {}).get("secretKeyRef"):
         out.append(f"{name}: the ext-authz container has no REDIS_PASSWORD from a Secret")
     if not any(c.get("name") == "wait-for-redis" for c in spec.get("initContainers") or []):
