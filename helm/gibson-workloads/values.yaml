@@ -2932,13 +2932,12 @@ setec:
       # templates/setec/disk-signing-externalsecret.yaml renders it here.
       signingSecret: "setec-disk-signing"
       # registrySecret names the dockerconfigjson Secret with the push
-      # credential of diskRepo. On an ECR repository it MUST be
-      # "setec-disk-registry": templates/setec/disk-registry.yaml writes that
-      # Secret from the stage 0 push user (charts#574). Any other registry
-      # takes no credential from the chart, and the value stays empty. The
-      # render fails on any other pair. A hosted env sets it in its overlay
-      # with diskRepo.
-      registrySecret: ""
+      # credential of diskRepo. The default setec-disk-registry is the Secret
+      # that templates/setec/disk-registry.yaml writes: a refreshed ECR token
+      # from the stage 0 push user when diskRepo is on ECR, and a config with
+      # no credential for any other registry (charts#574). No install sets
+      # it. Another name is a Secret that the operator of the install writes.
+      registrySecret: "setec-disk-registry"
       # publicKeys are the base64 ed25519 public keys of the seed. Each
       # launcher refuses a disk that none of them signed. REQUIRED: the
       # setec chart fails the render when the list is empty. The install

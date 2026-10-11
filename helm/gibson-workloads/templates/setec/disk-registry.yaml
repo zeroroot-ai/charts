@@ -24,24 +24,23 @@ The chain, in the setec namespace:
      Secret for the registry host of diskRepo, refreshed every 6 hours, half
      the life of the token.
 
-It renders only when diskRepo is an ECR repository
-(<account>.dkr.ecr.<region>.amazonaws.com/<name>). The kind registry is
-plain HTTP with no credential, so kind renders none of it. registrySecret
-must name setec-disk-registry exactly when the chain renders: the render
-fails otherwise, so a disk builder never runs with no credential on ECR, or
-mounts a Secret that nothing writes elsewhere. A key rotation
-(make substrate-rotate CREDENTIAL=setec-disk-builder in hosted) reaches the
-generator through the five-minute keyring pass of the seeder and the
-refresh of the first ExternalSecret.
+The chain renders when registrySecret is setec-disk-registry, the default, so
+no install sets a value for it (charts#574). It has two shapes:
+
+  - diskRepo on ECR (<account>.dkr.ecr.<region>.amazonaws.com/<name>): the
+    three objects above.
+  - any other registry (the plain HTTP registry of kind): a Fake generator
+    gives the Docker config {"auths":{}}, so the disk builder pushes with no
+    credential, as before.
+
+Another value of registrySecret names a Secret that the operator of the
+install writes. The chart then renders nothing here.
 */}}
 {{- if .Values.setec.enabled }}
 {{- $ecr := include "gibson.ecrRepo" .Values.setec.launcher.diskRepo | fromJson }}
-{{- $registrySecret := .Values.setec.launcher.diskBuilder.registrySecret }}
-{{- if $ecr.host }}
-{{- if ne $registrySecret "setec-disk-registry" }}
-{{- fail (printf "setec.launcher.diskBuilder.registrySecret is %q: the disk repository %s is on ECR, and the chart writes its push credential into the Secret setec-disk-registry. Set registrySecret to setec-disk-registry (charts#574)." $registrySecret .Values.setec.launcher.diskRepo) }}
-{{- end }}
+{{- if eq .Values.setec.launcher.diskBuilder.registrySecret "setec-disk-registry" }}
 {{- $ns := include "gibson.setecNamespace" . }}
+{{- if $ecr.host }}
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -88,6 +87,20 @@ spec:
       secretAccessKeySecretRef:
         name: setec-disk-push-key
         key: secret-access-key
+{{- else }}
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Fake
+metadata:
+  name: setec-disk-registry
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: setec-disk-builder
+spec:
+  # A registry that is not ECR takes no credential from the chart.
+  data:
+    config: '{"auths":{}}'
+{{- end }}
 ---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -104,7 +117,7 @@ spec:
     - sourceRef:
         generatorRef:
           apiVersion: generators.external-secrets.io/v1alpha1
-          kind: ECRAuthorizationToken
+          kind: {{ if $ecr.host }}ECRAuthorizationToken{{ else }}Fake{{ end }}
           name: setec-disk-registry
   target:
     name: setec-disk-registry
@@ -113,8 +126,10 @@ spec:
       type: kubernetes.io/dockerconfigjson
       engineVersion: v2
       data:
+        {{- if $ecr.host }}
         .dockerconfigjson: {{ printf "{\"auths\":{\"%s\":{\"username\":\"{{ .username }}\",\"password\":\"{{ .password }}\"}}}" $ecr.host | quote }}
-{{- else if $registrySecret }}
-{{- fail (printf "setec.launcher.diskBuilder.registrySecret is %q, but the disk repository %q is not on ECR, and nothing writes that Secret. Leave registrySecret empty: a registry that is not ECR takes no credential from the chart (charts#574)." $registrySecret .Values.setec.launcher.diskRepo) }}
+        {{- else }}
+        .dockerconfigjson: "{{ `{{ .config }}` }}"
+        {{- end }}
 {{- end }}
 {{- end }}

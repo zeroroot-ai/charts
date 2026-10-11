@@ -8051,6 +8051,7 @@ spec:
             - --disk-repo=registry.example.com/setec-disks
             - --disk-builder-image=ghcr.io/zeroroot-ai/setec-disk-builder:v0.126.0@sha256:347e0008fb781d472b030c28d643ced8b2dcdcbbad6dd5f11b0aef1dc4848b02
             - --disk-signing-secret=setec-disk-signing
+            - --disk-registry-secret=setec-disk-registry
             - --operator-namespace=setec-system
             - --disk-public-key=ExAmPlEpUbLiCkEy0000000000000000000000000000=
           ports:
@@ -17669,6 +17670,37 @@ spec:
     - secretKey: vault_admin_token
       remoteRef: { key: gibson-vault-admin-token, property: token }
 ---
+# Source: gibson/charts/gibson-workloads/templates/setec/disk-registry.yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: setec-disk-registry
+  namespace: setec-system
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: setec-disk-builder
+spec:
+  # Half the 12-hour life of an ECR token.
+  refreshInterval: 6h
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Fake
+          name: setec-disk-registry
+  target:
+    name: setec-disk-registry
+    creationPolicy: Owner
+    template:
+      type: kubernetes.io/dockerconfigjson
+      engineVersion: v2
+      data:
+        .dockerconfigjson: "{{ .config }}"
+---
 # Source: gibson/charts/gibson-workloads/templates/setec/disk-signing-externalsecret.yaml
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
@@ -17920,6 +17952,24 @@ spec:
       data:
         username: '{{ .username }}'
         password: '{{ .password }}'
+---
+# Source: gibson/charts/gibson-workloads/templates/setec/disk-registry.yaml
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Fake
+metadata:
+  name: setec-disk-registry
+  namespace: setec-system
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: setec-disk-builder
+spec:
+  # A registry that is not ECR takes no credential from the chart.
+  data:
+    config: '{"auths":{}}'
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/webhook.yaml
 apiVersion: cert-manager.io/v1
