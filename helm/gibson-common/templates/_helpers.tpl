@@ -1073,6 +1073,17 @@ helper. Redis auth is always on (one-code-path epic / deploy#199).
 {{- end }}
 
 {{/*
+Redis URL with no user info, for a consumer that reads the URL verbatim and
+takes the password from its own REDIS_PASSWORD env var (ext-authz,
+charts#633). Such a consumer does not expand ${REDIS_PASSWORD}, so the URL
+with that placeholder does not parse there.
+*/}}
+{{- define "gibson.redis.plainURL" -}}
+{{- $port := int (.Values.redis.service.port | default 6379) -}}
+{{- printf "redis://%s:%d" (include "gibson.redis.host" .) $port -}}
+{{- end }}
+
+{{/*
 gibson.validateSpiffeRequired — fails the render when gibson.auth.spiffe is
 null/empty in any overlay. Memorialises the "SPIFFE stays ON" invariant from
 memory feedback_spiffe_mtls_required.md as a structural chart guard.

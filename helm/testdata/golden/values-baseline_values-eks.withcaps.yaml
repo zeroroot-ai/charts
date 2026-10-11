@@ -13256,10 +13256,13 @@ spec:
             # request time. Redis holds the replay state of component tokens,
             # shared by every replica, and carries the FGA write events
             # (hosted#204) on the channel gibson:fga.write. Same Redis and the
-            # same password Secret as the daemon. make extauthz-redis fails a
-            # profile whose ext-authz pod lacks either variable.
+            # same password Secret as the daemon. ext-authz reads the URL
+            # verbatim and takes the password from REDIS_PASSWORD, so the URL
+            # holds no user info (charts#633). make extauthz-redis fails a
+            # profile whose ext-authz pod lacks either variable, or whose URL
+            # holds user info.
             - name: EXT_AUTHZ_REDIS_URL
-              value: "redis://:${REDIS_PASSWORD}@gibson-redis-stack:6379"
+              value: "redis://gibson-redis-stack:6379"
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
