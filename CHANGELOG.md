@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.145.2](https://github.com/zeroroot-ai/charts/compare/v0.145.1...v0.145.2) (2026-10-11)
+
+
+### Bug Fixes
+
+* **install:** the release namespace enforces the restricted level, and the guard models Velero in its own namespace ([#642](https://github.com/zeroroot-ai/charts/issues/642)) ([3319da2](https://github.com/zeroroot-ai/charts/commit/3319da234a12f1ceb1dab3f2cf357e64502c018e))
+* **spire:** the SPIRE agent and the SPIFFE CSI driver run in spire-system, with a named privileged exception ([#639](https://github.com/zeroroot-ai/charts/issues/639)) ([3a07cea](https://github.com/zeroroot-ai/charts/commit/3a07cea6391b0765bfd9a47262a456e9e9031fd5))
+* **tenant-operator:** the per-tenant role grants the belief trainer CronJob ([#636](https://github.com/zeroroot-ai/charts/issues/636)) ([bfc3ae3](https://github.com/zeroroot-ai/charts/commit/bfc3ae39867ca669b5eab2e3185e0f9776af9add)), closes [#634](https://github.com/zeroroot-ai/charts/issues/634)
+
 ## [0.145.1](https://github.com/zeroroot-ai/charts/compare/v0.145.0...v0.145.1) (2026-10-11)
 
 
