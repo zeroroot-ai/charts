@@ -82,6 +82,14 @@ tenantOperator:
       tag: "v0.158.0@sha256:fd59ec6f2bdc1f91a3e901f65a22597844a41835151464f0e30bf2760b29419b"
       # digest: when set, gibson.image renders "<repository>@<digest>".
       digest: ""
+  # The Neo4j of each tenant data plane (gibson#1061, charts#608). The
+  # operator reads TENANT_NEO4J_IMAGE and exits at start when it is empty or
+  # has no sha256 digest. The mirror copy, so an air-gapped install pulls it.
+  tenantNeo4j:
+    image:
+      repository: ghcr.io/zeroroot-ai/mirror/neo4j
+      tag: "5.26.0-community@sha256:5a015e53de1895e7eee1574ae0325cf8c4b89587222778108c594bdd45a474b5"
+      digest: ""
   # replicas: HA required for failurePolicy: Fail webhooks (deploy#204).
   # A single replica + Fail posture means any pod restart rejects every
   # tenant-create until the new pod is Ready. With ≥2 replicas + leader
