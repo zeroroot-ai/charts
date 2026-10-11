@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.145.0](https://github.com/zeroroot-ai/charts/compare/v0.144.0...v0.145.0) (2026-10-11)
+
+
+### Miscellaneous Chores
+
+* **release:** release charts 0.145.0 with the gibson v0.159.0 pin ([#630](https://github.com/zeroroot-ai/charts/issues/630)) ([60b26bc](https://github.com/zeroroot-ai/charts/commit/60b26bcbbbd26b3d0e582da70176d97bcb0b255c))
+
 ## [0.144.0](https://github.com/zeroroot-ai/charts/compare/v0.143.0...v0.144.0) (2026-10-11)
 
 
