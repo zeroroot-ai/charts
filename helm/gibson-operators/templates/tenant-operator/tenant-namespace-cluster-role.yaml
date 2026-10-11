@@ -55,3 +55,9 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: [roles, rolebindings]  # SA-token RBAC for in-namespace workloads
     verbs: [get, list, watch, create, update, patch, delete]
+  # The belief trainer of each tenant (gibson operators/tenant
+  # internal/saga/flows/belief_trainer.go). The operator reads it without
+  # its cache, in the tenant namespace only (charts#634, gibson#1089).
+  - apiGroups: ["batch"]
+    resources: [cronjobs]
+    verbs: [get, list, watch, create, update, patch, delete]
