@@ -41,15 +41,13 @@ jobs:
   ci-required:
     name: ci-required
     runs-on: ubuntu-latest
-    # `make check` took 13.5 minutes before the admission-cel gate. A cold
-    # download of its Go modules adds about 1.5 minutes. The 15-minute cap
-    # cancelled a run 10 ms after every gate passed (charts#609). The gates
-    # added since then (the OpenBao and lease simulation tests, the Envoy
-    # cluster render) bring the green runs to a median of 15.8 and a maximum
-    # of 19.7 minutes (27 runs, 2026-10-12), and the 20-minute cap cancelled
-    # the release PR charts#654 at 20m17s while its last gates ran. 30 minutes
-    # leaves room for a slow runner and still ends a hung job.
-    timeout-minutes: 30
+    # The budget of the merge gate is ten minutes (ADR-0080). make check runs
+    # its gates in parallel on one repack (charts#667): three CI runs of this
+    # job took 9m31s, 5m48s and 9m01s (make check 9m02s, 5m16s, 8m27s;
+    # 2026-10-12). The cap is the budget plus a margin for a slow runner, so a
+    # green change is not cancelled; a run near the cap is a signal to make
+    # the gates faster, not to raise the cap (charts#665 raised it to 30).
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
