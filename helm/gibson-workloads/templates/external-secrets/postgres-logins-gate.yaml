@@ -1,0 +1,91 @@
+{{- /*
+The gate of the database login ExternalSecrets (hosted#627).
+
+The five login ExternalSecrets (postgres-logins.yaml, wave -5) ask the
+OpenBao database engine for a login role. The openbao-auto-init sidecar
+writes the engine connections only after the CNPG superuser Secret exists,
+which is after the Postgres cluster (wave -7), on its next pass. On a
+from-zero sync the ExternalSecrets asked before that, got "empty response
+from Vault", and reported Degraded. Argo spent its sync retries on that
+window and the bringup stopped, although External Secrets later converged.
+
+This Job runs in wave -6, with the postgres-setup Jobs, and waits for the
+pg-engine mark. The sidecar writes that mark into the Secret of the login
+token (pg_engine_mark) when the engine issues each login role. The Job
+mounts that one key and never the token. Argo applies wave -5 only when
+the Job has completed, so each login ExternalSecret syncs at its first ask.
+On a plain `helm install` the Job is a post-install hook, after the
+ExternalSecrets, and it ends at once when the mark exists.
+make postgres-logins-wave fails a login ExternalSecret that is not after
+this gate.
+*/ -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: postgres-logins-gate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres-logins-gate
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-6"
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+    helm.sh/hook-weight: "-6"
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1500
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: postgres-logins-gate
+        {{- include "gibson.netLabels" (dict "role" "platform") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: pg-engine
+          secret:
+            secretName: gibson-openbao-pg-logins
+            optional: true
+            items:
+              - key: pg-engine
+                path: pg-engine
+      containers:
+        - name: gate
+          image: {{ include "gibson.toolImage" . | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: pg-engine
+              mountPath: /etc/pg-engine
+              readOnly: true
+          command: ["sh", "-ec"]
+          args:
+            - |
+              # The kubelet updates a mounted Secret within about a minute
+              # of a change, so the loop reads the file again each pass.
+              DEADLINE=1200
+              began=$(date +%s)
+              until [ -s /etc/pg-engine/pg-engine ]; do
+                if [ $(( $(date +%s) - began )) -ge "$DEADLINE" ]; then
+                  echo "[postgres-logins-gate] ERROR: the OpenBao database engine did not report ready in ${DEADLINE}s." >&2
+                  echo "[postgres-logins-gate] Read the openbao-auto-init log of the OpenBao pod: the engine waits for the CNPG superuser Secret and for the Postgres cluster." >&2
+                  exit 1
+                fi
+                echo "[postgres-logins-gate] waiting for the database engine of OpenBao ($(( $(date +%s) - began ))s of ${DEADLINE}s)"
+                sleep 10
+              done
+              echo "[postgres-logins-gate] the database engine issues each login role"
