@@ -7,8 +7,8 @@ the setec launcher and disk builder, which the setec operator starts from
 its flags --launcher-image and --disk-builder-image. Such an install could
 not start a sandbox.
 
-This check does not reuse the generator. It reads every golden render
-(helm/testdata/golden/), walks each container of each pod template, and
+This check does not reuse the generator. It reads every golden render of
+the umbrella and of gibson-velero (helm/testdata/golden/), walks each container of each pod template, and
 collects each image it names:
 
   - the image field of a container and of an init container,
@@ -76,7 +76,10 @@ def missing(rendered: set[str], on_list: set[str]) -> list[str]:
 
 def goldens() -> set[str]:
     found = set()
-    for f in sorted(glob.glob(os.path.join(ROOT, "helm", "testdata", "golden", "values-*.yaml"))):
+    # The umbrella profiles and Velero, which every install runs as its own release.
+    paths = sorted(glob.glob(os.path.join(ROOT, "helm", "testdata", "golden", "values-*.yaml")))
+    paths.append(os.path.join(ROOT, "helm", "testdata", "golden", "gibson-velero.yaml"))
+    for f in paths:
         found |= images(yaml.safe_load_all(open(f)))
     return found
 
@@ -89,14 +92,15 @@ def selftest() -> int:
         return 1
     launcher = next((i for i in rendered if "/setec-launcher:" in i), None)
     builder = next((i for i in rendered if "/setec-disk-builder:" in i), None)
-    if not launcher or not builder:
-        print("SELFTEST FAIL: the render names no setec launcher or disk builder image: the check is blind to flags")
+    velero = next((i for i in rendered if "/mirror/velero:" in i), None)
+    if not launcher or not builder or not velero:
+        print("SELFTEST FAIL: the render names no setec launcher, disk builder or Velero image: the check is blind")
         return 1
-    for drop in (launcher, builder):
+    for drop in (launcher, builder, velero):
         if missing(rendered, full - {drop}) != [drop]:
             print(f"SELFTEST FAIL: a list without {drop} must fail on it")
             return 1
-    print("  ✓ selftest: a list without the setec launcher or disk builder fails, the committed list passes")
+    print("  ✓ selftest: a list without the setec launcher, the disk builder or Velero fails, the committed list passes")
     return 0
 
 

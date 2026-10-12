@@ -26,15 +26,6 @@
 #       is the closed seam and is bypassable on-prem (no-op provider); www is
 #       absent from any self-hosted install by design.
 #
-#   ghcr.io/zeroroot-ai/mirror/velero{,-plugin-for-aws}
-#       Velero ships as its own release, helm/gibson-velero, in its own
-#       namespace, for the RBAC reason that chart's Chart.yaml states. This
-#       package deploys the umbrella chart only, so its images are not in this
-#       render. An air-gapped operator who wants backups mirrors
-#       ghcr.io/zeroroot-ai/mirror/velero:v1.18.1 and
-#       ghcr.io/zeroroot-ai/mirror/velero-plugin-for-aws:v1.14.2 as well; the
-#       versions are pinned in helm/gibson-velero/values.yaml.
-#
 #   ghcr.io/zeroroot-ai/internal-authz-registry
 #       An OCI artifact, not a runtime image, and the air-gap path does not
 #       fetch it: the default path reads the registry from the daemon over
@@ -197,6 +188,12 @@ mirrored:
     digest: ""
     role: ""
   - ref: ghcr.io/zeroroot-ai/mirror/step-cli:0.30.2@sha256:c75414251d4d8234945fb01e1374707dcc6a7adced88679bae4f0fd526331e74
+    digest: ""
+    role: ""
+  - ref: ghcr.io/zeroroot-ai/mirror/velero-plugin-for-aws:v1.14.2@sha256:0751144c1c8e52d52c48717fbd13ad5a3061e612ae4d7ad744a946cd5b139d1a
+    digest: ""
+    role: ""
+  - ref: ghcr.io/zeroroot-ai/mirror/velero:v1.18.1@sha256:11459094b1b21ec7c817b08f8067d9e89380835547915cac9c4132ff05b55b90
     digest: ""
     role: ""
   - ref: ghcr.io/zeroroot-ai/mirror/wait4x:3.7.2@sha256:2337e64637e1aa9d5d638de6d877914806be6c5156a7221ea40f11911ea4071a

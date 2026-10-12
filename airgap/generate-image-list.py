@@ -93,7 +93,9 @@ PROFILES = [
     ("guest", [BASELINE, INPUTS, "helm/gibson/values-guest.yaml"]),
 ]
 
-IMAGE_LINE_RX = re.compile(r'^\s+(?:image|customImage):\s*"?([^"\s]+)"?\s*$')
+# `- image: <ref>` is the same field as the first key of a list item (the
+# Velero plugin init container renders that way).
+IMAGE_LINE_RX = re.compile(r'^\s+(?:-\s+)?(?:image|customImage):\s*"?([^"\s]+)"?\s*$')
 
 FIRST_PARTY_RX = re.compile(r"^ghcr\.io/zeroroot-ai/(?!mirror/)")
 MIRROR_RX = re.compile(r"^ghcr\.io/zeroroot-ai/mirror/")
@@ -271,6 +273,19 @@ def render_images() -> dict[str, set[str]]:
         for ref in env_images(out):
             found.setdefault(repo_of(ref), set()).add(ref)
         del name
+    # Velero is its own release, helm/gibson-velero, and every install runs it
+    # (baseline-up.sh phase 1b, charts#642), so its images are mirrored too.
+    out = run(
+        ["helm", "template", "gibson-velero", "helm/gibson-velero", "--namespace", "gibson",
+         "--values", "helm/testdata/render-inputs/gibson-velero.yaml", "--include-crds"],
+        cwd=ROOT,
+    )
+    for line in out.splitlines():
+        m = IMAGE_LINE_RX.match(line)
+        if m and "{{" not in m.group(1):
+            found.setdefault(repo_of(m.group(1)), set()).add(m.group(1))
+    for ref in env_images(out):
+        found.setdefault(repo_of(ref), set()).add(ref)
     return found
 
 
@@ -387,15 +402,6 @@ EXCLUSIONS = """\
 #       install does not deploy — it deploys the umbrella chart only. billing
 #       is the closed seam and is bypassable on-prem (no-op provider); www is
 #       absent from any self-hosted install by design.
-#
-#   ghcr.io/zeroroot-ai/mirror/velero{,-plugin-for-aws}
-#       Velero ships as its own release, helm/gibson-velero, in its own
-#       namespace, for the RBAC reason that chart's Chart.yaml states. This
-#       package deploys the umbrella chart only, so its images are not in this
-#       render. An air-gapped operator who wants backups mirrors
-#       ghcr.io/zeroroot-ai/mirror/velero:v1.18.1 and
-#       ghcr.io/zeroroot-ai/mirror/velero-plugin-for-aws:v1.14.2 as well; the
-#       versions are pinned in helm/gibson-velero/values.yaml.
 #
 #   ghcr.io/zeroroot-ai/internal-authz-registry
 #       An OCI artifact, not a runtime image, and the air-gap path does not
