@@ -34,6 +34,8 @@ STANDALONE="gibson-crds gibson-operator-crds gibson-velero"
 # gibson-workloads template and helm renders the STALE tarball while
 # chart-deps reports "current". Force the repack or every snapshot is a lie.
 repack() {
+  # Inside `make check` the gates share one repack (CHART_DEPS_DONE).
+  [ -z "${CHART_DEPS_DONE:-}" ] || return 0
   rm -f "$ROOT"/helm/gibson/charts/gibson-{workloads,operators,crds,common}-*.tgz \
         "$ROOT"/helm/*/.charts.stamp 2>/dev/null || true
   make -C "$ROOT" chart-deps >/dev/null

@@ -35,6 +35,7 @@ daemon, with the reason, and is checked in BOTH directions so a stale entry fail
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -84,11 +85,14 @@ def rendered_keys() -> list[str]:
     # tarball built BEFORE the edit — the first run of this check reported three
     # keys as still present after they had been deleted. A check that renders the
     # umbrella and does not repack is measuring the previous commit.
-    subprocess.run("rm -f helm/gibson/charts/gibson-{workloads,operators,crds,common}-*.tgz "
-                   "helm/*/.charts.stamp", cwd=ROOT, shell=True, check=False)
-    dep = subprocess.run(["make", "chart-deps"], cwd=ROOT, capture_output=True, text=True)
-    if dep.returncode != 0:
-        fail(f"chart-deps failed, so the render would be stale:\n{dep.stderr[-800:]}")
+    # Inside `make check` the gates share one repack (CHART_DEPS_DONE), and a
+    # second repack here would rewrite tarballs that parallel gates read.
+    if not os.environ.get("CHART_DEPS_DONE"):
+        subprocess.run("rm -f helm/gibson/charts/gibson-{workloads,operators,crds,common}-*.tgz "
+                       "helm/*/.charts.stamp", cwd=ROOT, shell=True, check=False)
+        dep = subprocess.run(["make", "chart-deps"], cwd=ROOT, capture_output=True, text=True)
+        if dep.returncode != 0:
+            fail(f"chart-deps failed, so the render would be stale:\n{dep.stderr[-800:]}")
     cmd = ["helm", "template", "gibson", "helm/gibson",
            "-f", "helm/gibson/values-baseline.yaml",
            "-f", "helm/testdata/render-inputs/gibson.yaml",

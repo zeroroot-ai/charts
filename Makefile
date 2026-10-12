@@ -9,7 +9,7 @@
 GREEN := \033[0;32m
 NC    := \033[0m
 
-.PHONY: upgrade-pair reloader-names operator-rbac-sync operator-rbac-covers identity-admission-covers openbao-one-replica zitadel-claimed-host contract-pins config-contract-sync config-consumed smtp-tls-mode email-smtp-external-secret openbao-login-diagnosis help values-consumed env-consumed env-contract-sync env-contract-fresh chart-deps chart-deps-retry golden golden-update render-diff baseline-up baseline-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks velero-home iam-admin-pat-escrow seed-passwords login-brand \
+.PHONY: repack check-gates upgrade-pair reloader-names operator-rbac-sync operator-rbac-covers identity-admission-covers openbao-one-replica zitadel-claimed-host contract-pins config-contract-sync config-consumed smtp-tls-mode email-smtp-external-secret openbao-login-diagnosis help values-consumed env-consumed env-contract-sync env-contract-fresh chart-deps chart-deps-retry golden golden-update render-diff baseline-up baseline-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks velero-home iam-admin-pat-escrow seed-passwords login-brand \
         check attribution vendor-operators cloud-free
 
 help: ## Show available targets
@@ -25,9 +25,18 @@ help: ## Show available targets
 	@echo "  baseline-verify    prove the install came up"
 
 chart-deps: ## Vendor sub-chart tarballs, with retries (hosted#147)
-	@for c in helm/gibson-operator-crds helm/gibson-crds helm/gibson-operators helm/gibson-workloads helm/gibson-velero helm/gibson; do \
+	@# Inside `make check` the gates run in parallel on one repack. CHART_DEPS_DONE
+	@# says it is done, so a gate never rewrites a tarball that another gate reads.
+	@if [ -n "$$CHART_DEPS_DONE" ]; then exit 0; fi; \
+	for c in helm/gibson-operator-crds helm/gibson-crds helm/gibson-operators helm/gibson-workloads helm/gibson-velero helm/gibson; do \
 	  ./scripts/helm-dep-update.sh $$c || exit 1; done
 	@printf "$(GREEN)  ✓$(NC) chart-deps: vendored sub-charts are current\n"
+
+repack: ## Repack the first-party sub-charts from the tree (chart-deps tracks dependency sources, not templates); a no-op inside make check
+	@if [ -z "$$CHART_DEPS_DONE" ]; then \
+	  rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/charts/gibson-operators-*.tgz \
+	        helm/gibson/charts/gibson-crds-*.tgz helm/gibson/charts/gibson-common-*.tgz helm/*/.charts.stamp; \
+	  $(MAKE) -s chart-deps >/dev/null; fi
 
 chart-deps-retry: ## chart-deps retries a failed download and fails after the last attempt
 	@./scripts/check-chart-deps-retry.sh
@@ -88,33 +97,28 @@ no-pinned-addressing: ## No hostAliases, no pinned Envoy address, and no public 
 openbao-token-rotation: ## A service token older than its lifetime or a rotation request gets a successor, and the old one is revoked after its grace (ADR-0171)
 	@# The test renders the umbrella, which reads the PACKAGED gibson-workloads
 	@# chart. chart-deps tracks dependency sources, not templates, so repack first.
-	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
-	@$(MAKE) -s chart-deps >/dev/null
+	@$(MAKE) -s repack
 	@bats tests/openbao-token-rotation.bats
 
 .PHONY: openbao-seed-inputor
 keyring-seal-rotation: ## The seal key rotates in the keyring, and the openbao container writes both keys with their own ids (ADR-0171)
-	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
-	@$(MAKE) -s chart-deps >/dev/null
+	@$(MAKE) -s repack
 	@bats tests/keyring-seal-rotation.bats
 
 openbao-seed-inputor: ## The inputor seed kind takes the keyring value when present and the placeholder when not (charts#486)
 	@bats tests/openbao-seed-inputor.bats
 .PHONY: egress-host-groups-test
 egress-host-groups-test: ## An egress host group of the values renders one policy with each host on its port, and a bad group fails the render (D76)
-	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
-	@$(MAKE) -s chart-deps >/dev/null
+	@$(MAKE) -s repack
 	@bats tests/egress-host-groups.bats
 .PHONY: redis-rotation-test
 redis-rotation-test: ## The redis password rotation keeps the old password until each client restarted, and recovers when the store already has the new one (ADR-0171)
-	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
-	@$(MAKE) -s chart-deps >/dev/null
+	@$(MAKE) -s repack
 	@bats tests/redis-rotation.bats
 
 .PHONY: openbao-seed-lifetime
 openbao-seed-lifetime: ## A seed key older than its lifetime gets a new generated value, and no other key changes (ADR-0171)
-	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
-	@$(MAKE) -s chart-deps >/dev/null
+	@$(MAKE) -s repack
 	@bats tests/openbao-seed-lifetime.bats
 
 .PHONY: edge-extra-routes
@@ -244,33 +248,27 @@ openbao-login-diagnosis: ## A failed OpenBao kubernetes-auth login names which s
 	@./scripts/check-openbao-login-diagnosis.sh
 
 openbao-system-key-rotation: ## The Zitadel System API key flips to the other slot, then the old slot gets a new key (ADR-0171)
-	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
-	@$(MAKE) -s chart-deps >/dev/null
+	@$(MAKE) -s repack
 	@bats tests/openbao-system-key-rotation.bats
 
 zitadel-system-key-wait: ## The init container wait-for-system-key renders on the Zitadel Deployment and the init and setup Jobs (charts#576)
-	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
-	@$(MAKE) -s chart-deps >/dev/null
+	@$(MAKE) -s repack
 	@bats tests/zitadel-system-key-wait.bats
 
 zitadel-masterkey-rotation: ## The masterkey rotation proves the marker, rewraps each Zitadel key in one transaction, and refuses a marker neither key opens (ADR-0171)
-	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
-	@$(MAKE) -s chart-deps >/dev/null
+	@$(MAKE) -s repack
 	@bats tests/zitadel-masterkey-rotation.bats
 
 setec-disk-registry: ## An ECR disk repository renders the push credential chain of the setec disk builder, and kind renders none (charts#574)
-	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
-	@$(MAKE) -s chart-deps >/dev/null
+	@$(MAKE) -s repack
 	@bats tests/setec-disk-registry.bats
 
 openbao-pg-login-lease: ## A rotation or a stop of the sidecar never ends the token that issued a live Postgres login role (charts#602)
-	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
-	@$(MAKE) -s chart-deps >/dev/null
+	@$(MAKE) -s repack
 	@bats tests/openbao-pg-login-lease.bats
 
 openbao-seal-legacy-id: ## A store sealed under the id of a chart before charts#568 starts unsealed after the upgrade (charts#605; needs BAO_BIN)
-	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
-	@$(MAKE) -s chart-deps >/dev/null
+	@$(MAKE) -s repack
 	@bats tests/openbao-seal-legacy-id.bats
 
 daemon-secret-source: ## The daemon config of each profile names the platform OpenBao at security.secret_source.address (gibson#1079)
@@ -280,19 +278,20 @@ tenant-neo4j-image: ## The tenant operator of each profile gets a digest-pinned 
 	@bats tests/tenant-neo4j-image.bats
 
 envoy-clusters-unique: ## Each Envoy config of the chart names each cluster once, also with several extra routes to one backend (charts#655)
-	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
-	@$(MAKE) -s chart-deps >/dev/null
+	@$(MAKE) -s repack
 	@python3 scripts/check-envoy-clusters-unique.py --selftest
 	@python3 scripts/check-envoy-clusters-unique.py
 
+repack-once: ## Inside make check no gate repacks the umbrella: each repack tests CHART_DEPS_DONE (charts#667)
+	@python3 scripts/check-repack-once.py --selftest
+	@python3 scripts/check-repack-once.py
+
 openbao-pg-engine: ## The database engine issues one login role for each owner of a platform database, and rewrites a connection only when the superuser credential changes (ADR-0171)
-	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
-	@$(MAKE) -s chart-deps >/dev/null
+	@$(MAKE) -s repack
 	@bats tests/openbao-pg-engine.bats
 
 cg-rotation-window: ## The CG signing-key set projects its current, next and previous slots always, with no rotation flag (ADR-0171)
-	@rm -f helm/gibson/charts/gibson-workloads-*.tgz helm/gibson/.charts.stamp
-	@$(MAKE) -s chart-deps >/dev/null
+	@$(MAKE) -s repack
 	@python3 scripts/check-cg-rotation-window.py --selftest
 	@python3 scripts/check-cg-rotation-window.py
 	@bats tests/openbao-cg-key-rotation.bats
@@ -673,8 +672,17 @@ operator-rbac-fresh: ## The vendored cert-manager and External Secrets RBAC matc
 	@python3 scripts/vendor-operator-rbac.py --selftest
 	@python3 scripts/vendor-operator-rbac.py --check
 
-check: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted connector-creds-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed env-consumed config-consumed contract-pins probes probe-timeouts helper-docs referenced-paths-exist cg-rotation-window email-smtp-external-secret smtp-tls-mode edge-rate-limits secure-pod daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit belief-trainer-image daemon-address-qualified hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks velero-home iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows upgrade-pair platform-owner-values no-owner-password-secret edge-zitadel-routes edge-grpc-routes edge-jwt-payload-unforgeable netpol-before-hooks openbao-login-diagnosis zitadel-claimed-host openbao-one-replica identity-admission-covers operator-rbac-covers reloader-names purge-tenant-backup-test preflight-kvm-test no-render-time-secrets spiffeid-selectors trust-domain-literal optional-references no-closed-images operator-crd-bundle alert-runbooks registration-rung extauthz-redis secret-contract egress-policy-type no-pinned-addressing openbao-seed-inputor keyring-seal-rotation openbao-seed-lifetime openbao-system-key-rotation openbao-token-rotation redis-rotation-test egress-host-groups-test hubble-drops fga-tls openfga-authn fga-init-seeds externalsecret-store-namespace metrics-policy network-peers cilium-policy-shape openbao-tls alert-series-scraped postgres-logins-wave scratch-mounts-writable monitoring-crds-shipped namespace-policy openbao-policies entitlements-identity connector-proxy-caller connector-grant-alert email-one-value platform-operator-audit alert-rules-test plugin-namespace-role dns-names namespace-label-admission edge-extra-routes zitadel-masterkey-rotation openbao-pg-engine admission-cel zitadel-system-key-wait setec-disk-registry openbao-pg-login-lease openbao-seal-legacy-id daemon-secret-source tenant-neo4j-image envoy-clusters-unique ## Everything that runs without a cluster
+# The merge gate (ADR-0080: ten minutes). One repack, then every gate in
+# parallel on that repack, with the output of each gate kept together.
+# CHECK_JOBS sets the parallelism (default: the CPU count).
+CHECK_JOBS ?= $(shell nproc 2>/dev/null || echo 4)
+
+check: ## Everything that runs without a cluster
+	@CHART_DEPS_DONE= $(MAKE) -s repack
+	@CHART_DEPS_DONE=1 $(MAKE) --no-print-directory -k -j$(CHECK_JOBS) --output-sync=target check-gates
 	@printf "$(GREEN)  ✓$(NC) check: all offline gates passed\n"
+
+check-gates: golden attribution cloud-free smtp-host-resolves chart-deps-retry substrate-overlays subchart-overrides zitadel-lockstep oidcclient-roles instance-admin-roles-scoped signin-policy login-brand tool-image secret-plumbing backup-coverage extauthz-transport servicemonitor-tls envoy-admin-loopback workload-rbac owner-credential-readers operator-rbac-fresh cnpg-superuser-secret secret-reads-granted connector-creds-binding fixture-flag-follows-runner webhooks edge-config-identical hook-jobs-sh kubeconform image-registry mirror-digests orphan-templates values-consumed env-consumed config-consumed contract-pins probes probe-timeouts helper-docs referenced-paths-exist cg-rotation-window email-smtp-external-secret smtp-tls-mode edge-rate-limits secure-pod daemon-netpol-admits-callers edge-strips-instance-headers edge-misdirected-authority edge-access-log-no-credentials node-heap-tracks-limit belief-trainer-image daemon-address-qualified hostnames app-url-links reloader-namespaced archive-bucket-required postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks velero-home iam-admin-pat-escrow seed-passwords set-secret-env helm-record-size values-no-duplicate-keys baseline-up-one-path rungs workflows upgrade-pair platform-owner-values no-owner-password-secret edge-zitadel-routes edge-grpc-routes edge-jwt-payload-unforgeable netpol-before-hooks openbao-login-diagnosis zitadel-claimed-host openbao-one-replica identity-admission-covers operator-rbac-covers reloader-names purge-tenant-backup-test preflight-kvm-test no-render-time-secrets spiffeid-selectors trust-domain-literal optional-references no-closed-images operator-crd-bundle alert-runbooks registration-rung extauthz-redis secret-contract egress-policy-type no-pinned-addressing openbao-seed-inputor keyring-seal-rotation openbao-seed-lifetime openbao-system-key-rotation openbao-token-rotation redis-rotation-test egress-host-groups-test hubble-drops fga-tls openfga-authn fga-init-seeds externalsecret-store-namespace metrics-policy network-peers cilium-policy-shape openbao-tls alert-series-scraped postgres-logins-wave scratch-mounts-writable monitoring-crds-shipped namespace-policy openbao-policies entitlements-identity connector-proxy-caller connector-grant-alert email-one-value platform-operator-audit alert-rules-test plugin-namespace-role dns-names namespace-label-admission edge-extra-routes zitadel-masterkey-rotation openbao-pg-engine admission-cel zitadel-system-key-wait setec-disk-registry openbao-pg-login-lease openbao-seal-legacy-id daemon-secret-source tenant-neo4j-image envoy-clusters-unique repack-once ## The gates of make check; run them through make check, which repacks once
 
 baseline-up: ## Install onto the current kube context
 	@./scripts/baseline-up.sh

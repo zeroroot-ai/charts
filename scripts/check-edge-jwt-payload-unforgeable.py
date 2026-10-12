@@ -54,8 +54,12 @@ def repack() -> None:
 
     The umbrella renders packaged tarballs, and .charts.stamp tracks dependency
     sources, not templates: without this, an edit to an Envoy file renders the
-    stale tarball and the guard judges the old config.
+    stale tarball and the guard judges the old config. Inside `make check` the
+    gates share one repack (CHART_DEPS_DONE), and this one would delete
+    tarballs that parallel gates are rendering.
     """
+    if os.environ.get("CHART_DEPS_DONE"):
+        return
     charts = os.path.join(ROOT, "helm", "gibson", "charts")
     for name in os.listdir(charts) if os.path.isdir(charts) else []:
         if name.startswith(("gibson-workloads-", "gibson-operators-", "gibson-crds-", "gibson-common-")) \
