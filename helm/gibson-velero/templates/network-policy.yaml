@@ -90,7 +90,19 @@ metadata:
 {{- /* specs is a top-level field of the policy, beside metadata, not a field
        of spec: the CRD refuses .spec.specs (charts#494). */}}
 specs:
-    {{- range $sel := list (dict "matchLabels" (dict "app.kubernetes.io/name" "velero")) (dict "matchExpressions" (list (dict "key" "velero.io/repo-name" "operator" "Exists"))) }}
+    {{- /* The Velero server and node-agent, the repository maintenance Jobs
+           (velero.io/repo-name), and the data path pod that Velero 1.18
+           runs for each PodVolumeBackup and PodVolumeRestore. A data path
+           pod carries the label velero.io/pod-volume-backup or
+           velero.io/pod-volume-restore, and it reads the API server and
+           writes the bucket. Without it each pod volume backup timed out on
+           the API server (charts#671). */}}
+    {{- $exists := list "velero.io/repo-name" "velero.io/pod-volume-backup" "velero.io/pod-volume-restore" }}
+    {{- $selectors := list (dict "matchLabels" (dict "app.kubernetes.io/name" "velero")) }}
+    {{- range $key := $exists }}
+    {{- $selectors = append $selectors (dict "matchExpressions" (list (dict "key" $key "operator" "Exists"))) }}
+    {{- end }}
+    {{- range $sel := $selectors }}
     - description: "Velero reaches the API server and the backup bucket only."
       endpointSelector:
         {{- toYaml $sel | nindent 8 }}
