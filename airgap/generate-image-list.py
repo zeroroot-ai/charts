@@ -76,7 +76,8 @@ GITHUB_API = "https://api.github.com"
 
 # Ordered: gibson-common must exist before gibson-workloads can be packaged,
 # and both subcharts before the umbrella.
-DEP_CHARTS = ["helm/gibson-operators", "helm/gibson-workloads", "helm/gibson"]
+# gibson-velero is its own release, rendered for the list too (charts#668).
+DEP_CHARTS = ["helm/gibson-operators", "helm/gibson-workloads", "helm/gibson", "helm/gibson-velero"]
 
 # Every profile a consumer can install from this repo. The manifest is the
 # union. The SaaS profiles (ci/values-staging, ci/values-saas) live in the
