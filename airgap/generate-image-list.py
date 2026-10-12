@@ -263,9 +263,11 @@ def render_images() -> dict[str, set[str]]:
             if "{{" in ref or not ref:
                 continue
             found.setdefault(repo_of(ref), set()).add(ref)
-        # An image that a workload starts from an env var, not from an
-        # image: field, for example the tenant Neo4j of TENANT_NEO4J_IMAGE
-        # that the tenant operator deploys (charts#608).
+        # An image that a workload starts from an env var or a flag, not
+        # from an image: field: the tenant Neo4j of TENANT_NEO4J_IMAGE that
+        # the tenant operator deploys (charts#608), and the setec launcher
+        # and disk builder of --launcher-image and --disk-builder-image that
+        # the setec operator starts (charts#668).
         for ref in env_images(out):
             found.setdefault(repo_of(ref), set()).add(ref)
         del name
@@ -273,11 +275,13 @@ def render_images() -> dict[str, set[str]]:
 
 
 ENV_IMAGE_NAME_RX = re.compile(r"^[A-Z0-9_]+_IMAGE$")
+ARG_IMAGE_RX = re.compile(r"^--[a-z0-9-]+-image=(\S+)$")
 IMAGE_REF_RX = re.compile(r"^ghcr\.io/[^\s:@]+(?::[^\s@]+)?(?:@sha256:[0-9a-f]{64})?$")
 
 
 def env_images(rendered: str) -> set[str]:
-    """Each image reference in an env var named *_IMAGE of a container."""
+    """Each image reference in an env var named *_IMAGE, or in a flag
+    --<name>-image=<ref>, of a container."""
     import yaml  # noqa: PLC0415  (only this pass reads the render as YAML)
 
     refs: set[str] = set()
@@ -294,6 +298,11 @@ def env_images(rendered: str) -> set[str]:
                     refs.add(value)
                 stack.extend(node.values())
             elif isinstance(node, list):
+                for item in node:
+                    if isinstance(item, str):
+                        m = ARG_IMAGE_RX.match(item)
+                        if m and IMAGE_REF_RX.match(m.group(1)):
+                            refs.add(m.group(1))
                 stack.extend(node)
     return refs
 
