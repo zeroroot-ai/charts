@@ -574,7 +574,7 @@ jobs:
                 type: RuntimeDefault
             containers:
               - name: dial
-                image: ghcr.io/zeroroot-ai/mirror/curl:8.10.1
+                image: ghcr.io/zeroroot-ai/mirror/curl:8.10.1@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b
                 command: ["sh", "-c", "curl -sS --max-time 10 telnet://platform-postgres-rw.${NS}.svc:5432 </dev/null; exit 0"]
                 securityContext:
                   allowPrivilegeEscalation: false
@@ -586,6 +586,91 @@ jobs:
           python3 scripts/check-hubble-drops.py --namespace "$NS" --since "$fixture_since" \
             --expect-drop hubble-proof-unlabeled
           kubectl -n "$NS" delete pod hubble-proof-unlabeled --wait=false
+
+          # The connector runner fixture (charts#519). A connector runs
+          # third-party MCP server code in the tenant namespace, and no runner
+          # calls the daemon. The connector-operator writes one NetworkPolicy
+          # for each ConnectorInstance (connector-<name>), on the pods with
+          # the label toolhive-name: <name>, and it opens no egress to the
+          # daemon (gibson#1065). The step makes a ConnectorInstance, waits
+          # for its policy, and runs a pod that the policy selects. The pod
+          # dials the daemon Service address on the callback port and on the
+          # registration port. A policy must drop each flow at the pod
+          # (EGRESS). The rule that gibson#1065 deletes opened the daemon
+          # ports 8080, 50002 and 50100. With it, the registration flow
+          # leaves the pod and the daemon drops it (INGRESS), so this step
+          # fails. The step needs a chart release that pins a gibson release
+          # with gibson#1065.
+          echo "▶ the fixture: a connector pod dials the daemon callback and registration ports"
+          tns="$(kubectl get tenant primary -o jsonpath='{.status.namespace}')"
+          [ -n "$tns" ] || { echo "::error::the tenant primary reports no namespace"; exit 1; }
+          addr="$(kubectl -n "$NS" get deploy/gibson-tenant-operator \
+                    -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="GIBSON_DAEMON_GRPC_ADDRESS")].value}')"
+          host="${addr%:*}"
+          svc="${host%%.*}"
+          callback="$(kubectl -n "$NS" get svc "$svc" -o jsonpath='{.spec.ports[?(@.name=="callback")].port}')"
+          registration="$(kubectl -n "$NS" get svc "$svc" -o jsonpath='{.spec.ports[?(@.name=="registration")].port}')"
+          # The Service address, not its name: the claim is the TCP flow, and
+          # a DNS rule of the tenant namespace must not decide it.
+          ip="$(kubectl -n "$NS" get svc "$svc" -o jsonpath='{.spec.clusterIP}')"
+          if [ -z "$svc" ] || [ -z "$callback" ] || [ -z "$registration" ] || [ -z "$ip" ]; then
+            echo "::error::no daemon address (${addr:-<none>}), or Service ${svc} has no callback or registration port"; exit 1
+          fi
+          kubectl -n "$tns" apply -f - <<YAML
+          apiVersion: gibson.zeroroot.ai/v1alpha1
+          kind: ConnectorInstance
+          metadata:
+            name: hubble-proof
+          spec:
+            connector: connector-hubble-proof
+            shape: Hosted
+            transport: streamable-http
+            image: ghcr.io/zeroroot-ai/mirror/curl:8.10.1@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b
+          YAML
+          np=""
+          for _ in $(seq 1 60); do
+            np="$(kubectl -n "$tns" get networkpolicy connector-hubble-proof -o name 2>/dev/null || true)"
+            [ -n "$np" ] && break
+            sleep 2
+          done
+          if [ -z "$np" ]; then
+            echo "::error::the connector-operator wrote no NetworkPolicy connector-hubble-proof in 120s"
+            kubectl -n "$tns" get connectorinstance hubble-proof -o yaml || true
+            exit 1
+          fi
+          runner_since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          kubectl -n "$tns" apply -f - <<YAML
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: hubble-proof-connector-runner
+            labels:
+              toolhive-name: hubble-proof
+          spec:
+            restartPolicy: Never
+            automountServiceAccountToken: false
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 65532
+              seccompProfile:
+                type: RuntimeDefault
+            containers:
+              - name: dial
+                image: ghcr.io/zeroroot-ai/mirror/curl:8.10.1@sha256:d9b4541e214bcd85196d6e92e2753ac6d0ea699f0af5741f8c6cccbfcf00ef4b
+                command: ["sh", "-c", "curl -sS --max-time 10 telnet://${ip}:${callback} </dev/null; curl -sS --max-time 10 telnet://${ip}:${registration} </dev/null; exit 0"]
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  capabilities:
+                    drop: ["ALL"]
+          YAML
+          kubectl -n "$tns" wait --for=jsonpath='{.status.phase}'=Succeeded pod/hubble-proof-connector-runner --timeout=180s
+          for p in "$callback" "$registration"; do
+            python3 scripts/check-hubble-drops.py --namespace "$tns" --since "$runner_since" \
+              --expect-drop "hubble-proof-connector-runner:${p}" --direction EGRESS
+          done
+          kubectl -n "$tns" delete pod hubble-proof-connector-runner --wait=false
+          kubectl -n "$tns" delete connectorinstance hubble-proof --wait=false
 
       - name: Diagnose a failure
         if: failure()
