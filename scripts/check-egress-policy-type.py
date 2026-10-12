@@ -94,6 +94,14 @@ def pods(docs: list) -> list[dict]:
             # time. Its pod carries velero.io/repo-name, and the velero policy
             # selects it by that label (charts#494).
             out.append({"velero.io/repo-name": "runtime", NS_KEY: ns})
+        if (d.get("kind") == "Deployment" and labels.get("app.kubernetes.io/name") == "setec"
+                and labels.get("app.kubernetes.io/component") == "operator"):
+            # The setec operator creates the disk builder Job and the image
+            # verify Job at run time (setec internal/controller launcher_disk.go
+            # and pool_verify.go). Their pods carry these component labels, and
+            # the setec chart gives each its own policy (setec 0.127).
+            for job in ("disk-builder", "image-verify"):
+                out.append({"app.kubernetes.io/name": "setec", "app.kubernetes.io/component": job, NS_KEY: ns})
     return out
 
 
@@ -156,6 +164,18 @@ def selftest() -> int:
               "spec": {"template": {"metadata": {"labels": {"app.kubernetes.io/name": "velero"}}}}}
     repo = {"apiVersion": "cilium.io/v2", "kind": "CiliumNetworkPolicy", "metadata": {"name": "velero", "namespace": NAMESPACE},
             "specs": [{"endpointSelector": {"matchExpressions": [{"key": "velero.io/repo-name", "operator": "Exists"}]}}]}
+    setec_op = {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "setec", "namespace": "setec-system"},
+                "spec": {"template": {"metadata": {"labels": {"app.kubernetes.io/name": "setec",
+                                                               "app.kubernetes.io/component": "operator"}}}}}
+    builder = {"apiVersion": "cilium.io/v2", "kind": "CiliumNetworkPolicy",
+               "metadata": {"name": "setec-disk-builder", "namespace": "setec-system"},
+               "spec": {"endpointSelector": {"matchLabels": {"app.kubernetes.io/component": "disk-builder"}}}}
+    if judge([setec_op, builder]):
+        print(f"SELFTEST FAIL: a policy for the Jobs of the setec operator must pass: {judge([setec_op, builder])}")
+        return 1
+    if not judge([builder]):
+        print("SELFTEST FAIL: a policy for setec Jobs with no setec operator must fail")
+        return 1
     if judge([velero, repo]):
         print(f"SELFTEST FAIL: a policy for the maintenance Jobs of a Velero server must pass: {judge([velero, repo])}")
         return 1
@@ -173,7 +193,7 @@ def selftest() -> int:
             print(f"SELFTEST FAIL: {what} must give one finding, got {judge(docs)}")
             return 1
     print("  ✓ selftest: a second policy type, a NetworkPolicy in the release namespace and a Cilium rule "
-          "that selects no pod fail; the label policies and the Velero maintenance Jobs pass")
+          "that selects no pod fail; the label policies, the Velero maintenance Jobs and the setec operator Jobs pass")
     return 0
 
 
