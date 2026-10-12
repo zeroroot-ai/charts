@@ -34,10 +34,7 @@
 # promoted. Combined with ADR-0080 (prod follows a green staging), that is the
 # containment charts#155 asked for.
 #
-# ONE DISTRO, kind. published-install.yml's own header records that k3d is red
-# on an unrelated Tenant-seeding problem, and a known-red leg would mask the
-# regression this is here to find. kind also enforces no NetworkPolicy, which
-# is irrelevant to a database migration.
+# ONE DISTRO, kind, the one CI cluster (D89).
 #
 # COST. Two convergences on one runner, so it is the longest job in this repo.
 # That is the price of the only question it answers, and the alternative price
@@ -88,7 +85,6 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     uses: ./.github/workflows/published-install.yml
     with:
-      distro: kind
       chart_version: ${{ inputs.chart_version }}
       upgrade_from_previous: true
       upgrade_from_version: ${{ inputs.upgrade_from_version }}
