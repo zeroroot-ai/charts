@@ -74,18 +74,28 @@ done < <(echo "$MEMBERS" | jq -r '.result[] | [.userId, .preferredLoginName, .us
 
 STORE_ID="$(kubectl -n "$NS" get configmap gibson-fga-config -o jsonpath='{.data.store_id}')"
 forward "${RELEASE}-openfga" "$FPORT" 8080
+# OpenFGA requires the preshared key (charts#645). The key goes to curl on
+# stdin, never on an argv. A call that does not answer 200 stops the check
+# by name: a 401 read as "no holders" once (hosted#634).
+FGA_KEY="$(kubectl -n "$NS" get secret gibson-openfga-preshared-key -o jsonpath='{.data.key}' | base64 -d)"
+[ -n "$FGA_KEY" ] || { echo "the Secret gibson-openfga-preshared-key holds no key" >&2; exit 1; }
 fga_users() { # relation -> sorted user ids
-  curl -sSk -X POST "https://127.0.0.1:${FPORT}/stores/${STORE_ID}/read" -H 'Content-Type: application/json' \
-    -d "{\"tuple_key\":{\"relation\":\"$1\",\"object\":\"system_tenant:_system\"}}" \
-    | jq -r '[.tuples[]?.key.user | sub("^user:"; "")] | sort | join(",")'
+  local out code
+  out="$(printf 'header = "Authorization: Bearer %s"\n' "$FGA_KEY" \
+    | curl -sSk -K - -w '\n%{http_code}' -X POST "https://127.0.0.1:${FPORT}/stores/${STORE_ID}/read" \
+        -H 'Content-Type: application/json' \
+        -d "{\"tuple_key\":{\"relation\":\"$1\",\"object\":\"system_tenant:_system\"}}")"
+  code="${out##*$'\n'}"
+  [ "$code" = 200 ] || { echo "OpenFGA read of $1 answered HTTP ${code}: ${out%$'\n'*}" >&2; exit 1; }
+  printf '%s' "${out%$'\n'*}" | jq -r '[.tuples[]?.key.user | sub("^user:"; "")] | sort | join(",")'
 }
-got_owner="$(fga_users platform_owner)"
+got_owner="$(fga_users platform_owner)" || exit 1
 if [ -n "$owner_id" ] && [ "$got_owner" = "$owner_id" ]; then pass "platform_owner is held by exactly the Platform owner (${owner_id})"
 else fail "platform_owner holders are [${got_owner}], expected [${owner_id:-the Platform owner}]"; fi
 
 MAP="$(kubectl -n "$NS" get configmap "${RELEASE}-sa-identity-map" -o json 2>/dev/null || kubectl -n "$NS" get configmap gibson-sa-identity-map -o json)"
 want_op="$(echo "$MAP" | jq -r '[.data["gibson-iam-admin"], .data["gibson-tenant-operator"]] | map(select(. != null)) | sort | join(",")')"
-got_op="$(fga_users platform_operator)"
+got_op="$(fga_users platform_operator)" || exit 1
 if [ "$got_op" = "$want_op" ]; then pass "platform_operator is held by exactly gibson-iam-admin and gibson-tenant-operator"
 else fail "platform_operator holders are [${got_op}], expected [${want_op}]"; fi
 
