@@ -18,6 +18,13 @@ Rebuilds three guards lost in the 2026-09-04 split (charts#17):
     on a dead endpoint. A url-backed webhook it leaves in place. Every
     webhook in the render must therefore be service-backed.
 
+  reach (charts#644): a probe of a webhook in another namespace (setec)
+    must be able to connect. The gate pod carries the egress-namespaces
+    label, and a CiliumNetworkPolicy in the namespace of the webhook admits
+    the gate (its namespace and labels) on the target port of the Service.
+    Without both, the probe never answers and every Helm install stops on
+    the post-install timeout.
+
   fail-closed: no webhook in the render carries `failurePolicy: Ignore`,
     except the two webhooks of the SPIRE controller manager that ADR-0076
     accepts. ACCEPTED_IGNORE names them. An entry that names a webhook that
@@ -27,7 +34,8 @@ The guard reads each published profile, the same list that scripts/golden.sh
 renders.
 
   check-webhooks.py             exit 1 on a violation, 0 when clean
-  check-webhooks.py --selftest  prove an unprobed Fail webhook, a url-backed one, an Ignore one and a stale exception fail
+  check-webhooks.py --selftest  prove an unprobed Fail webhook, a url-backed one, an Ignore one, a stale exception
+                                and a probe the network policy blocks fail
 """
 import os
 import subprocess
@@ -90,12 +98,69 @@ def stale(seen: set[str], accepted: dict) -> list[str]:
             for name in sorted(accepted) if name not in seen]
 
 
+def gate_pod_labels(docs: list[dict]) -> dict:
+    for d in docs:
+        if d.get("kind") == "Job" and d["metadata"]["name"] == "gibson-webhook-gate":
+            return d["spec"]["template"]["metadata"].get("labels") or {}
+    return {}
+
+
+def target_port(docs: list[dict], name: str, namespace: str, port: int) -> str | None:
+    """The target port of a Service port in the render, as a string."""
+    for d in docs:
+        if (d.get("kind") == "Service" and d["metadata"]["name"] == name
+                and d["metadata"].get("namespace") == namespace):
+            for sp in d["spec"].get("ports") or []:
+                if int(sp.get("port")) == port:
+                    return str(sp.get("targetPort", port))
+    return None
+
+
+def admits(docs: list[dict], namespace: str, release_ns: str, labels: dict, port: str) -> bool:
+    """A CiliumNetworkPolicy of namespace admits a pod of release_ns with labels on port."""
+    for d in docs:
+        if d.get("kind") != "CiliumNetworkPolicy" or d["metadata"].get("namespace") != namespace:
+            continue
+        for spec in [d.get("spec")] + (d.get("specs") or []):
+            for rule in (spec or {}).get("ingress") or []:
+                ports = {str(pp.get("port")) for tp in rule.get("toPorts") or [] for pp in tp.get("ports") or []}
+                if port not in ports:
+                    continue
+                for peer in rule.get("fromEndpoints") or []:
+                    ml = dict(peer.get("matchLabels") or {})
+                    if ml.pop("k8s:io.kubernetes.pod.namespace", None) != release_ns:
+                        continue
+                    if all(labels.get(k) == v for k, v in ml.items()):
+                        return True
+    return False
+
+
+def reach(docs: list[dict], probes: list[dict], release_ns: str = "gibson") -> list[str]:
+    """A probe of another namespace can connect: egress label on the gate, ingress allow at the webhook."""
+    out = []
+    labels = gate_pod_labels(docs)
+    for p in probes:
+        ns = p.get("namespace") or release_ns
+        if ns == release_ns:
+            continue
+        key = f"probe {p['config']}/{p['webhook']}"
+        if labels.get("gibson.zeroroot.ai/egress-namespaces") != "true":
+            out.append(f"{key} dials namespace {ns}, and the gate pod has no egress-namespaces label")
+        tp = target_port(docs, p["service"], ns, int(p.get("port") or 443))
+        if tp is None:
+            out.append(f"{key}: the render has no Service {ns}/{p['service']} with port {p.get('port')}")
+        elif not admits(docs, ns, release_ns, labels, tp):
+            out.append(f"{key}: no CiliumNetworkPolicy in {ns} admits the gate ({release_ns}, its labels) on port {tp}")
+    return out
+
+
 def judge_all(accepted: dict = ACCEPTED_IGNORE) -> list[str]:
     out, seen = [], set()
     for profile in PROFILES:
         docs, probes = render(profile)
         seen |= ignored(docs)
         out += [f"[{'+'.join(profile)}] {line}" for line in judge(docs, probes, accepted=accepted)]
+        out += [f"[{'+'.join(profile)}] {line}" for line in reach(docs, probes)]
     return out + stale(seen, accepted)
 
 
@@ -180,6 +245,32 @@ webhooks:
   failurePolicy: Ignore
   clientConfig: {service: {name: spire-webhook, namespace: gibson, path: /validate}}
 """
+REACH_FIXTURE = """
+apiVersion: batch/v1
+kind: Job
+metadata: {name: gibson-webhook-gate}
+spec:
+  template:
+    metadata:
+      labels: {app.kubernetes.io/component: webhook-gate, gibson.zeroroot.ai/egress-namespaces: "true"}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: s-webhook, namespace: other}
+spec:
+  ports: [{port: 443, targetPort: 9443}]
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: {name: s-operator, namespace: other}
+spec:
+  ingress:
+  - fromEndpoints:
+    - matchLabels: {k8s:io.kubernetes.pod.namespace: gibson, app.kubernetes.io/component: webhook-gate}
+    toPorts: [{ports: [{port: "9443", protocol: TCP}]}]
+"""
+REACH_PROBES = [{"config": "s", "webhook": "s.example.io", "namespace": "other", "service": "s-webhook",
+                 "port": 443, "path": "/validate"}]
 FIXTURE_PROBES = [
     {"config": "probed", "webhook": "a.example.io", "service": "a-svc", "port": 443, "path": "/validate"},
     {"config": "gone", "webhook": "z.example.io", "service": "z", "port": 443, "path": "/"},
@@ -216,12 +307,28 @@ def selftest() -> int:
     if len(stale(ignored(spire), listed)) != 1:
         print("SELFTEST FAIL: an entry for a webhook that renders Fail must fail as stale")
         return 1
+    # A probe of another namespace: the allowed shape passes, and each of a
+    # missing egress label, a missing ingress allow and a wrong port fails.
+    good = [d for d in yaml.safe_load_all(REACH_FIXTURE) if d]
+    if reach(good, REACH_PROBES):
+        print(f"SELFTEST FAIL: a reachable probe must pass, got {reach(good, REACH_PROBES)}")
+        return 1
+    no_label = [d for d in yaml.safe_load_all(REACH_FIXTURE) if d]
+    del no_label[0]["spec"]["template"]["metadata"]["labels"]["gibson.zeroroot.ai/egress-namespaces"]
+    no_allow = [d for d in yaml.safe_load_all(REACH_FIXTURE) if d][:2]
+    wrong_port = [d for d in yaml.safe_load_all(REACH_FIXTURE) if d]
+    wrong_port[1]["spec"]["ports"][0]["targetPort"] = 8443
+    for what, docs in (("no egress label", no_label), ("no ingress allow", no_allow), ("a wrong port", wrong_port)):
+        if len(reach(docs, REACH_PROBES)) != 1:
+            print(f"SELFTEST FAIL: {what} must give one finding, got {reach(docs, REACH_PROBES)}")
+            return 1
     live = judge_all()
     if live:
         print("SELFTEST FAIL: the render violates the webhook contracts:\n  " + "\n  ".join(live))
         return 1
-    print("OK: an unprobed Fail webhook, a url-backed one, a fail-open one, a stale probe, a wrong path and a stale "
-          f"exception fail; {len(PROFILES)} profiles are clean")
+    print("OK: an unprobed Fail webhook, a url-backed one, a fail-open one, a stale probe, a wrong path, a stale "
+          "exception and a probe the network policy blocks fail; "
+          f"{len(PROFILES)} profiles are clean")
     return 0
 
 
