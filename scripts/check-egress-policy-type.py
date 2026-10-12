@@ -69,6 +69,10 @@ def selects(selector: dict, labels: dict) -> bool:
     return True
 
 
+# The component labels of the Job pods that the setec operator creates.
+SETEC_RUNTIME_JOBS = ("disk-builder", "image-verify")
+
+
 def pods(docs: list) -> list[dict]:
     """The labels of each rendered pod template, with its namespace. A CNPG
     Cluster counts as the pods that its operator creates."""
@@ -94,6 +98,13 @@ def pods(docs: list) -> list[dict]:
             # time. Its pod carries velero.io/repo-name, and the velero policy
             # selects it by that label (charts#494).
             out.append({"velero.io/repo-name": "runtime", NS_KEY: ns})
+        if (d.get("kind") == "Deployment" and labels.get("app.kubernetes.io/name") == "setec"
+                and labels.get("app.kubernetes.io/component") == "operator"):
+            # The setec operator creates the disk Job and the image verify
+            # Job at run time, in its own namespace. Their pods carry the
+            # component labels that the setec policies select (setec#279).
+            for comp in SETEC_RUNTIME_JOBS:
+                out.append({"app.kubernetes.io/component": comp, NS_KEY: ns})
     return out
 
 
@@ -158,6 +169,18 @@ def selftest() -> int:
             "specs": [{"endpointSelector": {"matchExpressions": [{"key": "velero.io/repo-name", "operator": "Exists"}]}}]}
     if judge([velero, repo]):
         print(f"SELFTEST FAIL: a policy for the maintenance Jobs of a Velero server must pass: {judge([velero, repo])}")
+        return 1
+    setec_op = {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": "setec", "namespace": "setec-system"},
+                "spec": {"template": {"metadata": {"labels": {"app.kubernetes.io/name": "setec",
+                                                               "app.kubernetes.io/component": "operator"}}}}}
+    disk = {"apiVersion": "cilium.io/v2", "kind": "CiliumNetworkPolicy",
+            "metadata": {"name": "setec-disk-builder", "namespace": "setec-system"},
+            "spec": {"endpointSelector": {"matchLabels": {"app.kubernetes.io/component": "disk-builder"}}}}
+    if judge([setec_op, disk]):
+        print(f"SELFTEST FAIL: a policy for the disk Jobs of the setec operator must pass: {judge([setec_op, disk])}")
+        return 1
+    if not judge([disk]):
+        print("SELFTEST FAIL: a disk Job policy with no setec operator selects no pod and must fail")
         return 1
     se = {"apiVersion": "networking.istio.io/v1", "kind": "ServiceEntry", "metadata": {"name": "se"}}
     typo = {**cnp, "metadata": {"name": "typo", "namespace": NAMESPACE},

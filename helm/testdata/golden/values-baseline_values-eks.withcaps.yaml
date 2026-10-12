@@ -80,10 +80,10 @@ kind: Namespace
 metadata:
   name: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 ---
@@ -155,10 +155,10 @@ metadata:
   name: setec-sandbox-baseline-deny
   namespace: setec-sandboxes
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     setec.zeroroot.ai/managed-by: setec-operator
@@ -199,10 +199,10 @@ metadata:
   name: setec
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 spec:
@@ -414,10 +414,10 @@ metadata:
   name: setec-frontend
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 ---
@@ -428,10 +428,10 @@ metadata:
   name: setec
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 ---
@@ -5398,10 +5398,10 @@ kind: ClusterRole
 metadata:
   name: setec-manager
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 rules:
@@ -5537,10 +5537,10 @@ kind: ClusterRole
 metadata:
   name: setec-frontend
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 rules:
@@ -5599,10 +5599,10 @@ kind: ClusterRole
 metadata:
   name: setec-frontend-exec
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 rules:
@@ -5616,10 +5616,10 @@ kind: ClusterRole
 metadata:
   name: setec-sandbox-namespace
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 rules:
@@ -7001,10 +7001,10 @@ kind: ClusterRoleBinding
 metadata:
   name: setec-manager
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 roleRef:
@@ -7022,10 +7022,10 @@ kind: ClusterRoleBinding
 metadata:
   name: setec-frontend
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 roleRef:
@@ -7525,16 +7525,26 @@ metadata:
   name: setec-disk-builder
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 rules:
   - apiGroups: ["batch"]
     resources: [jobs]
     verbs: [get, create]
+  # The signature ConfigMap of each disk Job: the operator writes it after
+  # the build container reports, and the publish container mounts it. The
+  # Job owns it. create cannot be limited by name.
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, create]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: ["setec-disk-signing"]
+    verbs: [get]
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/leader-election-rbac.yaml
 # controller-runtime leader election holds a single Lease in the operator's
@@ -7551,10 +7561,10 @@ metadata:
   name: setec-leader-election
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 rules:
@@ -8139,10 +8149,10 @@ metadata:
   name: setec-disk-builder
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 roleRef:
@@ -8161,10 +8171,10 @@ metadata:
   name: setec-frontend-exec
   namespace: setec-sandboxes
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 roleRef:
@@ -8183,10 +8193,10 @@ metadata:
   name: setec-leader-election
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 roleRef:
@@ -8205,10 +8215,10 @@ metadata:
   name: setec-sandbox-namespace
   namespace: setec-sandboxes
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 roleRef:
@@ -8808,10 +8818,10 @@ metadata:
   name: setec-frontend
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     app.kubernetes.io/component: frontend
@@ -8837,10 +8847,10 @@ metadata:
   name: setec-webhook
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     app.kubernetes.io/component: webhook
@@ -9298,10 +9308,10 @@ metadata:
   name: setec-device-plugin
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     app.kubernetes.io/component: device-plugin
@@ -9334,7 +9344,7 @@ spec:
         kubernetes.io/os: linux
       containers:
         - name: device-plugin
-          image: "ghcr.io/zeroroot-ai/setec-device-plugin:v0.126.0@sha256:46d5d2b6393e88e6c2d418c36fa018fdff7f817da1240e3ef5268809151f97c9"
+          image: "ghcr.io/zeroroot-ai/setec-device-plugin:v0.127.3@sha256:c3673178fa39e856bcda820a242b455b475901f58edd8d7994dff47372de78d2"
           imagePullPolicy: IfNotPresent
           args:
             - --count=110
@@ -11683,10 +11693,10 @@ metadata:
   name: setec
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 spec:
@@ -11713,7 +11723,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/setec:v0.126.0@sha256:bffd1a4f5228510d0061571179856a864d52d41b6cee86c34ff215c9a15f88c6"
+          image: "ghcr.io/zeroroot-ai/setec:v0.127.3@sha256:3f42408c9aab71d4d04e6c269a69555c84498f9cfbeae89128ad88e8e754390e"
           imagePullPolicy: IfNotPresent
           args:
             - --metrics-bind-address=:8080
@@ -11722,12 +11732,13 @@ spec:
             - --webhook-enabled
             - --reserved-cidrs=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10,127.0.0.0/8,224.0.0.0/4,::1/128,fc00::/7,fe80::/10,ff00::/8
             - --sandbox-resolvers=1.1.1.1,8.8.8.8
-            - --launcher-image=ghcr.io/zeroroot-ai/setec-launcher:v0.126.0@sha256:ce9ec3058354c19b9f4ed5fb6eb39086ede51ceb13d31f97adcebbc334f1da0f
+            - --launcher-image=ghcr.io/zeroroot-ai/setec-launcher:v0.127.3@sha256:46b54a7848700fb0d01422482fc87eeccadf35f83c901f797e8179f2f7686528
             - --disk-repo=registry.example.com/setec-disks
-            - --disk-builder-image=ghcr.io/zeroroot-ai/setec-disk-builder:v0.126.0@sha256:347e0008fb781d472b030c28d643ced8b2dcdcbbad6dd5f11b0aef1dc4848b02
+            - --disk-builder-image=ghcr.io/zeroroot-ai/setec-disk-builder:v0.127.3@sha256:1ad0390b2ab05c643d776af7287d622361e822604fabfc75f77c7790a2640f30
             - --disk-signing-secret=setec-disk-signing
             - --disk-registry-secret=setec-disk-registry
             - --operator-namespace=setec-system
+            - --image-registry=ghcr.io
             - --disk-public-key=ExAmPlEpUbLiCkEy0000000000000000000000000000=
           ports:
             - name: metrics
@@ -11788,10 +11799,10 @@ metadata:
   name: setec-frontend
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     app.kubernetes.io/component: frontend
@@ -11816,7 +11827,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: frontend
-          image: "ghcr.io/zeroroot-ai/setec-frontend:v0.126.0@sha256:17fa719fe3ea696b3337c27d5d391b2ae685297f42614f2360b1cbfbe7b3fa21"
+          image: "ghcr.io/zeroroot-ai/setec-frontend:v0.127.3@sha256:7d92f6aa47fad8bcdf532a77b88c3e98f677caee980cca88f50f473184ffb209"
           imagePullPolicy: IfNotPresent
           args:
             - --listen-addr=:50051
@@ -19415,10 +19426,10 @@ metadata:
   name: setec-webhook-cert
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 spec:
@@ -19692,10 +19703,10 @@ kind: CiliumClusterwideNetworkPolicy
 metadata:
   name: setec-setec-system-default-deny
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 spec:
@@ -19822,10 +19833,10 @@ metadata:
   name: setec-operator
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 spec:
@@ -19848,10 +19859,8 @@ spec:
               protocol: TCP
     - fromEndpoints:
         - matchLabels:
+            k8s:io.kubernetes.pod.namespace: "monitoring"
             app.kubernetes.io/name: prometheus
-          matchExpressions:
-            - key: k8s:io.kubernetes.pod.namespace
-              operator: Exists
       toPorts:
         - ports:
             - port: "8080"
@@ -19864,10 +19873,10 @@ metadata:
   name: setec-frontend
   namespace: setec-system
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 spec:
@@ -19890,13 +19899,80 @@ spec:
               protocol: TCP
     - fromEndpoints:
         - matchLabels:
+            k8s:io.kubernetes.pod.namespace: "monitoring"
             app.kubernetes.io/name: prometheus
-          matchExpressions:
-            - key: k8s:io.kubernetes.pod.namespace
-              operator: Exists
       toPorts:
         - ports:
             - port: "9091"
+              protocol: TCP
+---
+# Source: gibson/charts/gibson-workloads/charts/setec/templates/system-namespace-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: setec-disk-builder
+  namespace: setec-system
+  labels:
+    helm.sh/chart: setec-0.127.3
+    app.kubernetes.io/name: setec
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v0.127.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: setec
+spec:
+  description: "The disk Job reaches the named image registries and the disk registry. No container of it holds the signing seed."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: disk-builder
+  egress:
+    
+    - toFQDNs:
+        - matchName: "ghcr.io"
+        - matchName: "pkg-containers.githubusercontent.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    
+    - toFQDNs:
+        - matchName: "registry.example.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# Source: gibson/charts/gibson-workloads/charts/setec/templates/system-namespace-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: setec-image-verify
+  namespace: setec-system
+  labels:
+    helm.sh/chart: setec-0.127.3
+    app.kubernetes.io/name: setec
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v0.127.3"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: setec
+spec:
+  description: "The image verify Job reaches the named image registries and the Sigstore trust root."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: image-verify
+  egress:
+    
+    - toFQDNs:
+        - matchName: "ghcr.io"
+        - matchName: "pkg-containers.githubusercontent.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toFQDNs:
+        - matchName: "tuf-repo-cdn.sigstore.dev"
+      toPorts:
+        - ports:
+            - port: "443"
               protocol: TCP
 ---
 # Source: gibson/templates/network-policies.yaml
@@ -22257,10 +22333,10 @@ kind: MutatingWebhookConfiguration
 metadata:
   name: setec-mutating-sandboxclass
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     app.kubernetes.io/component: webhook
@@ -23344,10 +23420,10 @@ kind: ValidatingAdmissionPolicy
 metadata:
   name: setec-frontend-scope
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 spec:
@@ -23443,10 +23519,10 @@ kind: ValidatingAdmissionPolicy
 metadata:
   name: setec-sandbox-host-guard
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     setec.zeroroot.ai/managed-by: setec-operator
@@ -23719,10 +23795,10 @@ kind: ValidatingAdmissionPolicyBinding
 metadata:
   name: setec-frontend-scope
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
 spec:
@@ -23749,10 +23825,10 @@ kind: ValidatingAdmissionPolicyBinding
 metadata:
   name: setec-sandbox-host-guard
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     setec.zeroroot.ai/managed-by: setec-operator
@@ -23778,10 +23854,10 @@ kind: ValidatingAdmissionPolicyBinding
 metadata:
   name: setec-sandbox-host-guard-pairs
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     setec.zeroroot.ai/managed-by: setec-operator
@@ -24139,10 +24215,10 @@ kind: ValidatingWebhookConfiguration
 metadata:
   name: setec-validating-sandboxclass
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
     app.kubernetes.io/component: webhook
@@ -24172,10 +24248,10 @@ kind: ValidatingWebhookConfiguration
 metadata:
   name: setec-validating-webhook
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
   annotations:
@@ -28079,10 +28155,10 @@ kind: SandboxClass
 metadata:
   name: tool
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
   annotations:
@@ -28113,10 +28189,10 @@ kind: SandboxClass
 metadata:
   name: connector
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
   annotations:
@@ -28145,10 +28221,10 @@ kind: SandboxClass
 metadata:
   name: agent
   labels:
-    helm.sh/chart: setec-0.126.0
+    helm.sh/chart: setec-0.127.3
     app.kubernetes.io/name: setec
     app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.126.0"
+    app.kubernetes.io/version: "v0.127.3"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: setec
   annotations:
