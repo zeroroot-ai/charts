@@ -346,6 +346,7 @@ spec:
                 configMapKeyRef:
                   name: gibson-fga-config
                   key: model_id
+            {{- include "gibson.fgaKey.env" $ | nindent 12 }}
             {{- /* Redis is structural infrastructure . The validator
                    fails chart render when redis.addr or the auth Secret name is
                    missing; the operator exits 1 at boot when REDIS_ADDR is
@@ -751,6 +752,8 @@ spec:
             - name: fga-http-ca
               mountPath: /etc/ssl/fga-ca
               readOnly: true
+            # The OpenFGA preshared key (charts#637).
+            {{- include "gibson.fgaKey.mount" $ | nindent 12 }}
             {{- if .Values.envoy.tls.secretName }}
             - name: envoy-ca
               mountPath: /etc/ssl/envoy-ca
@@ -767,6 +770,7 @@ spec:
               - key: ca.crt
                 path: ca.crt
             defaultMode: 0444
+        {{- include "gibson.fgaKey.volume" $ | nindent 8 }}
         # plans ConfigMap volume removed: the operator binary no longer reads a
         # runtime plans file (tiers generated at build time). The
         # gibson-tenant-operator-plans ConfigMap is still rendered for the plans

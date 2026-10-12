@@ -297,6 +297,7 @@ spec:
                   name: gibson-fga-config
                   key: model_id
                   optional: true
+            {{- include "gibson.fgaKey.env" $ | nindent 12 }}
             - name: HOME
               value: /var/lib/gibson
             # The Dockerfile bakes GIBSON_HOME=/root/.gibson which the daemon
@@ -857,6 +858,8 @@ spec:
             - name: fga-http-ca
               mountPath: /etc/ssl/fga-ca
               readOnly: true
+            # The OpenFGA preshared key (charts#637).
+            {{- include "gibson.fgaKey.mount" $ | nindent 12 }}
             # Provider catalogue hot-reload mount (spec: gibson#296).
             # The daemon reads GIBSON_PROVIDERS_CATALOGUE_PATH and polls
             # this file every 5 minutes; mtime changes trigger an in-process
@@ -1013,6 +1016,7 @@ spec:
               - key: ca.crt
                 path: ca.crt
             defaultMode: 0444
+        {{- include "gibson.fgaKey.volume" $ | nindent 8 }}
   volumeClaimTemplates:
     {{- if .Values.gibson.persistence.enabled }}
     - metadata:

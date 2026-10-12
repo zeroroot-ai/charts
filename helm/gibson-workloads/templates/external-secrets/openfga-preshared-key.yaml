@@ -1,0 +1,74 @@
+{{- /*
+The OpenFGA preshared key (charts#637, ADR-0171).
+
+OpenFGA runs with the preshared key method (helm/gibson/values.yaml,
+`openfga.authn`). Its HTTP and gRPC APIs refuse a call that carries no valid
+key as a bearer token. The health check stays open for the kubelet probes.
+
+One key for each install. The openbao-auto-init sidecar generates it in the
+platform OpenBao (files/openbao-seed-keys.txt, `gibson-openfga-preshared-key`).
+No value file and no repository holds it.
+
+This ExternalSecret writes the Secret gibson-openfga-preshared-key:
+
+  keys          the key list of OpenFGA: key, and key_previous when it is
+                set. OpenFGA reads it from OPENFGA_AUTHN_PRESHARED_KEYS and
+                splits it on commas. The seed kind rand has no comma.
+  key           the key that each client sends.
+  key_previous  the key before the last rotation, empty before the first.
+
+Each client mounts key and key_previous at gibson.fgaKey.dir and gets
+GIBSON_FGA_KEY_DIR (gibson internal/infra/fgakey). A client reads the files
+again after ten seconds, and sends key_previous again after a 401.
+
+Rotation (ADR-0171): the sidecar writes a new key when the key is older than
+its lifetime, or the drill writes one with scripts/baseline-set-secret.sh.
+The old key moves to key_previous. ESO writes the Secret within
+refreshInterval. Reloader restarts OpenFGA with both keys. A client that has
+the new key before OpenFGA restarts sends key_previous after the 401. The
+next rotation drops the old key from key_previous, and OpenFGA refuses it.
+*/ -}}
+{{- $eso := .Values.externalSecrets }}
+{{- $store := $eso.clusterSecretStore.name | default "gibson-secrets" }}
+{{- $refresh := $eso.refreshInterval | default "60s" }}
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ include "gibson.fgaKey.secretName" . }}
+  namespace: {{ .Release.Namespace }}
+  {{- if $eso.preSyncBringup }}
+  # Cold-bringup ordering: the Secret lands after the ClusterSecretStore
+  # (-10) and before OpenFGA and its clients start, which mount it.
+  annotations:
+    argocd.argoproj.io/sync-wave: "-8"
+  {{- end }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: openfga
+spec:
+  refreshInterval: {{ $refresh }}
+  secretStoreRef:
+    name: {{ $store | quote }}
+    kind: ClusterSecretStore
+  target:
+    name: {{ include "gibson.fgaKey.secretName" . }}
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      type: Opaque
+      metadata:
+        labels:
+          app.kubernetes.io/managed-by: external-secrets
+          app.kubernetes.io/component: openfga
+      data:
+        # An empty key would let OpenFGA accept a call with an empty bearer
+        # token. fail leaves the Secret absent instead, and OpenFGA does not
+        # start.
+        keys: '{{ `{{ if not .key }}{{ fail "the OpenFGA preshared key is empty" }}{{ end }}{{ .key }}{{ if .key_previous }},{{ .key_previous }}{{ end }}` }}'
+        key: '{{ `{{ .key }}` }}'
+        key_previous: '{{ `{{ .key_previous }}` }}'
+  data:
+    - secretKey: key
+      remoteRef: { key: gibson-openfga-preshared-key, property: key }
+    - secretKey: key_previous
+      remoteRef: { key: gibson-openfga-preshared-key, property: key_previous }

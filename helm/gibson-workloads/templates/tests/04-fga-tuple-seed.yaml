@@ -73,9 +73,24 @@ spec:
           # without trailing context) should resolve; we use the bare form.
           BODY='{"tuple_key":{"user":"user:platform_operator","relation":"member","object":"platform:gibson"}}'
 
+          # OpenFGA runs with the preshared key method (charts#637): a call
+          # with no key must get 401, and the platform key must work. The
+          # header goes in a file, so the key is in no argv.
+          code=$(curl -ksS -o /dev/null -w '%{http_code}' \
+            -X POST -H 'Content-Type: application/json' -d "$BODY" \
+            --max-time 15 "${FGA}/stores/${STORE_ID}/check" || echo "000")
+          if [ "$code" != "401" ]; then
+            echo "$ERR fga-tuple-seed: OpenFGA answered HTTP $code to a Check with no key; want 401"
+            exit 1
+          fi
+          echo "[fga-tuple-seed] OK  a Check with no key gets 401"
+          umask 077
+          printf 'Authorization: Bearer %s\n' "$(cat "${GIBSON_FGA_KEY_DIR}/key")" > /tmp/fga-auth
+
           # Note: -f makes curl exit non-zero on >=400, but for diagnostics we
           # want to keep the body. So we capture status separately.
           code=$(curl -ksS -o /tmp/check.json -w '%{http_code}' \
+            -H @/tmp/fga-auth \
             -X POST -H 'Content-Type: application/json' \
             -d "$BODY" \
             --max-time 15 \
@@ -124,12 +139,16 @@ spec:
           drop: ["ALL"]
         seccompProfile:
           type: RuntimeDefault
+      env:
+        {{- include "gibson.fgaKey.env" $ | nindent 8 }}
       volumeMounts:
         - name: tmp
           mountPath: /tmp
+        {{- include "gibson.fgaKey.mount" $ | nindent 8 }}
   volumes:
     - name: tmp
       emptyDir: {}
+    {{- include "gibson.fgaKey.volume" $ | nindent 4 }}
   {{- with .Values.global.imagePullSecrets }}
   imagePullSecrets:
     {{- toYaml . | nindent 4 }}

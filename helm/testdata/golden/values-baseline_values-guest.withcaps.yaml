@@ -422,22 +422,6 @@ metadata:
     app.kubernetes.io/version: "0.154.0"
     app.kubernetes.io/managed-by: Helm
 ---
-# Source: gibson/charts/gibson-workloads/templates/operations/active-session-backfill/job.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: gibson-gibson-workloads-active-session-backfill
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: active-session-backfill
-  annotations:
-    helm.sh/resource-policy: keep
----
 # Source: gibson/charts/gibson-workloads/templates/ratelimit/serviceaccount.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -4684,25 +4668,6 @@ rules:
     resources: ["secrets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
-# Source: gibson/charts/gibson-workloads/templates/operations/active-session-backfill/job.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: gibson-gibson-workloads-active-session-backfill
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: active-session-backfill
-  annotations:
-    helm.sh/resource-policy: keep
-rules:
-  - apiGroups: ["gibson.zeroroot.ai"]
-    resources: ["tenants", "tenantmembers"]
-    verbs: ["get", "list"]
----
 # Source: gibson/charts/spire/charts/spire-agent/templates/roles.yaml
 # Required cluster role to allow spire-agent to query k8s API server
 kind: ClusterRole
@@ -4918,29 +4883,6 @@ subjects:
   - kind: ServiceAccount
     name: gibson-openbao
     namespace: gibson
----
-# Source: gibson/charts/gibson-workloads/templates/operations/active-session-backfill/job.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: gibson-gibson-workloads-active-session-backfill
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: active-session-backfill
-  annotations:
-    helm.sh/resource-policy: keep
-subjects:
-  - kind: ServiceAccount
-    name: gibson-gibson-workloads-active-session-backfill
-    namespace: gibson
-roleRef:
-  kind: ClusterRole
-  apiGroup: rbac.authorization.k8s.io
-  name: gibson-gibson-workloads-active-session-backfill
 ---
 # Source: gibson/charts/spire/charts/spire-agent/templates/roles.yaml
 # Binds above cluster role to spire-agent service account
@@ -5376,26 +5318,6 @@ rules:
   #   in this PR) DROPPED — startup_migration_check + recover_missions
   #   both deleted; daemon no longer enumerates tenants.
 ---
-# Source: gibson/charts/gibson-workloads/templates/operations/active-session-backfill/job.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: gibson-gibson-workloads-active-session-backfill
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: active-session-backfill
-  annotations:
-    helm.sh/resource-policy: keep
-rules:
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get", "list"]
----
 # Source: gibson/charts/openfga/templates/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -5780,30 +5702,6 @@ subjects:
   - kind: ServiceAccount
     name: gibson
     namespace: gibson
----
-# Source: gibson/charts/gibson-workloads/templates/operations/active-session-backfill/job.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: gibson-gibson-workloads-active-session-backfill
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: active-session-backfill
-  annotations:
-    helm.sh/resource-policy: keep
-subjects:
-  - kind: ServiceAccount
-    name: gibson-gibson-workloads-active-session-backfill
-    namespace: gibson
-roleRef:
-  kind: Role
-  apiGroup: rbac.authorization.k8s.io
-  name: gibson-gibson-workloads-active-session-backfill
 ---
 # Source: gibson/charts/openfga/templates/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -6895,7 +6793,7 @@ spec:
               readOnly: true
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/connector-operator:v0.159.0@sha256:ac0e2c4c3b0f22d99aec9de05d0ec7622e2513c6adadb93bea020ed16190adb3"
+          image: "ghcr.io/zeroroot-ai/connector-operator:v0.160.1@sha256:8d426ff4e8bec8507b3e16c8921ecf4f794214204822b2d1d96db23d573678b9"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -7027,7 +6925,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/platform-operator:v0.159.0@sha256:daaded39fb6833c75bf5a878d23ab5738a4492a876c0c14503aba29dd1e8e382"
+          image: "ghcr.io/zeroroot-ai/platform-operator:v0.160.1@sha256:1cd652a5cb40d477fac9aa91d80000a08a827d5a9e77eb5acf1d9f8aea24ff45"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -7087,6 +6985,10 @@ spec:
             # the env is unconditional.
             - name: SSL_CERT_DIR
               value: "/etc/ssl/certs:/etc/ssl/envoy-ca:/etc/ssl/fga-ca:/etc/gibson/openbao-ca"
+            # The OpenFGA preshared key (charts#637): the model load and the
+            # platform owner tuple call OpenFGA.
+            - name: GIBSON_FGA_KEY_DIR
+              value: "/etc/gibson/openfga-key"
             - name: ZITADEL_URL
               value: "http://gibson-zitadel.gibson.svc.cluster.local:8080"
             - name: ZITADEL_EXTERNAL_DOMAIN
@@ -7133,6 +7035,9 @@ spec:
             - name: fga-http-ca
               mountPath: /etc/ssl/fga-ca
               readOnly: true
+            - name: openfga-key
+              mountPath: /etc/gibson/openfga-key
+              readOnly: true
             - name: envoy-ca
               mountPath: /etc/ssl/envoy-ca
               readOnly: true
@@ -7161,6 +7066,15 @@ spec:
             items:
               - key: ca.crt
                 path: ca.crt
+            defaultMode: 0444
+        - name: openfga-key
+          secret:
+            secretName: gibson-openfga-preshared-key
+            items:
+              - key: key
+                path: key
+              - key: key_previous
+                path: key_previous
             defaultMode: 0444
         - name: envoy-ca
           secret:
@@ -7504,7 +7418,7 @@ spec:
               memory: 64Mi
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.159.0@sha256:eab335c0039fee5b5472fbb13db5c4c3a2a7b52bcb93aa515cabae7d596aaa5e"
+          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.160.1@sha256:87ddf44fa7a0cc71debf237735327b175e098fe1cfe6c7089eda050db7b8d533"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -7635,7 +7549,7 @@ spec:
             # The image of the belief trainer CronJob of each tenant
             # (gibson#616). The operator exits at start when it is empty.
             - name: BELIEF_TRAINER_IMAGE
-              value: "ghcr.io/zeroroot-ai/gibson:v0.159.0@sha256:a4d53e9cb31b7e5330a682772d532b69ff583060016c920e2aedaba8d09deb6a"
+              value: "ghcr.io/zeroroot-ai/gibson:v0.160.1@sha256:18706d8fbc52a7369546694af4c06e14588ebfd0ebd4595318b3324b3fd0d2d1"
             # The Neo4j image of each tenant data plane (gibson#1061). The
             # operator exits at start when it is empty or has no digest.
             - name: TENANT_NEO4J_IMAGE
@@ -7717,6 +7631,8 @@ spec:
                 configMapKeyRef:
                   name: gibson-fga-config
                   key: model_id
+            - name: GIBSON_FGA_KEY_DIR
+              value: "/etc/gibson/openfga-key"
             - name: REDIS_ADDR
               value: "gibson-redis-stack:6379"
             # one-code-path #203: REDIS_PASSWORD was `optional: true`. The
@@ -8030,6 +7946,10 @@ spec:
             - name: fga-http-ca
               mountPath: /etc/ssl/fga-ca
               readOnly: true
+            # The OpenFGA preshared key (charts#637).
+            - name: openfga-key
+              mountPath: /etc/gibson/openfga-key
+              readOnly: true
             - name: envoy-ca
               mountPath: /etc/ssl/envoy-ca
               readOnly: true
@@ -8049,6 +7969,15 @@ spec:
             items:
               - key: ca.crt
                 path: ca.crt
+            defaultMode: 0444
+        - name: openfga-key
+          secret:
+            secretName: gibson-openfga-preshared-key
+            items:
+              - key: key
+                path: key
+              - key: key_previous
+                path: key_previous
             defaultMode: 0444
         # plans ConfigMap volume removed: the operator binary no longer reads a
         # runtime plans file (tiers generated at build time). The
@@ -9543,7 +9472,7 @@ spec:
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,tmp"
         checksum/registry: c1c29512582a893a867405ae14499183f952c17ed756544d689ca1b5877c2c5c
-        checksum/daemon-registry: e433c6fed6160790a26948ade47d1742dfcd19632a411beb0811e64b21b2ef2b
+        checksum/daemon-registry: cb0fedb31f490a3300812b03b323a38621cff6ca875311361361d487cecd4d6f
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
         secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc,gibson-ext-authz-health-tls"
     spec:
@@ -9680,7 +9609,7 @@ spec:
               memory: 32Mi
       containers:
         - name: ext-authz
-          image: "ghcr.io/zeroroot-ai/ext-authz:v0.159.0@sha256:e477dda44bce0251014ce23a4287e5be963bef4ce1c3919e5b4779fd15df7907"
+          image: "ghcr.io/zeroroot-ai/ext-authz:v0.160.1@sha256:43e870a9a9fd7e0dfc81f7e168825b868e18ac1cf41de79ad21fb881497ef190"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -9747,6 +9676,8 @@ spec:
                 configMapKeyRef:
                   name: gibson-fga-config
                   key: model_id
+            - name: GIBSON_FGA_KEY_DIR
+              value: "/etc/gibson/openfga-key"
             - name: EXT_AUTHZ_CGJWT_ISSUER
               value: "https://api.localhost.zeroroot.ai"
             # Default (deploy#852): fetch the registry from the daemon's mTLS
@@ -9897,6 +9828,10 @@ spec:
             - name: fga-http-ca
               mountPath: /etc/extauthz/tls/fga-ca
               readOnly: true
+            # The OpenFGA preshared key (charts#637).
+            - name: openfga-key
+              mountPath: /etc/gibson/openfga-key
+              readOnly: true
             - name: tmp
               mountPath: /tmp
           # The /healthz endpoint is served over HTTPS with mandatory client
@@ -9976,6 +9911,15 @@ spec:
             items:
               - key: ca.crt
                 path: ca.crt
+            defaultMode: 0444
+        - name: openfga-key
+          secret:
+            secretName: gibson-openfga-preshared-key
+            items:
+              - key: key
+                path: key
+              - key: key_previous
+                path: key_previous
             defaultMode: 0444
         - name: tmp
           emptyDir: {}
@@ -10282,7 +10226,7 @@ spec:
   template:
     metadata:
       annotations:
-        secret.reloader.stakater.com/reload: openfga-postgres-credentials,gibson-openfga-http-tls
+        secret.reloader.stakater.com/reload: openfga-postgres-credentials,gibson-openfga-http-tls,gibson-openfga-preshared-key
         prometheus.io/scrape: "true"
         prometheus.io/path: /metrics
         prometheus.io/port: "2112"
@@ -10374,6 +10318,13 @@ spec:
               value: "*"
             - name: OPENFGA_HTTP_CORS_ALLOWED_HEADERS
               value: "*"
+            - name: OPENFGA_AUTHN_METHOD
+              value: preshared
+            - name: OPENFGA_AUTHN_PRESHARED_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: "gibson-openfga-preshared-key"
+                  key: keys
 
             - name: OPENFGA_PLAYGROUND_ENABLED
               value: "false"
@@ -11382,6 +11333,12 @@ spec:
               # value (ADR-0171).
               zitadel-masterkey value:rand next:empty
               gibson-dashboard-session-secrets auth_secret:rand auth_secret_previous:prev:auth_secret server_actions_key:randb64 @720h
+              # The OpenFGA preshared key, one for each install (ADR-0171). OpenFGA accepts
+              # key and key_previous. Each client sends key, and sends key_previous again
+              # after a 401, so a rotation keeps service while the pods take the new key.
+              # rand is URL-safe base64, so it has no comma: OpenFGA reads its key list
+              # split on commas (templates/external-secrets/openfga-preshared-key.yaml).
+              gibson-openfga-preshared-key key:rand key_previous:prev:key @720h
               gibson-cg-signing-key key:rand kid:rand8
               # The verify-only slots of the CG signing key set. Empty in steady state; the
               # sidecar fills and clears them during a rotation (cg_key_rotate, ADR-0171).
@@ -13518,7 +13475,7 @@ spec:
               memory: 32Mi
       containers:
         - name: gibson
-          image: "ghcr.io/zeroroot-ai/gibson:v0.159.0@sha256:a4d53e9cb31b7e5330a682772d532b69ff583060016c920e2aedaba8d09deb6a"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.160.1@sha256:18706d8fbc52a7369546694af4c06e14588ebfd0ebd4595318b3324b3fd0d2d1"
           imagePullPolicy: Always
           ports:
             - name: callback
@@ -13569,6 +13526,8 @@ spec:
                   name: gibson-fga-config
                   key: model_id
                   optional: true
+            - name: GIBSON_FGA_KEY_DIR
+              value: "/etc/gibson/openfga-key"
             - name: HOME
               value: /var/lib/gibson
             # The Dockerfile bakes GIBSON_HOME=/root/.gibson which the daemon
@@ -13927,6 +13886,10 @@ spec:
             - name: fga-http-ca
               mountPath: /etc/ssl/fga-ca
               readOnly: true
+            # The OpenFGA preshared key (charts#637).
+            - name: openfga-key
+              mountPath: /etc/gibson/openfga-key
+              readOnly: true
             # Provider catalogue hot-reload mount (spec: gibson#296).
             # The daemon reads GIBSON_PROVIDERS_CATALOGUE_PATH and polls
             # this file every 5 minutes; mtime changes trigger an in-process
@@ -14077,6 +14040,15 @@ spec:
             items:
               - key: ca.crt
                 path: ca.crt
+            defaultMode: 0444
+        - name: openfga-key
+          secret:
+            secretName: gibson-openfga-preshared-key
+            items:
+              - key: key
+                path: key
+              - key: key_previous
+                path: key_previous
             defaultMode: 0444
   volumeClaimTemplates:
     - metadata:
@@ -14545,7 +14517,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-fga-init-e433c6fe
+  name: gibson-gibson-workloads-fga-init-cb0fedb3
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -14614,7 +14586,7 @@ spec:
         # The entrypoint is the gibson binary, so command overrides it to get a
         # shell for the redirect. The runtime image is alpine-based and has one.
         - name: dump-model
-          image: "ghcr.io/zeroroot-ai/gibson:v0.159.0@sha256:a4d53e9cb31b7e5330a682772d532b69ff583060016c920e2aedaba8d09deb6a"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.160.1@sha256:18706d8fbc52a7369546694af4c06e14588ebfd0ebd4595318b3324b3fd0d2d1"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -14701,13 +14673,31 @@ spec:
 
               echo "=== FGA Init: ${FGA} ==="
 
+              # OpenFGA refuses a call with no preshared key (charts#637).
+              # The header goes in a file, so the key is in no argv. fcurl
+              # sends it on each call to OpenFGA. After a 401 the previous
+              # key is used: OpenFGA can still run with the key list from
+              # before a rotation.
+              umask 077
+              fga_header() {
+                printf 'Authorization: Bearer %s\n' "$(cat "${GIBSON_FGA_KEY_DIR}/$1" 2>/dev/null)" > /tmp/fga-auth
+              }
+              fcurl() { curl -H @/tmp/fga-auth "$@"; }
+              fga_header key
+              grep -q 'Bearer .' /tmp/fga-auth || { echo "FATAL: no OpenFGA preshared key at ${GIBSON_FGA_KEY_DIR}/key"; exit 1; }
+              AUTH_HTTP=$(fcurl -sS -o /dev/null -w '%{http_code}' "${FGA}/stores") || AUTH_HTTP=000
+              if [ "$AUTH_HTTP" = "401" ] && [ -s "${GIBSON_FGA_KEY_DIR}/key_previous" ]; then
+                echo "  OpenFGA refused the current key; the previous key is used"
+                fga_header key_previous
+              fi
+
               echo "--- Step 1: ensure store 'gibson' ---"
-              RESP=$(curl -sS "${FGA}/stores") || { echo "FATAL: cannot list stores"; exit 1; }
+              RESP=$(fcurl -sS "${FGA}/stores") || { echo "FATAL: cannot list stores"; exit 1; }
               STORE_ID=$(echo "$RESP" | jq -r '.stores[] | select(.name=="gibson") | .id' | head -1)
 
               if [ -z "$STORE_ID" ]; then
                 echo "  creating store ..."
-                RESP=$(curl -sS -H 'Content-Type: application/json' -d '{"name":"gibson"}' "${FGA}/stores") \
+                RESP=$(fcurl -sS -H 'Content-Type: application/json' -d '{"name":"gibson"}' "${FGA}/stores") \
                   || { echo "FATAL: create store failed"; exit 1; }
                 STORE_ID=$(echo "$RESP" | jq -r '.id')
               fi
@@ -14719,7 +14709,7 @@ spec:
 
               echo "--- Step 2: write authorization model ---"
               MODEL_JSON=$(cat /model/model.json)
-              RESP=$(curl -sS -H 'Content-Type: application/json' --data-binary "$MODEL_JSON" \
+              RESP=$(fcurl -sS -H 'Content-Type: application/json' --data-binary "$MODEL_JSON" \
                 "${FGA}/stores/${STORE_ID}/authorization-models") \
                 || { echo "FATAL: write model failed"; echo "$RESP"; exit 1; }
               MODEL_ID=$(echo "$RESP" | jq -r '.authorization_model_id')
@@ -14909,7 +14899,7 @@ spec:
                 fi
                 KEEP="${KEEP} user:${numeric}"
                 TUPLE_BODY=$(jq -cn --arg u "user:${numeric}" --arg r "$relation" '{writes:{tuple_keys:[{user:$u,relation:$r,object:"system_tenant:_system"}]}}')
-                TUPLE_HTTP=$(curl -sS -o /tmp/tuple.json -w '%{http_code}' \
+                TUPLE_HTTP=$(fcurl -sS -o /tmp/tuple.json -w '%{http_code}' \
                   -H 'Content-Type: application/json' \
                   -X POST --data "$TUPLE_BODY" \
                   "${FGA}/stores/${STORE_ID}/write")
@@ -14943,7 +14933,7 @@ spec:
                 CONT=""
                 while :; do
                   READ_BODY=$(jq -cn --arg r "$relation" --arg c "$CONT" '{tuple_key:{relation:$r,object:"system_tenant:_system"},page_size:100} + (if $c == "" then {} else {continuation_token:$c} end)')
-                  READ_HTTP=$(curl -sS -o /tmp/read.json -w '%{http_code}' \
+                  READ_HTTP=$(fcurl -sS -o /tmp/read.json -w '%{http_code}' \
                     -H 'Content-Type: application/json' \
                     -X POST --data "$READ_BODY" \
                     "${FGA}/stores/${STORE_ID}/read")
@@ -14959,7 +14949,7 @@ spec:
                 for holder in $HOLDERS; do
                   case " ${KEEP} " in *" ${holder} "*) continue ;; esac
                   DEL_BODY=$(jq -cn --arg u "$holder" --arg r "$relation" '{deletes:{tuple_keys:[{user:$u,relation:$r,object:"system_tenant:_system"}]}}')
-                  DEL_HTTP=$(curl -sS -o /tmp/del.json -w '%{http_code}' \
+                  DEL_HTTP=$(fcurl -sS -o /tmp/del.json -w '%{http_code}' \
                     -H 'Content-Type: application/json' \
                     -X POST --data "$DEL_BODY" \
                     "${FGA}/stores/${STORE_ID}/write")
@@ -15034,6 +15024,9 @@ spec:
             # reads CURL_CA_BUNDLE for every call that has no --cacert.
             - name: CURL_CA_BUNDLE
               value: /etc/gibson/tls/fga-ca/ca.crt
+            # The OpenFGA preshared key (charts#637).
+            - name: GIBSON_FGA_KEY_DIR
+              value: "/etc/gibson/openfga-key"
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -15042,6 +15035,9 @@ spec:
               readOnly: true
             - name: fga-http-ca
               mountPath: /etc/gibson/tls/fga-ca
+              readOnly: true
+            - name: openfga-key
+              mountPath: /etc/gibson/openfga-key
               readOnly: true
       volumes:
         - name: tmp
@@ -15057,164 +15053,14 @@ spec:
               - key: ca.crt
                 path: ca.crt
             defaultMode: 0444
----
-# Source: gibson/charts/gibson-workloads/templates/operations/active-session-backfill/job.yaml
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: gibson-gibson-workloads-active-session-backfill-e433c6fe
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-workloads-0.2.0
-    app.kubernetes.io/name: gibson-workloads
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: active-session-backfill
-  annotations:
-    # Modelled on fga-init's annotation set (templates/fga-init/job.yaml), one
-    # phase later. Argo runs this during PostSync — AFTER fga-init (a Sync hook)
-    # has written gibson-fga-config and the tenant-operator has provisioned
-    # members — and re-runs it every sync, so the repair net fires on each
-    # deploy. BeforeHookCreation clears both succeeded and failed prior runs at
-    # the next sync with NO finalizer wedge (fga-init rationale:
-    # deploy#494/#645/#673); NO HookSucceeded, for the same reason.
-    #
-    # Deliberately NOT a helm.sh/hook: this Job's only network peer is the
-    # OpenFGA sibling Argo app, which carries no in-chart NetworkPolicy for a
-    # hook to be allow-listed against (scripts/check-hook-jobs-sh.py). Under plain
-    # Helm (kind) it is therefore a normal resource that runs once at install —
-    # exactly how fga-init behaves off-Argo — and the wait-for-fga-config init
-    # container below handles ordering. resource-policy:keep stops uninstall
-    # racing the running Job.
-    argocd.argoproj.io/hook: PostSync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    helm.sh/resource-policy: keep
-spec:
-  backoffLimit: 6
-  activeDeadlineSeconds: 1200
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: gibson-workloads
-        app.kubernetes.io/instance: gibson
-        app.kubernetes.io/component: active-session-backfill
-        gibson.zeroroot.ai/net-role: platform
-        gibson.zeroroot.ai/client-postgres: "true"
-        gibson.zeroroot.ai/kube-api: "true"
-    spec:
-      restartPolicy: OnFailure
-      serviceAccountName: gibson-gibson-workloads-active-session-backfill
-      
-      imagePullSecrets:
-        - name: ghcr-credentials
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 65532
-        runAsGroup: 65532
-        fsGroup: 65532
-        seccompProfile:
-          type: RuntimeDefault
-      initContainers:
-        - name: wait-for-fga-config
-          image: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
-          command: ['/bin/bash', '-c']
-          args:
-            - |
-              set -eu
-              ns="gibson"
-              echo "[wait-for-fga-config] waiting for ConfigMap ${ns}/gibson-fga-config (store_id key, timeout: 300s)..."
-              for i in $(seq 1 150); do
-                val=$(kubectl get configmap -n "${ns}" gibson-fga-config \
-                      -o jsonpath='{.data.store_id}' 2>/dev/null || true)
-                if [ -n "${val}" ]; then
-                  echo "[wait-for-fga-config] ok (store_id=${val})"
-                  exit 0
-                fi
-                echo "[wait-for-fga-config] not ready (attempt ${i}/150), retrying in 2s..."
-                sleep 2
-              done
-              echo "[wait-for-fga-config] ERROR: gibson-fga-config not populated after 300s." \
-                   "Check: kubectl logs -n ${ns} -l app.kubernetes.io/component=fga-init" >&2
-              exit 1
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65532
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 10m
-              memory: 32Mi
-            limits:
-              cpu: 100m
-              memory: 64Mi
-      containers:
-        - name: active-session-backfill
-          image: "ghcr.io/zeroroot-ai/gibson:v0.159.0@sha256:a4d53e9cb31b7e5330a682772d532b69ff583060016c920e2aedaba8d09deb6a"
-          imagePullPolicy: Always
-          # allowlist-bringup-job-idempotency (deploy#928): the command is a
-          # single Go binary, not a shell script — there is no multi-step shell
-          # to make fail-loud. The binary is itself fail-loud (exit 1 on fatal
-          # config/FGA errors) and idempotent by design (already-present tuples
-          # → outcome=already_seeded, exits 0), and the Job carries
-          # restartPolicy: OnFailure + a bounded backoffLimit below.
-          command: ["/usr/local/bin/active-session-backfill"]
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 65532
-            capabilities:
-              drop: ["ALL"]
-          env:
-            # deploy#1382: explicit https:// — the OpenFGA HTTP listener
-            # serves TLS (cert-manager keypair gibson-openfga-http-tls).
-            # authz.NewFgaAuthorizer honours the scheme; SSL_CERT_DIR below
-            # adds the issuing CA without displacing the system bundle.
-            - name: EXT_AUTHZ_FGA_ADDR
-              value: "https://gibson-openfga:8080"
-            - name: SSL_CERT_DIR
-              value: "/etc/ssl/certs:/etc/gibson/tls/fga-ca"
-            # store_id / model_id are guaranteed non-empty by the
-            # wait-for-fga-config init container above.
-            - name: EXT_AUTHZ_FGA_STORE_ID
-              valueFrom:
-                configMapKeyRef:
-                  name: gibson-fga-config
-                  key: store_id
-            - name: EXT_AUTHZ_FGA_MODEL_ID
-              valueFrom:
-                configMapKeyRef:
-                  name: gibson-fga-config
-                  key: model_id
-            - name: HOME
-              value: /tmp
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
-            # CA for the OpenFGA HTTP-listener cert (deploy#1382).
-            - name: fga-http-ca
-              mountPath: /etc/gibson/tls/fga-ca
-              readOnly: true
-          resources:
-            limits:
-              cpu: 200m
-              memory: 128Mi
-            requests:
-              cpu: 50m
-              memory: 64Mi
-      volumes:
-        - name: tmp
-          emptyDir: {}
-        - name: fga-http-ca
+        - name: openfga-key
           secret:
-            secretName: gibson-openfga-http-tls
+            secretName: gibson-openfga-preshared-key
             items:
-              - key: ca.crt
-                path: ca.crt
+              - key: key
+                path: key
+              - key: key_previous
+                path: key_previous
             defaultMode: 0444
 ---
 # Source: gibson/charts/gibson-workloads/templates/databases/redis-rotation-controller.yaml
@@ -17724,6 +17570,51 @@ spec:
 # (epic-447 #730) but it raced the gitops producer and won with an incomplete
 # (private-only) definition, wedging zitadel-init on a missing public-key.pem
 # (deploy#769/#770). One producer, no race.
+---
+# Source: gibson/charts/gibson-workloads/templates/external-secrets/openfga-preshared-key.yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: gibson-openfga-preshared-key
+  namespace: gibson
+  # Cold-bringup ordering: the Secret lands after the ClusterSecretStore
+  # (-10) and before OpenFGA and its clients start, which mount it.
+  annotations:
+    argocd.argoproj.io/sync-wave: "-8"
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: openfga
+spec:
+  refreshInterval: 60s
+  secretStoreRef:
+    name: "gibson-secrets"
+    kind: ClusterSecretStore
+  target:
+    name: gibson-openfga-preshared-key
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      type: Opaque
+      metadata:
+        labels:
+          app.kubernetes.io/managed-by: external-secrets
+          app.kubernetes.io/component: openfga
+      data:
+        # An empty key would let OpenFGA accept a call with an empty bearer
+        # token. fail leaves the Secret absent instead, and OpenFGA does not
+        # start.
+        keys: '{{ if not .key }}{{ fail "the OpenFGA preshared key is empty" }}{{ end }}{{ .key }}{{ if .key_previous }},{{ .key_previous }}{{ end }}'
+        key: '{{ .key }}'
+        key_previous: '{{ .key_previous }}'
+  data:
+    - secretKey: key
+      remoteRef: { key: gibson-openfga-preshared-key, property: key }
+    - secretKey: key_previous
+      remoteRef: { key: gibson-openfga-preshared-key, property: key_previous }
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/zitadel-masterkey-externalsecret.yaml
 apiVersion: external-secrets.io/v1
@@ -21038,9 +20929,24 @@ spec:
           # without trailing context) should resolve; we use the bare form.
           BODY='{"tuple_key":{"user":"user:platform_operator","relation":"member","object":"platform:gibson"}}'
 
+          # OpenFGA runs with the preshared key method (charts#637): a call
+          # with no key must get 401, and the platform key must work. The
+          # header goes in a file, so the key is in no argv.
+          code=$(curl -ksS -o /dev/null -w '%{http_code}' \
+            -X POST -H 'Content-Type: application/json' -d "$BODY" \
+            --max-time 15 "${FGA}/stores/${STORE_ID}/check" || echo "000")
+          if [ "$code" != "401" ]; then
+            echo "$ERR fga-tuple-seed: OpenFGA answered HTTP $code to a Check with no key; want 401"
+            exit 1
+          fi
+          echo "[fga-tuple-seed] OK  a Check with no key gets 401"
+          umask 077
+          printf 'Authorization: Bearer %s\n' "$(cat "${GIBSON_FGA_KEY_DIR}/key")" > /tmp/fga-auth
+
           # Note: -f makes curl exit non-zero on >=400, but for diagnostics we
           # want to keep the body. So we capture status separately.
           code=$(curl -ksS -o /tmp/check.json -w '%{http_code}' \
+            -H @/tmp/fga-auth \
             -X POST -H 'Content-Type: application/json' \
             -d "$BODY" \
             --max-time 15 \
@@ -21089,12 +20995,27 @@ spec:
           drop: ["ALL"]
         seccompProfile:
           type: RuntimeDefault
+      env:
+        - name: GIBSON_FGA_KEY_DIR
+          value: "/etc/gibson/openfga-key"
       volumeMounts:
         - name: tmp
           mountPath: /tmp
+        - name: openfga-key
+          mountPath: /etc/gibson/openfga-key
+          readOnly: true
   volumes:
     - name: tmp
       emptyDir: {}
+    - name: openfga-key
+      secret:
+        secretName: gibson-openfga-preshared-key
+        items:
+          - key: key
+            path: key
+          - key: key_previous
+            path: key_previous
+        defaultMode: 0444
   imagePullSecrets:
     - name: ghcr-credentials
 ---
@@ -21690,7 +21611,7 @@ spec:
       # The daemon image itself — same repo@digest the StatefulSet runs — so
       # `gibson --version` reports the toolchain the DEPLOYED binary was built
       # with, not some proxy. The runtime image is alpine-based (has /bin/sh).
-      image: "ghcr.io/zeroroot-ai/gibson:v0.159.0@sha256:a4d53e9cb31b7e5330a682772d532b69ff583060016c920e2aedaba8d09deb6a"
+      image: "ghcr.io/zeroroot-ai/gibson:v0.160.1@sha256:18706d8fbc52a7369546694af4c06e14588ebfd0ebd4595318b3324b3fd0d2d1"
       imagePullPolicy: Always
       command: ["/bin/sh", "-c"]
       args:
@@ -22826,7 +22747,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: first-admin
-          image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-2f91a7b@sha256:90405ce6d9a3eb79dc3f46605d075f986079850cd1e9d5549055ac07ee3301f2"
+          image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-78ef343@sha256:ea11082c7cd9e71b237540e44718fcc0bc495dce6d5f57eeab35aad921a36355"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -22890,6 +22811,9 @@ spec:
             # OpenFGA's HTTP API serves TLS signed by the in-cluster CA.
             - name: SSL_CERT_DIR
               value: "/etc/ssl/certs:/etc/ssl/fga-ca"
+            # The OpenFGA preshared key (charts#637).
+            - name: GIBSON_FGA_KEY_DIR
+              value: "/etc/gibson/openfga-key"
           command:
             - /bin/bash
             - -c
@@ -22927,6 +22851,9 @@ spec:
             - name: fga-ca
               mountPath: /etc/ssl/fga-ca
               readOnly: true
+            - name: openfga-key
+              mountPath: /etc/gibson/openfga-key
+              readOnly: true
           resources:
             requests:
               cpu: 20m
@@ -22945,6 +22872,15 @@ spec:
               - key: ca.crt
                 path: ca.crt
             defaultMode: 0o444
+        - name: openfga-key
+          secret:
+            secretName: gibson-openfga-preshared-key
+            items:
+              - key: key
+                path: key
+              - key: key_previous
+                path: key_previous
+            defaultMode: 0444
 ---
 # Source: gibson/templates/jobs/gibson-workloads-iam-admin-pat-escrow.yaml
 apiVersion: batch/v1

@@ -618,7 +618,8 @@ openfga:
     # so the pod picks up the new password from env (deploy#559), and
     # when cert-manager renews the HTTP-listener keypair (deploy#1382) —
     # OpenFGA reads the cert files at startup only.
-    secret.reloader.stakater.com/reload: "openfga-postgres-credentials,gibson-openfga-http-tls"
+    # And when ESO writes a new OpenFGA preshared key list (charts#637).
+    secret.reloader.stakater.com/reload: "openfga-postgres-credentials,gibson-openfga-http-tls,gibson-openfga-preshared-key"
   # ---------------------------------------------------------------------------
   # Server-side TLS on the HTTP listener (deploy#1382). The Check response on
   # this listener is the allow/deny answer for every authenticated request the
@@ -626,13 +627,24 @@ openfga:
   # answer Checks. The keypair comes from the cert-manager Certificate
   # `gibson-openfga-http-tls` (gibson-workloads
   # templates/cert-manager/component-certificates.yaml), whose ca.crt every
-  # FGA client mounts. NOTE: the subchart's `http.tls` has NO `ca` field
-  # (unlike `grpc.tls`) — this is server authentication only; client identity
-  # on this hop would need `authn.method: preshared` (follow-up, see #1382).
+  # FGA client mounts. The subchart's `http.tls` has no `ca` field (unlike
+  # `grpc.tls`): TLS authenticates the server only. The client authenticates
+  # with the preshared key below (`authn`).
   # The gRPC listener (:8081) stays as-is: no first-party client dials it
   # (ext-authz is HTTP/JSON — deploy#140 — and its render guard rejects
   # gRPC-port overrides).
   # ---------------------------------------------------------------------------
+  # Client authentication (charts#637, ADR-0171). OpenFGA refuses a call to
+  # its HTTP or gRPC API that carries no valid preshared key. The key list
+  # comes from the Secret that gibson-workloads
+  # templates/external-secrets/openfga-preshared-key.yaml writes from the
+  # platform OpenBao, one key for each install. Never set
+  # `authn.preshared.keys`: a key in values is a key in a repository.
+  # scripts/check-openfga-authn.py fails a render without this block.
+  authn:
+    method: preshared
+    preshared:
+      keysSecret: gibson-openfga-preshared-key
   http:
     tls:
       enabled: true
@@ -1218,10 +1230,9 @@ zitadel:
     # umbrella never converges.
     #
     # 1200s is the same sizing deploy#1772 gave fga-init,
-    # openbao-jwt-auth-init, openbao-approle-cert-manager-init and
-    # active-session-backfill for the same reason. Those four are in
-    # gibson-workloads; this Job comes from the zitadel subchart, which is
-    # why it was outside that sweep.
+    # openbao-jwt-auth-init and openbao-approle-cert-manager-init for the
+    # same reason. Those are in gibson-workloads; this Job comes from the
+    # zitadel subchart, which is why it was outside that sweep.
     activeDeadlineSeconds: 1200
     annotations:
       helm.sh/hook: post-install,post-upgrade

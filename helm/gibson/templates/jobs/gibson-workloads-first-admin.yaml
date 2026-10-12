@@ -307,6 +307,8 @@ spec:
             # OpenFGA's HTTP API serves TLS signed by the in-cluster CA.
             - name: SSL_CERT_DIR
               value: "/etc/ssl/certs:/etc/ssl/fga-ca"
+            # The OpenFGA preshared key (charts#637).
+            {{- include "gibson.fgaKey.env" $ | nindent 12 }}
           command:
             - /bin/bash
             - -c
@@ -344,6 +346,7 @@ spec:
             - name: fga-ca
               mountPath: /etc/ssl/fga-ca
               readOnly: true
+            {{- include "gibson.fgaKey.mount" $ | nindent 12 }}
           resources:
             requests:
               cpu: 20m
@@ -362,4 +365,5 @@ spec:
               - key: ca.crt
                 path: ca.crt
             defaultMode: 0o444
+        {{- include "gibson.fgaKey.volume" $ | nindent 8 }}
 {{- end }}

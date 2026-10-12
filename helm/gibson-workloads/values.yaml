@@ -339,7 +339,7 @@ gibson:
     # on the SPIRE socket — so the fga-init Job hangs in dump-model until
     # its deadline and the whole install wedges. Verified on this digest:
     # `gibson dump-fga-model` exits 0 in under a second with the model.
-    tag: "v0.159.0@sha256:a4d53e9cb31b7e5330a682772d532b69ff583060016c920e2aedaba8d09deb6a"
+    tag: "v0.160.1@sha256:18706d8fbc52a7369546694af4c06e14588ebfd0ebd4595318b3324b3fd0d2d1"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     # Empty by default: first-party pins are hand-committed in the combined
@@ -1289,7 +1289,7 @@ extAuthz:
     # EXT_AUTHZ_CGJWT_KEYS_URL. It moves in lockstep with the daemon pin above
     # and with the https/:8086 value in ext-authz/deployment.yaml (deploy#1386)
     # — the three are one change, in both directions.
-    tag: "v0.159.0@sha256:e477dda44bce0251014ce23a4287e5be963bef4ce1c3919e5b4779fd15df7907"
+    tag: "v0.160.1@sha256:43e870a9a9fd7e0dfc81f7e168825b868e18ac1cf41de79ad21fb881497ef190"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -2534,45 +2534,6 @@ tenantOperator:
     annotations: {}
 
 # =============================================================================
-# activeSessionBackfill — one-shot repair Job (SECURITY, deploy#1186)
-#
-# Spec: instant-session-revocation (gibson#627 Slice 2).
-#
-# Runs the gibson image's `/usr/local/bin/active-session-backfill` binary as a
-# PostSync / post-upgrade hook, AFTER fga-init has seeded the store+model and
-# the tenant-operator has provisioned members. For every existing human tenant
-# member it writes the FGA `active_session` conditional tuple if missing.
-#
-# WHY IT MATTERS: `active_session` is a standalone direct relation
-# (model.fga:155) with no path into the role hierarchy — an ABSENT tuple DENIES
-# every tenant-scoped RPC with a 403. The tuple is normally written by the
-# tenant-operator TenantMember controller on membership creation, but that
-# write is non-fatal ("backfill will repair"), and several role-grant paths
-# (SetTenantRole, AcceptInvitation, TransferOwnership) write NO tuple at all.
-# Without this Job a transient operator write failure — or any existing-tenant
-# migration — locks users out at cutover, reading as an authz bug.
-#
-# The binary is IDEMPOTENT and exits zero unconditionally (per-member failures
-# are logged as outcome=write_failed and skipped; already-present tuples log
-# outcome=already_seeded). Re-running it every sync/upgrade is a safe no-op —
-# it is a pure repair net, so there is no enable toggle (one-code-path /
-# deploy#187), exactly like fga-init and tenantOwnerBackfill. Renders in ALL
-# profiles: active_session gating is authz, not billing, so self-hosted needs
-# the repair too.
-activeSessionBackfill:
-  # OpenFGA HTTP endpoint the backfill writes tuples to. Defaults to the same
-  # sibling OpenFGA service fga-init and ext-authz use.
-  openfgaService: ""      # empty → falls back to .Values.fgaInit.openfgaService
-  openfgaHttpPort: 0      # 0     → falls back to .Values.fgaInit.openfgaHttpPort
-  resources:
-    requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
-      cpu: 200m
-      memory: 128Mi
-
-# =============================================================================
 # dataPlane — external store overrides for database-per-tenant-data-plane
 #
 # Spec: database-per-tenant-data-plane Phase I Task 9.4, Requirement 16.2.
@@ -3320,7 +3281,9 @@ bootstrap:
     # reached Ready with no first admin (staging, 2026-09-23). Since
     # gibson#224 it dials Zitadel by Service name and claims the host by
     # header (ADR-0092), and it needs ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN.
-    tag: "sha-2f91a7b@sha256:90405ce6d9a3eb79dc3f46605d075f986079850cd1e9d5549055ac07ee3301f2"
+    # sha-78ef343 is the v0.160.1 release commit: from gibson#1091 the owner
+    # bootstrap sends the OpenFGA preshared key (GIBSON_FGA_KEY_DIR, charts#637).
+    tag: "sha-78ef343@sha256:ea11082c7cd9e71b237540e44718fcc0bc495dce6d5f57eeab35aad921a36355"
     pullPolicy: IfNotPresent
 
   # activeDeadlineSeconds caps the Job runtime. 10 min covers a fresh

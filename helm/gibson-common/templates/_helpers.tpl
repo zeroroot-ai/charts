@@ -1479,3 +1479,63 @@ this on each render.
 {{- define "gibson.metricsPorts" -}}
 8080 9003 9090 9187 9402 9464 9901
 {{- end -}}
+
+{{/*
+gibson.fgaKey.secretName: the Secret of the OpenFGA preshared key (charts#637,
+ADR-0171). templates/external-secrets/openfga-preshared-key.yaml of
+gibson-workloads writes it. OpenFGA reads its `keys`; each client mounts its
+`key` and `key_previous`.
+*/}}
+{{- define "gibson.fgaKey.secretName" -}}
+gibson-openfga-preshared-key
+{{- end }}
+
+{{/*
+gibson.fgaKey.dir: where each OpenFGA client mounts the key files. The client
+reads the directory from GIBSON_FGA_KEY_DIR (gibson internal/infra/fgakey).
+*/}}
+{{- define "gibson.fgaKey.dir" -}}
+/etc/gibson/openfga-key
+{{- end }}
+
+{{/*
+gibson.fgaKey.env: the env entry of an OpenFGA client container. A client
+with no key directory does not start.
+
+Invoke via: {{ include "gibson.fgaKey.env" . | nindent 12 }} under env.
+*/}}
+{{- define "gibson.fgaKey.env" -}}
+- name: GIBSON_FGA_KEY_DIR
+  value: {{ include "gibson.fgaKey.dir" . | quote }}
+{{- end }}
+
+{{/*
+gibson.fgaKey.mount: the volumeMount of an OpenFGA client container.
+
+Invoke via: {{ include "gibson.fgaKey.mount" . | nindent 12 }} under volumeMounts.
+*/}}
+{{- define "gibson.fgaKey.mount" -}}
+- name: openfga-key
+  mountPath: {{ include "gibson.fgaKey.dir" . }}
+  readOnly: true
+{{- end }}
+
+{{/*
+gibson.fgaKey.volume: the volume of the key files of an OpenFGA client pod.
+It projects only key and key_previous; the key list of OpenFGA stays out.
+The containers of the pods run as different users, so the files are 0444
+inside the pod.
+
+Invoke via: {{ include "gibson.fgaKey.volume" . | nindent 8 }} under volumes.
+*/}}
+{{- define "gibson.fgaKey.volume" -}}
+- name: openfga-key
+  secret:
+    secretName: {{ include "gibson.fgaKey.secretName" . }}
+    items:
+      - key: key
+        path: key
+      - key: key_previous
+        path: key_previous
+    defaultMode: 0444
+{{- end }}
