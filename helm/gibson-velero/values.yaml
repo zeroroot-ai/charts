@@ -157,6 +157,15 @@ velero:
     # still keeps.
     defaultBackupTTL: 4320h
     logLevel: info
+    # The root is read-only (podSecurityContext below), and Velero writes the
+    # kopia repository config to $HOME/udmrepo and its cache to $HOME/.cache.
+    # The image sets no HOME, so HOME was / and every volume backup failed
+    # with "mkdir /udmrepo: read-only file system" (charts#659). /scratch is
+    # the emptyDir that the upstream chart mounts for the server.
+    # scripts/check-velero-home.py holds this.
+    extraEnvVars:
+      - name: HOME
+        value: /scratch
 
   # The CRD jobs are OFF. `upgradeCRDs` runs a pre-install Job under a second
   # ServiceAccount with its own ClusterRole, and `cleanUpCRDs` deletes every
