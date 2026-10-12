@@ -78,6 +78,22 @@ rules:
   - apiGroups: [""]
     resources: ["events", "podtemplates"]
     verbs: ["get", "list", "watch"]
+  # Namespaced kinds that the cluster serves beyond the core, by the same rule
+  # (charts#660, backup-restore run 38201546512: each one was a listing error
+  # in five namespaces). Kubernetes 1.37 serves resourceclaims and
+  # resourceclaimtemplates (dynamic resource allocation) and
+  # podcertificaterequests. Cilium, the network plugin of every substrate
+  # (D76), serves its policies, endpoints and node configs. None of these
+  # carries a credential.
+  - apiGroups: ["resource.k8s.io"]
+    resources: ["resourceclaims", "resourceclaimtemplates"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["certificates.k8s.io"]
+    resources: ["podcertificaterequests"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumnetworkpolicies", "ciliumendpoints", "ciliumnodeconfigs"]
+    verbs: ["get", "list", "watch"]
   # events.k8s.io is the SAME objects as the core `events` above, served under
   # a second group. The item collector asks discovery for every namespaced
   # kind, gets both, and lists both, so a role that reads one and not the
