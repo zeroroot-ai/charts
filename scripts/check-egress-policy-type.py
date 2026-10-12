@@ -94,6 +94,11 @@ def pods(docs: list) -> list[dict]:
             # time. Its pod carries velero.io/repo-name, and the velero policy
             # selects it by that label (charts#494).
             out.append({"velero.io/repo-name": "runtime", NS_KEY: ns})
+            # Velero 1.18 runs each PodVolumeBackup and PodVolumeRestore in a
+            # data path pod labelled with the name of its PVB or PVR, and the
+            # velero policy selects them by that label (charts#671).
+            out.append({"velero.io/pod-volume-backup": "runtime", NS_KEY: ns})
+            out.append({"velero.io/pod-volume-restore": "runtime", NS_KEY: ns})
         if (d.get("kind") == "Deployment" and labels.get("app.kubernetes.io/name") == "setec"
                 and labels.get("app.kubernetes.io/component") == "operator"):
             # The setec operator creates the disk builder Job and the image
@@ -176,6 +181,16 @@ def selftest() -> int:
     if not judge([builder]):
         print("SELFTEST FAIL: a policy for setec Jobs with no setec operator must fail")
         return 1
+    for key in ("velero.io/pod-volume-backup", "velero.io/pod-volume-restore"):
+        data_path = {"apiVersion": "cilium.io/v2", "kind": "CiliumNetworkPolicy",
+                     "metadata": {"name": "velero", "namespace": NAMESPACE},
+                     "specs": [{"endpointSelector": {"matchExpressions": [{"key": key, "operator": "Exists"}]}}]}
+        if judge([velero, data_path]):
+            print(f"SELFTEST FAIL: a policy for the {key} data path pods of a Velero server must pass")
+            return 1
+        if not judge([data_path]):
+            print(f"SELFTEST FAIL: a policy for the {key} data path pods with no Velero server must fail")
+            return 1
     if judge([velero, repo]):
         print(f"SELFTEST FAIL: a policy for the maintenance Jobs of a Velero server must pass: {judge([velero, repo])}")
         return 1
