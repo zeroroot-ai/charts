@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.146.1](https://github.com/zeroroot-ai/charts/compare/v0.146.0...v0.146.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* **acceptance:** the admin-role live check sends the OpenFGA preshared key ([#663](https://github.com/zeroroot-ai/charts/issues/663)) ([dd4d1e4](https://github.com/zeroroot-ai/charts/commit/dd4d1e4696760afb82f3b1b066fe432f527609aa))
+* **ci:** the ci-required cap is 30 minutes, above the measured run time of make check ([#665](https://github.com/zeroroot-ai/charts/issues/665)) ([1890ceb](https://github.com/zeroroot-ai/charts/commit/1890ceb983b913efca573082b8901d0f85195fde))
+* **edge:** one Envoy cluster for each extra backend, so several routes may share it ([#656](https://github.com/zeroroot-ai/charts/issues/656)) ([81554c9](https://github.com/zeroroot-ai/charts/commit/81554c91b4ca42a1e7a8cf06ac20cc279b070344))
+* **mailpit:** the mail sink is a secure pod, and secure-pod renders the rungs ([#653](https://github.com/zeroroot-ai/charts/issues/653)) ([01b5c44](https://github.com/zeroroot-ai/charts/commit/01b5c44738ee29416cdc67495084dcbadb39efc4)), closes [#652](https://github.com/zeroroot-ai/charts/issues/652)
+* **postgres:** the login ExternalSecrets sync only after the OpenBao database engine issues logins ([#658](https://github.com/zeroroot-ai/charts/issues/658)) ([5a8c5e3](https://github.com/zeroroot-ai/charts/commit/5a8c5e3c53e0eb34dbfb91ca95a88c549dd19118))
+* **velero:** the role reads the namespaced kinds of Kubernetes 1.37 and Cilium ([#662](https://github.com/zeroroot-ai/charts/issues/662)) ([e1c75a2](https://github.com/zeroroot-ai/charts/commit/e1c75a2821933934512301571ed1c16c7b1f0527)), closes [#660](https://github.com/zeroroot-ai/charts/issues/660)
+* **velero:** the server keeps HOME on its scratch volume ([#661](https://github.com/zeroroot-ai/charts/issues/661)) ([b1f49bb](https://github.com/zeroroot-ai/charts/commit/b1f49bb7e6c98177acbb2c50a21e47e8afa81b09))
+
 ## [0.146.0](https://github.com/zeroroot-ai/charts/compare/v0.145.2...v0.146.0) (2026-10-12)
 
 
