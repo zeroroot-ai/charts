@@ -1439,20 +1439,21 @@ static_resources:
                       address: "gibson-docs-svc"
                       port_value: 8080
 
-{{- range .extraRoutes }}
-    # envoy.extraRoutes entry {{ .path }} (charts#375).
-    - name: {{ .cluster }}
+{{- range $name, $c := .extraClusters }}
+    # The backend of the envoy.extraRoutes entries to {{ $c.service }}:{{ $c.port }}
+    # (charts#375). One cluster for each service and port (charts#655).
+    - name: {{ $c.cluster }}
       type: STRICT_DNS
       connect_timeout: 5s
       load_assignment:
-        cluster_name: {{ .cluster }}
+        cluster_name: {{ $c.cluster }}
         endpoints:
           - lb_endpoints:
               - endpoint:
                   address:
                     socket_address:
-                      address: {{ .service | quote }}
-                      port_value: {{ .port }}
+                      address: {{ $c.service | quote }}
+                      port_value: {{ $c.port }}
 {{- end }}
 
     # gibson#623 — daemon's dedicated native-login bootstrap listener (:8085).
