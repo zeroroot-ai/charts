@@ -1805,7 +1805,7 @@ data:
                             # code flow Auth.js drives) OR an S2S Zitadel JWT
                             # (audience: gibson-platform, issued by the
                             # client_credentials grant for machine users like
-                            # gibson-dashboard-service / signup-bot).
+                            # gibson-dashboard-service).
                             # ext_authz + FGA do the actual authorization based
                             # on the JWT's `sub` claim — the per-method registry
                             # decides whether a given subject can call a given
@@ -9107,7 +9107,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 2b65a66776935d11a8bd0009d6e0a3ae6c8645c09cf60517618863af11fdccda
+        checksum/config: e42d168db9ea6d61e4f236dd26b581e78e57c653832659a172ba73cf1f878f2d
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -14675,9 +14675,7 @@ spec:
         # Image needs curl AND jq baked in. The alpine:3.21 image ships
         # neither and apk-add fails in any cluster without outbound
         # network to dl-cdn.alpinelinux.org (kind dev, air-gapped prod).
-        # alpine/k8s:1.31.0 bakes curl + jq + kubectl and is the same
-        # image our sibling Jobs (postgres-setup, sa-identity-map-populator,
-        # signup-bot-pat-minter) use; one pull serves every dependent Job.
+        # alpine/k8s:1.31.0 bakes curl + jq + kubectl.
         # Override via .Values.gibson.config.security.fgaInit.image
         # for air-gapped operators with a different mirror. deploy#322
         # finding 4 (previous mirror image 404ed on first install).
@@ -17623,12 +17621,6 @@ spec:
   data:
     - secretKey: redis_password
       remoteRef: { key: gibson-redis-password, property: password }
-# NOTE: `gibson-zitadel-dashboard` and `gibson-zitadel-signup-bot-pat`
-# ExternalSecrets are defined in their dedicated templates
-# (`dashboard/zitadel-serverside-externalsecret.yaml` and
-# `dashboard/signup-bot-pat-externalsecret.yaml` respectively). Duplicate
-# definitions previously lived here and tripped Argo's "Resource appeared
-# 2 times" validation on multi-source Apps.
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/missing-secrets.yaml
 # gibson-platform-postgres-credentials — the login role of gibson_platform that
