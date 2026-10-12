@@ -26,15 +26,6 @@
 #       is the closed seam and is bypassable on-prem (no-op provider); www is
 #       absent from any self-hosted install by design.
 #
-#   ghcr.io/zeroroot-ai/mirror/velero{,-plugin-for-aws}
-#       Velero ships as its own release, helm/gibson-velero, in its own
-#       namespace, for the RBAC reason that chart's Chart.yaml states. This
-#       package deploys the umbrella chart only, so its images are not in this
-#       render. An air-gapped operator who wants backups mirrors
-#       ghcr.io/zeroroot-ai/mirror/velero:v1.18.1 and
-#       ghcr.io/zeroroot-ai/mirror/velero-plugin-for-aws:v1.14.2 as well; the
-#       versions are pinned in helm/gibson-velero/values.yaml.
-#
 #   ghcr.io/zeroroot-ai/internal-authz-registry
 #       An OCI artifact, not a runtime image, and the air-gap path does not
 #       fetch it: the default path reads the registry from the daemon over
@@ -49,7 +40,7 @@ chart:
 
 # The gibson commit whose component catalog the dispatchTime group is
 # derived from (airgap/gibson-catalog.ref).
-gibsonCatalogRef: 81085563a20a7cc6ae9495d44eed92a394b1c5dc
+gibsonCatalogRef: 1cb6094d9703b805345ae407c6bdf6f35c00c516
 
 # First-party platform images (private; ELv2 + the closed billing seam).
 firstParty:
@@ -77,9 +68,15 @@ firstParty:
   - ref: ghcr.io/zeroroot-ai/setec-device-plugin:v0.127.3@sha256:c3673178fa39e856bcda820a242b455b475901f58edd8d7994dff47372de78d2
     digest: ""
     role: "setec KVM device plugin"
+  - ref: ghcr.io/zeroroot-ai/setec-disk-builder:v0.127.3@sha256:1ad0390b2ab05c643d776af7287d622361e822604fabfc75f77c7790a2640f30
+    digest: ""
+    role: "setec disk builder (signed image disks)"
   - ref: ghcr.io/zeroroot-ai/setec-frontend:v0.127.3@sha256:7d92f6aa47fad8bcdf532a77b88c3e98f677caee980cca88f50f473184ffb209
     digest: ""
     role: "setec frontend (daemon dispatch endpoint)"
+  - ref: ghcr.io/zeroroot-ai/setec-launcher:v0.127.3@sha256:46b54a7848700fb0d01422482fc87eeccadf35f83c901f797e8179f2f7686528
+    digest: ""
+    role: "setec launcher (Firecracker machine of each sandbox)"
   - ref: ghcr.io/zeroroot-ai/setec:v0.127.3@sha256:3f42408c9aab71d4d04e6c269a69555c84498f9cfbeae89128ad88e8e754390e
     digest: ""
     role: "setec microVM operator (untrusted-exec boundary)"
@@ -191,6 +188,12 @@ mirrored:
     digest: ""
     role: ""
   - ref: ghcr.io/zeroroot-ai/mirror/step-cli:0.30.2@sha256:c75414251d4d8234945fb01e1374707dcc6a7adced88679bae4f0fd526331e74
+    digest: ""
+    role: ""
+  - ref: ghcr.io/zeroroot-ai/mirror/velero-plugin-for-aws:v1.14.2@sha256:0751144c1c8e52d52c48717fbd13ad5a3061e612ae4d7ad744a946cd5b139d1a
+    digest: ""
+    role: ""
+  - ref: ghcr.io/zeroroot-ai/mirror/velero:v1.18.1@sha256:11459094b1b21ec7c817b08f8067d9e89380835547915cac9c4132ff05b55b90
     digest: ""
     role: ""
   - ref: ghcr.io/zeroroot-ai/mirror/wait4x:3.7.2@sha256:2337e64637e1aa9d5d638de6d877914806be6c5156a7221ea40f11911ea4071a
