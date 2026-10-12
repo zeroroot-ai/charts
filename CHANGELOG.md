@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.146.0](https://github.com/zeroroot-ai/charts/compare/v0.145.2...v0.146.0) (2026-10-12)
+
+
+### Features
+
+* **openfga:** OpenFGA requires the preshared key, and each client sends it ([#645](https://github.com/zeroroot-ai/charts/issues/645)) ([c079c55](https://github.com/zeroroot-ai/charts/commit/c079c55f4a79805d3badff762b022234ab676fce))
+
+
+### Bug Fixes
+
+* **webhook-gate:** the gate reaches the setec webhook, and setec pins 0.127.3 ([#647](https://github.com/zeroroot-ai/charts/issues/647)) ([16cd564](https://github.com/zeroroot-ai/charts/commit/16cd56401060ae2cb7e5a9fc99232701e50868ae))
+
 ## [0.145.2](https://github.com/zeroroot-ai/charts/compare/v0.145.1...v0.145.2) (2026-10-11)
 
 
