@@ -43,8 +43,13 @@ jobs:
     runs-on: ubuntu-latest
     # `make check` took 13.5 minutes before the admission-cel gate. A cold
     # download of its Go modules adds about 1.5 minutes. The 15-minute cap
-    # cancelled a run 10 ms after every gate passed (charts#609).
-    timeout-minutes: 20
+    # cancelled a run 10 ms after every gate passed (charts#609). The gates
+    # added since then (the OpenBao and lease simulation tests, the Envoy
+    # cluster render) bring the green runs to a median of 15.8 and a maximum
+    # of 19.7 minutes (27 runs, 2026-10-12), and the 20-minute cap cancelled
+    # the release PR charts#654 at 20m17s while its last gates ran. 30 minutes
+    # leaves room for a slow runner and still ends a hung job.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
