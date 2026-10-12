@@ -169,6 +169,7 @@ unconditionally — there is no `envoy.enabled` opt-out.
   One route and one cluster render for each entry, on the browser chain.
 */ -}}
 {{- $extraRoutes := list -}}
+{{- $extraClusters := dict -}}
 {{- $rlClass := dict "login" "app_login" "catch-all" "app_catch_all" -}}
 {{- range $i, $r := (.Values.envoy.extraRoutes | default list) -}}
 {{- if not (and $r.path (hasPrefix "/" (toString $r.path))) -}}
@@ -186,13 +187,21 @@ unconditionally — there is no `envoy.enabled` opt-out.
 {{- if not (has (toString ($r.auth | default "")) (list "signed-request" "own-sign-in" "query-token")) -}}
 {{- fail (printf "envoy.extraRoutes[%d].auth must be signed-request, own-sign-in or query-token: the edge adds no authentication to an extra route, so the entry states who authenticates the request (charts#375, charts#561)" $i) -}}
 {{- end -}}
+{{- $cluster := printf "extra_%s_%d" (replace "-" "_" $r.service) (int $r.port) -}}
 {{- $extraRoutes = append $extraRoutes (dict
       "path" $r.path "rewrite" ($r.rewrite | default "") "service" $r.service "port" (int $r.port)
       "descriptor" (get $rlClass (toString $r.rateLimitClass)) "auth" $r.auth
-      "cluster" (printf "extra_%s_%d" (replace "-" "_" $r.service) (int $r.port))) -}}
+      "cluster" $cluster) -}}
+{{- /* One cluster for each service and port. Several routes may name one
+       backend (the billing webhook serves four paths), and Envoy refuses a
+       config that declares a cluster name twice (charts#655). */ -}}
+{{- if not (hasKey $extraClusters $cluster) -}}
+{{- $_ := set $extraClusters $cluster (dict "cluster" $cluster "service" $r.service "port" (int $r.port)) -}}
+{{- end -}}
 {{- end -}}
 {{- $ctx := dict
     "extraRoutes"      $extraRoutes
+    "extraClusters"    $extraClusters
     "release"          .Release.Name
     "namespace"        .Release.Namespace
     "envoyServiceType"     .Values.envoy.service.type

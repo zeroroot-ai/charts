@@ -1,0 +1,27 @@
+# Four extra routes to one backend, the shape of the staging and drill
+# overlays of hosted (charts#655). Each route needs its own route entry, and
+# the backend needs one Envoy cluster.
+gibson-workloads:
+  envoy:
+    extraRoutes:
+      - path: /api/billing/webhook
+        rewrite: /webhook
+        service: gibson-billing-webhook
+        port: 8090
+        rateLimitClass: catch-all
+        auth: signed-request
+      - path: /signup-step
+        service: gibson-billing-webhook
+        port: 8090
+        rateLimitClass: login
+        auth: query-token
+      - path: /account
+        service: gibson-billing-webhook
+        port: 8090
+        rateLimitClass: login
+        auth: own-sign-in
+      - path: /account/callback
+        service: gibson-billing-webhook
+        port: 8090
+        rateLimitClass: login
+        auth: own-sign-in
