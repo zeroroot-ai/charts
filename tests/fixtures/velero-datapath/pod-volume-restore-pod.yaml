@@ -1,0 +1,28 @@
+# The hosting pod of one PodVolumeRestore (velero v1.18.1,
+# pkg/controller/pod_volume_restore_controller.go: hostingPodLabels is
+# {velero.io/pod-volume-restore: <pvr name>}). Same shape as the backup pod.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: platform-hourly-20261012103634-restore-m4n8p
+  namespace: gibson
+  labels:
+    velero.io/pod-volume-restore: platform-hourly-20261012103634-restore-m4n8p
+  ownerReferences:
+    - apiVersion: velero.io/v1
+      kind: PodVolumeRestore
+      name: platform-hourly-20261012103634-restore-m4n8p
+      uid: 7a2c9e41-0b3d-4f58-8c6e-1d2f3a4b5c6d
+      controller: true
+spec:
+  serviceAccountName: velero-server
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: 7a2c9e41-0b3d-4f58-8c6e-1d2f3a4b5c6d
+      image: ghcr.io/zeroroot-ai/mirror/velero:v1.18.1
+      imagePullPolicy: Never
+      command: ["/velero"]
+      args:
+        - restore
+        - --volume-path=/7a2c9e41-0b3d-4f58-8c6e-1d2f3a4b5c6d
+        - --resource-timeout=10m0s

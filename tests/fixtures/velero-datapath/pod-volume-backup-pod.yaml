@@ -1,0 +1,36 @@
+# The hosting pod that the Velero 1.18.1 node-agent starts for one
+# PodVolumeBackup. Shape from vmware-tanzu/velero at v1.18.1:
+#   pkg/controller/pod_volume_backup_controller.go: hostingPodLabels is
+#     {velero.io/pod-volume-backup: <pvb name>} plus the podLabels of the
+#     node-agent ConfigMap (none here) or, without one, the third-party label
+#     azure.workload.identity/use when the node-agent carries it (it does not).
+#     The podLabels of the node-agent DaemonSet are NOT copied.
+#   pkg/exposer/pod_volume.go createHostingPod: name = the PVB name, namespace
+#     = the PVB namespace, container name = the PVB UID, image and service
+#     account inherited from the node-agent, imagePullPolicy Never.
+# The names are from the staging schedule platform-hourly (drill sweep row 17).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: platform-hourly-20261012103634-q7x2k
+  namespace: gibson
+  labels:
+    velero.io/pod-volume-backup: platform-hourly-20261012103634-q7x2k
+  ownerReferences:
+    - apiVersion: velero.io/v1
+      kind: PodVolumeBackup
+      name: platform-hourly-20261012103634-q7x2k
+      uid: 0d8f1c2e-5b7a-4e0c-9a1d-3f6b8c2e7a90
+      controller: true
+spec:
+  serviceAccountName: velero-server
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: 0d8f1c2e-5b7a-4e0c-9a1d-3f6b8c2e7a90
+      image: ghcr.io/zeroroot-ai/mirror/velero:v1.18.1
+      imagePullPolicy: Never
+      command: ["/velero"]
+      args:
+        - backup
+        - --volume-path=/0d8f1c2e-5b7a-4e0c-9a1d-3f6b8c2e7a90
+        - --resource-timeout=10m0s
