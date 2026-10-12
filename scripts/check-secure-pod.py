@@ -51,11 +51,16 @@ EXCEPTIONS = os.path.join(ROOT, "helm", "gibson", "secure-pod-exceptions.yaml")
 RBAC_ALLOWLIST = os.path.join(ROOT, "helm", "gibson", "rbac-allowlist.yaml")
 INSTALL_SCRIPT = os.path.join(ROOT, "scripts", "baseline-up.sh")
 NAMESPACE = "gibson"
-# The same profiles that scripts/golden.sh renders.
+# The profiles that scripts/golden.sh renders, and the two rungs on the
+# baseline. A rung turns on pods that no profile renders (mailpit is on only
+# in the ci and developer rungs), and a pod that no render holds is a pod
+# this guard cannot see (charts#652).
 PROFILES = (
     ("values-baseline.yaml",),
     ("values-baseline.yaml", "values-eks.yaml"),
     ("values-baseline.yaml", "values-guest.yaml"),
+    ("values-baseline.yaml", "values-ci.yaml"),
+    ("values-baseline.yaml", "values-developer.yaml"),
 )
 # gibson-velero is its own release in its own namespace, velero, on every
 # install (scripts/baseline-up.sh, hosted gitops). The guard renders it there
