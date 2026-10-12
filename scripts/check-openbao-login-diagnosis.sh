@@ -32,9 +32,13 @@ trap 'rm -rf "$WORK"' EXIT
 # invisible. Every mutation of the diagnosis passed this check before the
 # repack went in, which is the whole reason it is here and not an optimisation
 # someone may remove.
-rm -f "$ROOT"/helm/gibson/charts/gibson-{workloads,operators,crds,common}-*.tgz \
-      "$ROOT"/helm/*/.charts.stamp 2>/dev/null || true
-make -C "$ROOT" chart-deps >/dev/null
+# Inside `make check` the gates share one repack (CHART_DEPS_DONE): a second
+# repack here would delete tarballs that parallel gates are rendering.
+if [ -z "${CHART_DEPS_DONE:-}" ]; then
+  rm -f "$ROOT"/helm/gibson/charts/gibson-{workloads,operators,crds,common}-*.tgz \
+        "$ROOT"/helm/*/.charts.stamp 2>/dev/null || true
+  make -C "$ROOT" chart-deps >/dev/null
+fi
 
 RENDER="$WORK/render.yaml"
 helm template gibson "$ROOT/helm/gibson" --namespace gibson \

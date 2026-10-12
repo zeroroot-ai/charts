@@ -31,12 +31,16 @@ FAKE
 chmod +x "$tmp/bin/helm"
 
 # The charts the target loops over, read from the target itself.
-charts=$(grep -A3 '^chart-deps:' "$root/Makefile" | grep -oE 'helm/[a-z-]+' | sort -u | wc -l)
+# The whole recipe of the target (its tab-indented lines), not a fixed count of
+# lines: a comment in the recipe must not hide the chart list.
+charts=$(awk '/^chart-deps:/{f=1; next} f && !/^\t/{exit} f' "$root/Makefile" | grep -oE 'helm/[a-z-]+' | sort -u | wc -l)
 [ "$charts" -gt 0 ] || { echo "FAIL: no chart dirs found under the chart-deps target"; exit 1; }
 
 run() {
   local count="$tmp/count-$1"; : > "$count"
-  ( cd "$root" && PATH="$tmp/bin:$PATH" FAKE_HELM_COUNT="$count" HELM_DEP_UPDATE_BACKOFF=0 "$@" make chart-deps >"$tmp/out-$1" 2>&1 ) && rc=0 || rc=$?
+  # The test runs the real target, so it ignores the shared repack mark of
+  # `make check` (CHART_DEPS_DONE).
+  ( cd "$root" && PATH="$tmp/bin:$PATH" FAKE_HELM_COUNT="$count" HELM_DEP_UPDATE_BACKOFF=0 "$@" env -u CHART_DEPS_DONE make chart-deps >"$tmp/out-$1" 2>&1 ) && rc=0 || rc=$?
   echo "$rc $(cat "$count")"
 }
 
