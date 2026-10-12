@@ -173,9 +173,7 @@ spec:
         # Image needs curl AND jq baked in. The alpine:3.21 image ships
         # neither and apk-add fails in any cluster without outbound
         # network to dl-cdn.alpinelinux.org (kind dev, air-gapped prod).
-        # alpine/k8s:1.31.0 bakes curl + jq + kubectl and is the same
-        # image our sibling Jobs (postgres-setup, sa-identity-map-populator,
-        # signup-bot-pat-minter) use; one pull serves every dependent Job.
+        # alpine/k8s:1.31.0 bakes curl + jq + kubectl.
         # Override via .Values.gibson.config.security.fgaInit.image
         # for air-gapped operators with a different mirror. deploy#322
         # finding 4 (previous mirror image 404ed on first install).

@@ -20,7 +20,7 @@ WHY THIS LIVES AT THE UMBRELLA LEVEL, NOT IN gibson-workloads:
 The Job is a post-install helm hook. Inside a gibson-* subchart a helm hook
 becomes an ArgoCD Pre/PostSync hook and can deadlock the umbrella sync
 (cross-chart-check Check 22, deploy#754). The umbrella chart is the sanctioned
-home for bring-up hook Jobs (same as signup-bot-pat-minter, deploy#788), so the
+home for bring-up hook Jobs (deploy#788), so the
 Job renders here and reads the gibson-workloads value subtree explicitly.
 
 first-admin is off unless global.firstTenant.enabled (baseline only); SaaS uses
