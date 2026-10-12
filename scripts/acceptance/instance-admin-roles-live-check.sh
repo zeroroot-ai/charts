@@ -15,7 +15,9 @@
 #
 # Read-only. It reaches Zitadel and OpenFGA through kubectl port-forward, so it
 # needs no tool inside any image. It reads the escrowed owner PAT (Secret
-# iam-admin-pat), the one credential reserved for bootstrap and inspection.
+# iam-admin-pat), the one credential reserved for bootstrap and inspection,
+# and the OpenFGA preshared key (Secret gibson-openfga-preshared-key), which
+# OpenFGA requires since charts#645. Neither value reaches argv or output.
 #
 # Usage (kubectl pointed at the cluster, umbrella chart installed):
 #   NS=gibson RELEASE=gibson ./scripts/acceptance/instance-admin-roles-live-check.sh
@@ -73,11 +75,30 @@ done < <(echo "$MEMBERS" | jq -r '.result[] | [.userId, .preferredLoginName, .us
 [ -n "$owner_id" ] || fail "the Platform owner (${OWNER_EMAIL}) is not a Zitadel administrator"
 
 STORE_ID="$(kubectl -n "$NS" get configmap gibson-fga-config -o jsonpath='{.data.store_id}')"
+[ -n "$STORE_ID" ] || { echo "ConfigMap gibson-fga-config has no store_id" >&2; exit 2; }
+# OpenFGA requires the preshared key (charts#645). The header goes through a
+# file, so the key is never in argv.
+FGA_AUTH="$(mktemp)"
+chmod 600 "$FGA_AUTH"
+trap 'cleanup; rm -f "$FGA_AUTH"' EXIT
+FGA_KEY="$(kubectl -n "$NS" get secret gibson-openfga-preshared-key -o jsonpath='{.data.key}' | base64 -d)"
+[ -n "$FGA_KEY" ] || { echo "Secret gibson-openfga-preshared-key has no key" >&2; exit 2; }
+printf 'Authorization: Bearer %s\n' "$FGA_KEY" > "$FGA_AUTH"
+unset FGA_KEY
 forward "${RELEASE}-openfga" "$FPORT" 8080
-fga_users() { # relation -> sorted user ids
-  curl -sSk -X POST "https://127.0.0.1:${FPORT}/stores/${STORE_ID}/read" -H 'Content-Type: application/json' \
-    -d "{\"tuple_key\":{\"relation\":\"$1\",\"object\":\"system_tenant:_system\"}}" \
-    | jq -r '[.tuples[]?.key.user | sub("^user:"; "")] | sort | join(",")'
+fga_users() { # relation -> sorted user ids; a refused read fails the check, it never reads as "no holder"
+  local body code
+  body="$(mktemp)"
+  code="$(curl -sSk -o "$body" -w '%{http_code}' -X POST "https://127.0.0.1:${FPORT}/stores/${STORE_ID}/read" \
+    -H @"$FGA_AUTH" -H 'Content-Type: application/json' \
+    -d "{\"tuple_key\":{\"relation\":\"$1\",\"object\":\"system_tenant:_system\"}}" || true)"
+  if [ "$code" != 200 ]; then
+    echo "OpenFGA read of $1 answered HTTP ${code}" >&2
+    rm -f "$body"
+    exit 2
+  fi
+  jq -r '[.tuples[]?.key.user | sub("^user:"; "")] | sort | join(",")' "$body"
+  rm -f "$body"
 }
 got_owner="$(fga_users platform_owner)"
 if [ -n "$owner_id" ] && [ "$got_owner" = "$owner_id" ]; then pass "platform_owner is held by exactly the Platform owner (${owner_id})"
