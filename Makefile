@@ -9,7 +9,7 @@
 GREEN := \033[0;32m
 NC    := \033[0m
 
-.PHONY: upgrade-pair reloader-names operator-rbac-sync operator-rbac-covers identity-admission-covers openbao-one-replica zitadel-claimed-host contract-pins config-contract-sync config-consumed smtp-tls-mode email-smtp-external-secret openbao-login-diagnosis help values-consumed env-consumed env-contract-sync env-contract-fresh chart-deps chart-deps-retry golden golden-update render-diff baseline-up baseline-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks iam-admin-pat-escrow seed-passwords login-brand \
+.PHONY: upgrade-pair reloader-names operator-rbac-sync operator-rbac-covers identity-admission-covers openbao-one-replica zitadel-claimed-host contract-pins config-contract-sync config-consumed smtp-tls-mode email-smtp-external-secret openbao-login-diagnosis help values-consumed env-consumed env-contract-sync env-contract-fresh chart-deps chart-deps-retry golden golden-update render-diff baseline-up baseline-verify postgres-archive-names cnpg-netpol-covers-jobs velero-volume-excludes velero-no-hooks velero-home iam-admin-pat-escrow seed-passwords login-brand \
         check attribution vendor-operators cloud-free
 
 help: ## Show available targets
@@ -142,6 +142,10 @@ helm-record-size: ## Every published chart fits in a Helm release record (one Se
 
 velero-volume-excludes: ## Every pod tells Velero which of its volumes are sockets and scratch, never a claim
 	@./scripts/check-velero-volume-excludes.sh
+
+velero-home: ## The Velero server keeps HOME on an emptyDir, so its read-only root takes no repository config (charts#659)
+	@python3 scripts/check-velero-home.py --selftest
+	@python3 scripts/check-velero-home.py
 
 velero-no-hooks: ## The Velero Schedule and BackupStorageLocation are ordinary resources, so a chart bump reaches Argo (charts#190)
 	@./scripts/check-velero-no-hooks.sh
