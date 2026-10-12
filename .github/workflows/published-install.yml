@@ -1,22 +1,10 @@
-# THE published-install steps, defined ONCE and called by two workflows.
+# THE published-install steps, defined ONCE and called by each kind exit test
+# (baseline, published install, guest, upgrade). The callers choose a mode and
+# a version and nothing else, so there is no second copy to drift from.
 #
-# WHY TWO WORKFLOWS AND NOT A MATRIX
-#
-# Owner call, 2026-09-16: a developer uses kind OR k3d, not both, and each
-# needs its own answer. A matrix gives one run, one status and one badge for
-# two claims, so "does the published chart install on k3d?" cannot be read
-# without opening a log and finding the right leg. Two workflows give two
-# statuses, and a developer on either distribution can point at theirs.
-#
-# It also stops a known-red distribution from masking the other. k3d is red on
-# a Tenant-seeding problem that has nothing to do with kind; with one matrix,
-# a real kind regression would land inside an already-red run.
-#
-# WHAT THE MATRIX WAS PROTECTING, kept. The argument for one matrix was drift:
-# two workflows diverge, the second gets a fix the first does not, and then
-# "it works on kind" and "it works on k3d" stop being the same claim. So the
-# STEPS live here, once. The two callers choose a distribution and nothing
-# else. There is no second copy to drift from.
+# ONE DISTRIBUTION, kind (D89). k3d runs only on a workstation: on a CI runner
+# its node evicted pods, and its exit test stayed red. The kind cluster runs
+# Cilium, so each policy that this chart ships is enforced here.
 #
 # THE SOURCE MODE (charts#433)
 #
@@ -44,23 +32,14 @@
 #     hosted  (private)  ubuntu-latest : 2 vCPU,  ~7990 MB
 #
 # Public repositories get twice the machine AND unlimited standard-runner
-# minutes at no cost. That is not academic: the k3d leg had been deleted from
-# hosted because on 2 vCPU / 7 GB the node evicted 35 pods and the install
-# died. On 4 vCPU it evicts one.
+# minutes at no cost. That is not academic: on 2 vCPU / 7 GB a one-node
+# cluster evicted 35 pods and the install died.
 #
-# WHY k3d IS WORTH RUNNING AT ALL. kind's CNI does not implement NetworkPolicy,
-# so every policy this chart ships is inert there. k3s enforces them, and
-# charts#80 was found exactly that way: OpenBao had no egress to the apiserver
-# and every symptom pointed somewhere else.
 name: published-install
 
 on:
   workflow_call:
     inputs:
-      distro:
-        description: kind or k3d
-        required: true
-        type: string
       chart_version:
         description: The published chart version to install (default, the newest)
         required: false
@@ -104,7 +83,7 @@ permissions:
 
 jobs:
   install:
-    name: ${{ inputs.from_source && 'source' || 'published' }} install on ${{ inputs.distro }}
+    name: ${{ inputs.from_source && 'source' || 'published' }} install on kind
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -209,48 +188,30 @@ jobs:
             python3 scripts/resolve-upgrade-pair.py --to "${{ steps.version.outputs.version }}"
           fi
 
-      - name: Install k3d
-        if: inputs.distro == 'k3d'
-        run: |
-          set -euo pipefail
-          # 5.9.0 or newer: older k3d rolls back a cluster whose node is in
-          # fact Ready, because its readiness wait cannot follow Docker's logs
-          # on Docker 25+. The error names the cluster and the fault is k3d's.
-          curl -fsSL https://github.com/k3d-io/k3d/releases/download/v5.9.0/k3d-linux-amd64 \
-            -o /usr/local/bin/k3d
-          chmod +x /usr/local/bin/k3d
-          k3d version
-
       - name: Stage 0 — the bucket, the relay and the keyring
         working-directory: hosted
         run: SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
 
-      # The cluster. Stage 0 owns the Docker network either way; the two verbs
-      # differ only in which tool builds the node on it.
-      - name: Create the ${{ inputs.distro }} cluster
+      # The cluster. Stage 0 owns the Docker network, and kind builds the node
+      # on it.
+      - name: Create the kind cluster
         run: |
           set -euo pipefail
-          if [ "${{ inputs.distro }}" = kind ]; then
-            KIND_PV_DIR="$RUNNER_TEMP/kind-pv"; mkdir -p "$KIND_PV_DIR"
-            # No --wait: the node is not Ready until a CNI runs, and kind
-            # starts with none (helm/kind-config.yaml). Cilium is installed
-            # next, with the one pin and the kind values of hosted (hosted#436).
-            sed "s|__KIND_PV_DIR__|$KIND_PV_DIR|" helm/kind-config.yaml \
-              | kind create cluster --name gibson --config -
-            echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
-            # shellcheck source=/dev/null
-            . ./hosted/scripts/lib/cilium.sh
-            cilium_install kind --set "k8sServiceHost=gibson-control-plane"
-            # The Cilium operator registers the CiliumNetworkPolicy CRD after
-            # it starts, so verify only once the node is Ready, in the order
-            # of hosted's recreate-kind.sh (exit test run 37448588132).
-            kubectl wait --for=condition=Ready nodes --all --timeout=300s
-            cilium_verify
-          else
-            CLUSTER=gibson ./hosted/scripts/cluster-k3d.sh create
-            CLUSTER=gibson ./hosted/scripts/cluster-k3d.sh verify
-            echo "KUBECONFIG=/tmp/k3d-gibson.kubeconfig" >> "$GITHUB_ENV"
-          fi
+          KIND_PV_DIR="$RUNNER_TEMP/kind-pv"; mkdir -p "$KIND_PV_DIR"
+          # No --wait: the node is not Ready until a CNI runs, and kind
+          # starts with none (helm/kind-config.yaml). Cilium is installed
+          # next, with the one pin and the kind values of hosted (hosted#436).
+          sed "s|__KIND_PV_DIR__|$KIND_PV_DIR|" helm/kind-config.yaml \
+            | kind create cluster --name gibson --config -
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+          # shellcheck source=/dev/null
+          . ./hosted/scripts/lib/cilium.sh
+          cilium_install kind --set "k8sServiceHost=gibson-control-plane"
+          # The Cilium operator registers the CiliumNetworkPolicy CRD after
+          # it starts, so verify only once the node is Ready, in the order
+          # of hosted's recreate-kind.sh (exit test run 37448588132).
+          kubectl wait --for=condition=Ready nodes --all --timeout=300s
+          cilium_verify
 
       # Hubble on, so the last step can read the verdict of each flow
       # (ADR-0165 rule 4, D76, charts#489). The shared Cilium values of hosted
@@ -398,7 +359,7 @@ jobs:
           done
 
       # The hook Jobs are dumped too. The previous version of this step listed
-      # pods and ExternalSecrets and nothing else, so when the k3d leg died at
+      # pods and ExternalSecrets and nothing else, so when an install died at
       # `first-admin failed: DeadlineExceeded` the ONE thing that failed was
       # the one thing with no log, and the cause took a second run to find.
       # ADR-0092: an identity client CONNECTS to the Zitadel Service and CLAIMS

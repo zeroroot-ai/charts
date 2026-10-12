@@ -7,7 +7,7 @@ the exit test assertions, and it fails on each flow with the verdict DROPPED
 and a policy drop reason. The log names the source pod, the destination and
 the port, so the missing label or policy is clear.
 
-The exit tests turn Hubble on in the Cilium of their kind or k3d cluster
+The exit tests turn Hubble on in the Cilium of their kind cluster
 (.github/workflows/published-install.yml). The check reads each agent with
 `hubble observe` inside the agent container, so it needs no Hubble relay.
 

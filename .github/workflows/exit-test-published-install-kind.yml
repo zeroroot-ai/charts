@@ -1,13 +1,11 @@
 # The PUBLISHED chart installs on kind.
 #
-# kind is the distribution most developers reach for first, and the one CI
-# has always used. Its CNI does NOT implement NetworkPolicy, so every policy
-# this chart ships is inert here — that is not a defect in this test, it is
-# the reason the k3d one exists alongside it.
+# kind is the one CI cluster (D89). It runs Cilium, so each policy that this
+# chart ships is enforced here.
 #
-# The steps are NOT here. They live in published-install.yml and both
-# distributions call the same ones, so the two cannot drift into different
-# claims (ADR-0027). This file chooses a distribution and nothing else.
+# The steps are NOT here. They live in published-install.yml, and each kind
+# exit test calls the same ones, so they cannot drift into different claims
+# (ADR-0027).
 #
 # CADENCE. On a schedule and on push to main, never on a pull request
 # (ADR-0080). A published artifact only changes when a release publishes, so a
@@ -45,6 +43,5 @@ jobs:
   install:
     uses: ./.github/workflows/published-install.yml
     with:
-      distro: kind
       chart_version: ${{ inputs.chart_version }}
     secrets: inherit

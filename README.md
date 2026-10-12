@@ -92,7 +92,7 @@ environment variable.
 
 ## Profiles
 
-The supported substrates are EKS, k3s, and the CI clusters kind and k3d. Any
+The supported substrates are EKS, k3s, and the CI cluster kind. k3d runs only on a workstation (D89). Any
 conformant cluster that meets the substrate contract can run the baseline.
 
 | Profile | For |
