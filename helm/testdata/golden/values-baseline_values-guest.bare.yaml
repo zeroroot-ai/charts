@@ -7648,18 +7648,6 @@ spec:
               value: "true"
             - name: ORPHAN_REAPER_GRACE_SECONDS
               value: "300"
-            - name: SMTP_HOST
-              value: "gibson-mailpit"
-            - name: SMTP_PORT
-              value: "1025"
-            - name: SMTP_USERNAME
-              value: "" 
-            - name: SMTP_PASSWORD
-              value: "" 
-            - name: SMTP_TLS_MODE
-              value: "plaintext"
-            - name: SMTP_FROM
-              value: "no-reply@localhost.zeroroot.ai"
             # Zitadel Management API — the EnsureZitadelOrg + TenantMember
             # saga steps call this as the operator's own machine user
             # (gibson-tenant-operator, client credentials). It holds only
@@ -19585,7 +19573,7 @@ rules:
   # (gibson#1510): it lists the members in the tenant's own namespace
   # (tenant-<slug>, which does not exist at render time, so this cannot be a
   # namespaced Role) and patches spec.acceptedByUserID on the owner. Without
-  # the pre-accept the member sits Invited forever, the reconciler never
+  # the pre-accept the member has no acceptedByUserID, the reconciler never
   # seeds the FGA active_session tuples, and the owner can log in but every
   # tenant-scoped RPC is denied by the session gate.
   # create as well as patch: bootstrap-tenant-owner documents its own
