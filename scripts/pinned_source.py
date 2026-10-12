@@ -55,14 +55,32 @@ def pinned_tag(repo: str) -> str:
     return tag
 
 
+def main_checkout() -> Path:
+    """The main clone of this repo. In a git worktree, ROOT.parent is the
+    worktrees directory, and the sibling clones sit beside the main clone."""
+    common = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--path-format=absolute",
+                             "--git-common-dir"], capture_output=True, text=True).stdout.strip()
+    return Path(common).parent if common else ROOT
+
+
 def sibling(repo: str) -> Path | None:
-    for cand in (ROOT.parent / repo, ROOT.parent.parent / "opensource" / repo,
+    main = main_checkout()
+    for cand in (main.parent / repo, ROOT.parent / repo, ROOT.parent.parent / "opensource" / repo,
                  ROOT.parent.parent / "enterprise" / "platform" / repo,
                  ROOT.parent / "enterprise" / "platform" / repo,
                  ROOT.parent / "opensource" / repo):
-        if (cand / ".git").exists():
+        if (cand / ".git").exists() and is_clone_of(cand, repo):
             return cand
     return None
+
+
+def is_clone_of(path: Path, repo: str) -> bool:
+    """A directory beside this checkout can carry a repo's name and hold
+    another repo: a charts worktree named `dashboard` sits beside a charts
+    worktree. Only a checkout whose origin is zeroroot-ai/<repo> counts."""
+    url = subprocess.run(["git", "-C", str(path), "remote", "get-url", "origin"],
+                         capture_output=True, text=True).stdout.strip()
+    return re.search(rf"[/:]zeroroot-ai/{re.escape(repo)}(\.git)?$", url) is not None
 
 
 def tree_at(repo: str, tag: str) -> tempfile.TemporaryDirectory:
