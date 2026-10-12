@@ -17,8 +17,11 @@ Jobs, and not after any hook Job that mounts the Secret it writes.
 
 WHAT IT CHECKS, on a rendered golden (helm/testdata/golden/values-baseline.bare.yaml)
   For each ExternalSecret that reads a postgres-login-* generator:
-    1. its sync-wave is above the wave of the Postgres Cluster and of each
-       Job named *-postgres-setup, and
+    1. its sync-wave is above the wave of the Postgres Cluster, of each Job
+       named *-postgres-setup, and of the Job postgres-logins-gate, which
+       waits until the OpenBao database engine issues logins (hosted#627):
+       the gate must exist and mount the pg-engine key of the login token
+       Secret, and
     2. its sync-wave is at or below the wave of each hook Job whose pod
        reads the Secret it writes.
 
@@ -88,16 +91,29 @@ def judge(docs: list[dict]) -> list[str]:
               or (d.get("kind") == "Job" and d["metadata"]["name"].endswith("-postgres-setup"))]
     if not before:
         return ["no Postgres Cluster and no postgres-setup Job in the render"]
+    gates = [d for d in docs if d.get("kind") == "Job" and d["metadata"]["name"] == "postgres-logins-gate"]
+    if not gates:
+        return ["no Job postgres-logins-gate in the render: the login ExternalSecrets would ask the OpenBao database engine "
+                "before it issues logins, and a from-zero Argo sync spends its retries there (hosted#627)"]
+    gate_out = []
+    for g in gates:
+        vols = (((g.get("spec") or {}).get("template") or {}).get("spec") or {}).get("volumes") or []
+        if not any((v.get("secret") or {}).get("secretName") == "gibson-openbao-pg-logins"
+                   and any(i.get("key") == "pg-engine" for i in (v.get("secret") or {}).get("items") or [])
+                   for v in vols):
+            gate_out.append("Job/postgres-logins-gate mounts no pg-engine key of Secret gibson-openbao-pg-logins: "
+                            "it does not wait for the database engine")
+    before = before + gates
     floor = max(wave(d) for d in before)
     jobs = [d for d in docs if d.get("kind") == "Job" and "argocd.argoproj.io/hook" in ((d.get("metadata") or {}).get("annotations") or {})]
-    out = []
+    out = list(gate_out)
     for es in logins:
         w = wave(es)
         name = es["metadata"]["name"]
         target = ((es.get("spec") or {}).get("target") or {}).get("name", name)
         if w <= floor:
-            out.append(f"ExternalSecret/{name} is at wave {w}, not after the Postgres cluster and the setup Jobs (wave {floor}): "
-                       "the engine or the owner role does not exist yet")
+            out.append(f"ExternalSecret/{name} is at wave {w}, not after the Postgres cluster, the setup Jobs and the "
+                       f"engine gate (wave {floor}): the engine or the owner role does not exist yet")
         for j in jobs:
             if target in secret_names(j) and wave(j) < w:
                 out.append(f"ExternalSecret/{name} is at wave {w}, after Job/{j['metadata']['name']} (wave {wave(j)}) that mounts {target}: "
@@ -109,6 +125,20 @@ def judge(docs: list[dict]) -> list[str]:
                 out.append(f"VaultDynamicSecret/{d['metadata']['name']} reads {d['spec']['path']} without tokenSecretRef: "
                            "the lease dies with the token that External Secrets revokes after the read")
     return out
+
+
+def _set_gate_wave(docs: list, w: str) -> list:
+    for d in docs:
+        if isinstance(d, dict) and d.get("kind") == "Job" and d["metadata"]["name"] == "postgres-logins-gate":
+            d["metadata"].setdefault("annotations", {})[WAVE] = w
+    return docs
+
+
+def _gate_without_mark(docs: list) -> list:
+    for d in docs:
+        if isinstance(d, dict) and d.get("kind") == "Job" and d["metadata"]["name"] == "postgres-logins-gate":
+            d["spec"]["template"]["spec"]["volumes"] = []
+    return docs
 
 
 def goldens() -> list[str]:
@@ -142,7 +172,18 @@ def selftest() -> int:
     if len(got) != 1 or "tokenSecretRef" not in got[0]:
         print(f"SELFTEST FAIL: a generator of database/creds on the kubernetes auth must fail once, got {got}")
         return 2
-    print("selftest ok: a login ExternalSecret too early, one too late, and a generator on the kubernetes auth fail")
+    for label, mutate, want in (
+            ("with no engine gate", lambda ds: [d for d in ds if not (d.get("kind") == "Job"
+                                                                     and d["metadata"]["name"] == "postgres-logins-gate")],
+             "no Job postgres-logins-gate"),
+            ("with the gate in the wave of the logins", lambda ds: _set_gate_wave(ds, "-5"), "not after the Postgres cluster"),
+            ("with a gate that mounts no pg-engine key", _gate_without_mark, "does not wait for the database engine")):
+        got = judge(mutate(copy.deepcopy(docs)))
+        if not got or not any(want in g for g in got):
+            print(f"SELFTEST FAIL: a render {label} must fail with '{want}', got {got}")
+            return 2
+    print("selftest ok: a login ExternalSecret too early, one too late, a generator on the kubernetes auth, no engine gate, "
+          "a gate in the wave of the logins and a gate that waits for nothing fail")
     return 0
 
 

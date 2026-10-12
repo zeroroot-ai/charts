@@ -53,11 +53,26 @@ no_write() {
 run_engine() {
   run sh -c '
     set -u
-    TMPD="$S/tmp"; BAO_ADDR_LOCAL=http://b
+    TMPD="$S/tmp"; BAO_ADDR_LOCAL=http://b; NAMESPACE=gibson; KUBE_API=https://k
     sed "s#/etc/openbao/pg-superuser#$S/su#" "$WORK/pg.sh" > "$S/pg.sh"
     . "$S/pg.sh"
     kv_get() { cat "$S/kv.json"; }
     kv_put() { printf "%s" "$3" > "$S/kv.json"; }
+    # The Secret of the login token: GET answers its data, PATCH records the
+    # pg-engine mark (hosted#627).
+    kube_curl() {
+      method=GET; data=""
+      while [ $# -gt 0 ]; do case "$1" in
+        -X) method="$2"; shift 2 ;; --data-binary) data="$2"; shift 2 ;;
+        -o|-w|-H) shift 2 ;; *) shift ;; esac; done
+      if [ "$method" = PATCH ]; then
+        v=$(printf "%s" "$data" | jq -r ".data[\"pg-engine\"]")
+        echo "MARK $(printf "%s" "$v" | base64 -d)" >> "$S/log"
+        printf "{\"kind\":\"Secret\",\"data\":{\"pg-engine\":\"%s\"}}" "$v" > "$S/mark.json"
+        printf 200; return 0
+      fi
+      cat "$S/mark.json" 2>/dev/null || echo "{\"kind\":\"Secret\",\"data\":{}}"
+    }
     curl() {
       out=""; method=GET; data=""; url=""
       while [ $# -gt 0 ]; do case "$1" in
@@ -67,6 +82,9 @@ run_engine() {
       path="${url#http://b/v1/}"
       if [ "$method" = POST ]; then
         echo "POST $path" >> "$S/log"; printf "%s" "$data" > "$S/body.$(printf "%s" "$path" | tr / _)"
+        if [ -n "${ROLEFAIL:-}" ] && [ "$path" = "database/roles/${ROLEFAIL}" ]; then
+          [ -n "$out" ] && : > "$out"; printf 500; return 0
+        fi
         [ -n "$out" ] && : > "$out"; printf 204; return 0
       fi
       case "$path" in
@@ -125,4 +143,29 @@ run_engine() {
   MOUNT=404 CFG_USER="" run_engine
   [[ "$output" == *"rc=0"* ]]
   [ ! -e "$S/log" ]
+}
+
+@test "the engine writes the pg-engine mark when it issues each login role, and once only" {
+  MOUNT=404 CFG_USER="" run_engine
+  [[ "$output" == *"rc=0"* ]] || { echo "$output"; false; }
+  [ "$(grep -c '^MARK ' "$S/log")" -eq 1 ]
+  want=$(cat "$S/su/username" "$S/su/password" | sha256sum | cut -c1-16)
+  grep -q "^MARK ${want}$" "$S/log"
+  rm -f "$S/log"
+  MOUNT=200 CFG_USER=postgres run_engine
+  [[ "$output" == *"rc=0"* ]] || { echo "$output"; false; }
+  no_write '^MARK '
+}
+
+@test "FAILING FIXTURE: a role the engine cannot write leaves no pg-engine mark" {
+  MOUNT=404 CFG_USER="" ROLEFAIL=spire run_engine
+  [[ "$output" != *"rc=0"* ]] || { echo "$output"; false; }
+  no_write '^MARK '
+}
+
+@test "no superuser Secret yet: no pg-engine mark" {
+  rm -f "$S/su/username" "$S/su/password"
+  MOUNT=404 CFG_USER="" run_engine
+  [[ "$output" == *"rc=0"* ]] || { echo "$output"; false; }
+  [ ! -e "$S/log" ] || no_write '^MARK '
 }
