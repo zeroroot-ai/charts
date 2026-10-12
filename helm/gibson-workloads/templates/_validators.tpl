@@ -807,6 +807,21 @@ request. A values file that still sets either one fails here.
 {{- $daemonCaller = true -}}
 {{- end -}}
 {{- end -}}
+{{- /* The webhook gate of the umbrella probes the setec webhook from the
+       release namespace (charts#644). The setec namespace policy admits
+       the webhook port from setec.systemPolicy.webhookCallers only. */ -}}
+{{- $gateCaller := false -}}
+{{- range $c := (($setec.systemPolicy | default dict).webhookCallers) | default list -}}
+{{- if ne (toString $c.namespace) $.Release.Namespace -}}
+{{- fail (printf "validateSetecDispatch: setec.systemPolicy.webhookCallers names namespace %q, and this release runs its webhook gate in %q. The setec namespace policy admits the webhook port from the listed Pods only, so the gate would time out. Set the entry to the release namespace." (toString $c.namespace) $.Release.Namespace) -}}
+{{- end -}}
+{{- if eq (toString (dig "podLabels" "app.kubernetes.io/component" "" $c)) "webhook-gate" -}}
+{{- $gateCaller = true -}}
+{{- end -}}
+{{- end -}}
+{{- if not $gateCaller -}}
+{{- fail (printf "validateSetecDispatch: setec.systemPolicy.webhookCallers has no entry for the webhook gate of this release ({namespace: %s, podLabels: {app.kubernetes.io/component: webhook-gate}}). The setec namespace policy admits the webhook port from the listed Pods only, so the gate would time out on every install." $.Release.Namespace) -}}
+{{- end -}}
 {{- if not $daemonCaller -}}
 {{- fail (printf "validateSetecDispatch: setec.systemPolicy.frontendCallers has no entry for the daemon of this release ({namespace: %s, podLabels: {app.kubernetes.io/component: daemon}}). The setec namespace policy admits the frontend gRPC port from the listed Pods only (D76), so the daemon would be denied at the first dispatch." $.Release.Namespace) -}}
 {{- end -}}
