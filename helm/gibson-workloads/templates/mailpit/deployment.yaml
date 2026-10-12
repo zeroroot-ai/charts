@@ -40,6 +40,20 @@ spec:
         app.kubernetes.io/component: mailpit
         {{- include "gibson.netLabels" (dict "role" "platform") | nindent 8 }}
     spec:
+      # A secure pod (ADR-0165, charts#652): the gibson namespace enforces
+      # the restricted Pod Security level, and the mailpit image names no
+      # user, so the pod names one. mailpit keeps its message store in a
+      # temporary file, so /tmp is an emptyDir and the root is read-only.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: tmp
+          emptyDir: {}
       containers:
         - name: mailpit
           image: "{{ .Values.mailpit.image.repository }}:{{ .Values.mailpit.image.tag }}"
@@ -74,9 +88,12 @@ spec:
             timeoutSeconds: 2
           resources:
             {{- toYaml .Values.mailpit.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false  # mailpit writes its message store at startup
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
             seccompProfile:
