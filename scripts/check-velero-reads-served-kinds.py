@@ -57,6 +57,10 @@ def can(role, group, resource, verb) -> bool:
     return False
 
 
+def missing(role: str, verb: str, group: str, resource: str) -> str:
+    return f"ClusterRole {role} cannot {verb} {resource}.{group}: a Backup that lists it ends PartiallyFailed"
+
+
 def judge(docs) -> list[str]:
     role = cluster_role(docs)
     if role is None:
@@ -65,7 +69,7 @@ def judge(docs) -> list[str]:
     for group, resource in REQUIRED:
         for verb in ("get", "list"):
             if not can(role, group, resource, verb):
-                bad.append(f"ClusterRole {ROLE} cannot {verb} {resource}.{group}: a Backup that lists it ends PartiallyFailed")
+                bad.append(missing(ROLE, verb, group, resource))
     return bad
 
 
@@ -82,10 +86,11 @@ def selftest() -> int:
     broken = copy.deepcopy(docs)
     role = cluster_role(broken)
     for rule in role.get("rules") or []:
-        if "cilium.io" in (rule.get("apiGroups") or []):
+        if any(g == "cilium.io" for g in rule.get("apiGroups") or []):
             rule["resources"] = [r for r in rule.get("resources") or [] if r != "ciliumendpoints"]
-    found = judge(broken)
-    if not any("ciliumendpoints.cilium.io" in f for f in found):
+    found = set(judge(broken))
+    want = {missing(ROLE, verb, "cilium.io", "ciliumendpoints") for verb in ("get", "list")}
+    if found != want:
         print("GUARD BROKEN: a role with no read of ciliumendpoints passed", file=sys.stderr)
         return 2
     if not judge([d for d in docs if d.get("kind") != "ClusterRole"]):
