@@ -35,7 +35,7 @@ metadata:
     app.kubernetes.io/component: tenant-operator-tenant-namespace-rbac
     app.kubernetes.io/part-of: gibson
 rules:
-  # Eight resource families the operator manages inside each tenant
+  # The resource families the operator manages inside each tenant
   # namespace. Verbs are the full CRUD set because the saga both
   # writes (provision) and reads (reconcile / status) every kind.
   - apiGroups: [""]
@@ -45,6 +45,7 @@ rules:
       - services                 # per-tenant DB Services
       - persistentvolumeclaims   # per-tenant DB PVCs
       - resourcequotas           # per-tenant quota
+      - serviceaccounts          # the belief trainer's own ServiceAccount, the k8s:sa: pin of its SPIFFE ID (gibson#1164)
     verbs: [get, list, watch, create, update, patch, delete]
   - apiGroups: ["apps"]
     resources: [statefulsets]    # per-tenant Postgres / Neo4j / Vault / Vector
