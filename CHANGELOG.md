@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.147.0](https://github.com/zeroroot-ai/charts/compare/v0.146.1...v0.147.0) (2026-10-13)
+
+
+### Features
+
+* **dashboard:** pin the dashboard at v0.132.0 ([#676](https://github.com/zeroroot-ai/charts/issues/676)) ([449e199](https://github.com/zeroroot-ai/charts/commit/449e19989662872b4ce25ba2e390b2254463b431)), closes [#674](https://github.com/zeroroot-ai/charts/issues/674)
+* **dashboard:** pin the dashboard at v0.132.1 ([#680](https://github.com/zeroroot-ai/charts/issues/680)) ([6692852](https://github.com/zeroroot-ai/charts/commit/6692852732c3e4f5a39d9262b37752ea64cf9bdd)), closes [#674](https://github.com/zeroroot-ai/charts/issues/674)
+* **gibson:** pin gibson v0.160.2, the tenant-operator carries no SMTP env ([#683](https://github.com/zeroroot-ai/charts/issues/683)) ([1404507](https://github.com/zeroroot-ai/charts/commit/1404507e204c1361f47092fb5e0c781db6810d8d))
+* **guard:** the chart grants the tenant-operator each kind it writes in a tenant namespace ([#677](https://github.com/zeroroot-ai/charts/issues/677)) ([de4ec13](https://github.com/zeroroot-ai/charts/commit/de4ec13c4e2fb8499d1104f09f707de6a07fa3ed)), closes [#640](https://github.com/zeroroot-ai/charts/issues/640)
+
+
+### Bug Fixes
+
+* **airgap:** the list carries the setec launcher and disk builder, and a guard checks each started image ([#669](https://github.com/zeroroot-ai/charts/issues/669)) ([a99d68b](https://github.com/zeroroot-ai/charts/commit/a99d68b18e1ff08c6ce945e3930e3174b04ec6c8))
+* **scripts:** baseline-set-secret reads the value from stdin ([#679](https://github.com/zeroroot-ai/charts/issues/679)) ([9c5f3eb](https://github.com/zeroroot-ai/charts/commit/9c5f3eb01c8364cd6827020d873ebeac85486a31))
+* **secrets:** drop the signup-bot Zitadel token from the secret contract ([#675](https://github.com/zeroroot-ai/charts/issues/675)) ([b9b5124](https://github.com/zeroroot-ai/charts/commit/b9b51241e2b68c1fc0d135150db63f844e302df4)), closes [#674](https://github.com/zeroroot-ai/charts/issues/674)
+* **velero:** the data path pods of a pod volume backup reach the API server and the bucket ([#672](https://github.com/zeroroot-ai/charts/issues/672)) ([36d8ad8](https://github.com/zeroroot-ai/charts/commit/36d8ad8b6c17906b21a09141527d7d002a639ecd)), closes [#671](https://github.com/zeroroot-ai/charts/issues/671)
+
+
+### Performance Improvements
+
+* **check:** make check repacks once and runs its gates in parallel ([#670](https://github.com/zeroroot-ai/charts/issues/670)) ([05bb28f](https://github.com/zeroroot-ai/charts/commit/05bb28f6164affa7f47f859304d0035dab8c2e08))
+
 ## [0.146.1](https://github.com/zeroroot-ai/charts/compare/v0.146.0...v0.146.1) (2026-10-12)
 
 
