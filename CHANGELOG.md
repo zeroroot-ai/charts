@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.148.0](https://github.com/zeroroot-ai/charts/compare/v0.147.0...v0.148.0) (2026-10-13)
+
+
+### Features
+
+* **dashboard:** pin the dashboard at v0.132.2 ([#686](https://github.com/zeroroot-ai/charts/issues/686)) ([58c624b](https://github.com/zeroroot-ai/charts/commit/58c624b0e5b3a1dbcd62746236050b703060c91c))
+
+
+### Bug Fixes
+
+* **airgap:** the dispatch-time images come from the catalog of the pinned gibson release ([#687](https://github.com/zeroroot-ai/charts/issues/687)) ([851417d](https://github.com/zeroroot-ai/charts/commit/851417da4a6901cb467fca8da8439a9d569a10ed))
+* **velero:** the backups leave out CiliumEndpoints, which the Cilium agent writes for each pod ([#684](https://github.com/zeroroot-ai/charts/issues/684)) ([d4b9df1](https://github.com/zeroroot-ai/charts/commit/d4b9df13ac180566a20c08f7033186695bb4b779))
+
 ## [0.147.0](https://github.com/zeroroot-ai/charts/compare/v0.146.1...v0.147.0) (2026-10-13)
 
 
