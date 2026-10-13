@@ -23095,6 +23095,25 @@ spec:
               per-pod fuse only. Per-client quotas (signup, login) are NOT being
               enforced. Check gibson-ratelimit pods, the SPIFFE mTLS sidecar,
               and gibson-redis-stack.
+        # D92: POST /signup fails closed. When the quota service does not
+        # answer, the stage 1 filter refuses the signup with 503 and counts
+        # envoy_cluster_ratelimit_public_signup_error. It never counts
+        # failure_mode_allowed, so the rule above cannot see it.
+        - alert: EdgeSignupQuotaFailingClosed
+          expr: |
+            sum(increase(envoy_cluster_ratelimit_public_signup_error[5m])) > 0
+          for: 2m
+          labels:
+            severity: page
+            component: ratelimit
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/ratelimit.md#edgesignupquotafailingclosed"
+            summary: "Edge signup quota got no answer — signups are refused with 503"
+            description: |
+              The edge Envoy got no quota answer for at least one POST /signup
+              in the last 5 minutes and refused it with 503 (D92: signup fails
+              closed). New signups fail while this lasts. Check gibson-ratelimit
+              pods, the SPIFFE mTLS sidecar, and gibson-redis-stack.
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
 apiVersion: monitoring.coreos.com/v1
