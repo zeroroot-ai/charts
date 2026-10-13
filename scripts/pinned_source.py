@@ -117,7 +117,7 @@ def header_problems(contract_text: str, name: str, pinned: dict[str, str]) -> li
         return [f"{name} describes zeroroot-ai/{repo}, and the chart pins no image of that name"]
     if tag != want:
         return [f"{name} was read at {repo} {tag}, and the chart pins {want}: "
-                f"run `make env-contract-sync config-contract-sync` in the PR that moves the pin"]
+                f"run `make env-contract-sync config-contract-sync operator-rbac-sync` in the PR that moves the pin"]
     return []
 
 
