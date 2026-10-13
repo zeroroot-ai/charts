@@ -11,56 +11,49 @@
 # the backend" is a question every self-hosted install asks, and the answer
 # should not be a paragraph in a runbook.
 #
-# Usage:
-#   scripts/baseline-set-secret.sh <key> <property> <value>
-#   scripts/baseline-set-secret.sh ghcr-pull-secret pat "$GHCR_TOKEN"
-#   scripts/baseline-set-secret.sh ses-smtp-credentials password "$SMTP_PASSWORD"
+# Usage: the value comes on stdin. One trailing newline is removed, nothing
+# else is changed. The script takes exactly two arguments and refuses a third.
+#   printf '%s\n' "$value" | scripts/baseline-set-secret.sh <key> <property>
+#   printf '%s\n' "$GHCR_TOKEN"    | scripts/baseline-set-secret.sh ghcr-pull-secret pat
+#   printf '%s\n' "$SMTP_PASSWORD" | scripts/baseline-set-secret.sh ses-smtp-credentials password
 #
 # Env: NS (default gibson), RELEASE (default gibson)
+#
+# The value travels on stdin at every step: into this script, into the
+# exec'd shell of the pod, and inside the pod into files of a mode-0700
+# directory that the shell removes on exit. It is on no argv of any process,
+# so no process listing, audit log or shell history holds it. The test is
+# tests/baseline-set-secret.bats.
 set -euo pipefail
 
 NS="${NS:-gibson}"
 RELEASE="${RELEASE:-gibson}"
 POD="${RELEASE}-openbao-0"
 
-# --selftest: prove, offline, that a hostile value never becomes shell text
-# inside the pod. A stub kubectl records the argv it was handed and the script
-# it was fed on stdin. The value must reach the stub only as an env argument,
-# and the script text must be the fixed program with no trace of the value.
-if [ "${1:-}" = "--selftest" ]; then
-  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-  mkdir -p "$tmp/bin"
-  cat > "$tmp/bin/kubectl" <<'STUB'
-#!/usr/bin/env bash
-case "$*" in
-  *" exec "*)     printf '%s\n' "$@" > "$STUB_DIR/argv"; cat > "$STUB_DIR/stdin"; printf '200' ;;
-  *"get externalsecrets"*) printf '%s' '{"items":[]}' ;;
-esac
-STUB
-  chmod +x "$tmp/bin/kubectl"
-  hostile="x'; touch /tmp/pwned; echo '"
-  STUB_DIR="$tmp" PATH="$tmp/bin:$PATH" "$0" ghcr-pull-secret pat "$hostile" >/dev/null
-  grep -qF -- "SET_VALUE=$hostile" "$tmp/argv" \
-    || { echo "SELFTEST FAIL: the value did not reach the pod as an env argument"; exit 1; }
-  if grep -qF -- "VAULT_TOKEN=" "$tmp/argv"; then
-    echo "SELFTEST FAIL: a token left the cluster: the pod must log in with its own ServiceAccount"; exit 1
-  fi
-  grep -qF -- "auth/kubernetes/login" "$tmp/stdin" \
-    || { echo "SELFTEST FAIL: the pod script does not log in with the openbao-seeder role"; exit 1; }
-  if grep -qF -- "pwned" "$tmp/stdin"; then
-    echo "SELFTEST FAIL: a caller value is part of the script text the pod runs"; exit 1
-  fi
-  grep -qF -- '$SET_VALUE' "$tmp/stdin" \
-    || { echo "SELFTEST FAIL: the pod script does not read the value from its environment"; exit 1; }
-  echo "OK: baseline-set-secret.sh hands values to the pod as environment, never as script text"
-  exit 0
-fi
+usage() {
+  echo "usage: printf '%s\\n' \"\$value\" | $0 <key> <property>" >&2
+  echo "the value comes on stdin, never as an argument" >&2
+}
 
-if [ "$#" -ne 3 ]; then
-  echo "usage: $0 <key> <property> <value>" >&2
+if [ "$#" -ne 2 ]; then
+  usage
   exit 2
 fi
-KEY="$1"; PROP="$2"; VALUE="$3"
+KEY="$1"; PROP="$2"
+
+if [ -t 0 ]; then
+  echo "FATAL: stdin is a terminal; pipe the value in" >&2
+  usage
+  exit 2
+fi
+VALUE="$(cat; printf x)"
+VALUE="${VALUE%x}"
+VALUE="${VALUE%$'\n'}"
+if [ -z "$VALUE" ]; then
+  echo "FATAL: stdin holds no value" >&2
+  usage
+  exit 2
+fi
 
 # No token leaves the cluster. The exec'd shell runs in the openbao-auto-init
 # sidecar and logs in there with the openbao-seeder role, from the projected
@@ -69,34 +62,43 @@ KEY="$1"; PROP="$2"; VALUE="$3"
 # No consumer token can write an arbitrary KV key: each holds only its own paths.
 # The listener serves only TLS (charts#540). The sidecar sets CURL_CA_BUNDLE to
 # the chart CA, and kubectl exec keeps the container env, so curl verifies it.
-
+#
 # Read-modify-write: a KV v2 write REPLACES the whole object, so writing one
 # property naively would silently drop the others (ses-smtp-credentials holds two).
 #
-# The key, property, value and token travel as ENVIRONMENT of the exec'd
-# shell, never as text of the script it runs. An earlier version expanded
-# them into the heredoc, so a value with a single quote ended the quoting and
-# the rest ran as shell inside the pod that holds the platform's root secret
-# material. Operators paste vendor-issued values into this argument; the
-# script must not care what is in them. The quoted heredoc below contains no
-# expansion at all.
-code="$(kubectl -n "$NS" exec -i "$POD" -c openbao-auto-init -- \
-  env "SET_KEY=$KEY" "SET_PROP=$PROP" "SET_VALUE=$VALUE" sh -s <<'EOF'
+# The key and the property are names. They travel as environment of the
+# exec'd shell. The value travels on its stdin, and inside the pod it lives
+# only in files: the login body, the token header (curl -H @file), the
+# current data and the write body (curl --data-binary @file). jq reads the
+# value with --rawfile. The script text below is fixed: a quoted heredoc with
+# no expansion, so no value of the caller is ever shell text or an argument
+# inside the pod that holds the platform's root secret material.
+POD_SCRIPT="$(cat <<'EOF'
 set -eu
-VAULT_TOKEN=$(jq -nc --arg j "$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" '{role:"openbao-seeder",jwt:$j}' \
-  | curl -sS -X POST -H 'Content-Type: application/json' -d @- \
-    "https://127.0.0.1:8200/v1/auth/kubernetes/login" | jq -r '.auth.client_token // empty')
-[ -n "$VAULT_TOKEN" ] || { echo 000; exit 0; }
-trap 'curl -sS -o /dev/null -X POST -H "X-Vault-Token: $VAULT_TOKEN" https://127.0.0.1:8200/v1/auth/token/revoke-self || true' EXIT
-cur=$(curl -sS -H "X-Vault-Token: $VAULT_TOKEN" \
-  "https://127.0.0.1:8200/v1/secret/data/$SET_KEY" | jq -c '.data.data // {}')
-merged=$(printf '%s' "$cur" | jq -c --arg p "$SET_PROP" --arg v "$SET_VALUE" '.[$p]=$v')
-curl -sS -o /dev/null -w '%{http_code}' -X POST -H "X-Vault-Token: $VAULT_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -nc --argjson d "$merged" '{data:$d}')" \
-  "https://127.0.0.1:8200/v1/secret/data/$SET_KEY"
+umask 077
+BAO="https://127.0.0.1:8200"
+d="$(mktemp -d /tmp/baseline-set-secret.XXXXXX)"
+trap 'rm -rf "$d"' EXIT
+cat > "$d/value"
+jq -Rs -c '{role:"openbao-seeder",jwt:rtrimstr("\n")}' \
+  < "${SA_TOKEN_FILE:-/var/run/secrets/kubernetes.io/serviceaccount/token}" > "$d/login"
+curl -sS -X POST -H 'Content-Type: application/json' --data-binary "@$d/login" \
+  -o "$d/auth" "$BAO/v1/auth/kubernetes/login"
+jq -r '"X-Vault-Token: " + (.auth.client_token // empty)' "$d/auth" > "$d/hdr"
+grep -q 'X-Vault-Token: .' "$d/hdr" || { echo 000; exit 0; }
+trap 'curl -sS -o /dev/null -X POST -H "@$d/hdr" "$BAO/v1/auth/token/revoke-self" || true; rm -rf "$d"' EXIT
+curl -sS -H "@$d/hdr" -o "$d/cur" "$BAO/v1/secret/data/$SET_KEY"
+jq -c --arg p "$SET_PROP" --rawfile v "$d/value" \
+  '{data:((.data.data // {}) | .[$p]=$v)}' "$d/cur" > "$d/body"
+curl -sS -o /dev/null -w '%{http_code}' -X POST -H "@$d/hdr" \
+  -H 'Content-Type: application/json' --data-binary "@$d/body" \
+  "$BAO/v1/secret/data/$SET_KEY"
 EOF
 )"
+
+# printf is a bash builtin: the value reaches kubectl on a pipe, not an argv.
+code="$(printf '%s' "$VALUE" | kubectl -n "$NS" exec -i "$POD" -c openbao-auto-init -- \
+  env "SET_KEY=$KEY" "SET_PROP=$PROP" sh -c "$POD_SCRIPT")"
 case "$code" in
   200|204) ;;
   *) echo "FATAL: writing secret/${KEY} returned HTTP ${code}" >&2; exit 1 ;;

@@ -134,7 +134,7 @@ GHCR_PULL_TOKEN_VALUE="$(keyring_get GHCR_PULL_TOKEN)"
 if [ -n "$GHCR_PULL_TOKEN_VALUE" ]; then
   log "GHCR pull token -> Secret ${NS}/bringup-keyring key ghcr-pull-token (sha256:$(printf '%s' "$GHCR_PULL_TOKEN_VALUE" | sha256sum | cut -c1-16))"
 else
-  log "keyring member GHCR_PULL_TOKEN is empty; first-party images will not pull until scripts/baseline-set-secret.sh ghcr-pull-secret pat <token>"
+  log "keyring member GHCR_PULL_TOKEN is empty; first-party images will not pull until the token is set: printf '%s\\n' \"\$token\" | scripts/baseline-set-secret.sh ghcr-pull-secret pat"
 fi
 kubectl apply --server-side --field-manager=bringup-seed-inputs -f - >/dev/null <<YAML
 apiVersion: v1

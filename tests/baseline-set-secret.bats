@@ -1,0 +1,170 @@
+#!/usr/bin/env bats
+# baseline-set-secret.bats: the operator's value is on no argv, at any level.
+#
+# Three processes see the value: this script, kubectl exec, and the shell
+# inside the pod with its curl and jq. A stub kubectl records its argv and
+# its stdin. The pod script, taken from that recorded argv, then runs here
+# with a stub curl and a recording jq on PATH. The value, the ServiceAccount
+# token and the OpenBao token must appear in no recorded argv, and the KV
+# write body must hold the value byte for byte. A fixture with the value on
+# one argv (the old `env SET_VALUE=...` form) must fail the check.
+
+SCRIPT="$BATS_TEST_DIRNAME/../scripts/baseline-set-secret.sh"
+
+setup() {
+  STUB="$(mktemp -d)"
+  export STUB
+  mkdir -p "$STUB/bin"
+  REAL_JQ="$(command -v jq)"
+  export REAL_JQ
+  # The hostile value: a quote that ends a shell string, a command
+  # substitution, a double quote, a backslash and a second line.
+  HOSTILE="x'; touch /tmp/pwned; echo '\$(id) \"q\" back\\slash
+SECONDLINE-\$HOME"
+  export HOSTILE
+  cat > "$STUB/bin/kubectl" <<'K'
+#!/usr/bin/env bash
+case "$*" in
+  *" exec "*) printf '%s\n' "$@" > "$STUB/kubectl.argv"; cat > "$STUB/kubectl.stdin"; printf '200' ;;
+  *"get externalsecrets"*) printf '%s' '{"items":[]}' ;;
+  *) printf '%s\n' "$@" >> "$STUB/kubectl.other.argv" ;;
+esac
+K
+  # jq: record each argv, then run the real jq.
+  cat > "$STUB/bin/jq" <<'J'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >> "$STUB/jq.argv"
+exec "$REAL_JQ" "$@"
+J
+  # curl: record each argv, answer as OpenBao would, keep the write body.
+  cat > "$STUB/bin/curl" <<'C'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >> "$STUB/curl.argv"
+out=""; body=""; url=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift ;;
+    --data-binary) body="${2#@}"; shift ;;
+    -H) [ "${2#@}" != "$2" ] && cat "${2#@}" >> "$STUB/curl.hdr"; shift ;;
+    http*) url="$1" ;;
+  esac
+  shift
+done
+case "$url" in
+  */login) printf '%s' '{"auth":{"client_token":"s.FAKEBAOTOKEN42"}}' > "$out" ;;
+  */token/revoke-self) ;;
+  */v1/secret/data/*) if [ -n "$body" ]; then cp "$body" "$STUB/write.body"; printf '200'
+                      else printf '%s' '{"data":{"data":{"other":"keep"}}}' > "$out"; fi ;;
+esac
+C
+  chmod +x "$STUB/bin/"*
+  printf 'eyJFAKESATOKEN.payload.sig' > "$STUB/sa-token"
+}
+
+teardown() { rm -rf "$STUB"; }
+
+# no_value_on_argv <argv file>: each line of the value, the SA token and the
+# OpenBao token are absent from the recorded argv.
+no_value_on_argv() {
+  local f="$1" line
+  [ -f "$f" ] || { echo "no argv recorded in $f"; return 1; }
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    if grep -qF -- "$line" "$f"; then echo "value line on argv in $f: $line"; return 1; fi
+  done <<< "$HOSTILE"
+  for tok in eyJFAKESATOKEN s.FAKEBAOTOKEN42 SET_VALUE=; do
+    if grep -qF -- "$tok" "$f"; then echo "$tok on argv in $f"; return 1; fi
+  done
+}
+
+run_script() { PATH="$STUB/bin:$PATH" "$SCRIPT" "$@"; }
+
+# The pod script is the argument of `sh -c`, the last argv of the exec.
+pod_script_from_argv() {
+  python3 -c '
+import sys
+a = open(sys.argv[1]).read().split("\n")
+i = max(k for k in range(1, len(a)) if a[k] == "-c" and a[k - 1] == "sh")
+print("\n".join(a[i + 1:]).rstrip("\n"))' "$STUB/kubectl.argv"
+}
+
+@test "the value reaches kubectl exec on stdin, and no argv holds it" {
+  printf '%s\n' "$HOSTILE" | run_script ghcr-pull-secret pat
+  run no_value_on_argv "$STUB/kubectl.argv"
+  [ "$status" -eq 0 ]
+  grep -qxF -- 'SET_KEY=ghcr-pull-secret' "$STUB/kubectl.argv"
+  grep -qxF -- 'SET_PROP=pat' "$STUB/kubectl.argv"
+  printf '%s' "$HOSTILE" | cmp -s - "$STUB/kubectl.stdin"
+  [ ! -e /tmp/pwned ]
+}
+
+@test "one trailing newline is removed and nothing else" {
+  printf 'v\n\n' | run_script k p
+  printf 'v\n' | cmp -s - "$STUB/kubectl.stdin"
+  printf ' v ' | run_script k p
+  printf ' v ' | cmp -s - "$STUB/kubectl.stdin"
+}
+
+@test "inside the pod the value, the SA token and the OpenBao token are on no argv, and the write holds the value" {
+  printf '%s\n' "$HOSTILE" | run_script ses-smtp-credentials password
+  # The pod script is the last argv of the exec: the argument of sh -c.
+  pod_script="$(pod_script_from_argv)"
+  run bash -c 'printf "%s" "$HOSTILE" | SET_KEY=ses-smtp-credentials SET_PROP=password SA_TOKEN_FILE="$STUB/sa-token" PATH="$STUB/bin:$PATH" sh -c "$1"' _ "$pod_script"
+  [ "$status" -eq 0 ]
+  [ "$output" = "200" ]
+  run no_value_on_argv "$STUB/curl.argv"
+  [ "$status" -eq 0 ]
+  run no_value_on_argv "$STUB/jq.argv"
+  [ "$status" -eq 0 ]
+  # The token reached curl through a header file, and the login through a body file.
+  grep -qF -- 'X-Vault-Token: s.FAKEBAOTOKEN42' "$STUB/curl.hdr"
+  grep -qF -- '--data-binary' "$STUB/curl.argv"
+  # The write body holds the value byte for byte and keeps the other property.
+  "$REAL_JQ" -j '.data.password' "$STUB/write.body" | cmp -s - <(printf '%s' "$HOSTILE")
+  [ "$("$REAL_JQ" -r '.data.other' "$STUB/write.body")" = "keep" ]
+  # The command inside the value never ran.
+  [ ! -e /tmp/pwned ]
+  # The temporary directory of the pod script is gone.
+  [ -z "$(find /tmp -maxdepth 1 -name 'baseline-set-secret.*' -newer "$STUB/sa-token" 2>/dev/null)" ]
+}
+
+@test "FAILING FIXTURE: the old exec form with env SET_VALUE= on the argv fails the check" {
+  printf '%s\n' "env" "SET_KEY=k" "SET_PROP=p" "SET_VALUE=$HOSTILE" "sh" "-s" > "$STUB/old.argv"
+  run no_value_on_argv "$STUB/old.argv"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"value line on argv"* ]]
+}
+
+@test "FAILING FIXTURE: the old in-pod jq --arg form puts the value on the jq argv and fails the check" {
+  printf '%s' "$HOSTILE" | PATH="$STUB/bin:$PATH" sh -c 'jq -nc --arg v "$(cat)" "{v:\$v}"' >/dev/null
+  run no_value_on_argv "$STUB/jq.argv"
+  [ "$status" -eq 1 ]
+}
+
+@test "a third argument is refused with exit 2 and no kubectl call" {
+  run bash -c 'printf "v\n" | PATH="$STUB/bin:$PATH" "$0" k p "secret-on-argv"' "$SCRIPT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"never as an argument"* ]]
+  [ ! -f "$STUB/kubectl.argv" ]
+}
+
+@test "an empty stdin is refused with exit 2 and no kubectl call" {
+  run bash -c 'printf "" | PATH="$STUB/bin:$PATH" "$0" k p' "$SCRIPT"
+  [ "$status" -eq 2 ]
+  [ ! -f "$STUB/kubectl.argv" ]
+  run bash -c 'printf "\n" | PATH="$STUB/bin:$PATH" "$0" k p' "$SCRIPT"
+  [ "$status" -eq 2 ]
+}
+
+@test "a failed login returns 000 and the script exits 1" {
+  cat > "$STUB/bin/curl" <<'C'
+#!/usr/bin/env bash
+out=""; while [ "$#" -gt 0 ]; do [ "$1" = -o ] && out="$2"; shift; done
+[ -n "$out" ] && printf '%s' '{"errors":["permission denied"]}' > "$out"
+C
+  printf '%s\n' "$HOSTILE" | run_script k p
+  pod_script="$(pod_script_from_argv)"
+  run bash -c 'printf "%s" "$HOSTILE" | SET_KEY=k SET_PROP=p SA_TOKEN_FILE="$STUB/sa-token" PATH="$STUB/bin:$PATH" sh -c "$1"' _ "$pod_script"
+  [ "$status" -eq 0 ]
+  [ "$output" = "000" ]
+}
