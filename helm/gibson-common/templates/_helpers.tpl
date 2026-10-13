@@ -1437,7 +1437,7 @@ gibson.zeroroot.ai/kube-api: "true"
 gibson.zeroroot.ai/egress-internet: "true"
 {{- end }}
 {{- with .fqdn }}
-{{- $groups := list "zitadel" "tenant-operator" "cert-manager" "external-dns" "object-store" "external-secrets" }}
+{{- $groups := list "zitadel" "tenant-operator" "cert-manager" "external-dns" "object-store" "external-secrets" "dashboard" }}
 {{- if not (has . $groups) }}
 {{- fail (printf "gibson.netLabels: egress host group %v is not one of %s" . (join ", " $groups)) }}
 {{- end }}
