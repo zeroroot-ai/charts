@@ -19196,6 +19196,15 @@ spec:
         string('gibson.zeroroot.ai/tenant' in variables.labels ? variables.labels['gibson.zeroroot.ai/tenant'] : '')
     - name: pluginNs
       expression: "'tenant-' + variables.t + '-plugins'"
+    # A trainer registration carries the trainer component label and no
+    # plugin label. Each other object is checked as a plugin.
+    - name: trainer
+      expression: >-
+        !('gibson.zeroroot.ai/plugin' in variables.labels)
+          && 'app.kubernetes.io/component' in variables.labels
+          && variables.labels['app.kubernetes.io/component'] == 'belief-trainer'
+    - name: tenantNs
+      expression: "'tenant-' + variables.t"
   validations:
     - expression: variables.managed && variables.oldManaged
       reason: Forbidden
@@ -19204,15 +19213,43 @@ spec:
         app.kubernetes.io/managed-by=gibson-tenant-operator, and changes or
         deletes only its own (gibson#815)
     - expression: >-
+        variables.trainer || (
         variables.v.matches('^[a-z][a-z0-9-]{2,40}$')
           && variables.t.matches('^[a-z0-9]([a-z0-9-]*[a-z0-9])?$') && size(variables.t) <= 48
-          && variables.obj.metadata.name == 'gibson-plugin-' + variables.v + '-' + variables.t
+          && variables.obj.metadata.name == 'gibson-plugin-' + variables.v + '-' + variables.t)
       reason: Forbidden
       message: >-
         a plugin ClusterSPIFFEID is named gibson-plugin-<plugin>-<tenant>, from
         its labels gibson.zeroroot.ai/plugin and gibson.zeroroot.ai/tenant
     - expression: >-
-        request.operation == 'DELETE' || (
+        !variables.trainer || (
+        variables.t.matches('^[a-z0-9]([a-z0-9-]*[a-z0-9])?$') && size(variables.t) <= 48
+          && variables.obj.metadata.name == 'gibson-belief-trainer-' + variables.t)
+      reason: Forbidden
+      message: >-
+        a belief trainer ClusterSPIFFEID is named gibson-belief-trainer-<tenant>,
+        from its label gibson.zeroroot.ai/tenant (gibson#1164)
+    - expression: >-
+        request.operation == 'DELETE' || !variables.trainer || (
+          has(object.spec)
+          && has(object.spec.className) && object.spec.className == "gibson-gibson"
+          && has(object.spec.spiffeIDTemplate)
+          && object.spec.spiffeIDTemplate == "spiffe://zeroroot.ai/trainer/" + variables.t
+          && has(object.spec.namespaceSelector) && has(object.spec.namespaceSelector.matchLabels)
+          && !has(object.spec.namespaceSelector.matchExpressions)
+          && object.spec.namespaceSelector.matchLabels == {'kubernetes.io/metadata.name': variables.tenantNs}
+          && has(object.spec.podSelector) && has(object.spec.podSelector.matchLabels)
+          && !has(object.spec.podSelector.matchExpressions)
+          && object.spec.podSelector.matchLabels == {'app.kubernetes.io/component': 'belief-trainer'}
+          && has(object.spec.workloadSelectorTemplates)
+          && object.spec.workloadSelectorTemplates == ['k8s:ns:' + variables.tenantNs, 'k8s:sa:gibson-belief-trainer'])
+      reason: Forbidden
+      messageExpression: >-
+        'a belief trainer ClusterSPIFFEID of the tenant-operator must name the ID spiffe://zeroroot.ai/trainer/' +
+        variables.t + ', the class gibson-gibson, and select only the trainer pod in ' +
+        variables.tenantNs + ' (gibson#1164)'
+    - expression: >-
+        request.operation == 'DELETE' || variables.trainer || (
           has(object.spec)
           && has(object.spec.className) && object.spec.className == "gibson-gibson"
           && has(object.spec.spiffeIDTemplate)
@@ -19239,7 +19276,7 @@ spec:
           && !has(object.spec.hint) && !has(object.spec.jwtTtl) && !has(object.spec.ttl))
       reason: Forbidden
       message: >-
-        a plugin ClusterSPIFFEID of the tenant-operator sets no DNS name,
+        a ClusterSPIFFEID of the tenant-operator sets no DNS name,
         federation, admin, downstream, fallback, hint or TTL field (gibson#815)
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/namespace-label-admission.yaml
