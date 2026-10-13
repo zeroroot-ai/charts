@@ -39,10 +39,13 @@ binary) that names the images setec pulls at dispatch time: the tool runner,
 the CVE triage agent, the two zerocool sandboxes and the OSV MCP server. None
 of them appears in any `helm template`, so a mirror built from the render
 alone comes up and then dispatches nothing. The `dispatchTime` group is
-derived from those manifests at the gibson commit recorded in
-gibson-catalog.ref. A plain run moves that pin to gibson's current main and
-rewrites the file; `--check` reads the committed pin, so CI is deterministic
-and the pin moves only when the manifest is regenerated (release time).
+derived from those manifests at the commit of the gibson release the chart
+pins: the tag of the ghcr.io/zeroroot-ai/gibson image in the render, resolved
+to its commit. That commit is recorded in gibson-catalog.ref. A plain run
+writes it; `--check` fails when the committed ref is not the commit of the
+pinned tag. The catalog of gibson main is never read: main can name a digest
+that the pinned daemon never dispatches, and an air-gapped install then
+mirrors the wrong image.
 
 DIGESTS ARE NOT RESOLVED HERE. Almost every image is now private
 (ghcr.io/zeroroot-ai/*, including the mirror), so pinning needs registry auth
@@ -349,10 +352,39 @@ def committed_catalog_ref() -> str:
     return ref
 
 
-def current_catalog_ref() -> str:
-    """gibson's main HEAD, the pin a plain run records."""
-    data = json.loads(github_get(f"/repos/{GIBSON_REPO}/commits/main"))
+GIBSON_IMAGE_REPO = "ghcr.io/zeroroot-ai/gibson"
+RELEASE_TAG_RX = re.compile(r"^v\d+\.\d+\.\d+$")
+
+
+def pinned_gibson_tag(by_repo: dict[str, set[str]]) -> str:
+    """The one release tag of the gibson image across every rendered profile.
+    The catalog is read at that release, so the pin must be exactly one tag."""
+    tags = {tag_of(r) for r in by_repo.get(GIBSON_IMAGE_REPO, set())}
+    if not tags:
+        raise SystemExit(f"the render pins no {GIBSON_IMAGE_REPO} image, so no catalog release is known")
+    bad = sorted(t or "(no tag)" for t in tags if not RELEASE_TAG_RX.match(t))
+    if bad:
+        raise SystemExit(f"{GIBSON_IMAGE_REPO} is pinned by {bad}, not by a release tag vX.Y.Z: "
+                         "the catalog is read at the pinned release only")
+    if len(tags) != 1:
+        raise SystemExit(f"{GIBSON_IMAGE_REPO} is pinned at {sorted(tags)} across the profiles: "
+                         "the catalog has one release, so the pin must be one tag")
+    return tags.pop()
+
+
+def tag_commit(tag: str) -> str:
+    """The commit a gibson release tag names."""
+    data = json.loads(github_get(f"/repos/{GIBSON_REPO}/commits/{tag}"))
     return data["sha"]
+
+
+def catalog_ref_problems(committed: str, pinned_tag: str, pinned_commit: str) -> list[str]:
+    """The committed catalog ref must be the commit of the pinned gibson tag."""
+    if committed != pinned_commit:
+        return [f"airgap/gibson-catalog.ref is {committed}, and the chart pins gibson {pinned_tag} "
+                f"at {pinned_commit}: the dispatch-time images must come from the catalog of the "
+                f"pinned release, never from another commit such as gibson main"]
+    return []
 
 
 def catalog_images(ref: str) -> dict[str, set[str]]:
@@ -540,9 +572,8 @@ def build_yaml(version: str, groups: dict[str, list[str]], catalog_ref: str) -> 
     return "\n".join(lines).rstrip() + "\n"
 
 
-def generate(catalog_ref: str) -> tuple[str, str]:
+def generate(by_repo: dict[str, set[str]], catalog_ref: str) -> tuple[str, str]:
     version = chart_version()
-    by_repo = render_images()
     groups: dict[str, list[str]] = {}
     for repo, refs in by_repo.items():
         groups.setdefault(classify(repo), []).extend(sorted(refs))
@@ -553,24 +584,70 @@ def generate(catalog_ref: str) -> tuple[str, str]:
     return build_txt(version, groups), build_yaml(version, groups, catalog_ref)
 
 
+def selftest() -> int:
+    """Offline. Each fixture must give the verdict written beside it."""
+    tag, main_sha, tag_sha = "v0.160.2", "6507c43f" + "0" * 32, "071ec72d" + "0" * 32
+    one = {GIBSON_IMAGE_REPO: {f"{GIBSON_IMAGE_REPO}:{tag}@sha256:" + "a" * 64}}
+    failures = []
+    if pinned_gibson_tag(one) != tag:
+        failures.append("one release tag of the gibson image is not read as the pin")
+    for name, by_repo in (
+        ("two tags across the profiles", {GIBSON_IMAGE_REPO: {f"{GIBSON_IMAGE_REPO}:v0.160.1",
+                                                              f"{GIBSON_IMAGE_REPO}:v0.160.2"}}),
+        ("a digest with no tag", {GIBSON_IMAGE_REPO: {f"{GIBSON_IMAGE_REPO}@sha256:" + "a" * 64}}),
+        ("a mutable tag", {GIBSON_IMAGE_REPO: {f"{GIBSON_IMAGE_REPO}:main"}}),
+        ("no gibson image", {}),
+    ):
+        try:
+            pinned_gibson_tag(by_repo)
+            failures.append(f"{name} was accepted as a pin")
+        except SystemExit:
+            pass
+    if catalog_ref_problems(tag_sha, tag, tag_sha):
+        failures.append("the commit of the pinned tag was refused")
+    if not catalog_ref_problems(main_sha, tag, tag_sha):
+        failures.append("FAILING FIXTURE: a catalog ref taken from gibson main, with the chart "
+                        "pinned at a tag, was accepted")
+    if failures:
+        for f in failures:
+            print(f"[selftest] {f}", file=sys.stderr)
+        return 1
+    print("[airgap-image-list] selftest OK: one release tag is the pin; two tags, an untagged "
+          "digest, a mutable tag and no image fail; a catalog ref from gibson main fails")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--check", action="store_true",
                     help="fail if the committed files differ from a fresh render")
     ap.add_argument("--skip-deps", action="store_true",
                     help="skip `helm dependency update` (only when charts/ is known fresh)")
+    ap.add_argument("--selftest", action="store_true",
+                    help="prove, offline, that a catalog ref other than the pinned release fails")
     args = ap.parse_args(argv)
+
+    if args.selftest:
+        return selftest()
 
     if not args.skip_deps:
         build_dependencies()
 
+    by_repo = render_images()
+    pinned_tag = pinned_gibson_tag(by_repo)
+    pinned_commit = tag_commit(pinned_tag)
     if args.check:
-        catalog_ref = committed_catalog_ref()
+        problems = catalog_ref_problems(committed_catalog_ref(), pinned_tag, pinned_commit)
+        if problems:
+            for msg in problems:
+                print(f"[airgap-image-list] {msg}", file=sys.stderr)
+            print("Regenerate and commit:\n    ./airgap/generate-image-list.py", file=sys.stderr)
+            return 1
     else:
-        catalog_ref = current_catalog_ref()
-        CATALOG_REF.write_text(catalog_ref + "\n", encoding="utf-8")
+        CATALOG_REF.write_text(pinned_commit + "\n", encoding="utf-8")
+    catalog_ref = pinned_commit
 
-    txt, yml = generate(catalog_ref)
+    txt, yml = generate(by_repo, catalog_ref)
 
     if args.check:
         stale = [
