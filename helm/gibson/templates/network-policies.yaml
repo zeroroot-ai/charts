@@ -201,7 +201,7 @@ specs:
           - ports:
               - port: "8201"
                 protocol: TCP
-  - description: "The SPIRE OIDC provider serves its public keys to OpenBao."
+  - description: "The SPIRE OIDC provider serves its public keys to OpenBao and to the connector proxies."
     endpointSelector:
       matchLabels:
         app.kubernetes.io/name: spiffe-oidc-discovery-provider
@@ -214,6 +214,27 @@ specs:
               - port: "8443"
                 protocol: TCP
               - port: "443"
+                protocol: TCP
+      {{- /* The ToolHive proxy of each connector checks the JWT-SVID of the
+             daemon with these keys (gibson#1151). A connector runs in the
+             namespace of its tenant, and only the tenant-operator sets the
+             tenant label on a namespace (namespace-label-admission.yaml). The
+             rule admits the proxy pods of those namespaces only, by the label
+             ToolHive sets on them, and not the MCP server pods, on the HTTPS
+             port only. The connector operator writes the matching egress
+             rule. */}}
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.cilium.k8s.namespace.labels.gibson.zeroroot.ai/managed-by: tenant-operator
+            matchExpressions:
+              - key: k8s:io.kubernetes.pod.namespace
+                operator: Exists
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [mcpserver, mcpremoteproxy]
+        toPorts:
+          - ports:
+              - port: "8443"
                 protocol: TCP
       {{- end }}
   - description: "The clients of the {{ $s.name }} data store reach it."

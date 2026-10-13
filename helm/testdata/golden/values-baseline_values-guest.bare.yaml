@@ -16411,7 +16411,7 @@ specs:
           - ports:
               - port: "8201"
                 protocol: TCP
-  - description: "The SPIRE OIDC provider serves its public keys to OpenBao."
+  - description: "The SPIRE OIDC provider serves its public keys to OpenBao and to the connector proxies."
     endpointSelector:
       matchLabels:
         app.kubernetes.io/name: spiffe-oidc-discovery-provider
@@ -16424,6 +16424,19 @@ specs:
               - port: "8443"
                 protocol: TCP
               - port: "443"
+                protocol: TCP
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.cilium.k8s.namespace.labels.gibson.zeroroot.ai/managed-by: tenant-operator
+            matchExpressions:
+              - key: k8s:io.kubernetes.pod.namespace
+                operator: Exists
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [mcpserver, mcpremoteproxy]
+        toPorts:
+          - ports:
+              - port: "8443"
                 protocol: TCP
   - description: "The clients of the openbao data store reach it."
     endpointSelector:
