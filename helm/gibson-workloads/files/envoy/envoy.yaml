@@ -1551,16 +1551,34 @@ static_resources:
     # (failure_mode_deny: false): an unreachable quota service degrades to the
     # per-pod local_ratelimit fuse, and envoy_ratelimit_failure_mode_allowed
     # counts every request that passed unchecked.
+    #
+    # C50 (hosted substrate run 38460645434): an answered quota call takes
+    # 5 ms or less, and a call that waits for a new connection (TCP, the
+    # SPIFFE mTLS handshake, HTTP/2 setup) ran past the 50 ms filter timeout
+    # and went through unchecked. So the connection, once open, stays open:
+    # no idle timeout closes it, and an HTTP/2 PING keeps it alive and
+    # detects a dead peer, so Envoy opens a new one between calls and not
+    # inside one. preconnect_policy opens the next connection ahead of the
+    # load. The first call after an Envoy or ratelimit pod start still opens
+    # the first connection.
     - name: ratelimit_grpc
       type: STRICT_DNS
       connect_timeout: 1s
       dns_refresh_rate: 5s
       respect_dns_ttl: false
+      preconnect_policy:
+        per_upstream_preconnect_ratio: 1.5
       typed_extension_protocol_options:
         envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
           "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          common_http_protocol_options:
+            # 0s turns the idle timeout off (the default closes after 1 h).
+            idle_timeout: 0s
           explicit_http_config:
-            http2_protocol_options: {}
+            http2_protocol_options:
+              connection_keepalive:
+                interval: 30s
+                timeout: 5s
       transport_socket:
         name: envoy.transport_sockets.tls
         typed_config:

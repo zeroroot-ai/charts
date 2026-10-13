@@ -349,8 +349,11 @@ item whose `-` and whose filter_chain_match the CALLER writes.
                             # → envoy.rateLimit.perClient.appSignupSubmit in the
                             # ratelimit service config. The address is the
                             # socket peer (Client-IP contract), never a header.
+                            # stage 1: the fail-closed signup filter judges
+                            # this entry, and the stage 0 filter skips it (D92).
                             rate_limits:
-                              - actions:
+                              - stage: 1
+                                actions:
                                   - generic_key:
                                       descriptor_key: route
                                       descriptor_value: app_signup_submit
@@ -493,8 +496,10 @@ item whose `-` and whose filter_chain_match the CALLER writes.
                           header: { key: retry-after, value: "{{ .rateLimit.publicBaseline.fillIntervalSeconds }}" }
                   # deploy#1657 — the per-client layer. Calls the
                   # shared ratelimit service (Redis-backed, exact across
-                  # replicas) for every route that carries `rate_limits`
-                  # actions. FAIL-OPEN, and there is no value that changes it:
+                  # replicas) for every route that carries stage 0
+                  # `rate_limits` actions. FAIL-OPEN, and there is no value
+                  # that changes it (POST /signup is the one route that fails
+                  # closed, through the stage 1 filter below, D92):
                   # an unreachable quota service degrades to the local fuse
                   # above, and envoy_ratelimit_failure_mode_allowed counts the
                   # requests that passed unchecked. Deny-on-error would turn a
@@ -511,6 +516,34 @@ item whose `-` and whose filter_chain_match the CALLER writes.
                       failure_mode_deny: false
                       enable_x_ratelimit_headers: DRAFT_VERSION_03
                       stat_prefix: public_per_client
+                      rate_limit_service:
+                        transport_api_version: V3
+                        grpc_service:
+                          envoy_grpc:
+                            cluster_name: ratelimit_grpc
+                  # D92 — POST /signup FAILS CLOSED. Signup is an abuse surface
+                  # with low volume: each accepted POST mints a tenant, a
+                  # Stripe customer and an email. A slow or absent quota answer
+                  # must refuse a signup, not let a flood through. The stage 0
+                  # filter above cannot do that per route (failure_mode_deny
+                  # is a field of the filter), so this second filter judges
+                  # only the rate_limits entries with stage 1, which only the
+                  # signup route carries. Its timeout is sized from the
+                  # measured latency (values.yaml envoy.rateLimit.perClient.
+                  # signupTimeoutMs). A refusal for an unanswered call is 503,
+                  # so a client retries it and it never reads as the quota.
+                  - name: envoy.filters.http.ratelimit.signup
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ratelimit.v3.RateLimit
+                      domain: {{ .rateLimit.perClient.domain }}
+                      stage: 1
+                      request_type: external
+                      timeout: {{ divf .rateLimit.perClient.signupTimeoutMs 1000 }}s
+                      failure_mode_deny: true
+                      status_on_error:
+                        code: ServiceUnavailable
+                      enable_x_ratelimit_headers: DRAFT_VERSION_03
+                      stat_prefix: public_signup
                       rate_limit_service:
                         transport_api_version: V3
                         grpc_service:

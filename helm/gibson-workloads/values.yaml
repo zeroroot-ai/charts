@@ -1595,7 +1595,8 @@ envoy:
     #
     # Fail-open by construction, not by knob: envoy.filters.http.ratelimit is
     # rendered with failure_mode_deny: false and there is no value that
-    # changes it. When the service is unreachable the fuse still holds and
+    # changes it. The one exception is POST /signup, which a second filter
+    # judges with failure_mode_deny: true (D92, signupTimeoutMs below). When the service is unreachable the fuse still holds and
     # envoy_ratelimit_failure_mode_allowed counts every request that passed
     # unchecked (templates/ratelimit/alertrule.yaml pages on it).
     # -------------------------------------------------------------------------
@@ -1603,7 +1604,21 @@ envoy:
       # The ratelimit service's config domain. One domain for the whole edge.
       domain: gibson-edge
       # How long Envoy waits for the quota decision before failing open.
-      timeoutMs: 50
+      # 250 ms, not 50 (D92, C50): a call that waits for a new SPIFFE mTLS
+      # connection to the ratelimit service ran past 50 ms and went through
+      # unchecked (hosted substrate run 38460645434). 250 ms is meant to fit
+      # the TCP connect and the TLS handshake. The substrate exit test prints
+      # the connect time and asserts that no call fails open; a cold call
+      # above 250 ms there raises this value to the measured number.
+      timeoutMs: 250
+      # How long Envoy waits for the quota decision of POST /signup before it
+      # REFUSES the signup with 503 (D92: that route fails closed). Measured
+      # on kind (hosted substrate run 38460645434): an answered call takes
+      # 5 ms or less, and a call that waits for a new SPIFFE mTLS connection
+      # to the ratelimit service runs past 50 ms. 1000 ms covers the
+      # handshake on a loaded node with a wide margin, and a signup already
+      # blocks for minutes, so the wait is not visible to a person.
+      signupTimeoutMs: 1000
       # POST /signup on the app vhost, by client address. Signup is once per
       # human; five a minute from one address is already a script.
       appSignupSubmit:
