@@ -83,8 +83,10 @@ rules:
   # in five namespaces). Kubernetes 1.37 serves resourceclaims and
   # resourceclaimtemplates (dynamic resource allocation) and
   # podcertificaterequests. Cilium, the network plugin of every substrate
-  # (D76), serves its policies, endpoints and node configs. None of these
-  # carries a credential.
+  # (D76), serves its policies and node configs. None of these carries a
+  # credential. CiliumEndpoints are not read: the Schedule excludes them,
+  # because the agent writes one for each pod (backup-restore run
+  # 38400223835).
   - apiGroups: ["resource.k8s.io"]
     resources: ["resourceclaims", "resourceclaimtemplates"]
     verbs: ["get", "list", "watch"]
@@ -92,7 +94,7 @@ rules:
     resources: ["podcertificaterequests"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["cilium.io"]
-    resources: ["ciliumnetworkpolicies", "ciliumendpoints", "ciliumnodeconfigs"]
+    resources: ["ciliumnetworkpolicies", "ciliumnodeconfigs"]
     verbs: ["get", "list", "watch"]
   # events.k8s.io is the SAME objects as the core `events` above, served under
   # a second group. The item collector asks discovery for every namespaced

@@ -136,6 +136,13 @@ spec:
       # 2026-09-27: 12 errors in platform-hourly-20260927150028.
       - "*.helm.cattle.io"
       - "*.k3s.cattle.io"
+      # Cilium writes one CiliumEndpoint for each pod, and writes it again
+      # when the pod comes back. A restore that creates one is wrong twice:
+      # the agent owns it, and the role may not create it. Backup-restore
+      # run 38400223835 ended PartiallyFailed on exactly that item
+      # ("ciliumendpoints.cilium.io is forbidden ... cannot create"), with
+      # every volume restored.
+      - ciliumendpoints.cilium.io
     includedClusterScopedResources:
       - tenants.gibson.zeroroot.ai
     defaultVolumesToFsBackup: true
