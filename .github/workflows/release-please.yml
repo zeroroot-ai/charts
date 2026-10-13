@@ -90,8 +90,8 @@ jobs:
       # No --skip-deps, matching ci.yml's airgap-image-list job: charts/*.tgz
       # is gitignored, so a fresh checkout has no packaged dependencies and the
       # generator must build them. GH_TOKEN lifts the GitHub API rate limit
-      # for the gibson component-catalog read; a plain run also moves
-      # airgap/gibson-catalog.ref to gibson's current main.
+      # for the gibson component-catalog read; a plain run writes
+      # airgap/gibson-catalog.ref as the commit of the gibson tag the chart pins.
       - name: Regenerate the air-gap image manifest
         env:
           GH_TOKEN: ${{ github.token }}
