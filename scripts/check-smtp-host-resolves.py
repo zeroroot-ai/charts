@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""check-smtp-host-resolves.py — an in-cluster SMTP_HOST names a Service the release renders.
+"""check-smtp-host-resolves.py — an in-cluster SMTP host names a Service the release renders.
 
-The tenant-operator's SMTP_HOST default was the literal
-"gibson-workloads-mailpit". The Service the workloads chart renders is named
+The daemon dials the relay of global.email as GIBSON_SMTP_HOST. The
+tenant-operator sends no mail since gibson#1122, so the daemon is the one
+in-cluster dialer the chart renders. The tenant-operator's SMTP_HOST default
+was once the literal "gibson-workloads-mailpit". The Service the workloads chart renders is named
 from the release: "gibson-mailpit" for `helm install gibson`. So the default
 named nothing, and every welcome email on a kind install failed:
 
@@ -31,22 +33,23 @@ import yaml
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKLOADS = ("Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob")
 NAMESPACE = "gibson"
-HOST_ENVS = ("SMTP_HOST",)
+HOST_ENVS = ("GIBSON_SMTP_HOST",)
 
 
 def render() -> list[dict]:
-    """The baseline, with the in-cluster sink switched on.
+    """The CI profile: the one render where the dialer and the sink both exist.
 
-    mailpit defaults off and only values-kind.yaml flips it on, so the
-    baseline alone renders no mailpit Service and the operator's default
-    host is inert there. The agreement this guard polices is between the
-    dialer and the Service, so it renders the profile where both exist.
+    The baseline alone sends with provider log, so the daemon renders no
+    SMTP host there, and the mailpit sink is off. values-ci.yaml switches the
+    sink on and points global.email.smtp.host at it through the
+    gibson.mailpit.host helper. The agreement this guard polices is between
+    that dialer and the Service, so it renders the profile where both exist.
     """
     out = subprocess.run(
         ["helm", "template", "gibson", "helm/gibson",
          "-f", "helm/gibson/values-baseline.yaml",
+         "-f", "helm/gibson/values-ci.yaml",
          "-f", "helm/testdata/render-inputs/gibson.yaml",
-         "--set", "gibson-workloads.mailpit.enabled=true",
          "--namespace", NAMESPACE],
         cwd=ROOT, capture_output=True, text=True, check=True,
     ).stdout
@@ -107,19 +110,19 @@ def selftest() -> int:
     def workload(env_value: str) -> dict:
         return {"kind": "Deployment", "metadata": {"name": "planted"},
                 "spec": {"template": {"spec": {"containers": [
-                    {"name": "c", "env": [{"name": "SMTP_HOST", "value": env_value}]}]}}}}
+                    {"name": "c", "env": [{"name": HOST_ENVS[0], "value": env_value}]}]}}}}
 
     # A bare host no Service answers must fail. This is charts#114 itself.
     planted = docs + [workload("gibson-workloads-mailpit")]
     if not any("gibson-workloads-mailpit" in p for p in check(planted)):
-        print("::error::[selftest] a dangling in-cluster SMTP_HOST was not caught")
+        print("::error::[selftest] a dangling in-cluster host was not caught")
         failures += 1
 
     # A bare host backed by a Service must pass.
     if services:
         planted = docs + [workload(services[0])]
         if any("planted" in p for p in check(planted)):
-            print(f"::error::[selftest] a Service-backed SMTP_HOST ({services[0]}) was wrongly flagged")
+            print(f"::error::[selftest] a Service-backed host ({services[0]}) was wrongly flagged")
             failures += 1
 
     # An external relay is out of scope, in every shape a substrate uses.
@@ -130,7 +133,7 @@ def selftest() -> int:
 
     # An unset host is not a dangling one.
     if any("planted" in p for p in check(docs + [workload("")])):
-        print("::error::[selftest] an empty SMTP_HOST was wrongly flagged")
+        print("::error::[selftest] an empty host was wrongly flagged")
         failures += 1
 
     if failures:

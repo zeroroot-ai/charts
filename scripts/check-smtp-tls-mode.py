@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""check-smtp-tls-mode.py — the tenant operator's SMTP transport is a named mode.
+"""check-smtp-tls-mode.py — the SMTP transport of global.email is a named mode.
 
 The mode is global.email.smtp.tlsMode, part of the one mail value (hosted#223).
 
@@ -33,8 +33,10 @@ the delivery.
 WHAT THIS ASSERTS
 
 The render is where a typo must die, because the alternative is a pod that
-crash-loops on an operator-side refusal. So: each of the three modes renders its
-own SMTP_TLS_MODE, an unknown one fails the render naming all three, and
+crash-loops on an operator-side refusal. The tenant-operator sends no mail since
+gibson#1122, so the mode reaches the render as the Zitadel SMTP setting of the
+PlatformBootstrap (spec.zitadel.smtp.tls, false only for plaintext). So: each of
+the three modes renders that setting, an unknown one fails the render naming all three, and
 `plaintext` with a credential fails — that pair can never deliver, since net/smtp
 refuses PlainAuth over a cleartext non-localhost link, and failing here says why
 a deploy earlier than the operator would.
@@ -64,7 +66,9 @@ SMTP = ("global.email.provider=smtp", "global.email.from=no-reply@example.test",
 CRED = (f"{SOURCE}=secretStore", "global.email.smtp.credentials.remoteKey=ses-smtp-credentials")
 ANON = (f"{SOURCE}=none",)
 MODES = ("starttls", "implicit", "plaintext")
-ENV = "SMTP_TLS_MODE"
+# The one rendered consumer of the mode: the Zitadel SMTP setting of the
+# PlatformBootstrap. tls is false only for plaintext.
+PB_KIND = "PlatformBootstrap"
 
 
 def fail(msg: str) -> None:
@@ -83,21 +87,20 @@ def render(*sets: str, smtp: bool = True) -> tuple[int, str, str]:
 
 
 def mode_env(stdout: str) -> list[str]:
-    """Every value SMTP_TLS_MODE is given across the whole render."""
+    """The mode each PlatformBootstrap of the render carries, as "plaintext" when
+    its Zitadel SMTP tls is false and "tls" when it is true."""
     out = []
     for doc in yaml.safe_load_all(stdout):
-        if not doc:
+        if not doc or doc.get("kind") != PB_KIND:
             continue
-        for container in _containers(doc):
-            for e in container.get("env") or []:
-                if e.get("name") == ENV:
-                    out.append(e.get("value"))
+        smtp = (((doc.get("spec") or {}).get("zitadel") or {}).get("smtp") or {})
+        if "tls" in smtp:
+            out.append("plaintext" if smtp["tls"] is False else "tls")
     return out
 
 
-def _containers(doc: dict) -> list[dict]:
-    spec = (((doc.get("spec") or {}).get("template") or {}).get("spec") or {})
-    return list(spec.get("containers") or []) + list(spec.get("initContainers") or [])
+def want(mode: str) -> list[str]:
+    return ["plaintext" if mode == "plaintext" else "tls"]
 
 
 def check_mode(mode: str) -> None:
@@ -105,11 +108,11 @@ def check_mode(mode: str) -> None:
     if rc != 0:
         fail(f"{mode!r} is a valid mode and the render refused it:\n{err[-800:]}")
     got = mode_env(out)
-    if got != [mode]:
+    if got != want(mode):
         fail(
-            f"with tlsMode={mode!r} the render sets {ENV} to {got}, want exactly [{mode!r}]. "
-            f"One operator reads this; more than one value or none means the env block and "
-            f"the mode have come apart."
+            f"with tlsMode={mode!r} the render sets the Zitadel SMTP tls of the {PB_KIND} to {got}, "
+            f"want exactly {want(mode)}. One PlatformBootstrap reads this; more than one value or "
+            f"none means the Zitadel SMTP block and the mode have come apart."
         )
 
 
@@ -154,7 +157,7 @@ def check_plaintext_without_username() -> None:
             f"no reachable transport, which is what gibson#574 fixed:\n{err[-500:]}"
         )
     if mode_env(out) != ["plaintext"]:
-        fail(f"plaintext alone did not reach the pod: {ENV}={mode_env(out)}")
+        fail(f"plaintext alone did not reach the {PB_KIND}: {mode_env(out)}")
 
 
 def main() -> None:
@@ -174,9 +177,9 @@ def main() -> None:
             fail("selftest: the enum is case-insensitive, so the unknown-mode assertion "
                  "cannot distinguish a typo")
         rc, out, _ = render(smtp=False)
-        if mode_env(out) != ["plaintext"]:
-            fail(f"selftest: the shipped default (provider log, the mailpit sink) is "
-                 f"{mode_env(out)}, not ['plaintext'], so the per-mode assertion has no baseline")
+        if mode_env(out) != []:
+            fail(f"selftest: the shipped default (provider log) gives Zitadel no SMTP provider, "
+                 f"so the {PB_KIND} must carry no SMTP tls setting, and it carries {mode_env(out)}")
         rc, _, err = render(f"{KEY}=implicit", *CRED)
         if rc != 0:
             fail(f"selftest: implicit WITH a username was refused, so the pair refusal is not "
@@ -184,7 +187,7 @@ def main() -> None:
         print("check-smtp-tls-mode: selftest OK — a cased variant, the shipped default and "
               "an encrypted mode with a username each behave differently")
 
-    print("check-smtp-tls-mode: starttls, implicit and plaintext each reach the pod; an "
+    print("check-smtp-tls-mode: starttls, implicit and plaintext each reach the PlatformBootstrap; an "
           "unknown mode fails the render naming all three; plaintext with a username fails "
           "and plaintext alone does not")
 

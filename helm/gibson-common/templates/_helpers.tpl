@@ -34,11 +34,14 @@ mailer.RequireDelivering gate on kind. Disabled outside kind
 (mailpit.enabled: false).
 
 It lives here, not in gibson-workloads, because two charts name it: the
-workloads chart renders the Service, and the operators chart's
-tenant-operator dials it as its default SMTP_HOST. The operators chart used
-to hardcode "gibson-workloads-mailpit", which is a Service no release
-renders — the name is keyed off the RELEASE name, so it is "gibson-mailpit"
-for every install (charts#114). One definition, two callers.
+workloads chart renders the Service, and the umbrella's CI and developer
+profiles point global.email.smtp.host at it, which gibson.email renders
+into the daemon's GIBSON_SMTP_HOST. The tenant-operator once hardcoded
+"gibson-workloads-mailpit" as its SMTP_HOST, a Service no release renders:
+the name is keyed off the RELEASE name, so it is "gibson-mailpit" for every
+install (charts#114). The tenant-operator sends no mail since gibson#1122.
+One definition, two callers, and scripts/check-smtp-host-resolves.py holds
+the agreement between the dialer and the Service.
 
 Values read: none. Derived from .Release.Name.
 */}}

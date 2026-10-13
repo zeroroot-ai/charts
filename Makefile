@@ -85,7 +85,7 @@ cnpg-netpol-covers-jobs: ## Every pod CNPG creates, bootstrap Jobs included, rea
 values-no-duplicate-keys: ## No values file declares a key twice (YAML keeps the last and drops the first, silently)
 	@./scripts/check-values-no-duplicate-keys.sh
 
-smtp-host-resolves: ## An in-cluster SMTP_HOST names a Service the release renders (charts#114)
+smtp-host-resolves: ## An in-cluster GIBSON_SMTP_HOST of the daemon names a Service the release renders (charts#114)
 	@./scripts/check-smtp-host-resolves.py --selftest
 
 .PHONY: no-pinned-addressing
@@ -312,7 +312,7 @@ email-smtp-external-secret: ## The daemon's SMTP ExternalSecret renders only wit
 	@python3 scripts/check-email-smtp-external-secret.py --selftest
 	@python3 scripts/check-email-smtp-external-secret.py
 
-smtp-tls-mode: ## The tenant operator's SMTP transport is one of three named modes, and plaintext with a username fails the render (gibson#561, gibson#574)
+smtp-tls-mode: ## The SMTP transport of global.email is one of three named modes that reach the PlatformBootstrap, an unknown one fails the render, and plaintext with a credential fails (gibson#561, #574)
 	@python3 scripts/check-smtp-tls-mode.py --selftest
 	@python3 scripts/check-smtp-tls-mode.py
 
