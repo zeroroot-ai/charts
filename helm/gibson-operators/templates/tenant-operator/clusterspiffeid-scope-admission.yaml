@@ -126,11 +126,14 @@ spec:
     - expression: >-
         !variables.trainer || (
         variables.t.matches('^[a-z0-9]([a-z0-9-]*[a-z0-9])?$') && size(variables.t) <= 48
+          && !variables.t.endsWith('-plugins')
           && variables.obj.metadata.name == 'gibson-belief-trainer-' + variables.t)
       reason: Forbidden
       message: >-
         a belief trainer ClusterSPIFFEID is named gibson-belief-trainer-<tenant>,
-        from its label gibson.zeroroot.ai/tenant (gibson#1164)
+        from its label gibson.zeroroot.ai/tenant, and the tenant does not end in
+        -plugins, so it never selects the plugin namespace of another tenant
+        (gibson#1164)
     - expression: >-
         request.operation == 'DELETE' || !variables.trainer || (
           has(object.spec)
