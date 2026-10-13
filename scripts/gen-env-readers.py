@@ -23,6 +23,12 @@ reads 27 literal names, and that is checked by this script finding them.
 
   gen-env-readers.py --write            refresh helm/contracts/
   gen-env-readers.py --check            exit 1 when the committed copy is stale
+  gen-env-readers.py --write docs-site  refresh one service's contract only
+
+Naming services limits the run to them. The version fan-out of one service
+(zeroroot-ai/.github#275) clones only that service beside this checkout, so
+it refreshes only that contract. Each service still goes through the same
+pinned-tag read below.
 """
 from __future__ import annotations
 
@@ -159,10 +165,15 @@ def main() -> int:
     if not (write or check):
         print(__doc__)
         return 2
+    named = [a for a in sys.argv[1:] if not a.startswith("-")]
+    unknown = [n for n in named if n not in SERVICES]
+    if unknown:
+        print(f"::error::no service named {', '.join(unknown)}; known: {', '.join(sorted(SERVICES))}")
+        return 2
     OUT.mkdir(parents=True, exist_ok=True)
     stale: list[str] = []
     missing: list[str] = []
-    for service in sorted(SERVICES):
+    for service in sorted(named or SERVICES):
         repo_name = SERVICES[service]["repo"]
         tag = pinned_tag(repo_name)
         with tree_at(repo_name, tag) as tree:
