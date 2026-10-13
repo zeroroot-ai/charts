@@ -34,6 +34,14 @@ A host in the cluster (a name with no dot, or a name under .svc or
                    repository is on ECR: the ECRAuthorizationToken generator
                    of the disk builder push credential (charts#574).
                    Nothing for another registry.
+  dashboard        The HIBP Pwned Passwords range API, api.pwnedpasswords.com
+                   on 443, when gibson-workloads.dashboard.auth.hibp.enabled
+                   is true: the breached-password check of signup and
+                   password reset sends the first five characters of a
+                   SHA-1 and nothing else (k-anonymity). No other host: the
+                   dashboard reaches every other service inside the cluster
+                   or through the edge. Nothing when the check is off
+                   (hosted#724).
   <name>           Each group of global.networkPolicy.egressHostGroups: the
                    hosts that the values of the install name, for a pod that
                    another chart of the install deploys. Each entry is a URL,
@@ -153,7 +161,13 @@ only.
 {{- $eso = append $eso (dict "matchName" (printf "api.ecr.%s.amazonaws.com" $ecr.region) "ports" $https) -}}
 {{- end -}}
 
-{{- $groups := dict "zitadel" $zitadel "tenant-operator" $to "cert-manager" $cm "external-dns" $dns "object-store" $obj "external-secrets" $eso -}}
+{{- /* dashboard: the HIBP range API of the breached-password check. */ -}}
+{{- $dash := list -}}
+{{- if ((($wl.dashboard | default dict).auth | default dict).hibp | default dict).enabled -}}
+{{- $dash = append $dash (dict "matchName" "api.pwnedpasswords.com" "ports" $https) -}}
+{{- end -}}
+
+{{- $groups := dict "zitadel" $zitadel "tenant-operator" $to "cert-manager" $cm "external-dns" $dns "object-store" $obj "external-secrets" $eso "dashboard" $dash -}}
 
 {{- /* The groups that the values of the install name. */ -}}
 {{- range $name, $entries := ((.Values.global).networkPolicy | default dict).egressHostGroups | default dict -}}

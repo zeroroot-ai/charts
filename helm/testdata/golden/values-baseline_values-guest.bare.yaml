@@ -8226,6 +8226,7 @@ spec:
         gibson.zeroroot.ai/net-role: platform
         gibson.zeroroot.ai/client-postgres: "true"
         gibson.zeroroot.ai/client-redis: "true"
+        gibson.zeroroot.ai/egress-fqdn: dashboard
         gibson.zeroroot.ai/metrics-port: "9464"
       annotations:
         # Velero fs-backup (defaultVolumesToFsBackup on the shipped Schedule)
@@ -16511,6 +16512,47 @@ spec:
           rules:
             dns:
               - matchPattern: '*'
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-egress-fqdn-dashboard
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-egress-fqdn
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Pods of the dashboard egress group resolve and reach only these host names, on their ports."
+  endpointSelector:
+    matchLabels:
+      gibson.zeroroot.ai/egress-fqdn: dashboard
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchName: api.pwnedpasswords.com
+    - toFQDNs:
+        - matchName: api.pwnedpasswords.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
 ---
 # Source: gibson/templates/network-policies.yaml
 apiVersion: cilium.io/v2
