@@ -452,11 +452,6 @@ spec:
                   key: "password"
             {{- end }}
             {{- end }}
-            # Provider catalogue hot-reload path (spec: gibson#296).
-            # When set, the daemon reads the operator-mounted YAML instead of
-            # the embedded copy and hot-reloads it every 5 minutes.
-            - name: GIBSON_PROVIDERS_CATALOGUE_PATH
-              value: {{ ((.Values.gibson.providers).cataloguePath) | default "/etc/gibson-providers/provider-catalogue.yaml" | quote }}
             {{- /* HMAC env var removed — Spec 3 R14 dead-mount cleanup. The
                    identity-header signing path is now SPIFFE-mTLS, not HMAC;
                    the daemon's interceptor verifies peer cert URI SAN against
@@ -860,18 +855,6 @@ spec:
               readOnly: true
             # The OpenFGA preshared key (charts#637).
             {{- include "gibson.fgaKey.mount" $ | nindent 12 }}
-            # Provider catalogue hot-reload mount (spec: gibson#296).
-            # The daemon reads GIBSON_PROVIDERS_CATALOGUE_PATH and polls
-            # this file every 5 minutes; mtime changes trigger an in-process
-            # catalogue swap without a restart.  See
-            # templates/gibson/provider-catalogue-cm.yaml.
-            # NOTE: mounted at /etc/gibson-providers/ (not inside /etc/gibson/)
-            # because subPath file mounts inside an already-mounted directory
-            # cause ENOTDIR in runc — the config volume occupies /etc/gibson.
-            - name: provider-catalogue
-              mountPath: /etc/gibson-providers/provider-catalogue.yaml
-              subPath: provider-catalogue.yaml
-              readOnly: true
           livenessProbe:
             httpGet:
               path: /healthz
@@ -992,13 +975,6 @@ spec:
           csi:
             driver: csi.spiffe.io
             readOnly: true
-        # Provider catalogue ConfigMap (spec: gibson#296).
-        # Mounted at /etc/gibson-providers/provider-catalogue.yaml (outside /etc/gibson)
-        # so the daemon can hot-reload the model list via GIBSON_PROVIDERS_CATALOGUE_PATH.
-        - name: provider-catalogue
-          configMap:
-            name: {{ include "gibson.fullname" . }}-provider-catalogue
-            defaultMode: 0444
         {{- /* identity-hmac volume removed — Spec 3 R14. SPIFFE-mTLS replaces HMAC. */}}
         {{- if eq (include "gibson.envoyEdge.caRequired" .) "true" }}
         - name: envoy-ca

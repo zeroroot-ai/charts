@@ -339,7 +339,7 @@ gibson:
     # on the SPIRE socket — so the fga-init Job hangs in dump-model until
     # its deadline and the whole install wedges. Verified on this digest:
     # `gibson dump-fga-model` exits 0 in under a second with the model.
-    tag: "v0.160.4@sha256:bfd63650b87f67132dab17b5579fb5373c9ce31720f4d9c73ce6456ee1998c54"
+    tag: "v0.161.0@sha256:378a3f1831b2853a27a55327c370ae78a3a3d6ab7bc3222b06afb0f27bdd85f1"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     # Empty by default: first-party pins are hand-committed in the combined
@@ -581,23 +581,6 @@ gibson:
       # empty class defers to the cluster default and can silently downgrade
       # isolation, so the daemon defaults empty to `tool`.
       sandboxClass: "tool"
-
-  # ---------------------------------------------------------------------------
-  # Provider catalogue hot-reload (spec: gibson#296)
-  # ---------------------------------------------------------------------------
-  # The daemon reads GIBSON_PROVIDERS_CATALOGUE_PATH at startup and polls the
-  # file every 5 minutes, swapping in a new catalogue whenever the file mtime
-  # changes.  On parse error the previous catalogue is retained.
-  #
-  # cataloguePath points at the file mounted from the provider-catalogue
-  # ConfigMap (templates/gibson/provider-catalogue-cm.yaml).  Operators can
-  # update the model list by pushing a new ConfigMap (via gitops) and waiting
-  # for the daemon's next 5-minute poll — no restart required.
-  #
-  # Override to "" to fall back to the binary-embedded catalogue (static; never
-  # hot-reloaded).
-  providers:
-    cataloguePath: /etc/gibson-providers/provider-catalogue.yaml
 
 # -----------------------------------------------------------------------------
 # IdP (Identity Provider) admin credentials
@@ -1289,7 +1272,7 @@ extAuthz:
     # EXT_AUTHZ_CGJWT_KEYS_URL. It moves in lockstep with the daemon pin above
     # and with the https/:8086 value in ext-authz/deployment.yaml (deploy#1386)
     # — the three are one change, in both directions.
-    tag: "v0.160.4@sha256:37a3e9027faeac738fe5dc8c561b58f78ca18b651289ac686bc3f33185ada214"
+    tag: "v0.161.0@sha256:1361b1c9637ae64606e1c798eab8fd684c53c4aa3ea904973080db9ada9658cb"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
