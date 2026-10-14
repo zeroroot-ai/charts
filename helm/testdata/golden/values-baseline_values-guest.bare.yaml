@@ -18813,7 +18813,10 @@ spec:
       messageExpression: >-
         'in a tenant namespace only the tenant-operator writes the belief trainer CronJob, and only the' +
         ' built-in controllers derive its Job and pods; ' + variables.user + ' may not write a ' +
-        variables.resource + ' that claims the trainer identity in ' + request.namespace + ' (gibson#1170)'
+        variables.resource + ' that claims the trainer identity in ' + request.namespace + ' (gibson#1170)' +
+        (variables.resource == 'jobs'
+          ? '. A manual trainer run needs --as-group system:masters, and the tenant-operator writes the per-tenant trainer identity.'
+          : '')
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/frontend-scope-policy.yaml
 apiVersion: admissionregistration.k8s.io/v1
