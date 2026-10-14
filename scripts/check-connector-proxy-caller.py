@@ -46,7 +46,9 @@ def judge(dep: dict) -> list[str]:
 
 def jwks_names_a_service(url: str) -> bool:
     """The rule of gibson operators/connector ProxyAuth.IssuerNamespace."""
-    host = urlparse(url).hostname or ""
+    # Go's url.Hostname keeps the case, Python's hostname lowers it: read
+    # the netloc so "SVC" fails here as it fails in the operator.
+    host = urlparse(url).netloc.rsplit("@", 1)[-1].split(":", 1)[0]
     labels = host.split(".") if host else []
     return len(labels) >= 3 and labels[0] != "" and labels[1] != "" and labels[2] == "svc"
 
@@ -89,6 +91,9 @@ def selftest() -> int:
         return 1
     if judge(dep(**dict(good, CONNECTOR_PROXY_JWKS_URL="https://p.ns.svc/keys"))):
         print("SELFTEST FAIL: <service>.<namespace>.svc with no cluster domain must pass")
+        return 1
+    if len(judge(dep(**dict(good, CONNECTOR_PROXY_JWKS_URL="https://p.ns.SVC/keys")))) != 1:
+        print("SELFTEST FAIL: an upper-case svc label must fail, as the operator refuses it")
         return 1
     print("  ✓ selftest: each missing value, an http JWKS and a short JWKS host fail; the complete env passes")
     return 0

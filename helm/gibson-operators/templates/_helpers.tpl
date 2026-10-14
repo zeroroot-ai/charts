@@ -72,3 +72,17 @@ password
 {{- define "gibson.tenantPostgres.sslMode" -}}
 {{- include "gibson.platformPostgres.sslMode" . -}}
 {{- end }}
+
+{{/*
+gibson-operators.spireOidcJwksURL: the JWKS URL of the SPIRE OIDC provider.
+An overlay value (vault.jwtAuth.spireOidcJwksURL) wins. The default names the
+provider Service of this release in full, with the cluster domain the provider
+itself reads (global.k8s.clusterDomain, default cluster.local). The issuer
+stays the short host because it is the iss claim. The connector-operator
+reads the provider namespace from this URL and refuses any host that is not
+<service>.<namespace>.svc (gibson operators/connector ProxyAuth, charts#706).
+*/}}
+{{- define "gibson-operators.spireOidcJwksURL" -}}
+{{- $domain := (((.Values.global).k8s).clusterDomain) | default "cluster.local" -}}
+{{- ((.Values.vault).jwtAuth).spireOidcJwksURL | default (printf "https://%s-spiffe-oidc-discovery-provider.%s.svc.%s/keys" .Release.Name .Release.Namespace $domain) -}}
+{{- end -}}
