@@ -26,6 +26,11 @@ on:
   pull_request:
   push:
     branches: [main]
+  # charts merges through a merge queue (zeroroot-ai/.github
+  # rulesets/repo/charts.json). A queue needs every required check on
+  # merge_group, or it waits on a check that never starts. In the queue,
+  # `make check` runs every gate against the commit that lands.
+  merge_group:
 
 permissions:
   contents: read
