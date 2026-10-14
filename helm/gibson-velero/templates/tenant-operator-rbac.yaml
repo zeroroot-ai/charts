@@ -3,10 +3,13 @@ The tenant-operator takes the last Backup of a deleted tenant (ADR-0075,
 charts#424). Before it deletes a tenant namespace it creates one Velero Backup
 of that namespace in this release's namespace, then reads it until it ends.
 
-The grant is `get` and `create` on backups.velero.io in this namespace only.
-No list, no watch, no delete and no other kind: the operator reads its own
-Backup by name, and the Schedule and the retention rule of the bucket stay the
-only other writers. The operator learns this namespace from VELERO_NAMESPACE
+The grant is `get` and `create` on backups.velero.io in this namespace, and
+`get` on the one Schedule platform-hourly. No list, no watch, no delete and no
+other kind: the operator reads its own Backup by name, and the Schedule and
+the retention rule of the bucket stay the only other writers. The operator
+builds the last Backup from the template of platform-hourly, so the last
+backup and the hourly backups exclude the same kinds from one list (C67,
+gibson#1177). The operator learns this namespace from VELERO_NAMESPACE
 (gibson-operators tenantOperator.veleroNamespace).
 
 The subject is the ServiceAccount of the tenant-operator in the platform
@@ -28,6 +31,10 @@ rules:
   - apiGroups: ["velero.io"]
     resources: ["backups"]
     verbs: ["get", "create"]
+  - apiGroups: ["velero.io"]
+    resources: ["schedules"]
+    resourceNames: ["platform-hourly"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
