@@ -16,8 +16,11 @@ The check renders the umbrella:
   3. with an entry that states no auth mode, an unknown mode, or no
      rate-limit class: the render fails.
 
-  check-edge-extra-routes.py   exit 1 on a finding
+  check-edge-extra-routes.py             exit 1 on a finding
+  check-edge-extra-routes.py --selftest  plants a defect in the baseline
+                                         render and requires a finding
 """
+import copy
 import json
 import os
 import subprocess
@@ -48,12 +51,9 @@ def envoy_config(out: str) -> str:
     return ""
 
 
-def main() -> int:
+def baseline_findings(out: str) -> list:
+    """The findings on a render with no extra route."""
     bad = []
-    rc, out, err = render(None)
-    if rc != 0:
-        print(f"the baseline does not render: {err[-400:]}", file=sys.stderr)
-        return 1
     cfg = envoy_config(out)
     if not cfg:
         bad.append("no Envoy configuration in the render: this check is blind")
@@ -62,6 +62,53 @@ def main() -> int:
     kinds = [(d.get("kind"), d["metadata"]["name"]) for d in yaml.safe_load_all(out) if d]
     if any("billing" in n or "stripe" in n for _, n in kinds):
         bad.append(f"the baseline renders a billing object: {[k for k in kinds if 'billing' in k[1] or 'stripe' in k[1]]}")
+    return bad
+
+
+def with_extra_cluster(docs: list) -> str:
+    """The render with one extra cluster added to the Envoy configuration."""
+    planted = copy.deepcopy(docs)
+    for d in planted:
+        if d.get("kind") == "ConfigMap" and "envoy" in d["metadata"]["name"]:
+            for k, v in (d.get("data") or {}).items():
+                if "static_resources" in v:
+                    d["data"][k] = v + "\n    - name: extra_gibson_billing_webhook_8090\n"
+                    return yaml.safe_dump_all(planted)
+    return ""
+
+
+def selftest() -> int:
+    """Each planted defect in the real baseline render must give a finding (gibson#807 condition 7)."""
+    rc, out, err = render(None)
+    if rc != 0:
+        print(f"the baseline does not render: {err[-400:]}", file=sys.stderr)
+        return 1
+    docs = [d for d in yaml.safe_load_all(out) if d]
+    cases = [
+        ("the real baseline render", out, False),
+        ("MUTATION a billing Service in the baseline",
+         out + "\n---\napiVersion: v1\nkind: Service\nmetadata:\n  name: gibson-billing-webhook\n", True),
+        ("MUTATION an extra cluster in the baseline Envoy configuration", with_extra_cluster(docs), True),
+        ("MUTATION no Envoy configuration in the render",
+         yaml.safe_dump_all([d for d in docs if not (d.get("kind") == "ConfigMap" and "envoy" in d["metadata"]["name"])]),
+         True),
+    ]
+    fails = 0
+    for desc, text, want in cases:
+        got = bool(text) and bool(baseline_findings(text))
+        ok = got == want
+        fails += not ok
+        print(f"  {'ok  ' if ok else 'FAIL'}  {desc} -> {'finding' if got else 'clean'}")
+    print(f"check-edge-extra-routes --selftest: {fails} failure(s)")
+    return 1 if fails else 0
+
+
+def main() -> int:
+    rc, out, err = render(None)
+    if rc != 0:
+        print(f"the baseline does not render: {err[-400:]}", file=sys.stderr)
+        return 1
+    bad = baseline_findings(out)
     rc, out, err = render([GOOD])
     cfg = envoy_config(out) if rc == 0 else ""
     if rc != 0:
@@ -92,4 +139,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(selftest() if sys.argv[1:] == ["--selftest"] else main())

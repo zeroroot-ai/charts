@@ -26,6 +26,34 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# --selftest: plant each structural defect in a copy of the real render and
+# require the check to fail on it (gibson#807 condition 7). The five cases
+# below already fail on a diagnosis that names the wrong cause. These cover
+# the parts that are not run: the lift and the call from the login branch.
+# LOGIN_DIAG_RENDER checks a given render file instead of a fresh render.
+if [ "${1:-}" = "--selftest" ]; then
+  real="$WORK/real.yaml"
+  "$0" --render-only "$real" >/dev/null
+  fails=0
+  expect() { # expect <pass|fail> <desc> <render file>
+    if LOGIN_DIAG_RENDER="$3" "$0" >"$WORK/st.out" 2>&1; then got=pass; else got=fail; fi
+    if [ "$got" = "$1" ]; then echo "  ok    $2 -> $got"
+    else echo "  FAIL  $2 -> $got, want $1"; sed 's/^/        /' "$WORK/st.out"; fails=$((fails + 1)); fi
+  }
+  expect pass "the real render" "$real"
+  # The call is the only line that is exactly the bare name.
+  grep -vE '^[[:space:]]*bao_login_diagnose[[:space:]]*$' "$real" > "$WORK/nocall.yaml"
+  expect fail "MUTATION the login branch does not call the diagnosis" "$WORK/nocall.yaml"
+  sed 's/bao_login_diagnose() {/bao_login_diag() {/' "$real" > "$WORK/renamed.yaml"
+  expect fail "MUTATION the diagnosis function is renamed" "$WORK/renamed.yaml"
+  sed 's/WARN: login as/WARN: sign in as/' "$real" > "$WORK/nobranch.yaml"
+  expect fail "MUTATION no branch carries the login failure message" "$WORK/nobranch.yaml"
+  sed 's/automountServiceAccountToken/automount/' "$real" > "$WORK/vague.yaml"
+  expect fail "MUTATION the no-token cause loses its remedy" "$WORK/vague.yaml"
+  echo "check-openbao-login-diagnosis --selftest: $fails failure(s)"
+  exit $(( fails > 0 ))
+fi
+
 # Repack first, exactly as scripts/golden.sh does. `helm template` on the
 # umbrella reads helm/gibson/charts/*.tgz, so without this it renders the
 # subchart as it was when the tarball was built and an edit to the sidecar is
@@ -34,16 +62,21 @@ trap 'rm -rf "$WORK"' EXIT
 # someone may remove.
 # Inside `make check` the gates share one repack (CHART_DEPS_DONE): a second
 # repack here would delete tarballs that parallel gates are rendering.
-if [ -z "${CHART_DEPS_DONE:-}" ]; then
+if [ -z "${CHART_DEPS_DONE:-}" ] && [ -z "${LOGIN_DIAG_RENDER:-}" ]; then
   rm -f "$ROOT"/helm/gibson/charts/gibson-{workloads,operators,crds,common}-*.tgz \
         "$ROOT"/helm/*/.charts.stamp 2>/dev/null || true
   make -C "$ROOT" chart-deps >/dev/null
 fi
 
 RENDER="$WORK/render.yaml"
-helm template gibson "$ROOT/helm/gibson" --namespace gibson \
-  -f "$ROOT/helm/testdata/render-inputs/gibson.yaml" \
-  -f "$ROOT/helm/gibson/values-baseline.yaml" >"$RENDER"
+if [ -n "${LOGIN_DIAG_RENDER:-}" ]; then
+  cp "$LOGIN_DIAG_RENDER" "$RENDER"
+else
+  helm template gibson "$ROOT/helm/gibson" --namespace gibson \
+    -f "$ROOT/helm/testdata/render-inputs/gibson.yaml" \
+    -f "$ROOT/helm/gibson/values-baseline.yaml" >"$RENDER"
+fi
+if [ "${1:-}" = "--render-only" ]; then cp "$RENDER" "$2"; exit 0; fi
 
 # Lift the two functions out of the rendered sidecar script.
 python3 - "$RENDER" "$WORK/lifted.sh" <<'PY'

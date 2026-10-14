@@ -54,6 +54,7 @@ attribution: ## Every verbatim redistribution carries its attribution
 	@python3 scripts/check-vendored-attribution.py
 
 cloud-free: ## The baseline profile assumes no cloud
+	@./scripts/check-baseline-is-cloud-free.sh --selftest
 	@./scripts/check-baseline-is-cloud-free.sh
 
 substrate-overlays: ## values-eks sets only substrate keys: load balancer, storage class, region, DNS-01, DNS provider, workload identity
@@ -130,6 +131,7 @@ openbao-seed-lifetime: ## A seed key older than its lifetime gets a new generate
 
 .PHONY: edge-extra-routes
 edge-extra-routes: ## Each extra edge route states its auth mode and rate-limit class; the baseline has none and no billing object (charts#375)
+	@python3 scripts/check-edge-extra-routes.py --selftest
 	@python3 scripts/check-edge-extra-routes.py
 
 .PHONY: workflows
@@ -154,6 +156,7 @@ baseline-up-one-path: ## The chart checkout and the published artifact install t
 
 .PHONY: helm-record-size
 helm-record-size: ## Every published chart fits in a Helm release record (one Secret, 1 MiB cap)
+	@./scripts/check-helm-record-size.sh --selftest
 	@./scripts/check-helm-record-size.sh
 
 velero-volume-excludes: ## Every pod tells Velero which of its volumes are sockets and scratch, never a claim
@@ -273,6 +276,7 @@ probe-timeouts: ## Every container probe the chart renders states its timeoutSec
 	@python3 scripts/check-probe-timeouts.py
 
 openbao-login-diagnosis: ## A failed OpenBao kubernetes-auth login names which step failed, not just 403 (charts#330)
+	@./scripts/check-openbao-login-diagnosis.sh --selftest
 	@./scripts/check-openbao-login-diagnosis.sh
 
 openbao-system-key-rotation: ## The Zitadel System API key flips to the other slot, then the old slot gets a new key (ADR-0171)
