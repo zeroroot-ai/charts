@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.149.1](https://github.com/zeroroot-ai/charts/compare/v0.149.0...v0.149.1) (2026-10-14)
+
+
+### Bug Fixes
+
+* **connector-operator:** the JWKS URL default names the provider Service in full ([#707](https://github.com/zeroroot-ai/charts/issues/707)) ([46e8cfe](https://github.com/zeroroot-ai/charts/commit/46e8cfe73ee0654689f4242168c092772b8e0888))
+
 ## [0.149.0](https://github.com/zeroroot-ai/charts/compare/v0.148.0...v0.149.0) (2026-10-14)
 
 
