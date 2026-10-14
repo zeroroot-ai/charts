@@ -20,8 +20,11 @@ path, CronJob, then Job, then Pod:
 
 An object claims the trainer when its pod (or pod template) has the trainer
 component label or the trainer ServiceAccount. Any other object passes. The
-garbage collector may UPDATE an object. A pod UPDATE is not matched: its
-labels and its ServiceAccount cannot change. A plugin namespace
+garbage collector may UPDATE an object. A pod UPDATE is not matched. An
+UPDATE can add the trainer label to a pod, but it cannot change the
+serviceAccountName, and the registration also selects the trainer
+ServiceAccount. So a relabeled pod still gets no trainer identity. A plugin
+namespace
 (tenant-<t>-plugins) has its own policy, gibson-tenant-plugin-workloads.
 */ -}}
 {{- $ns := .Values.tenantOperator.namespace | default "gibson" }}
