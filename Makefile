@@ -135,17 +135,15 @@ edge-extra-routes: ## Each extra edge route states its auth mode and rate-limit 
 	@python3 scripts/check-edge-extra-routes.py
 
 .PHONY: workflows
-<<<<<<< HEAD
 .PHONY: queue-lanes
 queue-lanes: ## Every pull_request check also runs each job in the merge queue (gibson#807 condition 7)
 	@python3 scripts/check-queue-lanes.py --selftest
 	@python3 scripts/check-queue-lanes.py
-=======
+
 .PHONY: gates-complete
 gates-complete: ## Every guard target of this Makefile is a gate of make check (gibson#807 condition 7)
 	@python3 scripts/check-gates-complete.py --selftest
 	@python3 scripts/check-gates-complete.py
->>>>>>> 202b4ca4 (fix(check): seam-conditions and kvm-fleet-selector run in make check again)
 
 workflows: ## The workflow files are valid: a bad expression is rejected at dispatch with no jobs and no log
 	@./scripts/check-workflows.sh
