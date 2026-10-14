@@ -433,9 +433,10 @@ vault:
     # of which per-tenant namespace it's logging into. REQUIRED — chart
     # fails render LOUDLY when empty.
     spireOidcIssuer: ""
-    # spireOidcJwksURL is the JWKS endpoint Vault dials to fetch the
-    # SPIRE OIDC signing keys. Defaults to "<spireOidcIssuer>/keys" at
-    # the operator (empty here, operator derives).
+    # spireOidcJwksURL is the JWKS endpoint of the SPIRE OIDC provider, for
+    # the tenant-operator and the connector-operator. Empty means the
+    # provider Service of this release (helper gibson-operators.spireOidcJwksURL):
+    # https://<release>-spiffe-oidc-discovery-provider.<namespace>.svc.<clusterDomain>/keys
     spireOidcJwksURL: ""
     # spireBundleConfigMap is the in-cluster ConfigMap (published by
     # SPIRE Server's k8s_configmap BundlePublisher) the operator pod

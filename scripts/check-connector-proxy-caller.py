@@ -18,6 +18,7 @@ blind when no render holds the Deployment.
 import glob
 import os
 import sys
+from urllib.parse import urlparse
 
 import yaml
 
@@ -36,7 +37,20 @@ def judge(dep: dict) -> list[str]:
             out.append(f"the connector-operator has no {name}")
         elif not env[name].startswith(scheme):
             out.append(f"the connector-operator {name} is {env[name]!r}, want a {scheme} value")
+    jwks = env.get("CONNECTOR_PROXY_JWKS_URL", "")
+    if jwks.startswith("https://") and not jwks_names_a_service(jwks):
+        out.append(f"the connector-operator CONNECTOR_PROXY_JWKS_URL is {jwks!r}: the operator refuses "
+                   "a host that is not <service>.<namespace>.svc and crash-loops")
     return out
+
+
+def jwks_names_a_service(url: str) -> bool:
+    """The rule of gibson operators/connector ProxyAuth.IssuerNamespace."""
+    # Go's url.Hostname keeps the case, Python's hostname lowers it: read
+    # the netloc so "SVC" fails here as it fails in the operator.
+    host = urlparse(url).netloc.rsplit("@", 1)[-1].split(":", 1)[0]
+    labels = host.split(".") if host else []
+    return len(labels) >= 3 and labels[0] != "" and labels[1] != "" and labels[2] == "svc"
 
 
 def audit(root: str) -> tuple[list[str], int]:
@@ -56,7 +70,8 @@ def selftest() -> int:
     def dep(**env):
         return {"spec": {"template": {"spec": {"containers": [
             {"name": "manager", "env": [{"name": k, "value": v} for k, v in env.items()]}]}}}}
-    good = {"CONNECTOR_PROXY_OIDC_ISSUER": "https://oidc", "CONNECTOR_PROXY_JWKS_URL": "https://oidc/keys",
+    good = {"CONNECTOR_PROXY_OIDC_ISSUER": "https://oidc",
+            "CONNECTOR_PROXY_JWKS_URL": "https://oidc.gibson.svc.cluster.local/keys",
             "GIBSON_DAEMON_SPIFFE_ID": "spiffe://td/platform/daemon"}
     if judge(dep(**good)):
         print(f"SELFTEST FAIL: a complete env must pass, got {judge(dep(**good))}")
@@ -69,7 +84,18 @@ def selftest() -> int:
     if len(judge(dep(**dict(good, CONNECTOR_PROXY_JWKS_URL="http://oidc/keys")))) != 1:
         print("SELFTEST FAIL: an http JWKS must give one finding")
         return 1
-    print("  ✓ selftest: each missing value and an http JWKS fail; the complete env passes")
+    # FAILING FIXTURE (staging 2026-10-14): the short host the issuer uses.
+    short = "https://gibson-spiffe-oidc-discovery-provider/keys"
+    if len(judge(dep(**dict(good, CONNECTOR_PROXY_JWKS_URL=short)))) != 1:
+        print("SELFTEST FAIL: a JWKS host that names no <service>.<namespace>.svc must give one finding")
+        return 1
+    if judge(dep(**dict(good, CONNECTOR_PROXY_JWKS_URL="https://p.ns.svc/keys"))):
+        print("SELFTEST FAIL: <service>.<namespace>.svc with no cluster domain must pass")
+        return 1
+    if len(judge(dep(**dict(good, CONNECTOR_PROXY_JWKS_URL="https://p.ns.SVC/keys")))) != 1:
+        print("SELFTEST FAIL: an upper-case svc label must fail, as the operator refuses it")
+        return 1
+    print("  ✓ selftest: each missing value, an http JWKS and a short JWKS host fail; the complete env passes")
     return 0
 
 
