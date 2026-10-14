@@ -2644,7 +2644,7 @@ data:
                           domain: gibson-edge
                           stage: 0
                           request_type: external
-                          timeout: 0.05s
+                          timeout: 0.25s
                           failure_mode_deny: false
                           enable_x_ratelimit_headers: DRAFT_VERSION_03
                           stat_prefix: api_per_client
@@ -2987,8 +2987,11 @@ data:
                                 # → envoy.rateLimit.perClient.appSignupSubmit in the
                                 # ratelimit service config. The address is the
                                 # socket peer (Client-IP contract), never a header.
+                                # stage 1: the fail-closed signup filter judges
+                                # this entry, and the stage 0 filter skips it (D92).
                                 rate_limits:
-                                  - actions:
+                                  - stage: 1
+                                    actions:
                                       - generic_key:
                                           descriptor_key: route
                                           descriptor_value: app_signup_submit
@@ -3128,8 +3131,10 @@ data:
                               header: { key: retry-after, value: "1" }
                       # deploy#1657 — the per-client layer. Calls the
                       # shared ratelimit service (Redis-backed, exact across
-                      # replicas) for every route that carries `rate_limits`
-                      # actions. FAIL-OPEN, and there is no value that changes it:
+                      # replicas) for every route that carries stage 0
+                      # `rate_limits` actions. FAIL-OPEN, and there is no value
+                      # that changes it (POST /signup is the one route that fails
+                      # closed, through the stage 1 filter below, D92):
                       # an unreachable quota service degrades to the local fuse
                       # above, and envoy_ratelimit_failure_mode_allowed counts the
                       # requests that passed unchecked. Deny-on-error would turn a
@@ -3142,10 +3147,38 @@ data:
                           stage: 0
                           request_type: external
                           # google.protobuf.Duration: seconds only, so ms/1000.
-                          timeout: 0.05s
+                          timeout: 0.25s
                           failure_mode_deny: false
                           enable_x_ratelimit_headers: DRAFT_VERSION_03
                           stat_prefix: public_per_client
+                          rate_limit_service:
+                            transport_api_version: V3
+                            grpc_service:
+                              envoy_grpc:
+                                cluster_name: ratelimit_grpc
+                      # D92 — POST /signup FAILS CLOSED. Signup is an abuse surface
+                      # with low volume: each accepted POST mints a tenant, a
+                      # Stripe customer and an email. A slow or absent quota answer
+                      # must refuse a signup, not let a flood through. The stage 0
+                      # filter above cannot do that per route (failure_mode_deny
+                      # is a field of the filter), so this second filter judges
+                      # only the rate_limits entries with stage 1, which only the
+                      # signup route carries. Its timeout is sized from the
+                      # measured latency (values.yaml envoy.rateLimit.perClient.
+                      # signupTimeoutMs). A refusal for an unanswered call is 503,
+                      # so a client retries it and it never reads as the quota.
+                      - name: envoy.filters.http.ratelimit.signup
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.ratelimit.v3.RateLimit
+                          domain: gibson-edge
+                          stage: 1
+                          request_type: external
+                          timeout: 1s
+                          failure_mode_deny: true
+                          status_on_error:
+                            code: ServiceUnavailable
+                          enable_x_ratelimit_headers: DRAFT_VERSION_03
+                          stat_prefix: public_signup
                           rate_limit_service:
                             transport_api_version: V3
                             grpc_service:
@@ -3587,16 +3620,34 @@ data:
         # (failure_mode_deny: false): an unreachable quota service degrades to the
         # per-pod local_ratelimit fuse, and envoy_ratelimit_failure_mode_allowed
         # counts every request that passed unchecked.
+        #
+        # C50 (hosted substrate run 38460645434): an answered quota call takes
+        # 5 ms or less, and a call that waits for a new connection (TCP, the
+        # SPIFFE mTLS handshake, HTTP/2 setup) ran past the 50 ms filter timeout
+        # and went through unchecked. So the connection, once open, stays open:
+        # no idle timeout closes it, and an HTTP/2 PING keeps it alive and
+        # detects a dead peer, so Envoy opens a new one between calls and not
+        # inside one. preconnect_policy opens the next connection ahead of the
+        # load. The first call after an Envoy or ratelimit pod start still opens
+        # the first connection.
         - name: ratelimit_grpc
           type: STRICT_DNS
           connect_timeout: 1s
           dns_refresh_rate: 5s
           respect_dns_ttl: false
+          preconnect_policy:
+            per_upstream_preconnect_ratio: 1.5
           typed_extension_protocol_options:
             envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
               "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              common_http_protocol_options:
+                # 0s turns the idle timeout off (the default closes after 1 h).
+                idle_timeout: 0s
               explicit_http_config:
-                http2_protocol_options: {}
+                http2_protocol_options:
+                  connection_keepalive:
+                    interval: 30s
+                    timeout: 5s
           transport_socket:
             name: envoy.transport_sockets.tls
             typed_config:
@@ -12717,7 +12768,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: e42d168db9ea6d61e4f236dd26b581e78e57c653832659a172ba73cf1f878f2d
+        checksum/config: 59e05e3d9794f3d11f798f623aea63cdac461cc6931d9ad0e386c470b99270f2
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -22881,6 +22932,25 @@ spec:
               per-pod fuse only. Per-client quotas (signup, login) are NOT being
               enforced. Check gibson-ratelimit pods, the SPIFFE mTLS sidecar,
               and gibson-redis-stack.
+        # D92: POST /signup fails closed. When the quota service does not
+        # answer, the stage 1 filter refuses the signup with 503 and counts
+        # envoy_cluster_ratelimit_public_signup_error. It never counts
+        # failure_mode_allowed, so the rule above cannot see it.
+        - alert: EdgeSignupQuotaFailingClosed
+          expr: |
+            sum(increase(envoy_cluster_ratelimit_public_signup_error[5m])) > 0
+          for: 2m
+          labels:
+            severity: page
+            component: ratelimit
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/ratelimit.md#edgesignupquotafailingclosed"
+            summary: "Edge signup quota got no answer — signups are refused with 503"
+            description: |
+              The edge Envoy got no quota answer for at least one POST /signup
+              in the last 5 minutes and refused it with 503 (D92: signup fails
+              closed). New signups fail while this lasts. Check gibson-ratelimit
+              pods, the SPIFFE mTLS sidecar, and gibson-redis-stack.
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
 apiVersion: monitoring.coreos.com/v1

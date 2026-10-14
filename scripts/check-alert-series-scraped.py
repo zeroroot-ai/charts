@@ -45,6 +45,9 @@ PRODUCERS = (
     ("gibson_tenant_operator_", "tenant-operator"),
     ("gibson_connector_", "connector-operator"),
     ("gibson_audit_", "daemon"),
+    # The edge Envoy serves its stats on the admin probe listener (D92: the
+    # signup quota alert reads envoy_cluster_ratelimit_public_signup_error).
+    ("envoy_", "envoy"),
 )
 # Series name prefix -> why no scrape object of the release collects it.
 EXTERNAL = {
