@@ -161,6 +161,8 @@ velero-home: ## The Velero server keeps HOME on an emptyDir, so its read-only ro
 velero-reads-served-kinds: ## The Velero server can list each served kind a Backup lists, even one the Schedule excludes (charts#660, charts#684)
 	@python3 scripts/check-velero-reads-served-kinds.py --selftest
 	@python3 scripts/check-velero-reads-served-kinds.py
+	@python3 scripts/check-cronjob-pods-excluded-from-backup.py --selftest
+	@python3 scripts/check-cronjob-pods-excluded-from-backup.py
 
 final-backup-reads-schedule: ## The tenant-operator may read the Schedule it builds the last tenant backup from (C67)
 	@python3 scripts/check-final-backup-reads-schedule.py --selftest

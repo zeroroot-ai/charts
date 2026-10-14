@@ -71,6 +71,11 @@ spec:
           labels:
             {{- include "gibson.selectorLabels" . | nindent 12 }}
             app.kubernetes.io/component: redis-backup
+            {{- /* A Job pod has nothing to restore, and one that ends while a
+                   Velero backup runs leaves no volume path, so its pod volume
+                   backup fails the whole backup (C66). The CronJob stays in
+                   the backup. */}}
+            velero.io/exclude-from-backup: "true"
             {{- /* fqdn object-store (D76): the upload goes to AWS S3, with
                    STS for the IRSA role. */}}
             {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "redis") "kubeApi" true "fqdn" "object-store") | nindent 12 }}

@@ -61,6 +61,11 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/component: zitadel-masterkey-rotation
+            {{- /* A Job pod has nothing to restore, and one that ends while a
+                   Velero backup runs leaves no volume path, so its pod volume
+                   backup fails the whole backup (C66). The CronJob stays in
+                   the backup. */}}
+            velero.io/exclude-from-backup: "true"
             {{- include "gibson.netLabels" (dict "role" "platform" "clients" (list "postgres" "openbao")) | nindent 12 }}
         spec:
           restartPolicy: Never
