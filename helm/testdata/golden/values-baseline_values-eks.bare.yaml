@@ -12869,20 +12869,19 @@ spec:
                 echo "platform-operator must populate it before Envoy can start." >&2
                 exit 2
               fi
-              # gibson#693 — the native-login (gibson login / device-grant) OAuth
-              # client_id. CLI user tokens carry this audience; jwt_authn must
-              # accept it so they flow through ext_authz like dashboard tokens.
-              # OPTIONAL (unlike the dashboard client_id which gates sign-in):
-              # the gibson-native-login-oidc Secret is provisioned asynchronously
-              # by the gibson-native-login OIDCClient CR. Envoy MUST start without
-              # it — substitute a non-matching sentinel so the audience entry is
-              # valid-but-inert until the Secret lands (Reloader then rolls Envoy).
-              # A hard exit here previously risked taking the edge down on a
-              # not-yet-provisioned CLI-login secret.
+              # gibson#693: the native-login (gibson login, device grant) OAuth
+              # client_id. CLI user tokens carry this audience, and jwt_authn
+              # must accept it. ADR-0031: an empty value fails here, like the
+              # dashboard client_id, and never becomes a placeholder audience.
+              # The platform-operator mints the Secret from the
+              # gibson-native-login OIDCClient. Until it lands, this container
+              # exits and kubelet retries it, so Envoy starts only with a real
+              # audience.
               NATIVE_LOGIN_CLIENT_ID=$(cat /etc/native-login-oidc/client_id 2>/dev/null || true)
               if [ -z "$NATIVE_LOGIN_CLIENT_ID" ]; then
-                echo "render-envoy-config: gibson-native-login-oidc not yet provisioned; CLI login disabled until it lands" >&2
-                NATIVE_LOGIN_CLIENT_ID="native-login-unconfigured"
+                echo "FATAL: gibson-native-login-oidc Secret has an empty or missing client_id key" >&2
+                echo "platform-operator must populate it before Envoy can start." >&2
+                exit 2
               fi
               echo "render-envoy-config: substituting DASHBOARD_CLIENT_ID=$CLIENT_ID NATIVE_LOGIN_CLIENT_ID=$NATIVE_LOGIN_CLIENT_ID"
               # Use a non-/ delimiter so numeric client_ids never collide
@@ -13045,10 +13044,9 @@ spec:
           secret:
             secretName: gibson-native-login-oidc
             defaultMode: 0400
-            # optional: the gibson-native-login OIDCClient provisions this
-            # asynchronously; Envoy must start without it (the initContainer
-            # substitutes a non-matching sentinel). Required-mount previously
-            # risked CreateContainerConfigError on the edge.
+            # optional, so a missing Secret reaches render-envoy-config, which
+            # exits with a named FATAL (ADR-0031). A required mount would stop
+            # the pod at CreateContainerConfigError with no such message.
             optional: true
             items:
               - key: client_id
