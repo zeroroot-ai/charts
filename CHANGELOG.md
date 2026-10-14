@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.149.0](https://github.com/zeroroot-ai/charts/compare/v0.148.0...v0.149.0) (2026-10-14)
+
+
+### Features
+
+* **contracts:** gen-env-readers.py refreshes the services it is given ([#693](https://github.com/zeroroot-ai/charts/issues/693)) ([cc4ca44](https://github.com/zeroroot-ai/charts/commit/cc4ca445faad50b171255e17bf61c7c6c09d0668))
+* **gibson:** pin gibson v0.160.3 ([#688](https://github.com/zeroroot-ai/charts/issues/688)) ([3ab9162](https://github.com/zeroroot-ai/charts/commit/3ab9162e7acdefc62415f69473e9b0a6b5fa20ac))
+* **gibson:** pin gibson v0.160.4, the signup owner is born inside the tenant org ([#705](https://github.com/zeroroot-ai/charts/issues/705)) ([dd944f4](https://github.com/zeroroot-ai/charts/commit/dd944f4cb8e19aaf630574dc871af64813856bd3))
+
+
+### Bug Fixes
+
+* **admission:** a refused trainer Job names the manual-run path ([c9b1742](https://github.com/zeroroot-ai/charts/commit/c9b17422869dd27ec9254f0bda5ac5a4dd761728))
+* **admission:** only the trainer CronJob path makes a belief trainer pod ([#700](https://github.com/zeroroot-ai/charts/issues/700)) ([3009161](https://github.com/zeroroot-ai/charts/commit/30091619f02731cf79821b74fa100f65d29f5108))
+* **docs-site:** bump to v0.6.16 ([#682](https://github.com/zeroroot-ai/charts/issues/682)) ([584f299](https://github.com/zeroroot-ai/charts/commit/584f29952b045120f90774bbd23b31402f225c9c))
+* **edge:** the signup quota fails closed, and quota calls stay warm ([#695](https://github.com/zeroroot-ai/charts/issues/695)) ([fcf6dcf](https://github.com/zeroroot-ai/charts/commit/fcf6dcf5ace294b00bc43b4de61aa7742fb21df4))
+* **envoy:** exit on an empty native-login client_id instead of a placeholder audience (ADR-0031) ([#697](https://github.com/zeroroot-ai/charts/issues/697)) ([b60ac5c](https://github.com/zeroroot-ai/charts/commit/b60ac5c5055704e22ad5bb18649d0746a1704903))
+* **network:** the dashboard reaches the HIBP range API through its own egress group ([#694](https://github.com/zeroroot-ai/charts/issues/694)) ([45d2c07](https://github.com/zeroroot-ai/charts/commit/45d2c075e83cf2f1a0c2608ddfbfebe258128913))
+* **network:** the SPIRE OIDC provider admits the connector proxies ([#691](https://github.com/zeroroot-ai/charts/issues/691)) ([3508cd2](https://github.com/zeroroot-ai/charts/commit/3508cd2eb531074498f3ef53db067cb420f9c322))
+* **rework:** a refused trainer Job names the manual-run path ([#703](https://github.com/zeroroot-ai/charts/issues/703)) ([c9b1742](https://github.com/zeroroot-ai/charts/commit/c9b17422869dd27ec9254f0bda5ac5a4dd761728))
+* **spire:** the tenant-operator may register the belief trainer identity ([#696](https://github.com/zeroroot-ai/charts/issues/696)) ([a0c1704](https://github.com/zeroroot-ai/charts/commit/a0c1704e8e4cd85158af961ecf182042efb8eae6))
+* **velero:** CronJob pods stay out of a backup ([#698](https://github.com/zeroroot-ai/charts/issues/698)) ([13e03fb](https://github.com/zeroroot-ai/charts/commit/13e03fb8e3bdcbb7a5928cf254e4fc650b2cec45))
+* **velero:** the tenant-operator may read the Schedule of the last backup ([#699](https://github.com/zeroroot-ai/charts/issues/699)) ([213e39b](https://github.com/zeroroot-ai/charts/commit/213e39bcefc39181ffe4ea27a6b391989fd248a9))
+
 ## [0.148.0](https://github.com/zeroroot-ai/charts/compare/v0.147.0...v0.148.0) (2026-10-13)
 
 
