@@ -11,19 +11,73 @@
 # It checks the RENDER, not the values file, because a cloud assumption can
 # arrive through a sub-chart default just as easily as through this profile.
 #
-# Usage: scripts/check-baseline-is-cloud-free.sh
+# Usage: scripts/check-baseline-is-cloud-free.sh [--selftest]
 # Exit:  0 clean · 1 a cloud assumption reached the baseline render
+#
+# --selftest plants each defect in a copy of the real render and requires
+# the check to fail on it, then requires the real render to pass
+# (gibson#807 condition 7). RENDER_FILE scans a given file instead of a
+# fresh render.
 set -euo pipefail
 
 CHART_DIR="${CHART_DIR:-helm/gibson}"
-RENDER="$(mktemp)"
-trap 'rm -f "$RENDER"' EXIT
-
-# The installer's inputs (the archive bucket) come from the render fixture;
-# the baseline profile itself has none, on purpose.
 INPUTS="${INPUTS:-$(dirname "$CHART_DIR")/testdata/render-inputs/gibson.yaml}"
-helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" -f "$INPUTS" \
-  --namespace gibson > "$RENDER"
+
+if [ "${1:-}" = "--selftest" ]; then
+  work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
+  # The installer's inputs (the archive bucket) come from the render fixture.
+  helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" -f "$INPUTS" \
+    --namespace gibson > "$work/real.yaml"
+  fails=0
+  expect() { # expect <pass|fail> <desc> <file>
+    if RENDER_FILE="$3" "$0" >/dev/null 2>&1; then got=pass; else got=fail; fi
+    if [ "$got" = "$1" ]; then echo "  ok    $2 -> $got"; else echo "  FAIL  $2 -> $got, want $1"; fails=$((fails + 1)); fi
+  }
+  plant() { # plant <name> <yaml>: a copy of the real render with one more document
+    { cat "$work/real.yaml"; printf -- '---\n%s\n' "$2"; } > "$work/$1.yaml"
+  }
+  expect pass "the real baseline render" "$work/real.yaml"
+  plant irsa 'apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: x
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::1:role/x'
+  expect fail "MUTATION an IRSA annotation" "$work/irsa.yaml"
+  plant gp3 'apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: x}
+spec:
+  storageClassName: gp3'
+  expect fail "MUTATION a gp3 storage class" "$work/gp3.yaml"
+  plant crd 'apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata: {name: x.example.com}'
+  expect fail "MUTATION a CRD in the umbrella render" "$work/crd.yaml"
+  grep -v '^kind: Cluster$' "$work/real.yaml" > "$work/nocluster.yaml"
+  expect fail "MUTATION platform-postgres-rw with no CNPG Cluster" "$work/nocluster.yaml"
+  : > "$work/empty.yaml"
+  expect fail "MUTATION an empty render" "$work/empty.yaml"
+  echo "check-baseline-is-cloud-free --selftest: $fails failure(s)"
+  exit $(( fails > 0 ))
+fi
+
+if [ -n "${RENDER_FILE:-}" ]; then
+  RENDER="$RENDER_FILE"
+else
+  RENDER="$(mktemp)"
+  trap 'rm -f "$RENDER"' EXIT
+  # The installer's inputs (the archive bucket) come from the render fixture;
+  # the baseline profile itself has none, on purpose.
+  helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" -f "$INPUTS" \
+    --namespace gibson > "$RENDER"
+fi
+
+# A render this small read nothing: an empty or failed render must not pass.
+if [ "$(grep -c '^kind: ' "$RENDER" || true)" -lt 50 ]; then
+  echo "❌ the baseline render holds fewer than 50 documents: the check read nothing"
+  exit 1
+fi
 
 # Patterns that mean "this only works on a cloud". Deliberately narrow: they
 # match configuration we emit, not prose. Vendored CRDs document cloud fields

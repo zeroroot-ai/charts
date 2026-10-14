@@ -51,7 +51,29 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$HERE/.." && pwd)"
+ROOT="${HELM_RECORD_ROOT:-$(cd "$HERE/.." && pwd)}"
+
+# --selftest: the check must fail on a chart over the margin and on a chart
+# that does not render, and pass on the real charts (gibson#807 condition 7).
+if [ "${1:-}" = "--selftest" ]; then
+  work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
+  fails=0
+  expect() { # expect <exit code> <desc> <env...>
+    local want="$1" desc="$2"; shift 2
+    local got=0
+    env "$@" "$0" >/dev/null 2>&1 || got=$?
+    if [ "$got" = "$want" ]; then echo "  ok    $desc -> exit $got"
+    else echo "  FAIL  $desc -> exit $got, want $want"; fails=$((fails + 1)); fi
+  }
+  mkdir -p "$work/helm/gibson/templates"
+  printf 'apiVersion: v2\nname: gibson\nversion: 0.0.0\n' > "$work/helm/gibson/Chart.yaml"
+  printf '{{ fail "planted render failure" }}\n' > "$work/helm/gibson/templates/x.yaml"
+  expect 0 "the real charts under the margin" MARGIN_PCT=80
+  expect 1 "MUTATION a margin every chart is over" MARGIN_PCT=1
+  expect 2 "MUTATION a chart that does not render" HELM_RECORD_ROOT="$work"
+  echo "check-helm-record-size --selftest: $fails failure(s)"
+  exit $(( fails > 0 ))
+fi
 
 # The Kubernetes Secret cap, and the share of it a chart may use.
 CAP=1048576

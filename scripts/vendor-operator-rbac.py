@@ -195,13 +195,15 @@ def load_committed(path: pathlib.Path) -> list[dict]:
     return [d for d in yaml.safe_load_all(text) if isinstance(d, dict)]
 
 
-def check(versions: dict[str, str]) -> list[str]:
+def check(versions: dict[str, str], dest: pathlib.Path = DEST,
+          rendered: dict[str, list[dict]] | None = None) -> list[str]:
     problems = []
     for name in OPERATORS:
-        fresh = render_rbac(name, versions[name])
-        path = DEST / f"{name}-rbac.yaml"
+        fresh = rendered[name] if rendered else render_rbac(name, versions[name])
+        path = dest / f"{name}-rbac.yaml"
         if load_committed(path) != fresh:
-            problems.append(f"{path.relative_to(ROOT)} differs from {name}-{versions[name]}.tgz")
+            shown = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path.name
+            problems.append(f"{shown} differs from {name}-{versions[name]}.tgz")
     return problems
 
 
@@ -218,30 +220,50 @@ def selftest(versions: dict[str, str]) -> int:
             return 2
     finally:
         tpath.unlink(missing_ok=True)
-    # 2. A dropped rule and a dropped wave annotation must both count as drift.
-    mutated = copy.deepcopy(fresh)
-    mutated[0]["rules" if "rules" in mutated[0] else "subjects"].pop()
-    if mutated == fresh:
-        print("GUARD BROKEN: removing a rule went unnoticed", file=sys.stderr)
-        return 2
-    mutated = copy.deepcopy(fresh)
-    mutated[0]["metadata"]["annotations"].pop("argocd.argoproj.io/sync-wave")
-    if mutated == fresh:
-        print("GUARD BROKEN: removing the sync-wave annotation went unnoticed", file=sys.stderr)
-        return 2
-    # 3. A removed upstream rule stays removed, and one put back is drift.
-    for chart, role, resource, verb in REMOVED_RULES:
-        docs = fresh if chart == name else render_rbac(chart, versions[chart])
-        cr = next(d for d in docs if d["kind"] == "ClusterRole" and d["metadata"]["name"] == role)
-        if any(resource in (r.get("resources") or []) and verb in (r.get("verbs") or []) for r in cr["rules"]):
-            print(f"GUARD BROKEN: {role} still grants {verb} {resource}", file=sys.stderr)
+    # 2-4 run the real check() against written files, so a mutation that
+    # check() does not catch fails here (gibson#807 condition 7: the old
+    # cases compared a list with a changed copy and never called check()).
+    rendered = {n: (fresh if n == name else render_rbac(n, versions[n])) for n in OPERATORS}
+    with tempfile.TemporaryDirectory() as td:
+        dest = pathlib.Path(td)
+
+        def write(docs_by_name: dict[str, list[dict]]) -> None:
+            for n, docs in docs_by_name.items():
+                (dest / f"{n}-rbac.yaml").write_text(dump(n, versions[n], docs))
+
+        write(rendered)
+        if check(versions, dest, rendered):
+            print("GUARD BROKEN: check() refuses freshly written files", file=sys.stderr)
             return 2
-        restored = copy.deepcopy(docs)
-        next(d for d in restored if d["kind"] == "ClusterRole" and d["metadata"]["name"] == role)["rules"].append(
-            {"apiGroups": [""], "resources": [resource], "verbs": [verb]})
-        if restored == docs:
-            print(f"GUARD BROKEN: putting back {verb} {resource} on {role} went unnoticed", file=sys.stderr)
+        # 2. A dropped rule and a dropped wave annotation must both count as drift.
+        mutated = copy.deepcopy(fresh)
+        mutated[0]["rules" if "rules" in mutated[0] else "subjects"].pop()
+        write({name: mutated})
+        if not check(versions, dest, rendered):
+            print("GUARD BROKEN: check() missed a dropped rule", file=sys.stderr)
             return 2
+        mutated = copy.deepcopy(fresh)
+        mutated[0]["metadata"]["annotations"].pop("argocd.argoproj.io/sync-wave")
+        write({name: mutated})
+        if not check(versions, dest, rendered):
+            print("GUARD BROKEN: check() missed a dropped sync-wave annotation", file=sys.stderr)
+            return 2
+        write(rendered)
+        # 3. A removed upstream rule stays removed, and one put back is drift.
+        for chart, role, resource, verb in REMOVED_RULES:
+            docs = rendered[chart]
+            cr = next(d for d in docs if d["kind"] == "ClusterRole" and d["metadata"]["name"] == role)
+            if any(resource in (r.get("resources") or []) and verb in (r.get("verbs") or []) for r in cr["rules"]):
+                print(f"GUARD BROKEN: {role} still grants {verb} {resource}", file=sys.stderr)
+                return 2
+            restored = copy.deepcopy(docs)
+            next(d for d in restored if d["kind"] == "ClusterRole" and d["metadata"]["name"] == role)["rules"].append(
+                {"apiGroups": [""], "resources": [resource], "verbs": [verb]})
+            write({chart: restored})
+            if not check(versions, dest, rendered):
+                print(f"GUARD BROKEN: check() missed {verb} {resource} put back on {role}", file=sys.stderr)
+                return 2
+            write(rendered)
     print("✅ selftest passed: --check round-trips, and detects a dropped rule, a dropped wave "
           "and a removed upstream rule put back")
     return 0
