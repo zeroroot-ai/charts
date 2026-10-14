@@ -435,7 +435,9 @@ vault:
     spireOidcIssuer: ""
     # spireOidcJwksURL is the JWKS endpoint Vault dials to fetch the
     # SPIRE OIDC signing keys. Defaults to "<spireOidcIssuer>/keys" at
-    # the operator (empty here, operator derives).
+    # the tenant-operator. The connector-operator defaults to the provider
+    # Service of this release, <release>-spiffe-oidc-discovery-provider.
+    # <namespace>.svc.cluster.local/keys, because it refuses any other form.
     spireOidcJwksURL: ""
     # spireBundleConfigMap is the in-cluster ConfigMap (published by
     # SPIRE Server's k8s_configmap BundlePublisher) the operator pod
