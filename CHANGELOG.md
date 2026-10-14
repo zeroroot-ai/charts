@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.150.0](https://github.com/zeroroot-ai/charts/compare/v0.149.1...v0.150.0) (2026-10-14)
+
+
+### Features
+
+* **gibson:** pin gibson v0.161.0, the provider test needs no model, and the catalogue leaves ([#710](https://github.com/zeroroot-ai/charts/issues/710)) ([89d594d](https://github.com/zeroroot-ai/charts/commit/89d594d0dee2b7a90ae345a41c01f90f48060b79))
+
 ## [0.149.1](https://github.com/zeroroot-ai/charts/compare/v0.149.0...v0.149.1) (2026-10-14)
 
 
