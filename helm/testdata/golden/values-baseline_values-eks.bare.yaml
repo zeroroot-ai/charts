@@ -22834,6 +22834,76 @@ spec:
         'the tenant-operator writes RoleBindings in tenant namespaces only, and ' +
         request.namespace + ' is not one'
 ---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/trainer-workload-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gibson-tenant-trainer-workloads
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["jobs", "cronjobs"]
+  matchConditions:
+    - name: tenant-namespace
+      expression: >-
+        request.namespace.startsWith('tenant-') && !request.namespace.endsWith('-plugins')
+  variables:
+    - name: user
+      expression: request.userInfo.username
+    - name: resource
+      expression: request.resource.resource
+    - name: gcUpdate
+      expression: >-
+        request.operation == 'UPDATE' && variables.user == "system:serviceaccount:kube-system:generic-garbage-collector"
+    # The pod spec and its labels: the object itself for a pod, the job
+    # template for a CronJob, the pod template for each other kind.
+    - name: podMeta
+      expression: >-
+        variables.resource == 'pods' ? object.metadata :
+        variables.resource == 'cronjobs'
+          ? (has(object.spec.jobTemplate) && has(object.spec.jobTemplate.spec) && has(object.spec.jobTemplate.spec.template)
+              && has(object.spec.jobTemplate.spec.template.metadata) ? object.spec.jobTemplate.spec.template.metadata : {})
+          : (has(object.spec.template) && has(object.spec.template.metadata) ? object.spec.template.metadata : {})
+    - name: podSpec
+      expression: >-
+        variables.resource == 'pods' ? object.spec :
+        variables.resource == 'cronjobs'
+          ? (has(object.spec.jobTemplate) && has(object.spec.jobTemplate.spec) && has(object.spec.jobTemplate.spec.template)
+              && has(object.spec.jobTemplate.spec.template.spec) ? object.spec.jobTemplate.spec.template.spec : {})
+          : (has(object.spec.template) && has(object.spec.template.spec) ? object.spec.template.spec : {})
+    - name: claims
+      expression: >-
+        (has(variables.podMeta.labels) && 'app.kubernetes.io/component' in variables.podMeta.labels
+          && variables.podMeta.labels['app.kubernetes.io/component'] == 'belief-trainer')
+        || (has(variables.podSpec.serviceAccountName) && variables.podSpec.serviceAccountName == 'gibson-belief-trainer')
+  validations:
+    - expression: >-
+        !variables.claims || variables.gcUpdate
+          || (variables.resource == 'cronjobs' && variables.user == "system:serviceaccount:gibson:gibson-tenant-operator")
+          || (variables.resource == 'jobs' && (variables.user == 'system:serviceaccount:kube-system:cronjob-controller'
+                || 'system:masters' in request.userInfo.groups))
+          || (variables.resource == 'pods' && variables.user == 'system:serviceaccount:kube-system:job-controller')
+      reason: Forbidden
+      messageExpression: >-
+        'in a tenant namespace only the tenant-operator writes the belief trainer CronJob, and only the' +
+        ' built-in controllers derive its Job and pods; ' + variables.user + ' may not write a ' +
+        variables.resource + ' that claims the trainer identity in ' + request.namespace + ' (gibson#1170)'
+---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/frontend-scope-policy.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -23207,6 +23277,18 @@ metadata:
     app.kubernetes.io/part-of: gibson
 spec:
   policyName: gibson-tenant-operator-rolebinding-scope
+  validationActions: ["Deny"]
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/trainer-workload-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gibson-tenant-trainer-workloads
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+spec:
+  policyName: gibson-tenant-trainer-workloads
   validationActions: ["Deny"]
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/frontend-scope-policy.yaml
