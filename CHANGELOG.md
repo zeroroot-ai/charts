@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.150.1](https://github.com/zeroroot-ai/charts/compare/v0.150.0...v0.150.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **check:** seam-conditions and kvm-fleet-selector run in make check again ([#702](https://github.com/zeroroot-ai/charts/issues/702)) ([7eb0a83](https://github.com/zeroroot-ai/charts/commit/7eb0a83c41c3dfb8fb1c09ead772d905273b00e2))
+
 ## [0.150.0](https://github.com/zeroroot-ai/charts/compare/v0.149.1...v0.150.0) (2026-10-14)
 
 
