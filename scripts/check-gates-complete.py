@@ -56,7 +56,7 @@ def problems(text: str) -> list[str]:
 
 
 def selftest() -> int:
-    good = "check-gates: a b\na:\n\t@x --selftest\nb:\n\t@bats tests/b.bats\nc:\n\t@echo hi\n"
+    good = "check-gates: a b\na:\n\t@x --selftest\nb:\n\t@bats b.bats\nc:\n\t@echo hi\n"
     cases = [
         ("every guard target is a gate", good, 0),
         ("MUTATION a --selftest target dropped from check-gates", good.replace("check-gates: a b", "check-gates: b"), 1),
