@@ -20,6 +20,9 @@ WHAT COUNTS AS BOUND
      field carrying only `yaml` is still a key the loader reads.
   2. a dotted path appearing as a Go string literal, for the paths read through
      `viper.GetString("core.timeout")` style calls rather than a struct.
+     A literal whose last segment is a file extension is a file name, not a
+     key: `"queue_redis_adapter.go"`, `"tls.key"` and `"config.yaml"` all match
+     the dotted shape, and none is a viper path (charts#716).
 
 Extracted repo-wide, NOT from internal/infra/config alone. Scoping to that one
 package produced nine false positives on the first pass, including
@@ -28,6 +31,7 @@ would have broken tenant secret encryption.
 
   gen-config-keys.py --write    rewrite the contract from the sibling checkout
   gen-config-keys.py --check    fail when the committed contract is stale
+  gen-config-keys.py --selftest prove a file name is not read as a key
 """
 from __future__ import annotations
 
@@ -44,6 +48,31 @@ TAG = re.compile(r'(?:mapstructure|yaml|json):"([a-zA-Z0-9_]+)')
 DOTTED = re.compile(r'"([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)"')
 # `// Example: "core.parallel_limit"` is prose, not a binding.
 LINE_COMMENT = re.compile(r"//[^\n]*")
+# The last segment of a file name. No key the daemon binds ends in one of these.
+FILE_EXTS = frozenset((
+    "go", "mod", "sum", "proto", "yaml", "yml", "json", "toml", "txt", "md",
+    "sh", "py", "sql", "db", "log", "tar", "gz", "zip", "csv", "html", "js", "ts",
+    "pem", "crt", "key", "cert", "der", "p12", "pub", "lock", "tpl",
+))
+
+
+def is_file_name(path: str) -> bool:
+    return path.rsplit(".", 1)[-1] in FILE_EXTS
+
+
+def extract_text(text: str) -> tuple[set[str], set[str]]:
+    """The leaves and dotted paths that one Go source text binds."""
+    leaves: set[str] = set()
+    paths: set[str] = set()
+    text = LINE_COMMENT.sub("", text)
+    for m in TAG.finditer(text):
+        name = m.group(1)
+        if name not in ("-", ""):
+            leaves.add(name)
+    for m in DOTTED.finditer(text):
+        if not is_file_name(m.group(1)):
+            paths.add(m.group(1))
+    return leaves, paths
 
 
 def extract(repo: Path) -> tuple[set[str], set[str]]:
@@ -59,14 +88,38 @@ def extract(repo: Path) -> tuple[set[str], set[str]]:
             text = f.read_text(errors="replace")
         except OSError:
             continue
-        text = LINE_COMMENT.sub("", text)
-        for m in TAG.finditer(text):
-            name = m.group(1)
-            if name not in ("-", ""):
-                leaves.add(name)
-        for m in DOTTED.finditer(text):
-            paths.add(m.group(1))
+        got_l, got_p = extract_text(text)
+        leaves |= got_l
+        paths |= got_p
     return leaves, paths
+
+
+def selftest() -> int:
+    src = (
+        'type C struct { T int `mapstructure:"timeout"` }\n'
+        'var a = viper.GetString("core.parallel_limit")\n'
+        'var b = map[string]string{"x": "queue_redis_adapter.go"}\n'
+        'var c = filepath.Join(dir, "tls.key")\n'
+        'var d = "mission.yaml"\n'
+        '// Example: "core.in_a_comment"\n'
+    )
+    leaves, paths = extract_text(src)
+    cases = [
+        ("a struct tag is a leaf", "timeout" in leaves),
+        ("a dotted literal is a path", "core.parallel_limit" in paths),
+        ("FIXTURE a Go file name is not a path", "queue_redis_adapter.go" not in paths),
+        ("FIXTURE a key file name is not a path", "tls.key" not in paths),
+        ("FIXTURE a YAML file name is not a path", "mission.yaml" not in paths),
+        ("a dotted literal in a comment is not a path", "core.in_a_comment" not in paths),
+        ("the filter refuses a file name", is_file_name("queue_redis_adapter.go")),
+        ("the filter keeps a key", not is_file_name("security.key_provider")),
+    ]
+    failed = 0
+    for desc, ok in cases:
+        failed += not ok
+        print(f"  {'ok  ' if ok else 'FAIL'}  {desc}")
+    print(f"gen-config-keys --selftest: {len(cases) - failed} passed, {failed} failed")
+    return 1 if failed else 0
 
 
 def render(tag: str, leaves: set[str], paths: set[str]) -> str:
@@ -107,6 +160,8 @@ def parse(text: str) -> tuple[set[str], set[str]]:
 
 
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
     write = "--write" in sys.argv
     check = "--check" in sys.argv
     if not (write or check):
