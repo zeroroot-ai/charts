@@ -414,11 +414,11 @@ jobs:
             tier: ${tier}
           YAML
           # The Tenant webhook is served by the tenant-operator, which this step
-          # restarted a moment ago. A finished rollout says that the pods are
+          # restarted a moment ago. A finished restart says that the pods are
           # Ready. It does not say that the apiserver already reaches the
           # webhook on them: run 37348444179 failed here with "failed calling
           # webhook ... context deadline exceeded" two seconds after the
-          # rollout. That delay is not the claim under test, so the create
+          # restart. That delay is not the claim under test, so the create
           # waits for the webhook, for a bounded time, and says how long.
           created=0
           for attempt in $(seq 1 24); do

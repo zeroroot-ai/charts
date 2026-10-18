@@ -166,9 +166,11 @@ run_restart() {
 # manual `kubectl rollout restart`" is not a call. A `rollout status` only
 # reads, and the policy does not judge a read, so it is not found. Only the
 # namespaces that the identity policy does not bind may restart: velero and
-# kube-system, with -n before or after the verb.
+# kube-system, with -n before or after the verb. The guard reads one line at
+# a time: a call that breaks with a backslash right after `rollout restart`
+# is found, but its workload on the next line is not read.
 own_restarts() {
-  grep -nE '^[^#]*kubectl[^#]*rollout restart[[:space:]]+["$a-z-]' "$@" \
+  grep -nE '^[^#]*kubectl[^#]*rollout restart[[:space:]]+["$a-z\\-]' "$@" \
     | grep -vE 'kubectl -n (velero|kube-system) rollout restart|rollout restart (-n|--namespace)[ =](velero|kube-system)[[:space:]]'
 }
 
@@ -188,6 +190,9 @@ own_restarts() {
   printf 'rotations require manual `kubectl rollout restart`.\n' > "$TMP/e.sh"
   printf 'kubectl -n kube-system rollout restart deployment/coredns\n' > "$TMP/f.sh"
   printf 'kubectl rollout restart -n kube-system deployment/coredns\n' > "$TMP/f2.sh"
+  printf 'kubectl -n velero rollout restart deployment/velero\n' > "$TMP/v.sh"
+  printf 'kubectl rollout restart --namespace velero daemonset/node-agent\n' > "$TMP/v2.sh"
+  printf '  kubectl -n "$NS" rollout restart \\\n    deployment/gibson-ext-authz\n' > "$TMP/bs.sh"
   printf '          kubectl -n "$NS" rollout restart deploy/gibson-platform-operator deploy/gibson-tenant-operator\n' > "$TMP/wf.yml"
   printf 'kubectl -n "$NS" rollout status deploy/gibson-envoy --timeout=300s\n' > "$TMP/st.sh"
   printf 'kubectl rollout restart -n "$NS" "$1"\n' > "$TMP/g.sh"
@@ -199,6 +204,9 @@ own_restarts() {
   run own_restarts "$TMP/e.sh"; [ "$status" -eq 1 ]
   run own_restarts "$TMP/f.sh"; [ "$status" -eq 1 ]
   run own_restarts "$TMP/f2.sh"; [ "$status" -eq 1 ]
+  run own_restarts "$TMP/v.sh"; [ "$status" -eq 1 ]
+  run own_restarts "$TMP/v2.sh"; [ "$status" -eq 1 ]
+  run own_restarts "$TMP/bs.sh"; [ "$status" -eq 0 ]
   # The line that published-install.yml ran before this guard read workflows.
   run own_restarts "$TMP/wf.yml"; [ "$status" -eq 0 ]
   run own_restarts "$TMP/st.sh"; [ "$status" -eq 1 ]
