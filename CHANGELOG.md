@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.151.0](https://github.com/zeroroot-ai/charts/compare/v0.150.0...v0.151.0) (2026-10-18)
+
+
+### Features
+
+* **dashboard:** pin dashboard v0.133.1, provider capabilities stay on a key edit ([#714](https://github.com/zeroroot-ai/charts/issues/714)) ([f4c051d](https://github.com/zeroroot-ai/charts/commit/f4c051d36200ffb1456713b3fbe435635f9ee14b))
+* **gibson:** pin gibson v0.161.1 and dashboard v0.133.2 ([#717](https://github.com/zeroroot-ai/charts/issues/717)) ([a3c9d3b](https://github.com/zeroroot-ai/charts/commit/a3c9d3bb7563937d64f2f1cf5ec1d1704bd2fa3c))
+
+
+### Bug Fixes
+
+* **check:** seam-conditions and kvm-fleet-selector run in make check again ([#702](https://github.com/zeroroot-ai/charts/issues/702)) ([7eb0a83](https://github.com/zeroroot-ai/charts/commit/7eb0a83c41c3dfb8fb1c09ead772d905273b00e2))
+* **contracts:** the config-key extractor reads no file name as a key ([#718](https://github.com/zeroroot-ai/charts/issues/718)) ([407f28b](https://github.com/zeroroot-ai/charts/commit/407f28bdcb1b4c56ec071a5df9a4bd918b705848)), closes [#716](https://github.com/zeroroot-ai/charts/issues/716)
+* **dashboard:** pin dashboard v0.133.3 ([#721](https://github.com/zeroroot-ai/charts/issues/721)) ([1f510e5](https://github.com/zeroroot-ai/charts/commit/1f510e58ee167659ba4f6f0b48516a0f6037e2da))
+* **docs-site:** bump to v0.6.17 ([#713](https://github.com/zeroroot-ai/charts/issues/713)) ([21a0261](https://github.com/zeroroot-ai/charts/commit/21a0261c5059c6c39d6a3013350044b910afb1eb))
+* **docs-site:** bump to v0.6.19 ([#722](https://github.com/zeroroot-ai/charts/issues/722)) ([45e15e7](https://github.com/zeroroot-ai/charts/commit/45e15e71791374e2c4152a01a92c7c1d01217f6a))
+* **setec:** pin setec 0.127.7 ([#720](https://github.com/zeroroot-ai/charts/issues/720)) ([c6a2365](https://github.com/zeroroot-ai/charts/commit/c6a236551c29dead1fe00b45476567feed6d23e4))
+
 ## [0.150.0](https://github.com/zeroroot-ai/charts/compare/v0.149.1...v0.150.0) (2026-10-14)
 
 
