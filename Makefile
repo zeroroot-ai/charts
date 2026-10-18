@@ -249,6 +249,7 @@ config-contract-sync: ## Regenerate helm/contracts/gibson-config-keys.txt from t
 	@python3 scripts/gen-config-keys.py --write
 
 config-consumed: ## Every config key the ConfigMap renders is one the gibson daemon binds; viper drops the rest in silence (gibson#599)
+	@python3 scripts/gen-config-keys.py --selftest
 	@python3 scripts/check-config-consumed.py --selftest
 
 contract-pins: ## Every vendored contract names the release tag the chart pins for its service (charts#303)
