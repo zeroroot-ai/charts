@@ -17,7 +17,10 @@
 #
 # The pods go one at a time, and each replacement must be Ready before the
 # next delete, so a workload with more than one replica keeps serving. A KNOWN
-# COST: a workload with one replica is down until its new pod is Ready.
+# COST: a workload with one replica is down until its new pod is Ready. A
+# rollout restart of a one-replica Deployment surged a new pod first, so this
+# adds a short gap (ext-authz: Envoy cannot authorize a call in it). The
+# daemon StatefulSet had the gap with a rollout restart too.
 #
 # The new pods are told apart from the old ones by UID, not by a clock.
 #
@@ -27,6 +30,9 @@
 #     stays in the list as Failed);
 #   - a pod with no owner (no controller makes a new one, so a delete would
 #     only remove it).
+# A live pod with any owner counts. The selectors of the four workloads that
+# the redis rotation restarts select no other workload today. A selector
+# that later overlaps another workload makes the restart delete its pods too.
 # An old pod in a crash loop is Running and not Ready. The waits count only
 # the new pods, so it does not block the restart. It is deleted in its turn.
 #
@@ -38,7 +44,7 @@
 # with a reason on stderr at the timeout. Requires kubectl and jq.
 
 restart_pods() {
-  local ns="$1" w="$2" timeout="$3" obj sel want pods old deadline pod left n k
+  local ns="$1" w="$2" timeout="$3" obj sel want pods old deadline pod n k
   obj="$(kubectl -n "$ns" get "$w" -o json)" \
     || { echo "restart_pods: cannot read ${ns}/${w}" >&2; return 1; }
   sel="$(jq -r '.spec.selector.matchLabels // {} | to_entries | map("\(.key)=\(.value)") | join(",")' <<<"$obj")"
@@ -60,8 +66,10 @@ restart_pods() {
   deadline=$(( $(date +%s) + timeout ))
   n=0
   for pod in $(jq -r "${_restart_pods_live}[] | .metadata.name" <<<"$pods"); do
-    left=$(( deadline - $(date +%s) )); [ "$left" -gt 0 ] || left=1
-    kubectl -n "$ns" delete pod "$pod" --ignore-not-found --wait=true --timeout="${left}s" >/dev/null \
+    # --wait=false: a wait for the delete needs a watch on pods, which the
+    # Role does not grant. The waits below tell a new pod by its UID, and a
+    # pod that is being deleted is not live, so they need no delete wait.
+    kubectl -n "$ns" delete pod "$pod" --ignore-not-found --wait=false >/dev/null \
       || { echo "restart_pods: cannot delete pod ${ns}/${pod}" >&2; return 1; }
     # After the Nth delete, N new pods are Ready (at most WANT: a surge can
     # list more pods than the workload wants).

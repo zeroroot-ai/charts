@@ -101,6 +101,10 @@ rules:
   # cannot choose an identity. The pods of a Deployment have random names, so
   # list and delete cannot name them: the script lists by the selector of a
   # named workload and deletes only the pods it lists (files/restart-pods.sh).
+  # THE COST: this ServiceAccount can read and delete any pod of the release
+  # namespace (redis-stack, OpenBao, the dashboard). Before, it could delete
+  # no pod. A delete stops a pod, and its controller starts a new one. No
+  # `watch`: the script deletes with --wait=false.
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "delete"]

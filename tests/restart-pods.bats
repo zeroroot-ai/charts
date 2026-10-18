@@ -30,10 +30,11 @@ case "$*" in
     else
       echo '{"kind":"Deployment","spec":{"replicas":2,"selector":{"matchLabels":{"app.kubernetes.io/component":"ext-authz"}}}}'
     fi ;;
-  "-n gibson delete pod ext-authz-a --ignore-not-found --wait=true --timeout="*|"-n gibson delete pod ext-authz-b --ignore-not-found --wait=true --timeout="*)
-    echo "$5" >> "$TMP/deleted"; echo "delete $5 $8" >> "$TMP/events"
-    # STUB_SLOW_DELETE: each delete takes one second.
-    [ -z "${STUB_SLOW_DELETE:-}" ] || sleep 1 ;;
+  # A delete with --wait=true needs a watch on pods, which the Role of the
+  # redis rotation does not grant: the stub refuses it.
+  *"delete pod"*"--wait=true"*) echo 'Error from server (Forbidden): pods is forbidden: cannot watch resource "pods"' >&2; exit 1 ;;
+  "-n gibson delete pod ext-authz-a --ignore-not-found --wait=false"|"-n gibson delete pod ext-authz-b --ignore-not-found --wait=false")
+    echo "$5" >> "$TMP/deleted"; echo "delete $5" >> "$TMP/events" ;;
   "-n gibson get pods -l app.kubernetes.io/component=ext-authz -o json")
     echo read >> "$TMP/events"
     r=True; [ -z "${STUB_NEVER_READY:-}" ] || r=False
@@ -128,16 +129,14 @@ run_restart() {
   [ "$(tr '\n' ' ' < "$TMP/deleted")" = "ext-authz-a ext-authz-b " ]
 }
 
-@test "FAILING FIXTURE: each delete gets the time left until the deadline, not the full timeout" {
-  # Each delete takes one second of the 3s timeout, so the second delete
-  # gets 2s or less.
-  export STUB_SLOW_DELETE=1
+@test "FAILING FIXTURE: a delete does not wait, because a wait needs a watch on pods that the Role does not grant" {
   run_restart
   [ "$status" -eq 0 ] || { echo "$output"; false; }
   [ "$(grep -c '^delete' "$TMP/events")" -eq 2 ]
-  t="$(grep '^delete ext-authz-b' "$TMP/events" | awk '{print $3}')"
-  [[ "$t" =~ ^--timeout=([0-9]+)s$ ]] || { echo "bad: $t"; false; }
-  [ "${BASH_REMATCH[1]}" -ge 1 ] && [ "${BASH_REMATCH[1]}" -le 2 ] || { echo "bad: $t"; false; }
+  # The delete of hosted#776 (--wait=true) is refused by the stub.
+  run env PATH="$TMP/bin:$PATH" kubectl -n gibson delete pod ext-authz-a --ignore-not-found --wait=true --timeout=3s
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cannot watch"* ]]
 }
 
 @test "FAILING FIXTURE: a workload whose new pods never become Ready fails the restart" {
@@ -168,12 +167,12 @@ run_restart() {
 # namespaces that the identity policy does not bind may use it: velero and
 # kube-system.
 own_restarts() {
-  grep -nE '^[^#]*kubectl[^#]*rollout (restart|status)[[:space:]]+["$a-z]' "$@" \
+  grep -nE '^[^#]*kubectl[^#]*rollout (restart|status)[[:space:]]+["$a-z-]' "$@" \
     | grep -vE 'kubectl -n (velero|kube-system) rollout (restart|status)'
 }
 
 @test "no chart template, chart file or script restarts a workload of the release namespace with rollout restart" {
-  mapfile -t files < <(cd "$REPO_ROOT" && git ls-files 'helm/*/templates/*' 'helm/*/files/*' 'scripts/*.sh' 'scripts/lib/*.sh' | sed "s|^|$REPO_ROOT/|")
+  mapfile -t files < <(cd "$REPO_ROOT" && git ls-files 'helm/*/templates/*' 'helm/*/files/*' 'scripts/*.sh' 'scripts/lib/*.sh' Makefile | sed "s|^|$REPO_ROOT/|")
   [ "${#files[@]}" -gt 100 ] || { echo "only ${#files[@]} files: the guard is blind"; false; }
   run own_restarts "${files[@]}"
   [ "$status" -eq 1 ] || { echo "status ${status}: $output"; false; }
@@ -186,10 +185,14 @@ own_restarts() {
   printf '# never: kubectl -n x rollout restart deployment/gibson-ext-authz\n' > "$TMP/d.sh"
   printf 'rotations require manual `kubectl rollout restart`.\n' > "$TMP/e.sh"
   printf 'kubectl -n kube-system rollout restart deployment/coredns\n' > "$TMP/f.sh"
+  printf 'kubectl rollout restart -n "$NS" "$1"\n' > "$TMP/g.sh"
+  printf 'kubectl rollout restart --namespace gibson statefulset/x\n' > "$TMP/h.sh"
   run own_restarts "$TMP/a.sh"; [ "$status" -eq 0 ]
   run own_restarts "$TMP/b.sh"; [ "$status" -eq 0 ]
   run own_restarts "$TMP/c.sh"; [ "$status" -eq 0 ]
   run own_restarts "$TMP/d.sh"; [ "$status" -eq 1 ]
   run own_restarts "$TMP/e.sh"; [ "$status" -eq 1 ]
   run own_restarts "$TMP/f.sh"; [ "$status" -eq 1 ]
+  run own_restarts "$TMP/g.sh"; [ "$status" -eq 0 ]
+  run own_restarts "$TMP/h.sh"; [ "$status" -eq 0 ]
 }

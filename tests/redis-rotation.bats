@@ -85,7 +85,8 @@ case "$args" in
     r=True; [ -z "${NEVER_READY:-}" ] || [ "$uid" = u0 ] || r=False
     jq -n --arg n "${name}-0" --arg u "$uid" --arg r "$r" \
       '{items: [{metadata: {name: $n, uid: $u, ownerReferences: [{kind: "ReplicaSet", controller: true}]}, status: {phase: "Running", conditions: [{type: "Ready", status: $r}]}}]}' ;;
-  "-n gibson delete pod "*"-0 --ignore-not-found --wait=true --timeout="*)
+  *"delete pod"*"--wait=true"*) echo 'Error from server (Forbidden): pods is forbidden: cannot watch resource "pods"' >&2; exit 1 ;;
+  "-n gibson delete pod "*"-0 --ignore-not-found --wait=false")
     name="${5%-0}"
     cat "$S/kind.$name" >> "$S/restarts"; echo >> "$S/restarts"
     echo "u$(( $(wc -l < "$S/restarts") ))" > "$S/uid.$name"
