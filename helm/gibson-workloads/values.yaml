@@ -2862,7 +2862,7 @@ setec:
   # ---------------------------------------------------------------------
   image:
     repository: ghcr.io/zeroroot-ai/setec
-    tag: "v0.127.6@sha256:38ef734357aeb2d6921b3ccd9c5d091b72e421bd31f3363e9f12b36a9ada068f"
+    tag: "v0.127.7@sha256:0c5190381bc0bd6f3c295146c486edfdbb86d6774a9c45e959e184b66faac05f"
 
   # launcher is the one runtime. The launcher image holds Firecracker, the
   # guest kernel and the guest agent. The disk builder runs as a Job in the
@@ -2873,7 +2873,7 @@ setec:
   launcher:
     image:
       repository: ghcr.io/zeroroot-ai/setec-launcher
-      tag: "v0.127.6@sha256:0f7a5126f7342a501c59ad0642fa417803b105fea84327fbb2bf5ed42c2d7ba7"
+      tag: "v0.127.7@sha256:372630627ef201106905c87162e5bcc283b77316f7ac8e24bf87e96c9723a670"
     # diskRepo is the registry repository of the signed image disks.
     # REQUIRED, and install-specific: the setec chart fails the render when
     # it is empty. The install reads it from substrate.env (SETEC_DISK_REPO,
@@ -2882,7 +2882,7 @@ setec:
     diskBuilder:
       image:
         repository: ghcr.io/zeroroot-ai/setec-disk-builder
-        tag: "v0.127.6@sha256:5d236b9ce9e20dca43a5ba1109a6badbd7be900147f5a598a96d4c7e16da6a4e"
+        tag: "v0.127.7@sha256:fc724db73aab38722328e3675ca47de1686ccba7f3b33c212a0585cdc51e58e0"
       # signingSecret names the Secret in the setec namespace that holds the
       # base64 ed25519 seed (key `seed`) that signs each disk. The seed is
       # the keyring member SETEC_DISK_SIGNING_SEED (scripts/keyring.sh): the
@@ -2911,7 +2911,7 @@ setec:
   devicePlugin:
     image:
       repository: ghcr.io/zeroroot-ai/setec-device-plugin
-      tag: "v0.127.6@sha256:b2a9dcbdc4667114bf13d6770d0292e2bd6a3064694e5f55f2d5248805fbdce6"
+      tag: "v0.127.7@sha256:1e7e348cb445ac6bf7e136d1993030d04f905076208d912642ca41d3bf700e40"
 
   # nodeAgent — the DaemonSet that snapshots, restores, pauses and resumes
   # the Firecracker machine of each launcher Pod on its node. Ships DISABLED
@@ -2922,7 +2922,7 @@ setec:
   nodeAgent:
     image:
       repository: ghcr.io/zeroroot-ai/setec-node-agent
-      tag: "v0.127.6@sha256:c492d1c98dd19fe882a075d9be8ed4260b7b77222f5ef62c65bef188ba147be6"
+      tag: "v0.127.7@sha256:7d5edf7cebb43049f9b2216cfdd431d45cfbde871be643789d5bf77422c872e5"
 
   # credentials: setec has one credential source, the SPIFFE Workload API
   # (ADR-0142). The frontend serves its X509-SVID from the socket and the
@@ -3204,7 +3204,7 @@ setec:
     replicas: 1
     image:
       repository: ghcr.io/zeroroot-ai/setec-frontend
-      tag: "v0.127.6@sha256:d71527106006d1234f35d0c0f533bf16b789f6e6445c6e0bdd431545c5d96d9f"
+      tag: "v0.127.7@sha256:da7c5f4c37b7059919d2421d9e5c79a729f3bbf5d0ce89b069234e26ac8aef47"
       pullPolicy: IfNotPresent
     # clients enrolls each Gibson cluster that may call the frontend
     # (setec#233). The frontend refuses a caller whose SVID carries no
