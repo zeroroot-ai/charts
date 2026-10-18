@@ -12,9 +12,12 @@ pods. This release brings its own:
                    nothing else.
 
 The bucket allow names only the bucket host:
-  - bucket.endpoint empty (AWS S3): the host <bucket>.s3.<region>.amazonaws.com,
-    on 443. The location addresses the bucket by host there, so the regional
-    host s3.<region>.amazonaws.com, which reaches each bucket, stays closed.
+  - bucket.endpoint empty (AWS S3): the hosts <bucket>.s3.<region>.amazonaws.com
+    and <bucket>.s3.dualstack.<region>.amazonaws.com, on 443. The Velero
+    server reads the bucket by the regional bucket host. The kopia client of
+    the repository reads it by the dual-stack bucket host (charts#726, restore
+    drill run 39147128857). Both names hold the bucket, so the regional host
+    s3.<region>.amazonaws.com, which reaches each bucket, stays closed.
   - bucket.endpoint a host name: that name, on the port of the URL.
   - bucket.endpoint an IP address (the kind MinIO): that address, on the
     port of the URL.
@@ -112,6 +115,7 @@ specs:
         {{- if not $endpoint }}
         - toFQDNs:
             - matchName: {{ printf "%s.s3.%s.amazonaws.com" $bucket.name $bucket.region | quote }}
+            - matchName: {{ printf "%s.s3.dualstack.%s.amazonaws.com" $bucket.name $bucket.region | quote }}
           toPorts:
             - ports:
                 - port: "443"

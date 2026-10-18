@@ -17,12 +17,20 @@ selects the pod, and when a selecting spec does not allow egress to the
 kube-apiserver entity and to the bucket on one port. The golden gate keeps
 the render equal to the chart.
 
+On AWS S3 the bucket rule must name two hosts of the bucket: the regional
+host <bucket>.s3.<region>.amazonaws.com, which the Velero server reads, and
+the dual-stack host <bucket>.s3.dualstack.<region>.amazonaws.com, which the
+kopia client of the repository reads (charts#726, restore drill run
+39147128857: `dial tcp ...:443: i/o timeout` on the dual-stack host). The
+rule must not name a host that reaches each bucket (s3.<region>...).
+
   check-velero-datapath-selected.py             exit 1 on a finding
   check-velero-datapath-selected.py --selftest  prove each finding fails
 """
 import copy
 import glob
 import os
+import re
 import sys
 
 import yaml
@@ -67,7 +75,29 @@ def egress_problems(spec: dict) -> list[str]:
     ports = [p for tp in (bucket[0].get("toPorts") or []) for p in (tp.get("ports") or [])]
     if len(ports) != 1:
         return [f"the bucket rule names {len(ports)} ports, want one"]
-    return []
+    return s3_host_problems([f.get("matchName", "") for f in bucket[0].get("toFQDNs") or []])
+
+
+S3_BUCKET_HOST = re.compile(r"^(?P<bucket>[a-z0-9][a-z0-9.-]*)\.s3\.(?:dualstack\.)?(?P<region>[a-z0-9-]+)\.amazonaws\.com$")
+
+
+def s3_host_problems(names: list[str]) -> list[str]:
+    """On AWS S3, the bucket rule names the regional and the dual-stack host of one bucket, and nothing else."""
+    aws = [n for n in names if n.endswith(".amazonaws.com")]
+    if not aws:
+        return []
+    out = []
+    shared = [n for n in aws if n.startswith("s3.")]
+    if shared:
+        out.append(f"the bucket rule names {shared}, a host that reaches each bucket")
+    pairs = {(m["bucket"], m["region"]) for n in aws if (m := S3_BUCKET_HOST.match(n)) and not n.startswith("s3.")}
+    for b, r in sorted(pairs):
+        want = {f"{b}.s3.{r}.amazonaws.com", f"{b}.s3.dualstack.{r}.amazonaws.com"}
+        missing = sorted(want - set(aws))
+        if missing:
+            out.append(f"the bucket rule does not name {missing}: the kopia client reads the bucket by the "
+                       f"dual-stack host and the Velero server by the regional host (charts#726)")
+    return out
 
 
 def policy_specs(docs: list) -> list[tuple[str, str, dict]]:
@@ -137,8 +167,32 @@ def selftest(docs: list, pods: list[dict]) -> int:
                     s["egress"] = [r for r in s["egress"] if "toEntities" not in r]
         return out
 
+    def fqdns(docs_in: list, edit) -> list:
+        out = copy.deepcopy(docs_in)
+        for d in out:
+            if isinstance(d, dict) and d.get("kind") == "CiliumNetworkPolicy":
+                for sp in d["specs"]:
+                    for r in sp["egress"]:
+                        if r.get("toFQDNs"):
+                            r["toFQDNs"] = edit(r["toFQDNs"])
+        return out
+
+    def no_dualstack(names: list) -> list:
+        return [f for f in names if ".s3.dualstack." not in f.get("matchName", "")]
+
+    def no_regional(names: list) -> list:
+        return [f for f in names if ".s3.dualstack." in f.get("matchName", "")]
+
+    def with_shared(names: list) -> list:
+        return names + [{"matchName": "s3.us-east-1.amazonaws.com"}]
+
     if check(docs, pods):
         print("selftest: the committed render must pass", file=sys.stderr)
+        return 1
+    if not any(".s3.dualstack." in f.get("matchName", "") for _, _, sp in policy_specs(docs)
+               for r in sp.get("egress") or [] for f in r.get("toFQDNs") or []):
+        print("selftest: the committed render names no dual-stack bucket host, so the S3 cases are blind",
+              file=sys.stderr)
         return 1
     cases = {
         "the policy before charts#672 (no pod-volume-backup selector) fails":
@@ -152,6 +206,11 @@ def selftest(docs: list, pods: list[dict]) -> int:
             (docs, [{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "pvb", "namespace": "other",
                                                                     "labels": {"velero.io/pod-volume-backup": "pvb"}}}]),
         "a selecting spec without the API server entity fails": (without_api(docs), pods),
+        "FAILING FIXTURE: the policy before charts#726 (no dual-stack bucket host) fails":
+            (fqdns(docs, no_dualstack), pods),
+        "a bucket rule with only the dual-stack host fails": (fqdns(docs, no_regional), pods),
+        "a bucket rule that also names the shared regional host s3.<region> fails":
+            (fqdns(docs, with_shared), pods),
         "a render with no policy is blind and fails": ([{"kind": "ConfigMap"}], pods),
         "no fixture is blind and fails": (docs, []),
     }
