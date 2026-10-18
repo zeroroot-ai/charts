@@ -324,7 +324,7 @@ repack-once: ## Inside make check no gate repacks the umbrella: each repack test
 	@python3 scripts/check-repack-once.py --selftest
 	@python3 scripts/check-repack-once.py
 
-velero-datapath-selected: ## The Velero policy selects the hosting pod of each PodVolumeBackup and PodVolumeRestore (fixture from velero v1.18.1), and allows it the API server and the bucket (charts#671)
+velero-datapath-selected: ## The Velero policy selects the hosting pod of each PodVolumeBackup and PodVolumeRestore (fixture from velero v1.18.1), and allows it the API server and the regional and dual-stack bucket hosts (charts#671, charts#726)
 	@python3 scripts/check-velero-datapath-selected.py --selftest
 	@python3 scripts/check-velero-datapath-selected.py
 
