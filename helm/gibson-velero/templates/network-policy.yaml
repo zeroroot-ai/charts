@@ -13,11 +13,15 @@ pods. This release brings its own:
 
 The bucket allow names only the bucket host:
   - bucket.endpoint empty (AWS S3): the hosts <bucket>.s3.<region>.amazonaws.com
-    and <bucket>.s3.dualstack.<region>.amazonaws.com, on 443. The Velero
-    server reads the bucket by the regional bucket host. The kopia client of
-    the repository reads it by the dual-stack bucket host (charts#726, restore
+    and <bucket>.s3.dualstack.<region>.amazonaws.com, on 443. In each pod,
+    the AWS plugin reads the bucket by the regional bucket host, and the kopia
+    client of the repository reads it by the dual-stack bucket host: its S3
+    library turns dual stack on for an Amazon endpoint (charts#726, restore
     drill run 39147128857). Both names hold the bucket, so the regional host
-    s3.<region>.amazonaws.com, which reaches each bucket, stays closed.
+    s3.<region>.amazonaws.com, which reaches each bucket, stays closed. For a
+    region that the S3 library does not know, it uses the us-east-1
+    dual-stack host, and this policy blocks it. us-east-1, the region of the
+    estate, is a known region.
   - bucket.endpoint a host name: that name, on the port of the URL.
   - bucket.endpoint an IP address (the kind MinIO): that address, on the
     port of the URL.

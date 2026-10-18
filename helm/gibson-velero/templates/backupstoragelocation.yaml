@@ -13,8 +13,9 @@ server reads down to exactly one, the kopia repository password.
 {{- fail "bucket.name is required: Velero writes to the durable bucket stage 0 created. There is no default that is safe to invent." }}
 {{- end }}
 {{- $onAWS := not (trim $bucket.endpoint) }}
-{{- /* On AWS S3 the bucket is addressed by host, <bucket>.s3.<region>.amazonaws.com,
-       because the network policy opens only that host: the regional host
+{{- /* On AWS S3 the bucket is addressed by host, <bucket>.s3.<region>.amazonaws.com
+       and <bucket>.s3.dualstack.<region>.amazonaws.com, because the network
+       policy opens only these two hosts of the bucket: the regional host
        s3.<region>.amazonaws.com of path-style addressing reaches each bucket of
        S3 (GHSA-3wg5). A name with a dot breaks the TLS name of that host. */}}
 {{- if and $onAWS (contains "." $bucket.name) }}
