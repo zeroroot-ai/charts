@@ -10,7 +10,9 @@
        password as its login. Both passwords now work.
     2. It restarts each client of Redis, one at a time, and waits for each:
        the daemon, the tenant-operator, ext-authz and ratelimit. Each one
-       reads the new password at start.
+       reads the new password at start. A restart deletes the pods of the
+       workload one at a time (files/restart-pods.sh): the identity admission
+       policy denies the patch of a `rollout restart` (charts#725).
     3. It removes the OLD password from the ACL. The old password is refused.
 
   redis-stack itself does not restart. Its probes accept NOAUTH, so a probe
@@ -80,39 +82,28 @@ rules:
     resources: ["secrets"]
     resourceNames: [{{ $stateSecret | quote }}]
     verbs: ["get", "update", "patch", "delete"]
-  # Reads for the rollout-status watch loop (deploy#551) — these stay
-  # namespace-wide because `kubectl rollout status` LISTs.
-  - apiGroups: ["apps"]
-    resources: ["statefulsets", "deployments"]
-    verbs: ["get", "list", "watch"]
-  # WRITES are name-restricted (deploy#1210). `patch` on .spec.template is a
-  # platform-identity grant, not a restart button: Kubernetes has no
-  # `serviceaccounts/use` verb, so an unrestricted patch here let this
-  # CronJob rewrite ANY workload in the namespace — including its own
-  # `serviceAccountName` — and take that workload's SVID. Unlike `create`,
-  # `patch` honours resourceNames, so the grant is scoped to exactly the four
-  # workloads the script rolls:
-  #   kubectl rollout restart statefulset/$DAEMON_STS
-  #   kubectl rollout restart deployment/$TENANT_OP
-  #   kubectl rollout restart deployment/$EXT_AUTHZ
-  #   kubectl rollout restart deployment/$RATELIMIT
-  # redis-stack is deliberately absent: it never restarts for a rotation.
+  # Read the four workloads the script restarts, for their selector and
+  # their wanted pod count. A `get` honours resourceNames.
   - apiGroups: ["apps"]
     resources: ["statefulsets"]
     resourceNames: [{{ $daemonSts | quote }}]
-    verbs: ["patch"]
+    verbs: ["get"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
     resourceNames: [{{ $tenantOpDep | quote }}, {{ $extAuthzDep | quote }}, {{ $ratelimitDep | quote }}]
-    verbs: ["patch"]
-  # rollout status needs to watch the status sub-resource.
-  - apiGroups: ["apps"]
-    resources: ["statefulsets/status", "deployments/status"]
-    verbs: ["get", "watch", "list"]
-  # kubectl rollout status for Deployments needs to read ReplicaSets.
-  - apiGroups: ["apps"]
-    resources: ["replicasets"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get"]
+  # Restart by a pod delete (charts#725). The Role no longer patches any
+  # workload: a `rollout restart` patched .spec.template, which the identity
+  # admission policy gibson-platform-identity-workloads denies to every
+  # principal but the release controllers and Reloader, so the rotation never
+  # completed. A pod delete is not a write of the workload, and the controller
+  # of the workload makes the new pod from its own template, so this grant
+  # cannot choose an identity. The pods of a Deployment have random names, so
+  # list and delete cannot name them: the script lists by the selector of a
+  # named workload and deletes only the pods it lists (files/restart-pods.sh).
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete"]
   # Execute redis-cli commands inside the redis-stack pod for ACL management.
   # deploy#1363: name-scoped to the single redis-stack StatefulSet pod. `exec`
   # is a subresource of an EXISTING named Pod, so `create` honours resourceNames
@@ -344,17 +335,22 @@ spec:
                     exit 1
                   fi
 
-                  # 2. Each client restarts and reads the new password.
+                  # 2. Each client restarts and reads the new password. A
+                  # restart deletes the pods of the workload one at a time and
+                  # waits for new Ready pods. A `rollout restart` patches the
+                  # workload, which the identity admission policy denies
+                  # (charts#725).
+                  {{- .Files.Get "files/restart-pods.sh" | nindent 18 }}
                   restart() {
                     echo "[rotation] restarting $1..."
-                    kubectl rollout restart "$1" -n "$NS"
-                    kubectl rollout status "$1" -n "$NS" --timeout="$2"
+                    restart_pods "$NS" "$1" "$2" \
+                      || { echo "[rotation] FATAL: the restart of $1 did not finish; the old password stays until the next run" >&2; exit 1; }
                     echo "[rotation] $1 ready"
                   }
-                  restart "statefulset/${DAEMON_STS}" 900s
-                  restart "deployment/${TENANT_OP}" 180s
-                  restart "deployment/${EXT_AUTHZ}" 180s
-                  restart "deployment/${RATELIMIT}" 180s
+                  restart "statefulset/${DAEMON_STS}" 900
+                  restart "deployment/${TENANT_OP}" 180
+                  restart "deployment/${EXT_AUTHZ}" 180
+                  restart "deployment/${RATELIMIT}" 180
 
                   # A second change of the Secret during step 2: a client that
                   # restarted late holds a password the store does not know
@@ -383,7 +379,7 @@ spec:
                   memory: 32Mi
                 limits:
                   # This is a kubectl shell-loop controller that spends most
-                  # of its life waiting on `kubectl rollout status`; it does
+                  # of its life waiting for new Ready pods; it does
                   # not need a 200m burst. 100m matches the sibling OpenBao
                   # init jobs and keeps the kind CPU budget in line
                   # (deploy#858).

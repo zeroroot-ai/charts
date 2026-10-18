@@ -120,8 +120,9 @@ egress-host-groups-test: ## An egress host group of the values renders one polic
 	@$(MAKE) -s repack
 	@bats tests/egress-host-groups.bats
 .PHONY: redis-rotation-test
-redis-rotation-test: ## The redis password rotation keeps the old password until each client restarted, and recovers when the store already has the new one (ADR-0171)
+redis-rotation-test: ## The redis password rotation keeps the old password until each client restarted, and restarts a client by a pod delete, never a rollout restart (ADR-0171, charts#725)
 	@$(MAKE) -s repack
+	@bats tests/restart-pods.bats
 	@bats tests/redis-rotation.bats
 
 .PHONY: openbao-seed-lifetime
