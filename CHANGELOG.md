@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.151.1](https://github.com/zeroroot-ai/charts/compare/v0.151.0...v0.151.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* **redis:** the redis rotation restarts a client by a pod delete, which the identity admission policy admits ([#728](https://github.com/zeroroot-ai/charts/issues/728)) ([31f51aa](https://github.com/zeroroot-ai/charts/commit/31f51aae518369d487e79825c54344972dd369b4))
+* **setec:** pin setec 0.127.8 ([#723](https://github.com/zeroroot-ai/charts/issues/723)) ([2582c1b](https://github.com/zeroroot-ai/charts/commit/2582c1bf5db4315bd451391d5ff243e85b9c746a))
+* **velero:** the velero network policy allows the S3 dual-stack bucket host ([#727](https://github.com/zeroroot-ai/charts/issues/727)) ([26d9ad7](https://github.com/zeroroot-ai/charts/commit/26d9ad7fa03049b28fc88146f4830633123c5ec7))
+
 ## [0.151.0](https://github.com/zeroroot-ai/charts/compare/v0.150.0...v0.151.0) (2026-10-18)
 
 
