@@ -71,12 +71,28 @@ case "$args" in
         if [ "${!#}" = resetpass ]; then printf '%s\n' "$new" > "$S/acl"; else printf '%s\n' "$new" >> "$S/acl"; fi
         echo OK ;;
     esac ;;
-  *"rollout restart"*)
-    echo "$3" >> "$S/restarts"
+  # A restart is a pod delete (charts#725). Each workload has one pod,
+  # "<name>-0", owned by a controller. A delete gives the pod a new UID.
+  *"rollout"*) echo "stub kubectl: a rollout restart patches the workload, and the identity admission policy denies it (charts#725)" >&2; exit 1 ;;
+  "-n gibson get statefulset/"*" -o json"|"-n gibson get deployment/"*" -o json")
+    w="${4}"; name="${w#*/}"
+    printf '%s' "$w" > "$S/kind.$name"
+    jq -n --arg n "$name" --arg k "$(case "$w" in statefulset/*) echo StatefulSet ;; *) echo Deployment ;; esac)" \
+      '{kind: $k, spec: {replicas: 1, selector: {matchLabels: {app: $n}}}}' ;;
+  "-n gibson get pods -l app="*" -o json")
+    name="${6#app=}"; uid="u0"; [ ! -f "$S/uid.$name" ] || uid="$(cat "$S/uid.$name")"
+    # NEVER_READY: a new pod never becomes Ready.
+    r=True; [ -z "${NEVER_READY:-}" ] || [ "$uid" = u0 ] || r=False
+    jq -n --arg n "${name}-0" --arg u "$uid" --arg r "$r" \
+      '{items: [{metadata: {name: $n, uid: $u, ownerReferences: [{kind: "ReplicaSet", controller: true}]}, status: {phase: "Running", conditions: [{type: "Ready", status: $r}]}}]}' ;;
+  *"delete pod"*"--wait=true"*) echo 'Error from server (Forbidden): pods is forbidden: cannot watch resource "pods"' >&2; exit 1 ;;
+  "-n gibson delete pod "*"-0 --ignore-not-found --wait=false")
+    name="${5%-0}"
+    cat "$S/kind.$name" >> "$S/restarts"; echo >> "$S/restarts"
+    echo "u$(( $(wc -l < "$S/restarts") ))" > "$S/uid.$name"
     if [ -s "$S/change_on_restart" ]; then
       cp "$S/change_on_restart" "$S/pw"; : > "$S/change_on_restart"; echo 99 > "$S/ver"
     fi ;;
-  *"rollout status"*) exit 0 ;;
   *) echo "stub kubectl: unexpected: $args" >&2; exit 3 ;;
 esac
 STUB
@@ -93,15 +109,16 @@ world() {
   shift 4; : > "$S/acl"; for p in "$@"; do printf '%s\n' "$p" >> "$S/acl"; done
 }
 
-run_job() { run env PATH="$S/bin:$PATH" S="$S" bash "$WORK/rotation.sh"; }
+run_job() { run env PATH="$S/bin:$PATH" S="$S" RESTART_PODS_POLL=0 bash "$WORK/rotation.sh"; }
 
-@test "a rotation adds the new password, restarts the four clients, then removes the old one" {
+@test "a rotation adds the new password, restarts the four clients by a pod delete, then removes the old one" {
   world new 2 old 1 old
   run_job
   echo "$output"
   [ "$status" -eq 0 ]
   [ "$(cat "$S/acl")" = "new" ]
   [ "$(wc -l < "$S/restarts")" -eq 4 ]
+  grep -qx 'statefulset/gibson-gibson-workloads' "$S/restarts" || { cat "$S/restarts"; false; }
   grep -qx 'deployment/gibson-ext-authz' "$S/restarts"
   grep -qx 'deployment/gibson-ratelimit' "$S/restarts"
   [ "$(cat "$S/state_ver")" = 2 ]
@@ -111,7 +128,7 @@ run_job() { run env PATH="$S/bin:$PATH" S="$S" bash "$WORK/rotation.sh"; }
 @test "the old password works during the restarts" {
   world new 2 old 1 old
   # Record the ACL at the first restart.
-  sed -i 's|    echo "$3" >> "$S/restarts"|    echo "$3" >> "$S/restarts"; cp "$S/acl" "$S/acl_at_restart"|' "$S/bin/kubectl"
+  sed -i 's|    cat "$S/kind.$name" >> "$S/restarts"; echo >> "$S/restarts"|    cat "$S/kind.$name" >> "$S/restarts"; echo >> "$S/restarts"; cp "$S/acl" "$S/acl_at_restart"|' "$S/bin/kubectl"
   run_job
   [ "$status" -eq 0 ]
   grep -qx old "$S/acl_at_restart"
@@ -181,4 +198,31 @@ run_job() { run env PATH="$S/bin:$PATH" S="$S" bash "$WORK/rotation.sh"; }
   [[ "$output" == *"gibson-redis-stack-0"* ]]
   [ "$(cat "$S/state_ver")" = 1 ]
   [ ! -s "$S/restarts" ]
+}
+
+@test "FAILING FIXTURE: the rendered rotation never runs a rollout restart, which the identity admission policy denies (charts#725)" {
+  # The rotation before charts#725 ran `kubectl rollout restart` and
+  # `kubectl rollout status`. The pattern finds both forms, and not a comment.
+  run grep -nE '^[^#]*kubectl[^#]*rollout (restart|status)' "$WORK/rotation.sh"
+  [ "$status" -eq 1 ] || { echo "$output"; false; }
+  printf '%s\n' '    kubectl rollout restart "$1" -n "$NS"' > "$S/old.sh"
+  run grep -nE '^[^#]*kubectl[^#]*rollout (restart|status)' "$S/old.sh"
+  [ "$status" -eq 0 ]
+  printf '%s\n' '# kubectl rollout restart "$1"' > "$S/comment.sh"
+  run grep -nE '^[^#]*kubectl[^#]*rollout (restart|status)' "$S/comment.sh"
+  [ "$status" -eq 1 ]
+}
+
+@test "FAILING FIXTURE: a restart whose new pod never becomes Ready fails the job and keeps the old password" {
+  world new 2 old 1 old
+  # The daemon timeout drops to 1s so the test does not wait 900s.
+  sed 's|restart "statefulset/${DAEMON_STS}" 900|restart "statefulset/${DAEMON_STS}" 1|' "$WORK/rotation.sh" > "$S/rotation.sh"
+  run grep -c 'restart "statefulset/${DAEMON_STS}" 1$' "$S/rotation.sh"
+  [ "$output" = 1 ]
+  run env PATH="$S/bin:$PATH" S="$S" RESTART_PODS_POLL=0 NEVER_READY=1 bash "$S/rotation.sh"
+  echo "$output"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"the restart of statefulset/gibson-gibson-workloads did not finish"* ]]
+  grep -qx old "$S/acl"
+  [ "$(cat "$S/state_ver")" = 1 ]
 }
