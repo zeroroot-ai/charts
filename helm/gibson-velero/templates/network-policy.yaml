@@ -7,21 +7,23 @@ pods. This release brings its own:
   1. default deny  One CiliumClusterwideNetworkPolicy selects each pod of the
                    release namespace. It allows DNS to kube-dns and nothing
                    else, in both directions. The same shape as the umbrella.
-  2. velero        The server, the node agent and the repository maintenance
-                   Jobs reach the API server and the backup bucket, and
-                   nothing else.
+  2. velero        The server, the node agent, the repository maintenance
+                   Jobs and the data path pods of each PodVolumeBackup and
+                   PodVolumeRestore reach the API server and the backup
+                   bucket, and nothing else.
 
 The bucket allow names only the bucket host:
-  - bucket.endpoint empty (AWS S3): the hosts <bucket>.s3.<region>.amazonaws.com
-    and <bucket>.s3.dualstack.<region>.amazonaws.com, on 443. The AWS plugin
-    in the server pod reads the bucket by the regional bucket host. The kopia
-    client reads it by the dual-stack bucket host, in each pod that opens the
-    repository: its S3 library turns dual stack on for an Amazon endpoint
-    (charts#726, restore drill run 39147128857). Both names hold the bucket, so the regional host
-    s3.<region>.amazonaws.com, which reaches each bucket, stays closed. For a
-    region that the S3 library does not know, it uses the us-east-1
-    dual-stack host, and this policy blocks it. us-east-1, the region of the
-    estate, is a known region.
+  - bucket.endpoint empty (AWS S3): two bucket hosts, on 443. The AWS
+    plugin in the server pod reads the bucket by the regional bucket host,
+    <bucket>.s3.<region>.amazonaws.com. The kopia client reads it by the
+    dual-stack bucket host, <bucket>.s3.dualstack.<region>.amazonaws.com, in
+    each pod that opens the repository: its S3 library turns dual stack on
+    for an Amazon endpoint (charts#726, restore drill run 39147128857). Both
+    names hold the bucket only. The shared host s3.<region>.amazonaws.com
+    reaches each bucket, so it stays closed. For a region that the S3
+    library does not know, the library uses the us-east-1 dual-stack host,
+    and this policy blocks it. us-east-1, the region of the estate, is a
+    known region.
   - bucket.endpoint a host name: that name, on the port of the URL.
   - bucket.endpoint an IP address (the kind MinIO): that address, on the
     port of the URL.

@@ -19,15 +19,17 @@ the render equal to the chart.
 
 On AWS S3 the bucket rule of EVERY spec of the Velero policy (the server and
 node agent, the maintenance Jobs and the data path pods) must name the two
-hosts of the release bucket, and nothing else: the regional host
-<bucket>.s3.<region>.amazonaws.com, which the AWS plugin in the server pod
-reads, and the dual-stack host <bucket>.s3.dualstack.<region>.amazonaws.com,
-which the kopia client reads in each pod that opens the repository
-(charts#726, restore drill run
-39147128857: `dial tcp ...:443: i/o timeout` on the dual-stack host). The
-kopia client that failed there runs in the Velero server pod. The rule must
-not name a host that reaches each bucket (s3.<region>...), a matchPattern,
-or the host of another bucket. Each spec of the policy must have a bucket rule.
+bucket hosts of the release bucket, and nothing else: the regional bucket
+host <bucket>.s3.<region>.amazonaws.com, which the AWS plugin in the server
+pod reads, and the dual-stack bucket host
+<bucket>.s3.dualstack.<region>.amazonaws.com, which the kopia client reads in
+each pod that opens the repository (charts#726, restore drill run
+39147128857: `dial tcp ...:443: i/o timeout` on the dual-stack bucket host).
+The kopia client that failed there runs in the Velero server pod. The rule
+must not name the shared host s3.<region>.amazonaws.com, which reaches each
+bucket, a matchPattern, or the host of another bucket. Each spec of the
+Velero policy must have a bucket rule. Another policy of the render needs
+none.
 
   check-velero-datapath-selected.py             exit 1 on a finding
   check-velero-datapath-selected.py --selftest  prove each finding fails
@@ -106,8 +108,8 @@ def s3_host_problems(fqdns: list[dict]) -> list[str]:
         missing = sorted(want - set(names))
         if missing:
             out.append(f"the bucket rule does not name {missing}: the AWS plugin in the server pod reads the bucket "
-                       f"by the regional host, and the kopia client by the dual-stack host (charts#726)")
-    if not pairs:
+                       f"by the regional bucket host, and the kopia client by the dual-stack bucket host (charts#726)")
+    if not pairs and any(n.endswith(".amazonaws.com") for n in names):
         out.append(f"the bucket rule names {names} and no bucket host: an amazonaws.com host that is not a bucket "
                    f"host, such as s3-<region>.amazonaws.com, reaches each bucket")
     other = sorted(set(names) - {h for b, r in pairs for h in (f"{b}.s3.{r}.amazonaws.com",
@@ -117,10 +119,17 @@ def s3_host_problems(fqdns: list[dict]) -> list[str]:
     return out
 
 
+VELERO_POLICY_SUFFIX = "-velero"
+
+
 def bucket_rule_problems(docs: list) -> list[str]:
-    """The bucket rule of each spec of each CiliumNetworkPolicy, not only the specs that select a fixture pod."""
+    """The bucket rule of each spec of the Velero policy (<release>-velero), not only the specs that select a
+    fixture pod. Another CiliumNetworkPolicy of the render needs no bucket rule."""
     out = []
-    for name, ns, spec in policy_specs(docs):
+    velero = [(n, ns, sp) for n, ns, sp in policy_specs(docs) if n.endswith(VELERO_POLICY_SUFFIX)]
+    if not velero:
+        return [f"the render holds no CiliumNetworkPolicy named *{VELERO_POLICY_SUFFIX}: the bucket check is blind"]
+    for name, ns, spec in velero:
         sel = (spec.get("endpointSelector") or {})
         rules = [r for r in spec.get("egress") or [] if r.get("toFQDNs") or r.get("toCIDR")]
         if not rules:
@@ -238,6 +247,15 @@ def selftest(docs: list, pods: list[dict]) -> int:
                         sp["egress"] = [r for r in sp["egress"] if not r.get("toFQDNs")]
         return out
 
+    def pattern_only(names: list) -> list:
+        return [{"matchPattern": "*.s3.us-east-1.amazonaws.com"}]
+
+    def with_other_policy(docs_in: list) -> list:
+        return copy.deepcopy(docs_in) + [{"kind": "CiliumNetworkPolicy",
+                                          "metadata": {"name": "gibson-velero-metrics", "namespace": "gibson"},
+                                          "specs": [{"endpointSelector": {"matchLabels": {"x": "y"}},
+                                                     "egress": [{"toEntities": ["kube-apiserver"]}]}]}]
+
     def with_pattern(names: list) -> list:
         return names + [{"matchPattern": "*.amazonaws.com"}]
 
@@ -256,6 +274,14 @@ def selftest(docs: list, pods: list[dict]) -> int:
 
     if check(docs, pods):
         print("selftest: the committed render must pass", file=sys.stderr)
+        return 1
+    pattern_findings = bucket_rule_problems(fqdns(docs, pattern_only))
+    if not pattern_findings or any("no bucket host" in f for f in pattern_findings):
+        print("selftest: a pattern-only bucket rule must give the pattern finding only, got: "
+              + "; ".join(pattern_findings), file=sys.stderr)
+        return 1
+    if bucket_rule_problems(with_other_policy(docs)):
+        print("selftest: another CiliumNetworkPolicy with no bucket rule must pass", file=sys.stderr)
         return 1
     if not any(".s3.dualstack." in f.get("matchName", "") for _, _, sp in policy_specs(docs)
                for r in sp.get("egress") or [] for f in r.get("toFQDNs") or []):
@@ -277,7 +303,7 @@ def selftest(docs: list, pods: list[dict]) -> int:
         "FAILING FIXTURE: the policy before charts#726 (no dual-stack bucket host) fails":
             (fqdns(docs, no_dualstack), pods),
         "a bucket rule with only the dual-stack host fails": (fqdns(docs, no_regional), pods),
-        "a bucket rule that also names the shared regional host s3.<region> fails":
+        "a bucket rule that also names the shared host s3.<region> fails":
             (fqdns(docs, with_shared), pods),
         "FAILING FIXTURE: the server spec only without the dual-stack host fails (the kopia client of the "
         "drill failure runs in the server pod)": (server_only(docs, no_dualstack), pods),
@@ -287,6 +313,9 @@ def selftest(docs: list, pods: list[dict]) -> int:
         "a server spec with no bucket rule fails": (no_bucket_rule(docs), pods),
         "a bucket rule with the hosts of a second bucket fails": (fqdns(docs, with_other_bucket), pods),
         "a render with no policy is blind and fails": ([{"kind": "ConfigMap"}], pods),
+        "a render with no *-velero policy is blind and fails":
+            ([dict(d, metadata=dict(d["metadata"], name="renamed")) if isinstance(d, dict)
+              and d.get("kind") == "CiliumNetworkPolicy" else d for d in docs], pods),
         "no fixture is blind and fails": (docs, []),
     }
     bad = [name for name, (d, p) in cases.items() if not check(d, p)]
