@@ -162,17 +162,21 @@ run_restart() {
 }
 
 # own_restarts FILE...: each line, not a comment, that runs `rollout restart`
-# or `rollout status` on a workload: a workload argument follows, so prose
-# such as "a manual `kubectl rollout restart`" is not a call. Only the
-# namespaces that the identity policy does not bind may use it: velero and
-# kube-system.
+# on a workload: a workload argument or a flag follows, so prose such as "a
+# manual `kubectl rollout restart`" is not a call. A `rollout status` only
+# reads, and the policy does not judge a read, so it is not found. Only the
+# namespaces that the identity policy does not bind may restart: velero and
+# kube-system, with -n before or after the verb. The guard reads one line at
+# a time: a call that breaks with a backslash right after `rollout restart`
+# is found, but its workload on the next line is not read.
 own_restarts() {
-  grep -nE '^[^#]*kubectl[^#]*rollout (restart|status)[[:space:]]+["$a-z-]' "$@" \
-    | grep -vE 'kubectl -n (velero|kube-system) rollout (restart|status)'
+  grep -nE '^[^#]*kubectl[^#]*rollout restart[[:space:]]+["$a-z\\-]' "$@" \
+    | grep -vE 'kubectl -n (velero|kube-system) rollout restart|rollout restart (-n|--namespace)[ =](velero|kube-system)[[:space:]]'
 }
 
-@test "no chart template, chart file or script restarts a workload of the release namespace with rollout restart" {
-  mapfile -t files < <(cd "$REPO_ROOT" && git ls-files 'helm/*/templates/*' 'helm/*/files/*' 'scripts/*.sh' 'scripts/lib/*.sh' Makefile | sed "s|^|$REPO_ROOT/|")
+@test "no chart template, chart file, script, Makefile or workflow restarts a workload of the release namespace with rollout restart" {
+  mapfile -t files < <(cd "$REPO_ROOT" && git ls-files 'helm/*/templates/*' 'helm/*/files/*' 'scripts/*.sh' 'scripts/lib/*.sh' Makefile '.github/workflows/*' | sed "s|^|$REPO_ROOT/|")
+  printf '%s\n' "${files[@]}" | grep -q '/.github/workflows/published-install.yml$' || { echo "the guard does not read the workflows"; false; }
   [ "${#files[@]}" -gt 100 ] || { echo "only ${#files[@]} files: the guard is blind"; false; }
   run own_restarts "${files[@]}"
   [ "$status" -eq 1 ] || { echo "status ${status}: $output"; false; }
@@ -185,6 +189,12 @@ own_restarts() {
   printf '# never: kubectl -n x rollout restart deployment/gibson-ext-authz\n' > "$TMP/d.sh"
   printf 'rotations require manual `kubectl rollout restart`.\n' > "$TMP/e.sh"
   printf 'kubectl -n kube-system rollout restart deployment/coredns\n' > "$TMP/f.sh"
+  printf 'kubectl rollout restart -n kube-system deployment/coredns\n' > "$TMP/f2.sh"
+  printf 'kubectl -n velero rollout restart deployment/velero\n' > "$TMP/v.sh"
+  printf 'kubectl rollout restart --namespace velero daemonset/node-agent\n' > "$TMP/v2.sh"
+  printf '  kubectl -n "$NS" rollout restart \\\n    deployment/gibson-ext-authz\n' > "$TMP/bs.sh"
+  printf '          kubectl -n "$NS" rollout restart deploy/gibson-platform-operator deploy/gibson-tenant-operator\n' > "$TMP/wf.yml"
+  printf 'kubectl -n "$NS" rollout status deploy/gibson-envoy --timeout=300s\n' > "$TMP/st.sh"
   printf 'kubectl rollout restart -n "$NS" "$1"\n' > "$TMP/g.sh"
   printf 'kubectl rollout restart --namespace gibson statefulset/x\n' > "$TMP/h.sh"
   run own_restarts "$TMP/a.sh"; [ "$status" -eq 0 ]
@@ -193,6 +203,13 @@ own_restarts() {
   run own_restarts "$TMP/d.sh"; [ "$status" -eq 1 ]
   run own_restarts "$TMP/e.sh"; [ "$status" -eq 1 ]
   run own_restarts "$TMP/f.sh"; [ "$status" -eq 1 ]
+  run own_restarts "$TMP/f2.sh"; [ "$status" -eq 1 ]
+  run own_restarts "$TMP/v.sh"; [ "$status" -eq 1 ]
+  run own_restarts "$TMP/v2.sh"; [ "$status" -eq 1 ]
+  run own_restarts "$TMP/bs.sh"; [ "$status" -eq 0 ]
+  # The line that published-install.yml ran before this guard read workflows.
+  run own_restarts "$TMP/wf.yml"; [ "$status" -eq 0 ]
+  run own_restarts "$TMP/st.sh"; [ "$status" -eq 1 ]
   run own_restarts "$TMP/g.sh"; [ "$status" -eq 0 ]
   run own_restarts "$TMP/h.sh"; [ "$status" -eq 0 ]
 }

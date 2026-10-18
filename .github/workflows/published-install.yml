@@ -390,9 +390,15 @@ jobs:
           [ "$left" -eq 0 ] || { echo "::error::$left edge pod(s) still exist, so the step would prove nothing"; exit 1; }
 
           echo "▶ restart both operators, so each one calls Zitadel again"
-          kubectl -n "$NS" rollout restart deploy/gibson-platform-operator deploy/gibson-tenant-operator
-          kubectl -n "$NS" rollout status deploy/gibson-platform-operator --timeout=300s
-          kubectl -n "$NS" rollout status deploy/gibson-tenant-operator --timeout=300s
+          # A pod delete, not a rollout restart: the identity admission policy
+          # of the chart denies the patch of a rollout restart to each
+          # principal that is not a release controller or Reloader
+          # (charts#725). This runner passes the policy only because
+          # baseline-up.sh lists it in workloadCreators. The restart of the
+          # redis rotation uses the same function (tests/restart-pods.bats).
+          . "$CHARTS_ROOT/helm/gibson-workloads/files/restart-pods.sh"
+          restart_pods "$NS" deployment/gibson-platform-operator 300
+          restart_pods "$NS" deployment/gibson-tenant-operator 300
 
           echo "▶ a second tenant, provisioned with no edge"
           tier="$(kubectl get tenant primary -o jsonpath='{.spec.tier}')"
@@ -408,11 +414,11 @@ jobs:
             tier: ${tier}
           YAML
           # The Tenant webhook is served by the tenant-operator, which this step
-          # restarted a moment ago. A finished rollout says that the pods are
+          # restarted a moment ago. A finished restart says that the pods are
           # Ready. It does not say that the apiserver already reaches the
           # webhook on them: run 37348444179 failed here with "failed calling
           # webhook ... context deadline exceeded" two seconds after the
-          # rollout. That delay is not the claim under test, so the create
+          # restart. That delay is not the claim under test, so the create
           # waits for the webhook, for a bounded time, and says how long.
           created=0
           for attempt in $(seq 1 24); do
