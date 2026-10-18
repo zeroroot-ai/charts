@@ -20,13 +20,14 @@ the render equal to the chart.
 On AWS S3 the bucket rule of EVERY spec of the Velero policy (the server and
 node agent, the maintenance Jobs and the data path pods) must name the two
 hosts of the release bucket, and nothing else: the regional host
-<bucket>.s3.<region>.amazonaws.com, which the AWS plugin reads, and the
-dual-stack host <bucket>.s3.dualstack.<region>.amazonaws.com, which the kopia
-client of the repository reads, in each pod (charts#726, restore drill run
+<bucket>.s3.<region>.amazonaws.com, which the AWS plugin in the server pod
+reads, and the dual-stack host <bucket>.s3.dualstack.<region>.amazonaws.com,
+which the kopia client reads in each pod that opens the repository
+(charts#726, restore drill run
 39147128857: `dial tcp ...:443: i/o timeout` on the dual-stack host). The
 kopia client that failed there runs in the Velero server pod. The rule must
 not name a host that reaches each bucket (s3.<region>...), a matchPattern,
-or the host of another bucket.
+or the host of another bucket. Each spec of the policy must have a bucket rule.
 
   check-velero-datapath-selected.py             exit 1 on a finding
   check-velero-datapath-selected.py --selftest  prove each finding fails
@@ -87,7 +88,7 @@ S3_BUCKET_HOST = re.compile(r"^(?P<bucket>[a-z0-9][a-z0-9.-]*)\.s3\.(?:dualstack
 
 def s3_host_problems(fqdns: list[dict]) -> list[str]:
     """On AWS S3, the bucket rule names the regional and the dual-stack host of one bucket, and nothing else."""
-    names = [f.get("matchName", "") for f in fqdns]
+    names = [f["matchName"] for f in fqdns if f.get("matchName")]
     patterns = [f["matchPattern"] for f in fqdns if "matchPattern" in f]
     if not any(n.endswith(".amazonaws.com") for n in names) and not patterns:
         return []
@@ -104,8 +105,11 @@ def s3_host_problems(fqdns: list[dict]) -> list[str]:
         want = {f"{b}.s3.{r}.amazonaws.com", f"{b}.s3.dualstack.{r}.amazonaws.com"}
         missing = sorted(want - set(names))
         if missing:
-            out.append(f"the bucket rule does not name {missing}: in each pod the AWS plugin reads the bucket by "
-                       f"the regional host and the kopia client by the dual-stack host (charts#726)")
+            out.append(f"the bucket rule does not name {missing}: the AWS plugin in the server pod reads the bucket "
+                       f"by the regional host, and the kopia client by the dual-stack host (charts#726)")
+    if not pairs:
+        out.append(f"the bucket rule names {names} and no bucket host: an amazonaws.com host that is not a bucket "
+                   f"host, such as s3-<region>.amazonaws.com, reaches each bucket")
     other = sorted(set(names) - {h for b, r in pairs for h in (f"{b}.s3.{r}.amazonaws.com",
                                                                  f"{b}.s3.dualstack.{r}.amazonaws.com")})
     if pairs and other:
@@ -117,11 +121,19 @@ def bucket_rule_problems(docs: list) -> list[str]:
     """The bucket rule of each spec of each CiliumNetworkPolicy, not only the specs that select a fixture pod."""
     out = []
     for name, ns, spec in policy_specs(docs):
-        for r in spec.get("egress") or []:
+        sel = (spec.get("endpointSelector") or {})
+        rules = [r for r in spec.get("egress") or [] if r.get("toFQDNs") or r.get("toCIDR")]
+        if not rules:
+            out.append(f"policy {ns}/{name}, spec {sel}: no bucket rule (toFQDNs or toCIDR)")
+        for r in rules:
             if r.get("toFQDNs"):
-                sel = (spec.get("endpointSelector") or {})
                 out += [f"policy {ns}/{name}, spec {sel}: {p}" for p in s3_host_problems(r["toFQDNs"])]
     return out
+
+
+def has_aws_bucket_rule(docs: list) -> bool:
+    return any(f.get("matchName", "").endswith(".amazonaws.com") for _, _, sp in policy_specs(docs)
+               for r in sp.get("egress") or [] for f in r.get("toFQDNs") or [])
 
 
 def policy_specs(docs: list) -> list[tuple[str, str, dict]]:
@@ -214,6 +226,18 @@ def selftest(docs: list, pods: list[dict]) -> int:
                             r["toFQDNs"] = edit(r["toFQDNs"])
         return out
 
+    def legacy_only(names: list) -> list:
+        return [{"matchName": "s3-us-east-1.amazonaws.com"}]
+
+    def no_bucket_rule(docs_in: list) -> list:
+        out = copy.deepcopy(docs_in)
+        for d in out:
+            if isinstance(d, dict) and d.get("kind") == "CiliumNetworkPolicy":
+                for sp in d["specs"]:
+                    if (sp.get("endpointSelector") or {}).get("matchLabels", {}).get("app.kubernetes.io/name") == "velero":
+                        sp["egress"] = [r for r in sp["egress"] if not r.get("toFQDNs")]
+        return out
+
     def with_pattern(names: list) -> list:
         return names + [{"matchPattern": "*.amazonaws.com"}]
 
@@ -258,6 +282,9 @@ def selftest(docs: list, pods: list[dict]) -> int:
         "FAILING FIXTURE: the server spec only without the dual-stack host fails (the kopia client of the "
         "drill failure runs in the server pod)": (server_only(docs, no_dualstack), pods),
         "a bucket rule with a matchPattern fails": (fqdns(docs, with_pattern), pods),
+        "a server bucket rule with only the legacy host s3-<region>.amazonaws.com fails":
+            (server_only(docs, legacy_only), pods),
+        "a server spec with no bucket rule fails": (no_bucket_rule(docs), pods),
         "a bucket rule with the hosts of a second bucket fails": (fqdns(docs, with_other_bucket), pods),
         "a render with no policy is blind and fails": ([{"kind": "ConfigMap"}], pods),
         "no fixture is blind and fails": (docs, []),
@@ -280,8 +307,9 @@ def main() -> int:
     if findings:
         return 1
     print(f"  ✓ velero-datapath-selected: {len(pods)} data path pod fixtures, each selected by a policy spec "
-          f"that allows the API server and the bucket, and each bucket rule names the regional and the "
-          f"dual-stack host of the release bucket only")
+          f"that allows the API server and the bucket"
+          + (", and each bucket rule names the regional and the dual-stack host of the release bucket only"
+             if has_aws_bucket_rule(docs) else ""))
     return 0
 
 
