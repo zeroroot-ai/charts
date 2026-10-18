@@ -15,7 +15,7 @@ server reads down to exactly one, the kopia repository password.
 {{- $onAWS := not (trim $bucket.endpoint) }}
 {{- /* On AWS S3 the bucket is addressed by host, <bucket>.s3.<region>.amazonaws.com
        and <bucket>.s3.dualstack.<region>.amazonaws.com, because the network
-       policy opens only these two hosts of the bucket: the regional host
+       policy opens only these two hosts of the bucket: the shared host
        s3.<region>.amazonaws.com of path-style addressing reaches each bucket of
        S3 (GHSA-3wg5). A name with a dot breaks the TLS name of that host. */}}
 {{- if and $onAWS (contains "." $bucket.name) }}
