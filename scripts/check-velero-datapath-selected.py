@@ -89,7 +89,7 @@ S3_BUCKET_HOST = re.compile(r"^(?P<bucket>[a-z0-9][a-z0-9.-]*)\.s3\.(?:dualstack
 
 
 def s3_host_problems(fqdns: list[dict]) -> list[str]:
-    """On AWS S3, the bucket rule names the regional and the dual-stack host of one bucket, and nothing else."""
+    """On AWS S3, the bucket rule names the regional bucket host and the dual-stack bucket host of one bucket, and nothing else."""
     names = [f["matchName"] for f in fqdns if f.get("matchName")]
     patterns = [f["matchPattern"] for f in fqdns if "matchPattern" in f]
     if not any(n.endswith(".amazonaws.com") for n in names) and not patterns:
@@ -99,7 +99,7 @@ def s3_host_problems(fqdns: list[dict]) -> list[str]:
         out.append(f"the bucket rule names the pattern {patterns}, which can reach another bucket")
     shared = [n for n in names if n.startswith("s3.")]
     if shared:
-        out.append(f"the bucket rule names {shared}, a host that reaches each bucket")
+        out.append(f"the bucket rule names {shared}, the shared host, which reaches each bucket")
     pairs = {(m["bucket"], m["region"]) for n in names if (m := S3_BUCKET_HOST.match(n)) and not n.startswith("s3.")}
     if len(pairs) > 1:
         out.append(f"the bucket rule names the hosts of {len(pairs)} buckets {sorted(pairs)}, want the release bucket only")
@@ -276,7 +276,7 @@ def selftest(docs: list, pods: list[dict]) -> int:
         print("selftest: the committed render must pass", file=sys.stderr)
         return 1
     pattern_findings = bucket_rule_problems(fqdns(docs, pattern_only))
-    if not pattern_findings or any("no bucket host" in f for f in pattern_findings):
+    if not pattern_findings or not all("names the pattern" in f for f in pattern_findings):
         print("selftest: a pattern-only bucket rule must give the pattern finding only, got: "
               + "; ".join(pattern_findings), file=sys.stderr)
         return 1
@@ -302,10 +302,10 @@ def selftest(docs: list, pods: list[dict]) -> int:
         "a selecting spec without the API server entity fails": (without_api(docs), pods),
         "FAILING FIXTURE: the policy before charts#726 (no dual-stack bucket host) fails":
             (fqdns(docs, no_dualstack), pods),
-        "a bucket rule with only the dual-stack host fails": (fqdns(docs, no_regional), pods),
+        "a bucket rule with only the dual-stack bucket host fails": (fqdns(docs, no_regional), pods),
         "a bucket rule that also names the shared host s3.<region> fails":
             (fqdns(docs, with_shared), pods),
-        "FAILING FIXTURE: the server spec only without the dual-stack host fails (the kopia client of the "
+        "FAILING FIXTURE: the server spec only without the dual-stack bucket host fails (the kopia client of the "
         "drill failure runs in the server pod)": (server_only(docs, no_dualstack), pods),
         "a bucket rule with a matchPattern fails": (fqdns(docs, with_pattern), pods),
         "a server bucket rule with only the legacy host s3-<region>.amazonaws.com fails":
@@ -337,7 +337,7 @@ def main() -> int:
         return 1
     print(f"  ✓ velero-datapath-selected: {len(pods)} data path pod fixtures, each selected by a policy spec "
           f"that allows the API server and the bucket"
-          + (", and each bucket rule names the regional and the dual-stack host of the release bucket only"
+          + (", and each bucket rule names the regional bucket host and the dual-stack bucket host of the release bucket only"
              if has_aws_bucket_rule(docs) else ""))
     return 0
 
