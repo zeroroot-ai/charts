@@ -40,6 +40,11 @@
 #
 # Preflight failure is exit 2 and is NOT a pass.
 
+# Sensitive values pass through this script. An xtrace (bash -x, set -x, or
+# xtrace in an exported SHELLOPTS) prints each expanded command to stderr,
+# value included, so the script turns it off first
+# (scripts/check-xtrace-secrets.py).
+set +x
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

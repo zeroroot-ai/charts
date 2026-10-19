@@ -27,6 +27,11 @@
 # Requires: kubectl (pointed at the k3d cluster), curl, jq.
 # Read-only against Kubernetes; makes live Zitadel API calls as the daemon's
 # and the tenant-operator's own service identities (no cluster mutation).
+# Secret values pass through this script in shell variables. An xtrace (bash
+# -x, set -x, or xtrace in an exported SHELLOPTS) prints each expanded
+# command to stderr, value included, so the script turns it off first
+# (scripts/check-xtrace-secrets.py).
+set +x
 set -euo pipefail
 
 NS="${NS:-gibson}"

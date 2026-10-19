@@ -33,6 +33,11 @@
 # directory that the shell removes on exit. It is on no argv of any process,
 # so no process listing, audit log or shell history holds it. The test is
 # tests/baseline-set-secret.bats.
+# Secret values pass through this script in shell variables. An xtrace (bash
+# -x, set -x, or xtrace in an exported SHELLOPTS) prints each expanded
+# command to stderr, value included, so the script turns it off first.
+# tests/xtrace-secrets.bats runs it under bash -x.
+set +x
 set -euo pipefail
 
 NS="${NS:-gibson}"
