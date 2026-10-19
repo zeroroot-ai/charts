@@ -1,13 +1,22 @@
 {{- /*
-Per-client quota degradation alert (deploy#1657).
+Per-client quota degradation alerts (deploy#1657, D92).
 
-The envoy.filters.http.ratelimit filter is fail-open: when the quota service
-is unreachable, traffic passes under the local fuse and Envoy increments
+Two filters call the quota service, and each one has its own alert.
+
+The stage 0 filter envoy.filters.http.ratelimit is fail-open: when the quota
+service is unreachable, traffic passes under the local fuse and Envoy increments
 cluster.<upstream>.ratelimit.<stat_prefix>.failure_mode_allowed for every
 request it could not check (Prometheus:
 envoy_cluster_ratelimit_public_per_client_failure_mode_allowed, measured on
-the edge harness). That is the observable-degradation rule of the seam convention — a
-silently degraded SaaS edge must be detectable — so this pages on it.
+the edge harness). EdgePerClientQuotaFailingOpen pages on it.
+
+The stage 1 filter envoy.filters.http.ratelimit.signup judges only POST
+/signup and is fail-closed (D92): it refuses the signup with 503 and increments
+envoy_cluster_ratelimit_public_signup_error. EdgeSignupQuotaFailingClosed
+pages on it.
+
+That is the observable-degradation rule of the seam convention: a silently
+degraded SaaS edge must be detectable.
 
 Renders only where prometheus-operator CRDs exist, like the Redis rules.
 */}}

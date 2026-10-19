@@ -1561,8 +1561,9 @@ envoy:
     # ceiling, not per-client. The per-client quota of the rate-limit service
     # (envoy.rateLimit.perClient.appSignupSubmit) bounds one client, and this
     # fuse bounds all of them together. When the rate-limit service does not
-    # answer, the edge admits the request under this fuse only (fails open,
-    # ADR-0079), and the EdgePerClientQuotaFailingOpen alert fires.
+    # answer, the edge refuses the signup with 503 (fails closed, D92: the
+    # stage 1 filter envoy.filters.http.ratelimit.signup), and the
+    # EdgeSignupQuotaFailingClosed alert fires.
     appSignupSubmit:
       maxTokens: 20
       tokensPerFill: 10
