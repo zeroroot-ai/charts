@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.152.0](https://github.com/zeroroot-ai/charts/compare/v0.151.1...v0.152.0) (2026-10-19)
+
+
+### Features
+
+* **guards:** each kubectl call of the redis rotation is checked against its Role ([#742](https://github.com/zeroroot-ai/charts/issues/742)) ([7c69076](https://github.com/zeroroot-ai/charts/commit/7c690766631d37df4081eab2898aebe7a1fcc48b))
+
+
+### Bug Fixes
+
+* **ci:** the rollout-restart guard reads the workflows, and the install test restarts by a pod delete ([#732](https://github.com/zeroroot-ai/charts/issues/732)) ([089b25d](https://github.com/zeroroot-ai/charts/commit/089b25dce701e7b7f93690f3baa9dac68dfd8283))
+* **rework:** the fail-open quota alert no longer says signup fails open ([#735](https://github.com/zeroroot-ai/charts/issues/735)) ([297ecc8](https://github.com/zeroroot-ai/charts/commit/297ecc8346abbae520e2ac1c8aaa4a5a6ba0c471))
+* **rework:** the redis rotation refuses an empty password and does not delete a new pod again ([#740](https://github.com/zeroroot-ai/charts/issues/740)) ([3faa03c](https://github.com/zeroroot-ai/charts/commit/3faa03cb1ec49ccd2789e6c70f16d28382c65491))
+* **secrets:** baseline-set-secret.sh writes a whole object in one write with --object ([#738](https://github.com/zeroroot-ai/charts/issues/738)) ([d44886c](https://github.com/zeroroot-ai/charts/commit/d44886cb6472c2ac233ed9d0e41849c83a4e668f))
+* **secrets:** pin the rotation margin and TZ=UTC with a test, and turn xtrace off where a script holds a secret ([#744](https://github.com/zeroroot-ai/charts/issues/744)) ([d379a99](https://github.com/zeroroot-ai/charts/commit/d379a99b4752e41ff14c1cce2f8b4821294dbe0e))
+* **velero:** the bucket guard gives one finding for a pattern, and reads only the Velero policy ([#731](https://github.com/zeroroot-ai/charts/issues/731)) ([425b63b](https://github.com/zeroroot-ai/charts/commit/425b63bc982d3eea5256ba2ac6765545af5970e9))
+* **velero:** the bucket guard refuses a non-bucket AWS host and a spec with no bucket rule ([#729](https://github.com/zeroroot-ai/charts/issues/729)) ([835266a](https://github.com/zeroroot-ai/charts/commit/835266aacb75315a5944cff5d3591b41ae19e836))
+
 ## [0.151.1](https://github.com/zeroroot-ai/charts/compare/v0.151.0...v0.151.1) (2026-10-18)
 
 
