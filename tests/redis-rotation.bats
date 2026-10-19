@@ -375,14 +375,30 @@ PY
   [ "$(grep -cx 'statefulset/gibson-gibson-workloads' "$S/restarts")" -eq 2 ]
 }
 
+# fake_jq16: a jq on PATH with the summer-time defect of jq 1.6, which the
+# job image runs. jq 1.6 adds the local summer-time hour in fromdateiso8601
+# when TZ names a zone on summer time; jq 1.7 does not. The fake adds that
+# hour on ANY jq when TZ is not UTC, so the test does not depend on the jq of
+# the runner or on its tzdata. It always runs the real jq in UTC, so a real
+# jq 1.6 does not add a second hour.
+fake_jq16() {
+  mkdir -p "$S/jq16"
+  printf '%s\n' '#!/usr/bin/env bash' \
+    'case "${TZ:-UTC}" in UTC|UTC0|:UTC|Etc/UTC) TZ=UTC exec "$REAL_JQ" "$@" ;; esac' \
+    'args=(); for a in "$@"; do args+=("${a//fromdateiso8601/(fromdateiso8601 + 3600)}"); done' \
+    'TZ=UTC exec "$REAL_JQ" "${args[@]}"' > "$S/jq16/jq"
+  chmod +x "$S/jq16/jq"
+}
+
 # two_ticks <new pod start> <TZ>: two runs where the daemon pod never becomes
-# Ready; prints the number of deletes of the daemon pod.
+# Ready, with the jq 1.6 fake; prints the number of deletes of the daemon pod.
 two_ticks() {
   world new 2 old 1 old
   : > "$S/restarts"; rm -f "$S"/uid.*
   sed 's|restart "statefulset/${DAEMON_STS}" 900|restart "statefulset/${DAEMON_STS}" 1|' "$WORK/rotation.sh" > "$S/rotation.sh"
+  fake_jq16
   for tick in 1 2; do
-    env PATH="$S/bin:$PATH" S="$S" RESTART_PODS_POLL=0 NEVER_READY=1 NEW_POD_TIME="$1" TZ="$2" \
+    env PATH="$S/jq16:$S/bin:$PATH" REAL_JQ="$(command -v jq)" S="$S" RESTART_PODS_POLL=0 NEVER_READY=1 NEW_POD_TIME="$1" TZ="$2" \
       bash "$S/rotation.sh" >/dev/null 2>&1 || true
   done
   grep -cx 'statefulset/gibson-gibson-workloads' "$S/restarts"
@@ -391,9 +407,12 @@ two_ticks() {
 @test "FAILING FIXTURE: the 60 s margin and TZ=UTC hold in a summer-time zone" {
   # The Secret write is 10:00:00Z. America/New_York is on summer time in
   # October, and jq 1.6 applies that offset in fromdateiso8601 when the
-  # job does not pin TZ=UTC.
+  # job does not pin TZ=UTC. fake_jq16 gives that defect on any jq.
   zone=America/New_York
-  [ -e "/usr/share/zoneinfo/$zone" ] || skip "no tzdata for $zone"
+  # The fake must have the defect, or the test proves nothing.
+  fake_jq16
+  [ "$(echo '"2026-10-19T10:00:00Z"' | TZ="$zone" REAL_JQ="$(command -v jq)" "$S/jq16/jq" -r 'fromdateiso8601 | todate')" = 2026-10-19T11:00:00Z ]
+  [ "$(echo '"2026-10-19T10:00:00Z"' | TZ=UTC REAL_JQ="$(command -v jq)" "$S/jq16/jq" -r 'fromdateiso8601 | todate')" = 2026-10-19T10:00:00Z ]
   # A pod that started 30 s after the write is inside the margin: it may
   # hold the old password from the kubelet cache, so the next run restarts
   # it again. Without the margin it counts as new: 1 delete.

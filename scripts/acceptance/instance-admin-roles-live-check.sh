@@ -19,6 +19,11 @@
 #
 # Usage (kubectl pointed at the cluster, umbrella chart installed):
 #   NS=gibson RELEASE=gibson ./scripts/acceptance/instance-admin-roles-live-check.sh
+# Secret values pass through this script in shell variables. An xtrace (bash
+# -x, set -x, or xtrace in an exported SHELLOPTS) prints each expanded
+# command to stderr, value included, so the script turns it off first
+# (scripts/check-xtrace-secrets.py).
+set +x
 set -euo pipefail
 
 NS="${NS:-gibson}"

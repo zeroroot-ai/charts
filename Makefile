@@ -80,7 +80,9 @@ set-secret-stdin: ## baseline-set-secret.sh reads the value from stdin and passe
 	@bats tests/baseline-set-secret.bats
 
 .PHONY: xtrace-secrets
-xtrace-secrets: ## A script under scripts/ that holds a secret value turns xtrace off, so bash -x never prints the value
+xtrace-secrets: ## Each script under scripts/ that reads a secret into a variable turns xtrace off first, so bash -x never prints the value (found by content)
+	@python3 scripts/check-xtrace-secrets.py --selftest
+	@python3 scripts/check-xtrace-secrets.py
 	@bats tests/xtrace-secrets.bats
 
 cnpg-netpol-covers-jobs: ## Every pod CNPG creates, bootstrap Jobs included, reaches the bucket and the primary under the network policy (D76)
