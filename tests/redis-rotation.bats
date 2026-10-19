@@ -36,6 +36,8 @@ setup() {
 # password per line), restarts, change_on_restart (a password the Secret
 # takes during the first restart).
 b64() { printf '%s' "$1" | base64 -w0; }
+# KUBECTL_LOG: record each argv as one JSON array (scripts/check-kubectl-rbac.py).
+[ -z "${KUBECTL_LOG:-}" ] || jq -cn '$ARGS.positional' --args -- "$@" >> "$KUBECTL_LOG"
 args="$*"
 case "$args" in
   *"get secret -n gibson gibson-redis-stack"*resourceVersion*) cat "$S/ver" ;;
@@ -150,6 +152,46 @@ run_job() { run env PATH="$S/bin:$PATH" S="$S" RESTART_PODS_POLL=0 bash "$WORK/r
   [ "$status" -ne 0 ]
   [ ! -s "$S/restarts" ]
   [ "$(cat "$S/state_ver")" = 1 ]
+}
+
+@test "every kubectl call of the rotation is allowed by the rendered Role of its ServiceAccount" {
+  # The paths of the job: the first run, a full rotation, a store that
+  # already runs with the new password, and a Secret change with the same
+  # password. scripts/check-kubectl-rbac.py maps each recorded call to its
+  # API requests and checks them against the Role in the render. In charts
+  # 0.150.0 the Role had pods/exec create and no pods get, so each job
+  # failed at its first exec (drill run 39125128505).
+  export KUBECTL_LOG="$S/calls.jsonl"
+  world pw1 5 "" "" pw1;   run_job; [ "$status" -eq 0 ]
+  world new 6 pw1 5 pw1;   run_job; [ "$status" -eq 0 ]
+  world newer 7 new 6 newer; run_job; [ "$status" -eq 0 ]
+  world newer 8 newer 7 newer; run_job; [ "$status" -eq 0 ]
+  grep -q '"exec"' "$KUBECTL_LOG"
+  grep -q '"delete"' "$KUBECTL_LOG"
+  grep -q '"apply"' "$KUBECTL_LOG"
+  run python3 "$ROOT/scripts/check-kubectl-rbac.py" --render "$WORK/render.yaml" \
+    --sa gibson/gibson-redis-rotation --calls "$KUBECTL_LOG"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "FAILING FIXTURE: the same calls against the 0.150.0 Role (no pods get) fail the check" {
+  export KUBECTL_LOG="$S/calls.jsonl"
+  world new 2 old 1 old; run_job; [ "$status" -eq 0 ]
+  # The render with the pods rule of the Role removed: the 0.150.0 shape.
+  python3 - "$WORK/render.yaml" "$S/render-0150.yaml" <<'PY'
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+for d in docs:
+    if d.get("kind") == "Role" and d["metadata"]["name"] == "gibson-redis-rotation":
+        d["rules"] = [r for r in d["rules"] if r.get("resources") != ["pods"]]
+yaml.safe_dump_all(docs, open(sys.argv[2], "w"))
+PY
+  run python3 "$ROOT/scripts/check-kubectl-rbac.py" --render "$S/render-0150.yaml" \
+    --sa gibson/gibson-redis-rotation --calls "$KUBECTL_LOG"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"needs get pods gibson-redis-stack-0"* ]]
 }
 
 @test "a new Secret version with the same password restarts nothing" {
