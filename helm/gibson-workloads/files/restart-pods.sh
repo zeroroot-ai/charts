@@ -3,7 +3,14 @@
 # (templates/databases/redis-rotation-controller.yaml), and
 # tests/restart-pods.bats sources it.
 #
-#   restart_pods <namespace> <kind/name> <timeout-seconds>
+#   restart_pods <namespace> <kind/name> <timeout-seconds> [<since>]
+#
+# <since> is an optional RFC 3339 time of the API server, such as the last
+# write of the Secret the pods read. A pod created after it already runs with
+# that write, so the restart does not delete it and counts it as new. Without
+# <since>, every live pod is old. This stops a loop: when a new pod never
+# becomes Ready, the next call waits for it again, and does not delete it
+# again (the redis rotation runs each minute).
 #
 # WHY NOT `kubectl rollout restart`. The chart binds the ValidatingAdmissionPolicy
 # gibson-platform-identity-workloads to the release namespace. It admits a
@@ -44,7 +51,7 @@
 # with a reason on stderr at the timeout. Requires kubectl and jq.
 
 restart_pods() {
-  local ns="$1" w="$2" timeout="$3" obj sel want pods old deadline pod n k
+  local ns="$1" w="$2" timeout="$3" since="${4:-}" obj sel want pods stale old deadline pod n k
   obj="$(kubectl -n "$ns" get "$w" -o json)" \
     || { echo "restart_pods: cannot read ${ns}/${w}" >&2; return 1; }
   sel="$(jq -r '.spec.selector.matchLabels // {} | to_entries | map("\(.key)=\(.value)") | join(",")' <<<"$obj")"
@@ -62,10 +69,19 @@ restart_pods() {
   for pod in $(jq -r "${_restart_pods_unowned}[] | .metadata.name" <<<"$pods"); do
     echo "restart_pods: pod ${ns}/${pod} matches ${w} and has no owner; no controller replaces it, so it stays" >&2
   done
-  old="$(jq -c "${_restart_pods_live} | map(.metadata.uid)" <<<"$pods")"
+  # The old pods: the live pods created at or before <since>, or all of them.
+  # creationTimestamp and <since> are both API server times in one RFC 3339
+  # form, so a string compare orders them.
+  stale="$(jq -c --arg since "$since" "${_restart_pods_live}
+    | map(select(\$since == \"\" or ((.metadata.creationTimestamp // \"\") <= \$since)))" <<<"$pods")"
+  for pod in $(jq -r --arg since "$since" "${_restart_pods_live}[]
+      | select(\$since != \"\" and (.metadata.creationTimestamp // \"\") > \$since) | .metadata.name" <<<"$pods"); do
+    echo "restart_pods: pod ${ns}/${pod} started after ${since}, so it is already new and stays" >&2
+  done
+  old="$(jq -c 'map(.metadata.uid)' <<<"$stale")"
   deadline=$(( $(date +%s) + timeout ))
   n=0
-  for pod in $(jq -r "${_restart_pods_live}[] | .metadata.name" <<<"$pods"); do
+  for pod in $(jq -r '.[] | .metadata.name' <<<"$stale"); do
     # --wait=false: a wait for the delete needs a watch on pods, which the
     # Role does not grant. The waits below tell a new pod by its UID, and a
     # pod that is being deleted is not live, so they need no delete wait.

@@ -39,6 +39,9 @@ b64() { printf '%s' "$1" | base64 -w0; }
 args="$*"
 case "$args" in
   *"get secret -n gibson gibson-redis-stack"*resourceVersion*) cat "$S/ver" ;;
+  # The time of the last write of the Secret (ESO), from its managedFields.
+  *"get secret -n gibson gibson-redis-stack -o json")
+    jq -n '{metadata: {managedFields: [{manager: "external-secrets", time: "2026-10-19T10:00:00Z"}]}}' ;;
   *"get secret -n gibson gibson-redis-stack -o jsonpath={.data."*) b64 "$(cat "$S/pw")" ;;
   *"get secret -n gibson gibson-redis-stack"*) exit 0 ;;
   *"get secret -n gibson gibson-redis-rotation-state -o name"*)
@@ -62,15 +65,16 @@ case "$args" in
     # the pod has init containers, as redis-stack does.
     case "$args" in *" -c redis-stack "*) ;; *) echo 'Defaulted container "redis-stack" out of: redis-stack, own-data (init), init-acl (init)' >&2 ;; esac
     if [ -n "${EXEC_FAILS:-}" ]; then echo 'error: unable to upgrade connection: container not found ("redis-stack")' >&2; exit 1; fi
-    read -r login
-    grep -qxF -- "$login" "$S/acl" || { echo "AUTH failed: WRONGPASS invalid username-password pair"; echo "NOAUTH Authentication required."; exit 0; }
-    case "$args" in
-      *PING*) echo PONG ;;
-      *"ACL SETUSER"*)
-        read -r new
-        if [ "${!#}" = resetpass ]; then printf '%s\n' "$new" > "$S/acl"; else printf '%s\n' "$new" >> "$S/acl"; fi
-        echo OK ;;
-    esac ;;
+    # Run the rendered pod command (all argv after "--") with a fake
+    # redis-cli on PATH, so the shell text that runs in the pod is under test.
+    while [ "$1" != "--" ]; do shift; done; shift
+    # lose_line: the next ACL SETUSER exec gets only its first stdin line,
+    # as when a stdin frame of the exec stream is lost.
+    if [ -f "$S/lose_line" ] && [[ "$*" == *SETUSER* ]]; then
+      rm -f "$S/lose_line"
+      head -n1 | env PATH="$S/podbin:$PATH" "$@"; exit $?
+    fi
+    exec env PATH="$S/podbin:$PATH" "$@" ;;
   # A restart is a pod delete (charts#725). Each workload has one pod,
   # "<name>-0", owned by a controller. A delete gives the pod a new UID.
   *"rollout"*) echo "stub kubectl: a rollout restart patches the workload, and the identity admission policy denies it (charts#725)" >&2; exit 1 ;;
@@ -83,8 +87,10 @@ case "$args" in
     name="${6#app=}"; uid="u0"; [ ! -f "$S/uid.$name" ] || uid="$(cat "$S/uid.$name")"
     # NEVER_READY: a new pod never becomes Ready.
     r=True; [ -z "${NEVER_READY:-}" ] || [ "$uid" = u0 ] || r=False
-    jq -n --arg n "${name}-0" --arg u "$uid" --arg r "$r" \
-      '{items: [{metadata: {name: $n, uid: $u, ownerReferences: [{kind: "ReplicaSet", controller: true}]}, status: {phase: "Running", conditions: [{type: "Ready", status: $r}]}}]}' ;;
+    # The first pod (u0) started before the Secret write, each new pod after it.
+    t="2026-10-19T10:00:05Z"; [ "$uid" != u0 ] || t="2026-01-01T00:00:00Z"
+    jq -n --arg n "${name}-0" --arg u "$uid" --arg r "$r" --arg t "$t" \
+      '{items: [{metadata: {name: $n, uid: $u, creationTimestamp: $t, ownerReferences: [{kind: "ReplicaSet", controller: true}]}, status: {phase: "Running", conditions: [{type: "Ready", status: $r}]}}]}' ;;
   *"delete pod"*"--wait=true"*) echo 'Error from server (Forbidden): pods is forbidden: cannot watch resource "pods"' >&2; exit 1 ;;
   "-n gibson delete pod "*"-0 --ignore-not-found --wait=false")
     name="${5%-0}"
@@ -96,7 +102,23 @@ case "$args" in
   *) echo "stub kubectl: unexpected: $args" >&2; exit 3 ;;
 esac
 STUB
-  chmod +x "$S/bin/kubectl"
+  # The fake redis-cli of the pod: the ACL is $S/acl, one accepted password
+  # per line. acl_log records each password that ACL SETUSER adds.
+  mkdir -p "$S/podbin"
+  cat > "$S/podbin/redis-cli" <<'CLI'
+#!/usr/bin/env bash
+grep -qxF -- "$REDISCLI_AUTH" "$S/acl" || { echo "AUTH failed: WRONGPASS invalid username-password pair"; echo "NOAUTH Authentication required."; exit 0; }
+[ "$1" = --no-auth-warning ] && shift
+case "$1" in
+  PING) echo PONG ;;
+  ACL)
+    shift 3; reset=""; [ "$1" = resetpass ] && { reset=1; shift; }
+    new="${1#>}"; printf '[%s]\n' "$new" >> "$S/acl_log"
+    if [ -n "$reset" ]; then printf '%s\n' "$new" > "$S/acl"; else printf '%s\n' "$new" >> "$S/acl"; fi
+    echo OK ;;
+esac
+CLI
+  chmod +x "$S/bin/kubectl" "$S/podbin/redis-cli"
 }
 
 teardown() { rm -rf "$S"; }
@@ -178,6 +200,7 @@ run_job() { run env PATH="$S/bin:$PATH" S="$S" RESTART_PODS_POLL=0 bash "$WORK/r
 @test "the first run records the state and restarts nothing" {
   world pw1 5 "" "" pw1
   run_job
+  echo "$output"
   [ "$status" -eq 0 ]
   [ ! -s "$S/restarts" ]
   [ "$(cat "$S/state_ver")" = 5 ]
@@ -223,6 +246,47 @@ run_job() { run env PATH="$S/bin:$PATH" S="$S" RESTART_PODS_POLL=0 bash "$WORK/r
   echo "$output"
   [ "$status" -ne 0 ]
   [[ "$output" == *"the restart of statefulset/gibson-gibson-workloads did not finish"* ]]
+  grep -qx old "$S/acl"
+  [ "$(cat "$S/state_ver")" = 1 ]
+}
+
+@test "FAILING FIXTURE: a lost stdin line never adds an empty password, and the step is sent again" {
+  world new 2 old 1 old
+  : > "$S/lose_line"
+  run_job
+  echo "$output"
+  [ "$status" -eq 0 ]
+  # No ACL SETUSER ever added an empty password.
+  run grep -cxF '[]' "$S/acl_log"
+  [ "$output" = 0 ] || { cat "$S/acl_log"; false; }
+  [ ! -e "$S/lose_line" ]
+  [ "$(cat "$S/acl")" = "new" ]
+  [ "$(cat "$S/state_ver")" = 2 ]
+}
+
+@test "FAILING FIXTURE: an empty password in the Secret fails the job before any ACL step or restart" {
+  world "" 2 old 1 old
+  run_job
+  echo "$output"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"holds an empty password"* ]]
+  [ ! -s "$S/acl_log" ]
+  [ ! -s "$S/restarts" ]
+  [ "$(cat "$S/acl")" = "old" ]
+  [ "$(cat "$S/state_ver")" = 1 ]
+}
+
+@test "FAILING FIXTURE: after a failed restart, the next run does not delete the new pod again" {
+  world new 2 old 1 old
+  sed 's|restart "statefulset/${DAEMON_STS}" 900|restart "statefulset/${DAEMON_STS}" 1|' "$WORK/rotation.sh" > "$S/rotation.sh"
+  for tick in 1 2 3; do
+    run env PATH="$S/bin:$PATH" S="$S" RESTART_PODS_POLL=0 NEVER_READY=1 bash "$S/rotation.sh"
+    echo "$output"
+    [ "$status" -ne 0 ]
+  done
+  # One delete of the daemon pod in three runs: its new pod started after
+  # the Secret write, so it already reads the new password.
+  [ "$(grep -cx 'statefulset/gibson-gibson-workloads' "$S/restarts")" -eq 1 ] || { cat "$S/restarts"; false; }
   grep -qx old "$S/acl"
   [ "$(cat "$S/state_ver")" = 1 ]
 }
