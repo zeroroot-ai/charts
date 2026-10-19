@@ -10,6 +10,11 @@
 #      KEYRING_FILE — the bringup keyring file stage 0 wrote (scripts/keyring.sh
 #      shape), set by baseline-up.sh on the kind fixture to run the keyring
 #      drill (section 5). Unset = skipped.
+# Sensitive values pass through this script. An xtrace (bash -x, set -x, or
+# xtrace in an exported SHELLOPTS) prints each expanded command to stderr,
+# value included, so the script turns it off first
+# (scripts/check-xtrace-secrets.py).
+set +x
 set -euo pipefail
 
 NS="${NS:-gibson}"

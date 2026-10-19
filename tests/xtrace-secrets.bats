@@ -14,6 +14,12 @@
 # Each call must exit 0, so the trace covers the path that reads the value,
 # and no trace may hold a secret. The FAILING FIXTURE runs the same calls with
 # the `set +x` line removed and asserts that EACH call then leaks.
+#
+# The other scripts the scan finds (the two under scripts/acceptance/,
+# baseline-up.sh, baseline-verify.sh, verify-selfhosted-seams.sh,
+# check-seed-passwords.sh) need a live cluster or a full bringup, so this file
+# does not trace them. The scan alone covers them, and its fixtures cover the
+# same patterns.
 
 ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
 SCRIPTS="baseline-set-secret.sh keyring.sh keyring-to-cluster.sh setec-disk-public-key.sh"
@@ -145,7 +151,9 @@ each_call_exits_0() {
     'PAT="$(kubectl get secret iam-admin-pat -o jsonpath={.data.pat} | base64 -d)"' > "$T/scan/new-check.sh"
   run python3 "$ROOT/scripts/check-xtrace-secrets.py" --root "$T/scan"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"new-check.sh:3 reads a secret"* ]]
+  [[ "$output" == *"new-check.sh:3 handles a sensitive value"* ]]
+  # The finding names the line, never its text.
+  [[ "$output" != *"iam-admin-pat"* ]]
   # FAILING FIXTURE: each script of this harness with its set +x removed.
   for s in $SCRIPTS; do
     sed -i '/^set +x$/d' "$T/scan/$s"

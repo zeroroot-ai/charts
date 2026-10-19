@@ -40,6 +40,11 @@
 #   TRUST_DOMAIN   the SPIFFE trust domain              (default: the profile's
 #                  global.spire.trustDomain). A running install keeps its own.
 #   OVERLAY        a substrate overlay: guest or eks    (default: none)
+# Sensitive values pass through this script. An xtrace (bash -x, set -x, or
+# xtrace in an exported SHELLOPTS) prints each expanded command to stderr,
+# value included, so the script turns it off first
+# (scripts/check-xtrace-secrets.py).
+set +x
 set -euo pipefail
 
 NS="${NS:-gibson}"

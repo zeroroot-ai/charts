@@ -22,6 +22,11 @@
 #
 # Usage: scripts/check-seed-passwords.sh
 # Exit:  0 both hold · 1 a password is not argument-safe · 2 could not run
+# Sensitive values pass through this script. An xtrace (bash -x, set -x, or
+# xtrace in an exported SHELLOPTS) prints each expanded command to stderr,
+# value included, so the script turns it off first
+# (scripts/check-xtrace-secrets.py).
+set +x
 set -euo pipefail
 CHART_DIR="${CHART_DIR:-helm/gibson}"
 TABLE="helm/gibson-workloads/files/openbao-seed-keys.txt"
