@@ -2,7 +2,7 @@
 
 ## EdgePerClientQuotaFailingOpen
 
-The edge could not reach the rate-limit service, and it let requests through under the local fuse only. The per-client quotas of signup and sign-in are not enforced.
+The edge could not reach the rate-limit service, and it let requests through under the local fuse only. The per-client quotas of login and the other fail-open routes are not enforced. POST /signup fails closed instead and raises [EdgeSignupQuotaFailingClosed](#edgesignupquotafailingclosed) (D92).
 
 1. Check the rate-limit pods: `kubectl -n gibson get pods -l app.kubernetes.io/component=ratelimit`.
 2. Read the log of the rate-limit service and of its SPIFFE mTLS sidecar.

@@ -22923,9 +22923,11 @@ spec:
             description: |
               The edge Envoy could not reach the ratelimit service for at least
               one request in the last 5 minutes and let it through under the
-              per-pod fuse only. Per-client quotas (signup, login) are NOT being
-              enforced. Check gibson-ratelimit pods, the SPIFFE mTLS sidecar,
-              and gibson-redis-stack.
+              per-pod fuse only. The per-client quotas of login and the other
+              fail-open routes are NOT enforced. POST /signup fails closed
+              instead and raises EdgeSignupQuotaFailingClosed (D92). Check
+              gibson-ratelimit pods, the SPIFFE mTLS sidecar, and
+              gibson-redis-stack.
         # D92: POST /signup fails closed. When the quota service does not
         # answer, the stage 1 filter refuses the signup with 503 and counts
         # envoy_cluster_ratelimit_public_signup_error. It never counts
