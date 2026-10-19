@@ -18695,24 +18695,30 @@ spec:
                     exit 0
                   fi
 
-                  # Read current Secret version and password.
-                  CURRENT_VERSION=$(kubectl get secret -n "$NS" "$REDIS_SECRET" \
-                    -o jsonpath='{.metadata.resourceVersion}')
-                  CURRENT_PASSWORD=$(kubectl get secret -n "$NS" "$REDIS_SECRET" \
-                    -o jsonpath="{.data.${REDIS_KEY}}" | base64 -d)
+                  # Read the version, the password and the write time of the
+                  # Secret from ONE read, so all three come from one version.
+                  # kubectl prints managedFields only with --show-managed-fields.
+                  SECRET_JSON=$(kubectl get secret -n "$NS" "$REDIS_SECRET" -o json --show-managed-fields)
+                  CURRENT_VERSION=$(jq -r '.metadata.resourceVersion // empty' <<<"$SECRET_JSON")
+                  CURRENT_PASSWORD=$(jq -r --arg k "$REDIS_KEY" '.data[$k] // empty' <<<"$SECRET_JSON" | base64 -d)
                   # An empty password is never a rotation. ACL SETUSER with an
                   # empty ">" would let any client log in.
                   if [ -z "$CURRENT_PASSWORD" ]; then
                     echo "[rotation] FATAL: ${REDIS_SECRET} holds an empty password; nothing changes" >&2
                     exit 1
                   fi
-                  # The last write of the Secret (the latest managedFields time).
-                  # A client pod created after it already reads the new
-                  # password, so a restart does not delete it again. A failed
-                  # restart therefore does not delete the same new pod on each
-                  # tick (files/restart-pods.sh, <since>).
-                  SECRET_WRITTEN=$(kubectl get secret -n "$NS" "$REDIS_SECRET" -o json \
-                    | jq -r '[.metadata.managedFields[]?.time // empty] | max // empty')
+                  # A client pod created after the last write of the Secret (the
+                  # latest managedFields time) already reads the new password,
+                  # so a restart does not delete it again. A failed restart
+                  # therefore does not delete the same new pod on each tick
+                  # (files/restart-pods.sh, <since>). The margin of 60 s covers
+                  # clock skew between API servers and the lag of the kubelet
+                  # Secret cache: a pod created inside it counts as old and
+                  # restarts. Without managedFields, every pod counts as old.
+                  # TZ=UTC: jq 1.6 applies the local summer-time offset in
+                  # fromdateiso8601, and the times here are all UTC.
+                  RESTART_SINCE=$(TZ=UTC jq -r '[.metadata.managedFields[]?.time // empty] | max // empty
+                    | if . == "" then "" else (fromdateiso8601 + 60 | todateiso8601) end' <<<"$SECRET_JSON")
 
                   # Read last-processed version from rotation-state Secret. Only
                   # NotFound is the first boot. Any other error of the read
@@ -18781,7 +18787,9 @@ spec:
                   # without -c kubectl writes a "Defaulted container" line.
                   # Only stdout is the answer, and stderr goes to the job log.
                   # The pod command exits 97 when a password line reached it
-                  # empty (a lost stdin frame of the exec stream). Then the
+                  # empty or with no newline (a lost or cut stdin frame of the
+                  # exec stream): printf ends each line with a newline, so a
+                  # line without one is a partial password. Then the
                   # call goes again, at most three times. An empty line never
                   # reaches redis-cli, so ACL SETUSER never adds an empty password.
                   redis_exec() {
@@ -18798,12 +18806,12 @@ spec:
                   # ACL SETUSER default [resetpass] ><password> in redis-stack.
                   redis_acl() {
                     redis_exec "$1"$'\n'"$2" \
-                      sh -c 'IFS= read -r p; IFS= read -r n; [ -n "$p" ] && [ -n "$n" ] || exit 97; REDISCLI_AUTH="$p" exec redis-cli --no-auth-warning ACL SETUSER default "$@" ">$n"' redis-cli ${3:-}
+                      sh -c 'IFS= read -r p && IFS= read -r n && [ -n "$p" ] && [ -n "$n" ] || exit 97; REDISCLI_AUTH="$p" exec redis-cli --no-auth-warning ACL SETUSER default "$@" ">$n"' redis-cli ${3:-}
                   }
                   # redis_ping <password>: PONG when redis-stack accepts it.
                   redis_ping() {
                     redis_exec "$1" \
-                      sh -c 'IFS= read -r p; [ -n "$p" ] || exit 97; REDISCLI_AUTH="$p" exec redis-cli --no-auth-warning PING'
+                      sh -c 'IFS= read -r p && [ -n "$p" ] || exit 97; REDISCLI_AUTH="$p" exec redis-cli --no-auth-warning PING'
                   }
 
                   # 1. Both passwords work. The store still runs with the old one.
@@ -18967,7 +18975,7 @@ spec:
                   
                   restart() {
                     echo "[rotation] restarting $1..."
-                    restart_pods "$NS" "$1" "$2" "$SECRET_WRITTEN" \
+                    restart_pods "$NS" "$1" "$2" "$RESTART_SINCE" \
                       || { echo "[rotation] FATAL: the restart of $1 did not finish; the old password stays until the next run" >&2; exit 1; }
                     echo "[rotation] $1 ready"
                   }

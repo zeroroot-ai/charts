@@ -59,9 +59,12 @@ case "$*" in
     # controller replaces it, and the stub refuses its delete.
     [ -z "${STUB_UNOWNED:-}" ] || extra='[{"metadata":{"name":"ext-authz-bare","uid":"x0"},"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}]}}]'
     [ -z "${STUB_OLD_DELETING:-}" ] || extra='[{"metadata":{"name":"ext-authz-old","uid":"a0","deletionTimestamp":"2026-10-18T12:00:00Z","ownerReferences":[{"kind":"ReplicaSet"}]},"status":{"conditions":[{"type":"Ready","status":"False"}]}}]'
-    jq -n --arg r "$r" --arg rb "$rb" --arg ua "$ua" --arg ub "$ub" --argjson extra "$extra" --argjson own '[{"kind":"ReplicaSet","controller":true}]' '{items: ([
-      {metadata: {name: "ext-authz-a", uid: $ua, ownerReferences: $own}, status: {conditions: [{type: "Ready", status: $r}]}},
-      {metadata: {name: "ext-authz-b", uid: $ub, ownerReferences: $own}, status: {conditions: [{type: "Ready", status: $rb}]}}] + $extra)}' ;;
+    # STUB_TIME_A, STUB_TIME_B: the creationTimestamp of the first pods. A
+    # replacement pod is created at 12:00:00.
+    jq -n --arg r "$r" --arg rb "$rb" --arg ua "$ua" --arg ub "$ub" --argjson extra "$extra" --argjson own '[{"kind":"ReplicaSet","controller":true}]' \
+      --arg ta "${STUB_TIME_A:-2026-01-01T00:00:00Z}" --arg tb "${STUB_TIME_B:-2026-01-01T00:00:00Z}" '{items: ([
+      {metadata: {name: "ext-authz-a", uid: $ua, creationTimestamp: (if $ua == "a0" then $ta else "2026-10-19T12:00:00Z" end), ownerReferences: $own}, status: {conditions: [{type: "Ready", status: $r}]}},
+      {metadata: {name: "ext-authz-b", uid: $ub, creationTimestamp: (if $ub == "b0" then $tb else "2026-10-19T12:00:00Z" end), ownerReferences: $own}, status: {conditions: [{type: "Ready", status: $rb}]}}] + $extra)}' ;;
   *) echo "kubectl stub: undeclared call: $*" >&2; exit 1 ;;
 esac
 SH
@@ -73,6 +76,29 @@ teardown() { rm -rf "$TMP"; }
 run_restart() {
   run env PATH="$TMP/bin:$PATH" RESTART_PODS_POLL=0 bash -c '. "$1"; restart_pods gibson "$2" 3' _ \
     "$REPO_ROOT/helm/gibson-workloads/files/restart-pods.sh" "${1:-deployment/gibson-ext-authz}"
+}
+
+@test "<since>: a pod created before or at the time is deleted, a pod created after it stays" {
+  export STUB_TIME_A=2026-10-19T09:59:59Z STUB_TIME_B=2026-10-19T10:00:00Z
+  run env PATH="$TMP/bin:$PATH" RESTART_PODS_POLL=0 bash -c '. "$1"; restart_pods gibson deployment/gibson-ext-authz 3 2026-10-19T10:00:00Z' _ \
+    "$REPO_ROOT/helm/gibson-workloads/files/restart-pods.sh"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ "$(tr '\n' ' ' < "$TMP/deleted")" = "ext-authz-a ext-authz-b " ]
+  rm -f "$TMP/deleted"
+  export STUB_TIME_B=2026-10-19T10:00:01Z
+  run env PATH="$TMP/bin:$PATH" RESTART_PODS_POLL=0 bash -c '. "$1"; restart_pods gibson deployment/gibson-ext-authz 3 2026-10-19T10:00:00Z' _ \
+    "$REPO_ROOT/helm/gibson-workloads/files/restart-pods.sh"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  # b started after <since>: it is already new, so it stays and counts as new.
+  [ "$(tr '\n' ' ' < "$TMP/deleted")" = "ext-authz-a " ]
+  [[ "$output" == *"ext-authz-b started after 2026-10-19T10:00:00Z"* ]]
+}
+
+@test "<since> left out: every live pod is old, whatever its creationTimestamp" {
+  export STUB_TIME_A=2030-01-01T00:00:00Z STUB_TIME_B=2030-01-01T00:00:00Z
+  run_restart
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ "$(tr '\n' ' ' < "$TMP/deleted")" = "ext-authz-a ext-authz-b " ]
 }
 
 @test "restart_pods deletes each pod of the workload, one at a time, and waits for new Ready pods" {
