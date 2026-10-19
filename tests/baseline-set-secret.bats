@@ -212,6 +212,33 @@ run_object_in_pod() { # run_object_in_pod <key> <stdin json>
   done
 }
 
+@test "FAILING FIXTURE: --object refuses a stream of several JSON documents, and no refusal prints the value" {
+  # jq -e alone judges only the last document, so these streams passed the
+  # check, and a later parse error printed the whole value (a private key).
+  secret='-----BEGIN PRIVATE KEY-----SECRETMATERIAL42'
+  for bad in "{\"a\":1} {\"kid\":\"x\"}" \
+             "\"$secret\" {\"kid\":\"x\"}" \
+             "{\"kid\":\"k1\",\"key\":\"$secret\"}{\"kid\":\"k2\",\"key\":\"$secret\"}" \
+             "{\"kid\":\"k1\",\"key\":\"$secret\"} not-json" \
+             "{\"kid\":\"k1\",\"key\":\"$secret\""; do
+    run bash -c 'printf "%s" "$1" | PATH="$STUB/bin:$PATH" "$0" --object k' "$SCRIPT" "$bad"
+    [ "$status" -eq 2 ] || { echo "accepted: $bad"; return 1; }
+    [ ! -f "$STUB/kubectl.argv" ]
+    [[ "$output" != *SECRETMATERIAL42* ]] || { echo "the refusal printed the value: $output"; return 1; }
+  done
+}
+
+@test "inside the pod a body that jq cannot build prints a fixed message, never the value" {
+  printf '%s' '{"kid":"k"}' | run_script --object k
+  pod_script="$(pod_script_from_argv)"
+  # The value reaches the pod as two documents: the host check is bypassed here.
+  run bash -c 'printf "%s" "{\"key\":\"SECRETMATERIAL42\"} {\"x\":\"y\"}" | SET_KEY=k SET_PROP= SET_MODE=object SA_TOKEN_FILE="$STUB/sa-token" PATH="$STUB/bin:$PATH" sh -c "$1"' _ "$pod_script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"000"* ]]
+  [[ "$output" == *"the write body could not be built"* ]]
+  [[ "$output" != *SECRETMATERIAL42* ]]
+}
+
 @test "--object takes exactly one key and no property" {
   run bash -c 'printf "{\"kid\":\"\"}" | PATH="$STUB/bin:$PATH" "$0" --object k p' "$SCRIPT"
   [ "$status" -eq 2 ]

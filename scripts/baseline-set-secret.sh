@@ -64,17 +64,22 @@ VALUE="$(cat; printf x)"
 VALUE="${VALUE%x}"
 VALUE="${VALUE%$'\n'}"
 if [ "$MODE" = object ]; then
-  # A JSON object with at least one property, and every value a string. An
-  # empty string is a value here: it clears that property. jq reads the
-  # object on stdin, so the value is on no argv.
+  # Exactly ONE JSON document: an object with at least one property, and
+  # every value a string. An empty string is a value here: it clears that
+  # property. jq reads the object on stdin, so the value is on no argv.
+  # `jq -e` alone judges only the last document of a stream, so
+  # `{"a":1} {"kid":"x"}` would pass, and a later parse error would print the
+  # whole value. [inputs] reads every document and counts them. The stderr
+  # of jq goes nowhere: a jq error message can quote the value.
   # jq 1.6 exits 0 on an empty input, so the empty check comes first.
   if [ -z "$VALUE" ] || ! printf '%s' "$VALUE" \
-      | jq -e 'type == "object" and length > 0 and all(.[]; type == "string")' >/dev/null 2>&1; then
+      | jq -n -e '[inputs] | length == 1 and (.[0] | type == "object" and length > 0 and all(.[]; type == "string"))' \
+        >/dev/null 2>&1; then
     echo "FATAL: --object needs a JSON object of string values on stdin" >&2
     usage
     exit 2
   fi
-  PROP="$(printf '%s' "$VALUE" | jq -r 'keys_unsorted | join(",")')"
+  PROP="$(printf '%s' "$VALUE" | jq -r 'keys_unsorted | join(",")' 2>/dev/null)"
 elif [ -z "$VALUE" ]; then
   echo "FATAL: stdin holds no value" >&2
   usage
@@ -114,12 +119,16 @@ jq -r '"X-Vault-Token: " + (.auth.client_token // empty)' "$d/auth" > "$d/hdr"
 grep -q 'X-Vault-Token: .' "$d/hdr" || { echo 000; exit 0; }
 trap 'curl -sS -o /dev/null -X POST -H "@$d/hdr" "$BAO/v1/auth/token/revoke-self" || true; rm -rf "$d"' EXIT
 curl -sS -H "@$d/hdr" -o "$d/cur" "$BAO/v1/secret/data/$SET_KEY"
+# The stderr of these jq calls goes nowhere: a jq error message can quote the
+# value. A failure prints a fixed message and the code 000.
 if [ "${SET_MODE:-property}" = object ]; then
   jq -c --rawfile v "$d/value" \
-    '{data:((.data.data // {}) + ($v | fromjson))}' "$d/cur" > "$d/body"
+    '{data:((.data.data // {}) + ($v | fromjson))}' "$d/cur" > "$d/body" 2>/dev/null \
+    || { echo "the write body could not be built" >&2; echo 000; exit 0; }
 else
   jq -c --arg p "$SET_PROP" --rawfile v "$d/value" \
-    '{data:((.data.data // {}) | .[$p]=$v)}' "$d/cur" > "$d/body"
+    '{data:((.data.data // {}) | .[$p]=$v)}' "$d/cur" > "$d/body" 2>/dev/null \
+    || { echo "the write body could not be built" >&2; echo 000; exit 0; }
 fi
 curl -sS -o /dev/null -w '%{http_code}' -X POST -H "@$d/hdr" \
   -H 'Content-Type: application/json' --data-binary "@$d/body" \
