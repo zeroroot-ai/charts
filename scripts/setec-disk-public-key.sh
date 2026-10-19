@@ -15,6 +15,11 @@
 # openssl 1.1.1 or later: the seed is wrapped as a PKCS#8 ed25519 private key
 # (the fixed 16-byte prefix, then the 32-byte seed), and the last 32 bytes of
 # the DER public key are the raw key.
+# Secret values pass through this script in shell variables. An xtrace (bash
+# -x, set -x, or xtrace in an exported SHELLOPTS) prints each expanded
+# command to stderr, value included, so the script turns it off first.
+# tests/xtrace-secrets.bats runs it under bash -x.
+set +x
 set -euo pipefail
 
 public_key_of_seed() {

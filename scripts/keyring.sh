@@ -104,6 +104,11 @@
 #
 # Exit codes: 0 ok, 1 the keyring fails a check, 2 the command could not run.
 
+# Secret values pass through this script in shell variables. An xtrace (bash
+# -x, set -x, or xtrace in an exported SHELLOPTS) prints each expanded
+# command to stderr, value included, so the script turns it off first.
+# tests/xtrace-secrets.bats runs it under bash -x.
+set +x
 set -euo pipefail
 
 # name:kind:size — kind b64 means base64 of exactly <size> bytes, kind alnum

@@ -100,7 +100,8 @@ case "$args" in
     r=True; [ -z "${NEVER_READY:-}" ] || [ "$uid" = u0 ] || r=False
     # The first pod (u0) started before the Secret write. Each new pod
     # started at 10:05:00, after the write and its margin of 60 s.
-    t="2026-10-19T10:05:00Z"; [ "$uid" != u0 ] || t="2026-01-01T00:00:00Z"
+    # NEW_POD_TIME sets the start of each new pod.
+    t="${NEW_POD_TIME:-2026-10-19T10:05:00Z}"; [ "$uid" != u0 ] || t="2026-01-01T00:00:00Z"
     jq -n --arg n "${name}-0" --arg u "$uid" --arg r "$r" --arg t "$t" \
       '{items: [{metadata: {name: $n, uid: $u, creationTimestamp: $t, ownerReferences: [{kind: "ReplicaSet", controller: true}]}, status: {phase: "Running", conditions: [{type: "Ready", status: $r}]}}]}' ;;
   *"delete pod"*"--wait=true"*) echo 'Error from server (Forbidden): pods is forbidden: cannot watch resource "pods"' >&2; exit 1 ;;
@@ -372,4 +373,35 @@ PY
   done
   # Without the flag the job deletes the new pod again: the defect of #739.
   [ "$(grep -cx 'statefulset/gibson-gibson-workloads' "$S/restarts")" -eq 2 ]
+}
+
+# two_ticks <new pod start> <TZ>: two runs where the daemon pod never becomes
+# Ready; prints the number of deletes of the daemon pod.
+two_ticks() {
+  world new 2 old 1 old
+  : > "$S/restarts"; rm -f "$S"/uid.*
+  sed 's|restart "statefulset/${DAEMON_STS}" 900|restart "statefulset/${DAEMON_STS}" 1|' "$WORK/rotation.sh" > "$S/rotation.sh"
+  for tick in 1 2; do
+    env PATH="$S/bin:$PATH" S="$S" RESTART_PODS_POLL=0 NEVER_READY=1 NEW_POD_TIME="$1" TZ="$2" \
+      bash "$S/rotation.sh" >/dev/null 2>&1 || true
+  done
+  grep -cx 'statefulset/gibson-gibson-workloads' "$S/restarts"
+}
+
+@test "FAILING FIXTURE: the 60 s margin and TZ=UTC hold in a summer-time zone" {
+  # The Secret write is 10:00:00Z. America/New_York is on summer time in
+  # October, and jq 1.6 applies that offset in fromdateiso8601 when the
+  # job does not pin TZ=UTC.
+  zone=America/New_York
+  [ -e "/usr/share/zoneinfo/$zone" ] || skip "no tzdata for $zone"
+  # A pod that started 30 s after the write is inside the margin: it may
+  # hold the old password from the kubelet cache, so the next run restarts
+  # it again. Without the margin it counts as new: 1 delete.
+  run two_ticks 2026-10-19T10:00:30Z "$zone"
+  [ "$output" = 2 ] || { echo "pod inside the margin: $output deletes, want 2"; false; }
+  # A pod that started 5 min after the write is new, so the next run does
+  # not delete it again. Without TZ=UTC the write time moves one hour later
+  # and the pod counts as old: 2 deletes.
+  run two_ticks 2026-10-19T10:05:00Z "$zone"
+  [ "$output" = 1 ] || { echo "pod after the margin: $output deletes, want 1"; false; }
 }
