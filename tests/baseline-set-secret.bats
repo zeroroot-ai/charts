@@ -168,3 +168,52 @@ C
   [ "$status" -eq 0 ]
   [ "$output" = "000" ]
 }
+
+# --object <key>: the properties of one key, as a JSON object on stdin, in ONE
+# KV write. A slot of two properties (kid and key) must never hold one without
+# the other, and clearing a slot writes empty strings (hosted rotation drill,
+# platform-signing-keys step 3).
+run_object_in_pod() { # run_object_in_pod <key> <stdin json>
+  printf '%s' "$2" | run_script --object "$1"
+  pod_script="$(pod_script_from_argv)"
+  run bash -c 'cat "$STUB/kubectl.stdin" | SET_KEY="$2" SET_PROP= SET_MODE=object SA_TOKEN_FILE="$STUB/sa-token" PATH="$STUB/bin:$PATH" sh -c "$1"' _ "$pod_script" "$1"
+}
+
+@test "--object clears a slot: empty strings for kid and key in one write" {
+  run_object_in_pod gibson-cg-signing-key-previous '{"kid":"","key":""}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "200" ]
+  grep -qxF -- 'SET_MODE=object' "$STUB/kubectl.argv"
+  [ "$("$REAL_JQ" -c '.data | {kid,key}' "$STUB/write.body")" = '{"kid":"","key":""}' ]
+  # The other property of the key stays, as in the single-property mode.
+  [ "$("$REAL_JQ" -r '.data.other' "$STUB/write.body")" = "keep" ]
+  # One write: the stub curl saw one body.
+  [ "$(grep -c -- '--data-binary' "$STUB/curl.argv")" -eq 2 ] # the login and the KV write
+}
+
+@test "--object writes kid and key together, and no argv holds a value" {
+  obj="$("$REAL_JQ" -nc --arg k "$HOSTILE" '{kid:"kid-2",key:$k}')"
+  run_object_in_pod gibson-cg-signing-key-next "$obj"
+  [ "$status" -eq 0 ]
+  "$REAL_JQ" -j '.data.key' "$STUB/write.body" | cmp -s - <(printf '%s' "$HOSTILE")
+  [ "$("$REAL_JQ" -r '.data.kid' "$STUB/write.body")" = "kid-2" ]
+  for f in "$STUB/kubectl.argv" "$STUB/curl.argv" "$STUB/jq.argv"; do
+    run no_value_on_argv "$f"
+    [ "$status" -eq 0 ]
+  done
+  [ ! -e /tmp/pwned ]
+}
+
+@test "--object refuses a non-object, an empty object and a non-string value, with no kubectl call" {
+  for bad in '' '"kid"' '[]' '{}' '{"kid":1}' '{"kid":null}' '{"kid":"a","key":{"x":"y"}}' 'not json'; do
+    run bash -c 'printf "%s" "$1" | PATH="$STUB/bin:$PATH" "$0" --object k' "$SCRIPT" "$bad"
+    [ "$status" -eq 2 ] || { echo "accepted: $bad"; return 1; }
+    [ ! -f "$STUB/kubectl.argv" ]
+  done
+}
+
+@test "--object takes exactly one key and no property" {
+  run bash -c 'printf "{\"kid\":\"\"}" | PATH="$STUB/bin:$PATH" "$0" --object k p' "$SCRIPT"
+  [ "$status" -eq 2 ]
+  [ ! -f "$STUB/kubectl.argv" ]
+}

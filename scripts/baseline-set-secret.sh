@@ -17,6 +17,15 @@
 #   printf '%s\n' "$GHCR_TOKEN"    | scripts/baseline-set-secret.sh ghcr-pull-secret pat
 #   printf '%s\n' "$SMTP_PASSWORD" | scripts/baseline-set-secret.sh ses-smtp-credentials password
 #
+# Object mode writes several properties of one key in ONE KV write. Stdin is a
+# JSON object with string values. An empty string is allowed here, so this mode
+# also clears a slot. Use it for properties that must change together, such as
+# the kid and the key of a signing-key slot: two writes would leave a slot with
+# a key and no kid between them, and the daemon refuses that slot.
+#   jq -nc --arg kid "$KID" --rawfile key key.pem '{kid:$kid,key:$key}' \
+#     | scripts/baseline-set-secret.sh --object gibson-cg-signing-key-next
+#   printf '%s' '{"kid":"","key":""}' | scripts/baseline-set-secret.sh --object gibson-cg-signing-key-previous
+#
 # Env: NS (default gibson), RELEASE (default gibson)
 #
 # The value travels on stdin at every step: into this script, into the
@@ -32,6 +41,7 @@ POD="${RELEASE}-openbao-0"
 
 usage() {
   echo "usage: printf '%s\\n' \"\$value\" | $0 <key> <property>" >&2
+  echo "       printf '%s' '{\"prop\":\"value\"}' | $0 --object <key>" >&2
   echo "the value comes on stdin, never as an argument" >&2
 }
 
@@ -39,7 +49,11 @@ if [ "$#" -ne 2 ]; then
   usage
   exit 2
 fi
-KEY="$1"; PROP="$2"
+if [ "$1" = "--object" ]; then
+  MODE=object; KEY="$2"; PROP=""
+else
+  MODE=property; KEY="$1"; PROP="$2"
+fi
 
 if [ -t 0 ]; then
   echo "FATAL: stdin is a terminal; pipe the value in" >&2
@@ -49,7 +63,19 @@ fi
 VALUE="$(cat; printf x)"
 VALUE="${VALUE%x}"
 VALUE="${VALUE%$'\n'}"
-if [ -z "$VALUE" ]; then
+if [ "$MODE" = object ]; then
+  # A JSON object with at least one property, and every value a string. An
+  # empty string is a value here: it clears that property. jq reads the
+  # object on stdin, so the value is on no argv.
+  # jq 1.6 exits 0 on an empty input, so the empty check comes first.
+  if [ -z "$VALUE" ] || ! printf '%s' "$VALUE" \
+      | jq -e 'type == "object" and length > 0 and all(.[]; type == "string")' >/dev/null 2>&1; then
+    echo "FATAL: --object needs a JSON object of string values on stdin" >&2
+    usage
+    exit 2
+  fi
+  PROP="$(printf '%s' "$VALUE" | jq -r 'keys_unsorted | join(",")')"
+elif [ -z "$VALUE" ]; then
   echo "FATAL: stdin holds no value" >&2
   usage
   exit 2
@@ -88,8 +114,13 @@ jq -r '"X-Vault-Token: " + (.auth.client_token // empty)' "$d/auth" > "$d/hdr"
 grep -q 'X-Vault-Token: .' "$d/hdr" || { echo 000; exit 0; }
 trap 'curl -sS -o /dev/null -X POST -H "@$d/hdr" "$BAO/v1/auth/token/revoke-self" || true; rm -rf "$d"' EXIT
 curl -sS -H "@$d/hdr" -o "$d/cur" "$BAO/v1/secret/data/$SET_KEY"
-jq -c --arg p "$SET_PROP" --rawfile v "$d/value" \
-  '{data:((.data.data // {}) | .[$p]=$v)}' "$d/cur" > "$d/body"
+if [ "${SET_MODE:-property}" = object ]; then
+  jq -c --rawfile v "$d/value" \
+    '{data:((.data.data // {}) + ($v | fromjson))}' "$d/cur" > "$d/body"
+else
+  jq -c --arg p "$SET_PROP" --rawfile v "$d/value" \
+    '{data:((.data.data // {}) | .[$p]=$v)}' "$d/cur" > "$d/body"
+fi
 curl -sS -o /dev/null -w '%{http_code}' -X POST -H "@$d/hdr" \
   -H 'Content-Type: application/json' --data-binary "@$d/body" \
   "$BAO/v1/secret/data/$SET_KEY"
@@ -98,7 +129,7 @@ EOF
 
 # printf is a bash builtin: the value reaches kubectl on a pipe, not an argv.
 code="$(printf '%s' "$VALUE" | kubectl -n "$NS" exec -i "$POD" -c openbao-auto-init -- \
-  env "SET_KEY=$KEY" "SET_PROP=$PROP" sh -c "$POD_SCRIPT")"
+  env "SET_KEY=$KEY" "SET_PROP=$PROP" "SET_MODE=$MODE" sh -c "$POD_SCRIPT")"
 case "$code" in
   200|204) ;;
   *) echo "FATAL: writing secret/${KEY} returned HTTP ${code}" >&2; exit 1 ;;
@@ -113,4 +144,8 @@ for es in $(kubectl -n "$NS" get externalsecrets -o json \
   echo "refreshed externalsecret/${es}"
 done
 
-echo "set secret/${KEY}.${PROP}"
+if [ "$MODE" = object ]; then
+  echo "set secret/${KEY} {${PROP}} in one write"
+else
+  echo "set secret/${KEY}.${PROP}"
+fi
