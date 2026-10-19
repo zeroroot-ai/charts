@@ -46,8 +46,20 @@ KINDS = {
 }
 # Flags that take the next argv as their value.
 VALUE_FLAGS = {"-n", "--namespace", "-c", "--container", "-l", "--selector", "-o", "--output",
-               "-f", "--filename", "--field-selector", "--from-literal", "--type", "--timeout",
-               "--context", "--kubeconfig", "-p", "--patch"}
+               "-f", "--filename", "--field-selector", "--from-literal", "--from-file", "--type",
+               "--timeout", "--request-timeout", "--grace-period", "--context", "--kubeconfig",
+               "--cluster", "--user", "--server", "-s", "--token", "-p", "--patch",
+               "--chunk-size", "--sort-by", "--template", "--pod-running-timeout"}
+# Flags that take no value in the space form. `--wait=false` and
+# `--dry-run=client` use the = form, which the parser reads for any known flag.
+BOOL_FLAGS = {"-i", "--stdin", "-t", "--tty", "-it", "-ti", "-q", "--quiet",
+              "--ignore-not-found", "--wait", "--dry-run", "--save-config", "--overwrite",
+              "--all", "-A", "--all-namespaces", "-w", "--watch", "--watch-only",
+              "--show-managed-fields", "--no-headers", "--show-labels", "--force", "--now",
+              "--local", "--cascade"}
+# A flag the guard does not know fails the check: a value flag read as a
+# boolean would make its value a positional, and a flag such as --watch-only
+# can change the requests.
 
 # The documented create shortcuts that make one named object.
 CREATE_SHORTCUTS = {"secret", "configmap", "serviceaccount"}
@@ -69,12 +81,16 @@ def parse(argv):
         if a.startswith("-"):
             if "=" in a and a.startswith("--"):
                 k, v = a.split("=", 1)
+                if k not in VALUE_FLAGS and k not in BOOL_FLAGS:
+                    raise CallError(f"kubectl flag {k!r} is not modelled: add it to scripts/check-kubectl-rbac.py")
                 flags.setdefault(k, []).append(v)
             elif a in VALUE_FLAGS and i + 1 < len(argv):
                 flags.setdefault(a, []).append(argv[i + 1])
                 i += 1
-            else:
+            elif a in BOOL_FLAGS:
                 flags.setdefault(a, []).append("")
+            else:
+                raise CallError(f"kubectl flag {a!r} is not modelled: add it to scripts/check-kubectl-rbac.py")
         else:
             pos.append(a)
         i += 1
@@ -154,7 +170,7 @@ def requests(calls):
                     req("list", g, r)
                 else:
                     req("get", g, r, n)
-            if "--watch" in flags or "-w" in flags:
+            if "--watch" in flags or "-w" in flags or "--watch-only" in flags:
                 for g, r, _ in targets(rest):
                     req("watch", g, r)
         elif sub == "delete":
@@ -270,17 +286,20 @@ def allowed(rq, rules):
 
 
 def check(docs, sa, calls):
-    """Return a list of findings (empty when every call is allowed)."""
+    """Return (findings, the number of API requests checked). No finding
+    means every call is allowed."""
     sa_ns, _, sa_name = sa.partition("/")
     rules = bound_rules(docs, sa_ns, sa_name)
     findings = []
+    checked = 0
     if not rules:
-        return [f"no Role or ClusterRole in the render is bound to ServiceAccount {sa}"]
+        return [f"no Role or ClusterRole in the render is bound to ServiceAccount {sa}"], 0
     if not calls:
-        return ["the call log is empty: the test recorded no kubectl call, so the check looked at nothing"]
+        return ["the call log is empty: the test recorded no kubectl call, so the check looked at nothing"], 0
     try:
         for argv, reqs in requests(calls):
             for rq in reqs:
+                checked += 1
                 if not allowed(rq, rules):
                     res = rq["resource"] + ("/" + rq["sub"] if rq["sub"] else "")
                     grp = rq["group"] or "core"
@@ -289,7 +308,10 @@ def check(docs, sa, calls):
                                     f"({grp}, namespace {rq['ns']}), and no rule bound to {sa} allows it")
     except CallError as e:
         findings.append(str(e))
-    return sorted(set(findings))
+    if checked == 0 and not findings:
+        # version, config and auth make no request: such a log checks nothing.
+        findings.append("the calls make no API request, so the check looked at nothing")
+    return sorted(set(findings)), checked
 
 
 # --- selftest -------------------------------------------------------------
@@ -332,7 +354,7 @@ def selftest():
     cases = []
 
     def expect(label, docs, calls, want_substr):
-        got = check(docs, sa, calls)
+        got, _ = check(docs, sa, calls)
         if want_substr is None:
             ok = got == []
         else:
@@ -385,6 +407,20 @@ def selftest():
     expect("FAILING FIXTURE: an apply of an unknown object fails",
            good, [["apply", "-f", "-"]], "apply of an object the check cannot tell")
 
+    # FAILING FIXTURE: a log with calls that make no API request.
+    expect("FAILING FIXTURE: a log of only version, config and auth calls fails",
+           good, [["version"], ["config", "view"]], "make no API request")
+
+    # FAILING FIXTURE: --watch-only is a watch; the Role grants no watch.
+    expect("FAILING FIXTURE: get --watch-only needs watch pods",
+           good, [["-n", "gibson", "get", "pods", "--watch-only"]], "needs watch pods")
+
+    # FAILING FIXTURE: a flag the guard does not know.
+    expect("FAILING FIXTURE: an unknown flag fails",
+           good, [["-n", "gibson", "get", "pods", "--frobnicate", "x"]], "flag '--frobnicate' is not modelled")
+    expect("FAILING FIXTURE: an unknown flag in the = form fails",
+           good, [["-n", "gibson", "get", "pods", "--frobnicate=x"]], "flag '--frobnicate' is not modelled")
+
     # FAILING FIXTURE: an empty call log measures nothing.
     expect("FAILING FIXTURE: an empty call log fails", good, [], "the call log is empty")
 
@@ -421,12 +457,12 @@ def main():
         ap.error("--render, --sa and --calls are required")
     docs = [d for d in yaml.safe_load_all(open(a.render)) if d]
     calls = [json.loads(line) for line in open(a.calls) if line.strip()]
-    findings = check(docs, a.sa, calls)
+    findings, checked = check(docs, a.sa, calls)
     if findings:
         for f in findings:
             print(f"FAIL: {f}", file=sys.stderr)
         return 1
-    print(f"kubectl-rbac: {len(calls)} kubectl calls of {a.sa}, each allowed by its Role")
+    print(f"kubectl-rbac: {len(calls)} kubectl calls of {a.sa}, {checked} API requests, each allowed by its Role")
     return 0
 
 

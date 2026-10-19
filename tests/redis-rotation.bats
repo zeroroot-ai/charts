@@ -173,6 +173,10 @@ run_job() { run env PATH="$S/bin:$PATH" S="$S" RESTART_PODS_POLL=0 bash "$WORK/r
     --sa gibson/gibson-redis-rotation --calls "$KUBECTL_LOG"
   echo "$output"
   [ "$status" -eq 0 ]
+  # A floor: the four paths make at least 40 API requests, so the check
+  # cannot pass on a log that lost most of the calls.
+  n="$(sed -n 's/.*, \([0-9]*\) API requests,.*/\1/p' <<<"$output")"
+  [ "${n:-0}" -ge 40 ] || { echo "only ${n:-0} API requests checked"; false; }
 }
 
 @test "FAILING FIXTURE: the same calls against the 0.150.0 Role (no pods get) fail the check" {
