@@ -243,6 +243,17 @@ oenc() {
   printf '%s%s' "$iv" "$ct" | sed 's/../\\x&/g' | xargs -0 printf '%b' | base64 -w0 | tr '+/' '-_'
 }
 
+@test "the AES-256-CFB of the step gives the NIST SP 800-38A F.3.13 and F.3.14 vectors (CFB128-AES256)" {
+  k=603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4
+  iv=000102030405060708090a0b0c0d0e0f
+  pt=6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710
+  ct=dc7e84bfda79164b7ecd8486985d386039ffed143b28b1c832113c6331e5407bdf10132415e54b92a13ed0a8267ae2f975a385741ab9cef82031623d55b1e471
+  got="$(bash -c ". '$D/crypto.sh'; printf '%s\n%s' \"\$1\" \"\$2\" | mk_cfb e \"\$3\"" _ "$k" "$pt" "$iv")"
+  [ "$got" = "$ct" ] || { echo "F.3.13 encrypt: got $got"; false; }
+  got="$(bash -c ". '$D/crypto.sh'; printf '%s\n%s' \"\$1\" \"\$2\" | mk_cfb d \"\$3\"" _ "$k" "$ct" "$iv")"
+  [ "$got" = "$pt" ] || { echo "F.3.14 decrypt: got $got"; false; }
+}
+
 @test "the AES-256-CFB of the step equals openssl enc -aes-256-cfb, the cipher of Zitadel" {
   for n in 1 15 16 17 31 32 33 48 70; do
     k="$(openssl rand -hex 32)"; iv="$(openssl rand -hex 16)"; d="$(openssl rand -hex "$n")"

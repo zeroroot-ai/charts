@@ -3956,7 +3956,13 @@ data:
     # (GHSA-5c5h-rrh4-5xw3). So the AES block cipher is this Perl program, and
     # perl-base of the client image runs it. The program text and the IV are on
     # the argv. The key and the data never are. tests/zitadel-masterkey-rotation.bats
-    # compares it with openssl on random keys and data.
+    # checks it against the NIST SP 800-38A CFB128-AES256 vectors (F.3.13,
+    # F.3.14) and against openssl on random keys and data.
+    # It is not constant time: the S-box lookups index a table by key-dependent
+    # bytes, so a process that shares the CPU cache could learn key bits from
+    # the timing. The risk is low here: it runs a few blocks, once per rotation
+    # Job and once per Zitadel start, in a pod of its own, and an attacker on
+    # the same node who can time it can also read the mounted Secret.
     MK_AES_PL='
     use strict; use warnings;
     my ($mode, $ivh) = @ARGV;
@@ -15664,7 +15670,13 @@ spec:
               # (GHSA-5c5h-rrh4-5xw3). So the AES block cipher is this Perl program, and
               # perl-base of the client image runs it. The program text and the IV are on
               # the argv. The key and the data never are. tests/zitadel-masterkey-rotation.bats
-              # compares it with openssl on random keys and data.
+              # checks it against the NIST SP 800-38A CFB128-AES256 vectors (F.3.13,
+              # F.3.14) and against openssl on random keys and data.
+              # It is not constant time: the S-box lookups index a table by key-dependent
+              # bytes, so a process that shares the CPU cache could learn key bits from
+              # the timing. The risk is low here: it runs a few blocks, once per rotation
+              # Job and once per Zitadel start, in a pod of its own, and an attacker on
+              # the same node who can time it can also read the mounted Secret.
               MK_AES_PL='
               use strict; use warnings;
               my ($mode, $ivh) = @ARGV;
