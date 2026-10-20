@@ -32,12 +32,104 @@ The exit tests turn Hubble on in the Cilium of their kind cluster
         Postgres is reported with its source, destination and port
 """
 import argparse
+import ipaddress
 import json
 import subprocess
 import sys
 
 # Hubble names a drop that a policy makes with one of these reasons.
 POLICY_REASONS = ("POLICY_DENIED", "POLICY_DENY", "AUTH_REQUIRED")
+
+
+class Peers:
+    """What the check knows of the cluster to judge a late packet: the pod
+    CIDRs of the nodes and the ports that a pod listens on. A pod CIDR list
+    that is empty, or a read that failed, makes no packet a late packet: the
+    check fails closed."""
+
+    def __init__(self, cidrs=None, ports=None, live=False):
+        self.cidrs = [ipaddress.ip_network(c, strict=False) for c in (cidrs or [])]
+        self.ports = {k: set(v) for k, v in (ports or {}).items()}
+        self.live = live
+        self.notices = []
+
+    def listens(self, namespace: str, pod: str, port: int) -> bool:
+        key = f"{namespace}/{pod}"
+        if key not in self.ports and self.live:
+            r = subprocess.run(["kubectl", "-n", namespace, "get", "pod", pod, "-o", "json"],
+                               capture_output=True, text=True)
+            got = set()
+            if r.returncode == 0:
+                for c in (json.loads(r.stdout).get("spec") or {}).get("containers") or []:
+                    got |= {int(p["containerPort"]) for p in c.get("ports") or [] if "containerPort" in p}
+            self.ports[key] = got
+        return port in self.ports.get(key, set())
+
+    def in_pod_cidr(self, ip: str) -> bool:
+        try:
+            a = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        return any(a in n for n in self.cidrs)
+
+
+def live_pod_cidrs() -> list:
+    """The pod CIDRs of the nodes. Empty when the read fails."""
+    r = subprocess.run(["kubectl", "get", "nodes", "-o", "jsonpath={.items[*].spec.podCIDRs}"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"::error::cannot read the pod CIDRs of the nodes: {r.stderr.strip()[:200]}. "
+              "No drop counts as a late packet to a gone peer.", file=sys.stderr)
+        return []
+    out = []
+    for chunk in r.stdout.split():
+        try:
+            out += json.loads(chunk)
+        except json.JSONDecodeError:
+            out += [x for x in chunk.strip("[]").replace('"', "").split(",") if x]
+    if not out:
+        print("::error::the nodes name no pod CIDR. No drop counts as a late packet to a gone peer.",
+              file=sys.stderr)
+    return out
+
+
+def gone_peer(flow: dict, peers: "Peers") -> bool:
+    """True for a late reply of a server to a peer pod that is gone.
+
+    When a pod ends, Cilium removes its endpoint and the connection tracking
+    entries of its address. A late ACK, FIN or RST of a server to that
+    address then has no entry and no identity, so the policy of the server
+    sees new egress to the world entity and drops it. Main run 39447716168
+    showed it: the OpenFGA server sent two packets to 10.244.0.187 port 60814
+    (world), the ephemeral port of a client that had just ended.
+
+    All of these must hold, or the drop stays a finding:
+      - TCP with flags and no SYN: the packet starts no connection;
+      - the destination is the world entity with no pod, at an address
+        inside a pod CIDR of the cluster: a pod address that has no pod;
+      - the source port is a port the source pod listens on, and the
+        destination port is ephemeral (32768 or more): a server reply.
+    A packet to an address outside the pod CIDRs, such as an outside host,
+    is never passed. Each passed drop is printed as a notice.
+    """
+    tcp = (flow.get("l4") or {}).get("TCP")
+    if not isinstance(tcp, dict):
+        return False
+    flags = tcp.get("flags") or {}
+    if not flags or flags.get("SYN"):
+        return False
+    src, dst = flow.get("source") or {}, flow.get("destination") or {}
+    if dst.get("pod_name") or "reserved:world" not in (dst.get("labels") or []):
+        return False
+    ip = (flow.get("IP") or {}).get("destination", "")
+    if not peers.in_pod_cidr(ip):
+        return False
+    if int(tcp.get("destination_port") or 0) < 32768:
+        return False
+    if not src.get("pod_name") or not peers.listens(src.get("namespace", ""), src["pod_name"],
+                                                    int(tcp.get("source_port") or 0)):
+        return False
+    return True
 
 
 def endpoint(e: dict, ip: str) -> str:
@@ -59,8 +151,22 @@ def port_of(flow: dict) -> str:
     return "?"
 
 
-def policy_drops(lines: list[str], namespace: str) -> list[dict]:
-    """The flows that a policy dropped, to or from the namespace."""
+def evidence_line(obj: dict) -> str:
+    """The flow as one JSON line for the evidence artifact, with no l7 key.
+    The artifact of a public repository is public: an HTTP rule of Cilium
+    would put request headers (Authorization, Cookie) into l7."""
+    obj = json.loads(json.dumps(obj))
+    flow = obj.get("flow", obj)
+    flow.pop("l7", None)
+    return json.dumps(obj)
+
+
+def policy_drops(lines: list[str], namespace: str, peers: "Peers" = None, evidence: list = None) -> list[dict]:
+    """The flows that a policy dropped, to or from the namespace. A late
+    reply to a gone peer (gone_peer) goes to peers.notices instead. Each
+    policy drop of the namespace, passed or not, is appended to evidence as
+    its raw flow."""
+    peers = peers or Peers()
     out = []
     for line in lines:
         line = line.strip()
@@ -79,8 +185,10 @@ def policy_drops(lines: list[str], namespace: str) -> list[dict]:
         src, dst = flow.get("source") or {}, flow.get("destination") or {}
         if namespace and namespace not in (src.get("namespace"), dst.get("namespace")):
             continue
+        if evidence is not None:
+            evidence.append(evidence_line(obj))
         ip = flow.get("IP") or {}
-        out.append({
+        item = {
             "source": endpoint(src, ip.get("source", "")),
             "source_pod": src.get("pod_name", ""),
             "destination": endpoint(dst, ip.get("destination", "")),
@@ -88,7 +196,12 @@ def policy_drops(lines: list[str], namespace: str) -> list[dict]:
             "direction": flow.get("traffic_direction", "?"),
             "reason": reason,
             "time": flow.get("time", ""),
-        })
+            "flags": ",".join(sorted(k for k, v in (((flow.get("l4") or {}).get("TCP") or {}).get("flags") or {}).items() if v)),
+        }
+        if gone_peer(flow, peers):
+            peers.notices.append(item)
+            continue
+        out.append(item)
     return out
 
 
@@ -97,8 +210,9 @@ def lines_of(files: list[str]) -> list[str]:
 
 
 def describe(d: dict) -> str:
+    flags = f", TCP {d['flags']}" if d.get("flags") else ""
     return (f"{d['source']} -> {d['destination']} port {d['port']} "
-            f"({d['direction']}, {d['reason']}, {d['time']})")
+            f"({d['direction']}, {d['reason']}{flags}, {d['time']})")
 
 
 def forwarded(lines: list[str], prefix: str, port: str) -> list[dict]:
@@ -197,6 +311,45 @@ def selftest() -> int:
     if len(got) != 1 or "world" not in got[0]["source"]:
         print(f"SELFTEST FAIL: a drop from outside the cluster must fail and name the world entity: {got}")
         return 1
+    # A late reply of a server to a pod address with no pod passes, as a
+    # notice. Each other shape fails.
+    peers = Peers(cidrs=["10.244.0.0/24"], ports={"gibson/gibson-openfga-x": [8080]})
+    late = {"flow": {**FIXTURE_UNLABELED_TO_POSTGRES["flow"],
+                     "IP": {"source": "10.244.0.30", "destination": "10.244.0.187"},
+                     "l4": {"TCP": {"source_port": 8080, "destination_port": 60814,
+                                    "flags": {"ACK": True, "FIN": True}}},
+                     "source": {"namespace": "gibson", "pod_name": "gibson-openfga-x"},
+                     "destination": {"labels": ["reserved:world"]}}}
+    if policy_drops([json.dumps(late)], "gibson", peers) or len(peers.notices) != 1:
+        print("SELFTEST FAIL: a late FIN of a server to a pod address with no pod must pass as a notice")
+        return 1
+    tcp = late["flow"]["l4"]["TCP"]
+    outside = {"flow": {**late["flow"], "IP": {"source": "10.244.0.30", "destination": "203.0.113.5"},
+                        "l4": {"TCP": {**tcp, "destination_port": 443, "flags": {"ACK": True, "PSH": True}}}}}
+    cases = (
+        ("a no-SYN packet to 203.0.113.5:443 (ACK,PSH)", outside, peers),
+        ("a SYN to a pod address with no pod", {"flow": {**late["flow"], "l4": {"TCP": {**tcp, "flags": {"SYN": True}}}}}, peers),
+        ("a late packet to a live pod", {"flow": {**late["flow"], "destination": {"namespace": "gibson", "pod_name": "gibson-x", "labels": ["k8s:app=x"]}}}, peers),
+        ("a packet with no TCP flags", {"flow": {**late["flow"], "l4": {"TCP": {**tcp, "flags": {}}}}}, peers),
+        ("a reply from a port the pod does not listen on", {"flow": {**late["flow"], "l4": {"TCP": {**tcp, "source_port": 9999}}}}, peers),
+        ("a packet to a port that is not ephemeral", {"flow": {**late["flow"], "l4": {"TCP": {**tcp, "destination_port": 5432}}}}, peers),
+        ("a late reply with no pod CIDR read (fails closed)", late, Peers(cidrs=[], ports={"gibson/gibson-openfga-x": [8080]})),
+    )
+    for what, f, pr in cases:
+        if len(policy_drops([json.dumps(f)], "gibson", pr)) != 1:
+            print(f"SELFTEST FAIL: {what} must fail")
+            return 1
+    ev = []
+    policy_drops([json.dumps(late), json.dumps(outside)], "gibson", Peers(cidrs=["10.244.0.0/24"], ports={"gibson/gibson-openfga-x": [8080]}), ev)
+    if len(ev) != 2:
+        print("SELFTEST FAIL: the evidence must hold the raw flow of each policy drop, the passed one too")
+        return 1
+    with_l7 = {"flow": {**outside["flow"], "l7": {"http": {"headers": [{"key": "Authorization", "value": "Bearer sekret-l7"}]}}}}
+    ev = []
+    policy_drops([json.dumps(with_l7)], "gibson", Peers(cidrs=["10.244.0.0/24"]), ev)
+    if len(ev) != 1 or "l7" in json.loads(ev[0])["flow"] or "sekret-l7" in ev[0]:
+        print("SELFTEST FAIL: the evidence must hold no l7 key, so no request header reaches the artifact")
+        return 1
     trainer = {"flow": {**FIXTURE_FORWARDED["flow"], "l4": {"TCP": {"destination_port": 50051}},
                         "source": {"namespace": "tenant-primary", "pod_name": "belief-trainer-proof-x1"},
                         "destination": {"namespace": "gibson", "pod_name": "gibson-gibson-workloads-0"}}}
@@ -234,7 +387,10 @@ def selftest() -> int:
         print("SELFTEST FAIL: a drop at the destination must not count as an EGRESS drop")
         return 1
     print("  ✓ selftest: a policy drop fails and names its source, destination and port; a forwarded flow, "
-          "another drop reason and other namespaces pass; a caller fixture needs its forwarded flow to its port; "
+          "another drop reason, other namespaces and a late server reply to a pod address with no pod pass; "
+          "a no-SYN packet to an outside host, a SYN, a live pod, no flags, a port the pod does not listen on, "
+          "a port that is not ephemeral and no pod CIDR read fail; a caller fixture needs its forwarded flow to "
+          "its port; "
           "an expected drop matches its pod and port only")
     return 0
 
@@ -248,6 +404,11 @@ def main() -> int:
     ap.add_argument("--expect-drop", default="")
     ap.add_argument("--expect-forward", default="")
     ap.add_argument("--direction", default="", choices=["", "EGRESS", "INGRESS"])
+    ap.add_argument("--pod-cidr", action="append", default=[],
+                    help="with --flows: a pod CIDR of the cluster (live, the nodes are read)")
+    ap.add_argument("--listen-port", action="append", default=[],
+                    help="with --flows: <namespace>/<pod>=<port>, a port the pod listens on")
+    ap.add_argument("--evidence", default="", help="write the raw flow of each policy drop to this file")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
@@ -272,9 +433,21 @@ def main() -> int:
         return 0
     if a.flows:
         lines = lines_of(a.flows)
+        ports = {}
+        for lp in a.listen_port:
+            k, _, v = lp.partition("=")
+            ports.setdefault(k, []).append(int(v))
+        peers = Peers(a.pod_cidr, ports)
     else:
         lines = live_flows(a.namespace, a.since)
-    drops = policy_drops(lines, a.namespace)
+        peers = Peers(live_pod_cidrs(), live=True)
+    evidence = []
+    drops = policy_drops(lines, a.namespace, peers, evidence)
+    if a.evidence:
+        with open(a.evidence, "a") as f:
+            f.writelines(x.rstrip("\n") + "\n" for x in evidence)
+    for n in peers.notices:
+        print(f"::notice::a late server reply to a pod address with no pod, not a policy finding: {describe(n)}")
     if a.expect_drop:
         mine = expected_drops(drops, a.expect_drop, a.direction)
         if not mine:
