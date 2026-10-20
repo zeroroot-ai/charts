@@ -114,7 +114,7 @@ esac
 ROOT_BODY="$(edge_body "$EDGE" "$APP_HOST" "/")"
 if [ -z "$ROOT_BODY" ] && [ "$ROOT_CODE" = "200" ]; then
   fail "GET / returned 200 with an empty body — cannot establish what it served"
-elif printf '%s' "$ROOT_BODY" | grep -qiE 'sign in|log in|login'; then
+elif grep -qiE 'sign in|log in|login' <<<"$ROOT_BODY"; then
   pass "GET / serves the login surface"
 else
   fail "GET / body carries no login affordance — self-hosted must not serve marketing here"
@@ -287,7 +287,7 @@ else
   # Offline installs only: the setup-link Secret exists and holds a link,
   # never a password.
   if kubectl -n "$NAMESPACE" get secret "$FIRST_ADMIN_SECRET" >/dev/null 2>&1; then
-    if kubectl -n "$NAMESPACE" get secret "$FIRST_ADMIN_SECRET" -o jsonpath='{.data.password}' 2>/dev/null | grep -q .; then
+    if [ -n "$(kubectl -n "$NAMESPACE" get secret "$FIRST_ADMIN_SECRET" -o jsonpath='{.data.password}' 2>/dev/null)" ]; then
       fail "offline setup-link Secret ${FIRST_ADMIN_SECRET} carries a password field — no password may ever be written to a Secret (ADR-0093)"
     else
       pass "offline setup-link Secret ${FIRST_ADMIN_SECRET} exists and carries no password"
@@ -311,7 +311,7 @@ DOCS_URL="$(kubectl -n "$NAMESPACE" get deploy gibson-dashboard \
   -o jsonpath='{.spec.template.spec.containers[*].env[?(@.name=="DOCS_URL")].value}' 2>/dev/null || true)"
 if [ -z "$DOCS_URL" ]; then
   fail "dashboard DOCS_URL is unset — the docs seam is not wired"
-elif printf '%s' "$DOCS_URL" | grep -q "${DOCS_HOST}"; then
+elif grep -q "${DOCS_HOST}" <<<"$DOCS_URL"; then
   pass "dashboard DOCS_URL points at the in-cluster docs host (${DOCS_URL})"
 else
   fail "dashboard DOCS_URL=${DOCS_URL} does not reference ${DOCS_HOST} — local docs are enabled but the dashboard links elsewhere"

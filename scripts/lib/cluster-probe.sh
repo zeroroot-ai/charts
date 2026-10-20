@@ -208,7 +208,7 @@ resolve_edge() {
 # ---------------------------------------------------------------------------
 _edge_curl_args() {
   local edge="$1" host="$2" addr="${1%:*}" port="${1##*:}"
-  if printf '%s' "$addr" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+  if grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' <<<"$addr"; then
     printf -- '--resolve\n%s:%s:%s\n' "$host" "$port" "$addr"
   fi
 }

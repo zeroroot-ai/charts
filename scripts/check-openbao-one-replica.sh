@@ -23,7 +23,7 @@ if ! render >/dev/null 2>"${TMPDIR:-/tmp}/bao-one.err"; then
 fi
 if out="$(render --set gibson-workloads.openbao.replicas=3 2>&1 >/dev/null)"; then
   echo "FAIL: three OpenBao replicas rendered. Each one would be a separate secret store."; fail=1
-elif ! printf '%s' "$out" | grep -q "each replica would be a separate secret store"; then
+elif ! grep -q "each replica would be a separate secret store" <<<"$out"; then
   echo "FAIL: three replicas failed the render, but not with the guard's reason:"; printf '%s\n' "$out" | tail -3; fail=1
 else
   echo "  ✓ one OpenBao replica renders, and three fail the render with the reason"

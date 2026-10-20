@@ -332,7 +332,7 @@ jobs:
             exit 1
           fi
           log="$(kubectl -n gibson logs job/gibson-zitadel-setup --tail=400 --all-containers 2>/dev/null || true)"
-          if printf '%s' "$log" | grep -q "migration failed"; then
+          if grep -q "migration failed" <<<"$log"; then
             echo "::error::the setup Job completed but its log carries \"migration failed\", so a \
           migration was skipped rather than applied:"
             printf '%s\n' "$log" | grep -n -A3 "migration failed" | head -40

@@ -516,7 +516,7 @@ log "cluster DNS: the platform hosts lead to the Envoy Service"
 . "$(dirname "$0")/lib/coredns-platform-hosts.sh"
 PLATFORM_DOMAIN="$(values_domain "$VALUES" ${OVERLAY_FILE:+"$OVERLAY_FILE"} ${RUNG_FILE:+"$RUNG_FILE"})"
 DNS_MODE=corefile
-if kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null | grep -q '+k3s'; then
+if grep -q '+k3s' <<<"$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null)"; then
   DNS_MODE=custom
 fi
 coredns_publish_platform_hosts "$DNS_MODE" "${RELEASE}-envoy.${NS}.svc.cluster.local" \
