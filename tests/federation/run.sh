@@ -103,6 +103,11 @@ echo "::group::the SPIRE servers of the fleet domain and the outside domain"
 # with no controller manager, because the SPIRE CRDs come with gibson-crds.
 # Its controller manager starts now.
 bundle spire-fleet spire-fleet-server-0 > "$WORK/fleet.json"
+# The bundle as one JSON string for the values below. It is read here, not
+# in the heredoc, so set -e stops the test when jq fails.
+FLEET_BUNDLE_JSON="$(jq -c . "$WORK/fleet.json" | jq -Rs .)"
+[ "$(jq -r 'fromjson | .keys | length' <<<"$FLEET_BUNDLE_JSON")" -gt 0 ] \
+  || { echo "::error::the bundle of ${TD_FLEET} has no key"; exit 1; }
 install_spire outside "$TD_OUT" 9984 -f - <<YAML
 spire-server:
   controllerManager:
@@ -117,7 +122,7 @@ spire-server:
           bundleEndpointProfile:
             type: https_spiffe
             endpointSPIFFEID: "spiffe://${TD_FLEET}/spire/server"
-          trustDomainBundle: $(jq -c . "$WORK/fleet.json" | jq -Rs .)
+          trustDomainBundle: ${FLEET_BUNDLE_JSON}
 YAML
 echo "::endgroup::"
 
