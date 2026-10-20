@@ -151,6 +151,16 @@ def port_of(flow: dict) -> str:
     return "?"
 
 
+def evidence_line(obj: dict) -> str:
+    """The flow as one JSON line for the evidence artifact, with no l7 key.
+    The artifact of a public repository is public: an HTTP rule of Cilium
+    would put request headers (Authorization, Cookie) into l7."""
+    obj = json.loads(json.dumps(obj))
+    flow = obj.get("flow", obj)
+    flow.pop("l7", None)
+    return json.dumps(obj)
+
+
 def policy_drops(lines: list[str], namespace: str, peers: "Peers" = None, evidence: list = None) -> list[dict]:
     """The flows that a policy dropped, to or from the namespace. A late
     reply to a gone peer (gone_peer) goes to peers.notices instead. Each
@@ -176,7 +186,7 @@ def policy_drops(lines: list[str], namespace: str, peers: "Peers" = None, eviden
         if namespace and namespace not in (src.get("namespace"), dst.get("namespace")):
             continue
         if evidence is not None:
-            evidence.append(line)
+            evidence.append(evidence_line(obj))
         ip = flow.get("IP") or {}
         item = {
             "source": endpoint(src, ip.get("source", "")),
@@ -333,6 +343,12 @@ def selftest() -> int:
     policy_drops([json.dumps(late), json.dumps(outside)], "gibson", Peers(cidrs=["10.244.0.0/24"], ports={"gibson/gibson-openfga-x": [8080]}), ev)
     if len(ev) != 2:
         print("SELFTEST FAIL: the evidence must hold the raw flow of each policy drop, the passed one too")
+        return 1
+    with_l7 = {"flow": {**outside["flow"], "l7": {"http": {"headers": [{"key": "Authorization", "value": "Bearer sekret-l7"}]}}}}
+    ev = []
+    policy_drops([json.dumps(with_l7)], "gibson", Peers(cidrs=["10.244.0.0/24"]), ev)
+    if len(ev) != 1 or "l7" in json.loads(ev[0])["flow"] or "sekret-l7" in ev[0]:
+        print("SELFTEST FAIL: the evidence must hold no l7 key, so no request header reaches the artifact")
         return 1
     trainer = {"flow": {**FIXTURE_FORWARDED["flow"], "l4": {"TCP": {"destination_port": 50051}},
                         "source": {"namespace": "tenant-primary", "pod_name": "belief-trainer-proof-x1"},
