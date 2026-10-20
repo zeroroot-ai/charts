@@ -3,7 +3,7 @@
 
 A vendored contract under helm/contracts/ describes the code inside an image.
 The chart pins that image by release tag, so the contract is true or false
-against that tag and against nothing else. The first nightly compared each
+against that tag and against nothing else. The first run compared each
 contract with the service's `main`. `main` moves with every merge, so the
 check went red on the day after each sync and stayed red: it measured the
 distance between a release and `main`, which is never zero and is not a defect.
