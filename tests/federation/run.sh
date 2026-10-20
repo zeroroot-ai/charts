@@ -43,9 +43,11 @@ WORK="$(mktemp -d)"
 . "$(dirname "$0")/lib.sh"
 
 # The setec fleet and the federation client come from one setec commit: the
-# merge of setec#335, which added the client (test/federation/client). The
-# frontend is built from the same commit, so its chart and its image agree.
-SETEC_REF=f53e890e6326b051fba8e2e9b904de650b0c0889
+# merge of setec#337. It holds the client of setec#335, the enrollment check
+# of setec#336 (a caller counts as accepted only past enrollment) and the
+# refusal classifier of setec#337. The frontend is built from the same
+# commit, so its chart and its image agree.
+SETEC_REF=60f1112878dec792fe00f579ea2492b85d4c511f
 KIND_CLUSTER="${KIND_CLUSTER:-gibson}"
 FRONTEND_IMAGE="${FRONTEND_IMAGE:-setec-frontend:fed}"
 CLIENT_IMAGE="${CLIENT_IMAGE:-setec-fedclient:fed}"
