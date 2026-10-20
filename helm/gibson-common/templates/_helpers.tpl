@@ -1260,6 +1260,27 @@ spiffe://{{ include "gibson.trustDomain" .ctx }}/{{ .path | trimPrefix "/" }}
 {{- end -}}
 
 {{/*
+gibson.setecFleetDomain: the trust domain of an outside setec fleet when it
+is another trust domain than this install, else nothing (setec#251). Call
+it with (dict "setec" <sandbox.setec values> "ctx" $). The domain comes
+from the fleet SPIFFE ID (gibson.sandbox.setec.spiffeID), so no value names it
+twice. gibson-workloads renders the federation from it, and the umbrella
+opens the egress of the SPIRE server to the fleet bundle endpoint.
+*/}}
+{{- define "gibson.setecFleetDomain" -}}
+{{- $id := get (.setec | default dict) "spiffeID" -}}
+{{- if $id -}}
+{{- if not (regexMatch "^spiffe://[a-z0-9]([a-z0-9._-]*[a-z0-9])?(/.*)?$" $id) -}}
+{{- fail (printf "sandbox.setec.spiffeID %q is not a SPIFFE ID" $id) -}}
+{{- end -}}
+{{- $domain := regexReplaceAll "^spiffe://([^/]+).*$" $id "${1}" -}}
+{{- if ne $domain (include "gibson.trustDomain" .ctx) -}}
+{{- $domain -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 gibson.spiffeIDs: the SPIFFE IDs of a list of paths, joined with commas.
   {{ include "gibson.spiffeIDs" (dict "ctx" $ "paths" .Values.spiffe.callbackPeers) }}
 */}}

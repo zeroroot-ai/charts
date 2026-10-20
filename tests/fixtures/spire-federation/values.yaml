@@ -1,0 +1,24 @@
+# An install whose daemon dials an outside setec fleet in the trust domain
+# fleet.example.org, and whose SPIRE server serves its own bundle endpoint to
+# that fleet (scripts/check-spire-federation.py, setec#251).
+spire:
+  spire-server:
+    federation:
+      enabled: true
+global:
+  networkPolicy:
+    spireBundleEndpointFrom:
+      namespaces: [spire-fleet]
+gibson-workloads:
+  gibson:
+    sandbox:
+      setec:
+        address: setec-frontend.setec-fleet.svc.cluster.local:50051
+        spiffeID: spiffe://fleet.example.org/ns/setec-fleet/sa/setec-frontend
+        federation:
+          bundleEndpointURL: https://spire-fleet-server.spire-fleet.svc.cluster.local:8443
+          bundleEndpointProfile: https_spiffe
+          endpointSPIFFEID: spiffe://fleet.example.org/spire/server
+          # A placeholder in the SPIFFE bundle format: the render only checks
+          # that the value is there.
+          trustDomainBundle: '{"keys":[],"spiffe_refresh_hint":300}'

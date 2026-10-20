@@ -110,6 +110,8 @@ def chart_findings(charts):
 
 OUTSIDE_ADDRESS = "setec.fleet.example.com:443"
 OUTSIDE_SPIFFE_ID = "spiffe://fleet.example.com/platform/setec-frontend"
+OUTSIDE_BUNDLE_URL = "https://spire.fleet.example.com:8443"
+OUTSIDE_BUNDLE_ID = "spiffe://fleet.example.com/spire/server"
 
 # (case name, address, spiffeID, expect the render to pass)
 SETEC_CASES = [
@@ -127,6 +129,14 @@ def render_setec_off(root, address, spiffe_id):
            "--namespace", "gibson", "--set", f"{SETEC_OFF}=false",
            "--set-string", f"{SETEC_ADDRESS}={address}",
            "--set-string", f"{SETEC_SPIFFE_ID}={spiffe_id}"]
+    if spiffe_id:
+        # A fleet in another trust domain names the bundle source of that
+        # domain (setec#251), or fleet-federation.yaml refuses the render
+        # before validateSetecDispatch runs.
+        fed = "gibson-workloads.gibson.sandbox.setec.federation"
+        cmd += ["--set-string", f"{fed}.bundleEndpointURL={OUTSIDE_BUNDLE_URL}",
+                "--set-string", f"{fed}.endpointSPIFFEID={OUTSIDE_BUNDLE_ID}",
+                "--set-string", f"{fed}.trustDomainBundle={{\"keys\":[]}}"]
     p = subprocess.run(cmd, capture_output=True, text=True, check=False)
     return p.returncode, p.stdout, p.stderr
 
