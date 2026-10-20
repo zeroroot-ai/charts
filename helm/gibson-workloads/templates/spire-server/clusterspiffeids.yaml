@@ -114,6 +114,13 @@ spec:
   workloadSelectorTemplates:
     - "k8s:ns:{{ $ns }}"
     - "k8s:sa:{{ include "gibson.serviceAccountName" . }}"
+  {{- /* An outside setec fleet in another trust domain (setec#251): the
+         daemon gets the bundle of that domain, which fleet-federation.yaml
+         asks SPIRE to fetch. */}}
+  {{- with include "gibson.setecFleetDomain" (dict "setec" (((.Values.gibson | default dict).sandbox | default dict).setec | default dict) "ctx" .) }}
+  federatesWith:
+    - {{ . | quote }}
+  {{- end }}
 ---
 # --- ext-authz ---
 apiVersion: spire.spiffe.io/v1alpha1

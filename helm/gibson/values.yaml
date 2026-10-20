@@ -167,6 +167,16 @@ global:
     #       - https://api.payments.example
     #       - app.example.com:443
     egressHostGroups: {}
+    # The peers that may fetch the federation bundle endpoint of the SPIRE
+    # server (spire.spire-server.federation, setec#251). Each list is a
+    # source of the ingress rule on the endpoint port, and the render fails
+    # with the endpoint on and all three lists empty. entities are Cilium
+    # entities (world for a peer outside the cluster), cidrs are address
+    # ranges, and namespaces are namespaces of this cluster.
+    spireBundleEndpointFrom:
+      entities: []
+      cidrs: []
+      namespaces: []
     # The cluster scraper that reads the metrics ports (the metrics policy of
     # templates/network-policies.yaml). The policy admits only a pod in this
     # namespace with these labels, and only to the metrics port of each pod
@@ -1410,9 +1420,10 @@ spire:
             name: spire-postgres-credentials
             key: username
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
-    # No egress label: the server uses the disk KeyManager, no
-    # UpstreamAuthority and no federation. It calls only the API server and
-    # Postgres.
+    # No egress label: the server uses the disk KeyManager and no
+    # UpstreamAuthority. It calls the API server and Postgres, and with a
+    # federation the bundle endpoint of the peer, which
+    # templates/spire-federation-policy.yaml opens alone.
     podLabels:
       gibson.zeroroot.ai/net-role: platform
       gibson.zeroroot.ai/client-postgres: "true"
@@ -1429,6 +1440,17 @@ spire:
       # pod template annotations, and the vendored chart renders none on the
       # StatefulSet itself (gibson-operators reloader.rollouts names it).
       secret.reloader.stakater.com/reload: "spire-postgres-credentials"
+    # The federation bundle endpoint of this install (setec#251, ADR-0164).
+    # A setec fleet in another trust domain fetches the bundle of this
+    # domain here, to verify the SVID of the daemon. Off by default: an
+    # install with the fleet of its own chart needs no federation. On, the
+    # server serves the endpoint on bundleEndpoint.port (8443) with its own
+    # SVID (the https_spiffe profile, endpoint ID
+    # spiffe://<trust domain>/spire/server), the Service gets the port, and
+    # templates/spire-federation-policy.yaml admits the peers of
+    # global.networkPolicy.spireBundleEndpointFrom on it.
+    federation:
+      enabled: false
     # The agent attests with the token of its ServiceAccount, which lives
     # in the namespace of the SPIRE node components.
     nodeAttestor:

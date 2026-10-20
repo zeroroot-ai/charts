@@ -1,0 +1,65 @@
+{{- /*
+The federation of this install with the trust domain of an outside setec
+fleet (setec#251, ADR-0164, the outside fleet seam of ADR-0087).
+
+The daemon dials the fleet at sandbox.setec.address and accepts only
+sandbox.setec.spiffeID. When that ID is in another trust domain, the daemon
+can verify the SVID of the fleet only with the bundle of that domain. SPIRE
+fetches it from the bundle endpoint of the domain, because of this
+ClusterFederatedTrustDomain, and gives it to the daemon, because the daemon
+registration (clusterspiffeids.yaml) lists the domain under federatesWith.
+
+The fleet trusts the daemon by the same mechanism in the other direction:
+the setec chart of the fleet names the daemon in frontend.clients with the
+bundle endpoint of this install (spire.spire-server.federation of the
+umbrella).
+
+The render fails when the fleet is in another domain and names no bundle
+source: the daemon would refuse the fleet on every call, and nothing at
+render time would say why. It also fails on a federation value with no
+fleet in another domain, which would be a value that does nothing.
+scripts/check-spire-federation.py renders both cases.
+*/ -}}
+{{- $setec := ((.Values.gibson | default dict).sandbox | default dict).setec | default dict -}}
+{{- $f := $setec.federation | default dict -}}
+{{- $domain := include "gibson.setecFleetDomain" (dict "setec" $setec "ctx" .) -}}
+{{- if and (not $domain) $f.bundleEndpointURL -}}
+{{- fail "sandbox.setec.federation.bundleEndpointURL is set, and sandbox.setec.spiffeID names no fleet in another trust domain: the federation would do nothing" -}}
+{{- end -}}
+{{- if $domain }}
+{{- if not $f.bundleEndpointURL }}
+{{- fail (printf "sandbox.setec.spiffeID is in trust domain %q, not the install domain: set sandbox.setec.federation.bundleEndpointURL, the bundle source of that domain" $domain) }}
+{{- end }}
+{{- if not (hasPrefix "https://" $f.bundleEndpointURL) }}
+{{- fail (printf "sandbox.setec.federation.bundleEndpointURL must be an https URL, got %q" $f.bundleEndpointURL) }}
+{{- end }}
+{{- $profile := $f.bundleEndpointProfile | default "https_spiffe" }}
+{{- if not (has $profile (list "https_spiffe" "https_web")) }}
+{{- fail (printf "sandbox.setec.federation.bundleEndpointProfile must be https_spiffe or https_web, got %q" $profile) }}
+{{- end }}
+{{- if eq $profile "https_spiffe" }}
+{{- $eid := get $f "endpointSPIFFEID" }}
+{{- if not (hasPrefix (printf "spiffe://%s/" $domain) $eid) }}
+{{- fail (printf "sandbox.setec.federation.endpointSPIFFEID must be a SPIFFE ID in the fleet domain %q with the https_spiffe profile, got %q" $domain $eid) }}
+{{- end }}
+{{- end }}
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterFederatedTrustDomain
+metadata:
+  name: gibson-setec-fleet
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ .Values.spire.controllerManager.className | default "gibson-gibson-spire" | quote }}
+  trustDomain: {{ $domain | quote }}
+  bundleEndpointURL: {{ $f.bundleEndpointURL | quote }}
+  bundleEndpointProfile:
+    type: {{ $profile }}
+    {{- if eq $profile "https_spiffe" }}
+    endpointSPIFFEID: {{ $f.endpointSPIFFEID | quote }}
+    {{- end }}
+  {{- with $f.trustDomainBundle }}
+  trustDomainBundle: {{ . | quote }}
+  {{- end }}
+{{- end }}

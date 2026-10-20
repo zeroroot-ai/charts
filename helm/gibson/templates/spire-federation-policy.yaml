@@ -1,0 +1,118 @@
+{{- /*
+The network policy of the SPIRE federation (setec#251, ADR-0164, ADR-0165
+rule 4).
+
+  1. The bundle endpoint. With spire.spire-server.federation.enabled the
+     SPIRE server serves the bundle of this trust domain on its federation
+     port. The peers of global.networkPolicy.spireBundleEndpointFrom reach
+     that port, and no other source does. The render fails with the
+     endpoint on and no peer: a peer that cannot fetch the bundle cannot
+     verify an SVID of this install.
+  2. The bundle of an outside setec fleet. When gibson-workloads
+     gibson.sandbox.setec.spiffeID is in another trust domain, the SPIRE server
+     fetches the bundle of that domain from
+     sandbox.setec.federation.bundleEndpointURL. The server reaches that one
+     host on its port: a host in the cluster by its namespace, a host
+     outside it by its name, with the DNS lookup of that name.
+
+scripts/check-spire-federation.py renders both, and a baseline with neither.
+*/ -}}
+{{- $srv := index (.Values.spire | default dict) "spire-server" | default dict -}}
+{{- $fed := $srv.federation | default dict -}}
+{{- $wl := index .Values "gibson-workloads" | default dict -}}
+{{- $setec := ((($wl.gibson | default dict).sandbox | default dict).setec) | default dict -}}
+{{- $fleetDomain := include "gibson.setecFleetDomain" (dict "setec" $setec "ctx" .) -}}
+{{- $fleetURL := get ($setec.federation | default dict) "bundleEndpointURL" -}}
+{{- $selector := dict "app.kubernetes.io/name" "server" "app.kubernetes.io/instance" .Release.Name "app.kubernetes.io/component" "server" -}}
+{{- if eq ($fed.enabled | toString) "true" }}
+{{- $port := ((($fed.bundleEndpoint | default dict).port) | default 8443) | toString -}}
+{{- $from := ((.Values.global).networkPolicy).spireBundleEndpointFrom | default dict -}}
+{{- if not (or $from.entities $from.cidrs $from.namespaces) }}
+{{- fail "spire.spire-server.federation.enabled is true, and global.networkPolicy.spireBundleEndpointFrom names no peer: no peer could fetch the bundle of this install" }}
+{{- end }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-spire-bundle-endpoint
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-spire-federation
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "The federation peers reach the bundle endpoint of the SPIRE server, and only that port."
+  endpointSelector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+  ingress:
+    {{- with $from.entities }}
+    - fromEntities:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- with $from.cidrs }}
+    - fromCIDR:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- range $from.namespaces }}
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ . }}
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+    {{- end }}
+{{- end }}
+{{- if and $fleetDomain $fleetURL }}
+{{- $host := (urlParse $fleetURL).host | splitList ":" | first | lower -}}
+{{- $port := include "gibson.urlPort" $fleetURL -}}
+{{- $external := include "gibson.externalHost" $fleetURL }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-spire-fleet-bundle
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-spire-federation
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "The SPIRE server reaches the bundle endpoint of the trust domain of the outside setec fleet, and only that host and port."
+  endpointSelector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+  egress:
+    {{- if $external }}
+    {{- include "gibson.dnsRule" (list (dict "matchName" $external)) | nindent 4 }}
+    - toFQDNs:
+        - matchName: {{ $external }}
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+    {{- else }}
+    {{- $labels := splitList "." $host }}
+    {{- $peerNs := .Release.Namespace }}
+    {{- if gt (len $labels) 1 }}
+    {{- $peerNs = index $labels 1 }}
+    {{- end }}
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ $peerNs }}
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+    {{- end }}
+{{- end }}

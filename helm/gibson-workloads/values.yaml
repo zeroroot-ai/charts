@@ -573,6 +573,31 @@ gibson:
       # that templates/spire-server/clusterspiffeids.yaml registers for the
       # in-chart frontend. Set it only for a fleet in another trust domain.
       spiffeID: ""
+      # federation is the bundle source of the trust domain of an outside
+      # fleet (setec#251, ADR-0164). The daemon checks the SVID of a fleet
+      # in another trust domain with the bundle of that domain, and SPIRE
+      # gives the daemon that bundle only through a federation. When
+      # spiffeID names another trust domain, the chart renders a
+      # ClusterFederatedTrustDomain for it and lists it under federatesWith
+      # of the daemon registration, and the render fails with no
+      # bundleEndpointURL. The domain comes from spiffeID: no value names
+      # it twice. The fleet trusts this install through
+      # spire.spire-server.federation of the umbrella (the bundle endpoint
+      # of this install). scripts/check-spire-federation.py renders both.
+      federation:
+        # bundleEndpointURL is the SPIFFE bundle endpoint of the fleet
+        # domain, https://<host>:<port>.
+        bundleEndpointURL: ""
+        # bundleEndpointProfile is https_spiffe (the endpoint serves an SVID
+        # of the fleet domain) or https_web (a web PKI certificate).
+        bundleEndpointProfile: https_spiffe
+        # endpointSPIFFEID is the SPIFFE ID of the endpoint, for
+        # https_spiffe. It is in the fleet domain.
+        endpointSPIFFEID: ""
+        # trustDomainBundle is the first bundle of the fleet domain, in the
+        # SPIFFE format. Optional: with https_spiffe, SPIRE needs it before
+        # its first fetch can verify the endpoint.
+        trustDomainBundle: ""
       # callTimeout bounds a single sandboxed tool call. Go duration string;
       # the daemon defaults empty to 5m.
       callTimeout: "5m"
