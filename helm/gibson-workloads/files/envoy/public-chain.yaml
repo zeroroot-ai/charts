@@ -501,8 +501,9 @@ item whose `-` and whose filter_chain_match the CALLER writes.
                   # that changes it (POST /signup is the one route that fails
                   # closed, through the stage 1 filter below, D92):
                   # an unreachable quota service degrades to the local fuse
-                  # above, and envoy_ratelimit_failure_mode_allowed counts the
-                  # requests that passed unchecked. Deny-on-error would turn a
+                  # above, and
+                  # envoy_cluster_ratelimit_<stat_prefix>_failure_mode_allowed
+                  # counts the requests that passed unchecked. Deny-on-error would turn a
                   # quota-service blip into an edge-wide 429 storm, which is
                   # the outage this layer exists to prevent.
                   - name: envoy.filters.http.ratelimit

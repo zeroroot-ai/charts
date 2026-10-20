@@ -9,6 +9,11 @@
 # A renamed stat_prefix renames the input series, the alert does not see it,
 # and the test fails. A rendered ratelimit filter that no placeholder names
 # fails the harness too.
+#
+# Envoy counts these under the route target cluster
+# (cluster.<cluster>.ratelimit.<stat_prefix>.*), so envoy_cluster_name is the
+# cluster of a real route: gibson_daemon_grpc on the api host (the api
+# prefix sorts first), gibson_dashboard on the app host.
 rule_files:
   - ratelimit.rules.yaml
 evaluation_interval: 1m
@@ -17,9 +22,9 @@ tests:
   # alert fires after 2 minutes, and the signup alert stays quiet.
   - interval: 1m
     input_series:
-      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:0@_failure_mode_allowed{envoy_cluster_name="ratelimit_grpc"}'
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:0@_failure_mode_allowed{envoy_cluster_name="gibson_daemon_grpc"}'
         values: '0x5 1+1x15'
-      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_closed:0@_error{envoy_cluster_name="ratelimit_grpc"}'
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_closed:0@_error{envoy_cluster_name="gibson_dashboard"}'
         values: '0x20'
     alert_rule_test:
       - eval_time: 5m
@@ -46,7 +51,7 @@ tests:
   # The second fail-open filter, alone: the per-client alert fires on it too.
   - interval: 1m
     input_series:
-      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:1@_failure_mode_allowed{envoy_cluster_name="ratelimit_grpc"}'
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:1@_failure_mode_allowed{envoy_cluster_name="gibson_dashboard"}'
         values: '0x5 1+1x15'
     alert_rule_test:
       - eval_time: 12m
@@ -55,9 +60,9 @@ tests:
   # Both fail-open counters stay flat: the per-client alert does not fire.
   - interval: 1m
     input_series:
-      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:0@_failure_mode_allowed{envoy_cluster_name="ratelimit_grpc"}'
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:0@_failure_mode_allowed{envoy_cluster_name="gibson_daemon_grpc"}'
         values: '7x20'
-      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:1@_failure_mode_allowed{envoy_cluster_name="ratelimit_grpc"}'
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:1@_failure_mode_allowed{envoy_cluster_name="gibson_dashboard"}'
         values: '3x20'
     alert_rule_test:
       - eval_time: 12m
@@ -67,9 +72,9 @@ tests:
   # after 2 minutes, and the per-client alert stays quiet.
   - interval: 1m
     input_series:
-      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_closed:0@_error{envoy_cluster_name="ratelimit_grpc"}'
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_closed:0@_error{envoy_cluster_name="gibson_dashboard"}'
         values: '0x5 1+1x15'
-      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:0@_failure_mode_allowed{envoy_cluster_name="ratelimit_grpc"}'
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:0@_failure_mode_allowed{envoy_cluster_name="gibson_daemon_grpc"}'
         values: '0x20'
     alert_rule_test:
       - eval_time: 5m
@@ -93,7 +98,7 @@ tests:
   # The signup error counter stays flat: the signup alert does not fire.
   - interval: 1m
     input_series:
-      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_closed:0@_error{envoy_cluster_name="ratelimit_grpc"}'
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_closed:0@_error{envoy_cluster_name="gibson_dashboard"}'
         values: '4x20'
     alert_rule_test:
       - eval_time: 12m

@@ -1549,8 +1549,9 @@ static_resources:
     # below; the pod's own Envoy sidecar terminates it and pins OUR SAN to
     # platform/envoy. The filter that calls this cluster is fail-open
     # (failure_mode_deny: false): an unreachable quota service degrades to the
-    # per-pod local_ratelimit fuse, and envoy_ratelimit_failure_mode_allowed
-    # counts every request that passed unchecked.
+    # per-pod local_ratelimit fuse, and
+    # envoy_cluster_ratelimit_<stat_prefix>_failure_mode_allowed counts every
+    # request that passed unchecked.
     #
     # C50 (hosted substrate run 38460645434): an answered quota call takes
     # 5 ms or less, and a call that waits for a new connection (TCP, the

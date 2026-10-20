@@ -30,7 +30,8 @@ metadata:
     app.kubernetes.io/name: gibson-connector-operator
     app.kubernetes.io/part-of: gibson
 rules:
-  # ConfigMaps alongside each connector (the egress-profile ConfigMap). No
+  # ConfigMaps: issuertrust reads the SPIRE trust bundle ConfigMap and
+  # applies the issuer CA ConfigMap beside each connector. No
   # Secrets: the operator only puts the credential Secret's NAME into the
   # MCPRemoteProxy spec. The daemon writes that Secret and ToolHive reads
   # it. A cluster-wide Secret read would also reach the Zitadel owner
