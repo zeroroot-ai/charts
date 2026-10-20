@@ -31,9 +31,7 @@
 # policy admits that Job because the installing identity of this cluster
 # writes it (spire.identityAdmission.workloadCreators, scripts/baseline-up.sh).
 #
-# Environment: NS (the release namespace) and the environment of
-# scripts/baseline-up.sh (SUBSTRATE_ENV, RUNG, EXTRA_VALUES), which this
-# script runs once more with the bundle of the fleet domain. With no
+# Environment: NS (the release namespace). With no
 # SETEC_DIR it fetches setec at SETEC_REF and builds the frontend and the
 # client into the kind cluster KIND_CLUSTER (default gibson).
 set -euo pipefail
@@ -41,6 +39,8 @@ set -euo pipefail
 : "${NS:?set NS, the release namespace}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="$(mktemp -d)"
+# shellcheck source=tests/federation/lib.sh
+. "$(dirname "$0")/lib.sh"
 
 # The setec fleet and the federation client come from one setec commit: the
 # merge of setec#335, which added the client (test/federation/client). The
@@ -62,10 +62,6 @@ if [ -z "${SETEC_DIR:-}" ]; then
   echo "::endgroup::"
 fi
 
-SPIRE_REPO=https://spiffe.github.io/helm-charts-hardened
-SPIRE_VERSION=0.28.4
-TD_FLEET=fleet.test
-TD_OUT=outside.test
 FLEET_NS=setec-fleet
 FLEET_RELEASE=setec-fleet
 FLEET_ID="spiffe://${TD_FLEET}/ns/${FLEET_NS}/sa/${FLEET_RELEASE}-frontend"
@@ -102,31 +98,10 @@ log "install domain ${TD_INSTALL}, daemon ${DAEMON_ID}, fleet ${FLEET_ID}"
 fw="$(kubectl get clusterspiffeid gibson-platform-daemon -o jsonpath='{.spec.federatesWith}')"
 [[ "$fw" == *"\"${TD_FLEET}\""* ]] || { echo "::error::the daemon registration does not federate with ${TD_FLEET}: ${fw}"; exit 1; }
 
-# install_spire <name> <trust domain> <health port of the agent> [helm args...]
-# The agents use the host network, so each one needs a port of its own and
-# a socket directory of its own. The CRDs are the ones gibson-crds installed.
-install_spire() {
-  local x="$1" td="$2" port="$3"; shift 3
-  kubectl create namespace "spire-$x" --dry-run=client -o yaml | kubectl apply -f -
-  helm upgrade --install "spire-$x" spire --repo "$SPIRE_REPO" --version "$SPIRE_VERSION" \
-    --namespace "spire-$x" \
-    --set global.spire.trustDomain="$td" \
-    --set global.spire.clusterName="fed-$x" \
-    --set global.spire.namespaces.server.name="spire-$x" \
-    --set global.spire.namespaces.system.name="spire-$x" \
-    --set spiffe-csi-driver.enabled=false \
-    --set spiffe-oidc-discovery-provider.enabled=false \
-    --set "spire-agent.socketPath=/run/spire/agent-sockets-$x/spire-agent.sock" \
-    --set "spire-agent.healthChecks.port=$port" \
-    "$@" --wait --timeout 10m
-}
-
-bundle() { # <namespace> <server pod>: the SPIFFE bundle of its trust domain
-  kubectl -n "$1" exec "$2" -c spire-server -- /opt/spire/bin/spire-server bundle show -format spiffe
-}
-
 echo "::group::the SPIRE servers of the fleet domain and the outside domain"
-install_spire fleet "$TD_FLEET" 9983 --set spire-server.federation.enabled=true
+# tests/federation/before.sh started the fleet server before the install,
+# with no controller manager, because the SPIRE CRDs come with gibson-crds.
+# Its controller manager starts now.
 bundle spire-fleet spire-fleet-server-0 > "$WORK/fleet.json"
 install_spire outside "$TD_OUT" 9984 -f - <<YAML
 spire-server:
@@ -144,15 +119,6 @@ spire-server:
             endpointSPIFFEID: "spiffe://${TD_FLEET}/spire/server"
           trustDomainBundle: $(jq -c . "$WORK/fleet.json" | jq -Rs .)
 YAML
-echo "::endgroup::"
-
-# The install trusts the fleet domain: the first bundle of that domain goes
-# into the chart value, and baseline-up.sh installs again, the same verb an
-# operator runs to change a value.
-echo "::group::the install takes the first bundle of the fleet domain"
-jq -n --rawfile b "$WORK/fleet.json" \
-  '{"gibson-workloads": {gibson: {sandbox: {setec: {federation: {trustDomainBundle: $b}}}}}}' > "$WORK/fleet-bundle.json"
-EXTRA_VALUES="${EXTRA_VALUES:-} $WORK/fleet-bundle.json" "$ROOT/scripts/baseline-up.sh"
 echo "::endgroup::"
 
 bundle "$NS" gibson-server-0 > "$WORK/install.json"
@@ -182,11 +148,17 @@ kubectl create namespace "$FLEET_NS" --dry-run=client -o yaml | kubectl apply -f
 helm upgrade --install "$FLEET_RELEASE" "$SETEC_DIR/charts/setec" --namespace "$FLEET_NS" --skip-crds \
   -f "$SETEC_DIR/hack/chart-launcher-values.yaml" -f "$WORK/fleet-values.json"
 kubectl -n "$FLEET_NS" rollout status deploy/"$FLEET_RELEASE"-frontend --timeout=300s
-# The fleet workloads get the bundle of the install domain.
+# The controller manager of the fleet domain starts, and the fleet
+# workloads get the bundle of the install domain. The setec chart wrote the
+# federation with the install domain above, so SPIRE holds that bundle when
+# it reads the registration.
 helm upgrade spire-fleet spire --repo "$SPIRE_REPO" --version "$SPIRE_VERSION" \
   --namespace spire-fleet --reuse-values \
+  --set spire-server.controllerManager.enabled=true \
   --set "spire-server.controllerManager.identities.clusterSPIFFEIDs.default.federatesWith={${TD_INSTALL}}" \
   --wait --timeout 10m
+kubectl -n "$FLEET_NS" rollout restart deploy/"$FLEET_RELEASE"-frontend
+kubectl -n "$FLEET_NS" rollout status deploy/"$FLEET_RELEASE"-frontend --timeout=300s
 echo "::endgroup::"
 
 echo "::group::a workload with the SPIFFE ID of the daemon reaches the fleet"

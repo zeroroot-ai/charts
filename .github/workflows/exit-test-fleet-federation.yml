@@ -4,8 +4,10 @@
 #
 # In plain words: the chart source installs on kind with the values of an
 # outside fleet in the trust domain fleet.test (tests/federation/install-values.yaml).
-# tests/federation/run.sh then runs the fleet in that domain, with its own
-# SPIRE server, and a third domain that the fleet does not trust. A workload
+# tests/federation/before.sh first starts the SPIRE server of that domain,
+# and the install takes its first bundle as a chart value.
+# tests/federation/run.sh then runs the fleet in that domain and a third
+# domain that the fleet does not trust. A workload
 # with the SPIFFE ID of the daemon reaches the fleet and gets an application
 # answer. The caller of the third domain is refused in the TLS handshake.
 #
@@ -40,5 +42,6 @@ jobs:
     with:
       from_source: true
       extra_values: tests/federation/install-values.yaml
+      before_install: tests/federation/before.sh
       after_install: tests/federation/run.sh
     secrets: inherit
