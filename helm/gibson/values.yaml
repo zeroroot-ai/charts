@@ -1418,8 +1418,10 @@ spire:
       gibson.zeroroot.ai/client-postgres: "true"
       gibson.zeroroot.ai/kube-api: "true"
       gibson.zeroroot.ai/ingress-control-plane: "true"
-    # Velero fs-backup skips these: sockets and scratch. spire-data (the
-    # datastore volume) stays in the backup. scripts/check-velero-volume-excludes.sh.
+    # Velero fs-backup skips these: sockets and scratch. The datastore is
+    # Postgres (dbname spire on platform-postgres-rw). spire-data holds only
+    # keys.json of the disk key manager, and it stays in the backup.
+    # scripts/check-velero-volume-excludes.sh.
     podAnnotations:
       backup.velero.io/backup-volumes-excludes: "server-tmp,spire-server-socket,spire-controller-manager-tmp"
       # The login role of the datastore changes every 24 hours (ADR-0171).

@@ -3136,8 +3136,9 @@ data:
                       # that changes it (POST /signup is the one route that fails
                       # closed, through the stage 1 filter below, D92):
                       # an unreachable quota service degrades to the local fuse
-                      # above, and envoy_ratelimit_failure_mode_allowed counts the
-                      # requests that passed unchecked. Deny-on-error would turn a
+                      # above, and
+                      # envoy_cluster_ratelimit_<stat_prefix>_failure_mode_allowed
+                      # counts the requests that passed unchecked. Deny-on-error would turn a
                       # quota-service blip into an edge-wide 429 storm, which is
                       # the outage this layer exists to prevent.
                       - name: envoy.filters.http.ratelimit
@@ -3618,8 +3619,9 @@ data:
         # below; the pod's own Envoy sidecar terminates it and pins OUR SAN to
         # platform/envoy. The filter that calls this cluster is fail-open
         # (failure_mode_deny: false): an unreachable quota service degrades to the
-        # per-pod local_ratelimit fuse, and envoy_ratelimit_failure_mode_allowed
-        # counts every request that passed unchecked.
+        # per-pod local_ratelimit fuse, and
+        # envoy_cluster_ratelimit_<stat_prefix>_failure_mode_allowed counts every
+        # request that passed unchecked.
         #
         # C50 (hosted substrate run 38460645434): an answered quota call takes
         # 5 ms or less, and a call that waits for a new connection (TCP, the
@@ -5075,7 +5077,8 @@ metadata:
     app.kubernetes.io/name: gibson-connector-operator
     app.kubernetes.io/part-of: gibson
 rules:
-  # ConfigMaps alongside each connector (the egress-profile ConfigMap). No
+  # ConfigMaps: issuertrust reads the SPIRE trust bundle ConfigMap and
+  # applies the issuer CA ConfigMap beside each connector. No
   # Secrets: the operator only puts the credential Secret's NAME into the
   # MCPRemoteProxy spec. The daemon writes that Secret and ToolHive reads
   # it. A cluster-wide Secret read would also reach the Zitadel owner
@@ -12634,7 +12637,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 59e05e3d9794f3d11f798f623aea63cdac461cc6931d9ad0e386c470b99270f2
+        checksum/config: afec51a1fe72e700764dc6e1912a0e547fede654308848b4aae2c80b99b80986
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
