@@ -11,7 +11,7 @@ Same shape as gen-env-readers.py and for the same reason: the consumer lives in
 another repository, so it cannot be read at PR time. The bound set is extracted
 from a gibson checkout and COMMITTED as helm/contracts/gibson-config-keys.txt,
 which check-config-consumed.py reads with no network and no sibling checkout.
-env-contract-fresh.yml re-extracts it nightly against the real repos.
+env-contract-fresh.yml re-extracts it against the real repos.
 
 WHAT COUNTS AS BOUND
 

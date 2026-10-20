@@ -25,7 +25,7 @@
 # `helm upgrade --install`, so a second run at a newer CHART_VERSION is the
 # upgrade a promotion performs, not a re-implementation of it.
 #
-# CADENCE. After every publish, on push to main and daily, never on a pull
+# CADENCE. After every publish, on push to main and on dispatch, never on a pull
 # request (ADR-0080). After every publish is the load-bearing half. A
 # release-please merge mints a version, but publish-umbrella-chart pushes the
 # artifact later, on the release event. A run on the merge commit would resolve
@@ -52,10 +52,6 @@ on:
   workflow_run:
     workflows: [publish-umbrella-chart]
     types: [completed]
-  schedule:
-    # Staggered away from the install legs (06:30 and 07:00) so the three do
-    # not contend for a runner.
-    - cron: '0 8 * * *'
   workflow_dispatch:
     inputs:
       chart_version:

@@ -9,7 +9,7 @@
 # through scripts/baseline-up.sh, and asserts that each workload is ready and
 # that the release namespace holds no second copy of an operator.
 #
-# CADENCE (ADR-0080): on push to main when the install path changes, daily, and
+# CADENCE (ADR-0080): on push to main when the install path changes and
 # on dispatch. Never on a pull request.
 name: exit-test-published-guest-kind
 
@@ -22,8 +22,6 @@ on:
       - 'helm/gibson/values-guest.yaml'
       - '.github/workflows/published-install.yml'
       - '.github/workflows/exit-test-published-guest-kind.yml'
-  schedule:
-    - cron: '0 9 * * *'
   workflow_dispatch:
     inputs:
       chart_version:

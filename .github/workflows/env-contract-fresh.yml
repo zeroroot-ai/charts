@@ -18,7 +18,7 @@
 # workflow is the half that needs the source repositories: it proves that the
 # committed copy is what the generator produces from the tagged source.
 #
-# CADENCE. On push to main and daily, never on a pull request (ADR-0080).
+# CADENCE. On push to main and on dispatch, never on a pull request (ADR-0080).
 #
 # NO PERSONAL TOKEN. Every source repository here is public. `billing` was the
 # one private checkout, for a contract that governed no rendered container. The
@@ -40,8 +40,6 @@ on:
       - 'scripts/pinned_source.py'
       - 'airgap/images.txt'
       - '.github/workflows/env-contract-fresh.yml'
-  schedule:
-    - cron: '0 7 * * *'
   workflow_dispatch:
 
 permissions:

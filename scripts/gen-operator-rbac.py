@@ -12,7 +12,7 @@ v0.153.0 added the TenantIdentity controller, and a fresh install of charts
 
 This script copies each generated role, AT THE TAG THE CHART PINS, into
 helm/contracts/. check-operator-rbac-covers.py then proves offline, at PR
-time, that the chart grants at least that role. The nightly
+time, that the chart grants at least that role. The
 env-contract-fresh run proves that the copy matches the tag.
 
 It also writes helm/contracts/gibson-tenant-namespace-kinds.yaml: the kinds

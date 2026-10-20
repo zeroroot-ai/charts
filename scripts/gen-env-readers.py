@@ -5,12 +5,12 @@ ADR-0094 layer 2. The chart injects env vars into containers whose source lives
 in other repos, so the consumer side of that contract cannot be read at PR time
 without checking out three repos. Instead each service's reader set is extracted
 here and committed under `helm/contracts/`, and `check-env-consumed.py` compares
-against the committed copy. A nightly job re-runs this and fails on drift, so
+against the committed copy. The env-contract-fresh job re-runs this and fails on drift, so
 the vendored copy cannot silently age.
 
 Each service is read AT THE TAG THE CHART PINS (scripts/pinned_source.py), never
 at its `main`. The contract describes the code inside the pinned image. Read at
-`main`, it went stale with every merge in the service repo and the nightly was
+`main`, it went stale with every merge in the service repo and the job was
 red on the day after each sync.
 
 Extraction is deliberately literal. For Go it takes the string arguments to
@@ -46,7 +46,7 @@ OUT = ROOT / "helm" / "contracts"
 # Sibling clones. Each service names the repo that builds its image. A service
 # is listed only when the chart renders one of its images: `billing` was listed
 # with no rendered image, so its contract governed no container and its
-# checkout was the one reason the nightly held a long-lived personal token.
+# checkout was the one reason the job held a long-lived personal token.
 SERVICES: dict[str, dict] = {
     # gibson publishes its own reader set since v0.152.0 (gibson#650,
     # charts#303): configs/env-readers.txt, with a drift gate in gibson's merge

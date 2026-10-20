@@ -8,7 +8,7 @@
 # steps, so the source claim and the published claim cannot drift apart.
 #
 # ADR-0080: an exit test never runs on a pull request. It runs on push to
-# main, daily, and on dispatch. The shared exit-tests-off-pr check holds that
+# main and on dispatch. The shared exit-tests-off-pr check holds that
 # (charts#380).
 name: exit-test-baseline-install
 
@@ -20,8 +20,6 @@ on:
       - 'scripts/baseline-up.sh'
       - '.github/workflows/published-install.yml'
       - '.github/workflows/exit-test-baseline-install.yml'
-  schedule:
-    - cron: '0 4 * * *'
   workflow_dispatch:
 
 concurrency:

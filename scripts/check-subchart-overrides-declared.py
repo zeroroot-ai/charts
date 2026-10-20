@@ -6,7 +6,7 @@ ZITADEL server tag, the OpenFGA tag, the tool images the zitadel subchart runs).
 Each override is one copy of an upstream version that nobody compares against
 the subchart's own appVersion or against upstream. zeroroot-ai/.github keeps
 `version-links.yaml`, the one manifest of such links, and `version-drift.yml`
-reports every declared link daily (epic zeroroot-ai/.github#20).
+reports every declared link on dispatch (epic zeroroot-ai/.github#20).
 
 This guard closes the gap between the two: an override that is NOT declared is
 invisible to the detector, so this fails `make check` for every `tag:` scalar
