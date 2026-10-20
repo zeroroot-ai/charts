@@ -401,7 +401,7 @@ static_resources:
                         - match: { prefix: "/.well-known/openid-configuration" }
                           route:
                             cluster: zitadel_upstream
-                            host_rewrite_literal: "{{ .domains.app }}{{ if and (eq .envoyServiceType "NodePort") .envoyServiceNodePort }}:{{ .envoyServiceNodePort }}{{ end }}"
+                            host_rewrite_literal: "{{ .domains.app }}"
                             timeout: 30s
                             # Per-client quota (deploy#1659):
                             # envoy.rateLimit.perClient.apiDiscovery, by address.

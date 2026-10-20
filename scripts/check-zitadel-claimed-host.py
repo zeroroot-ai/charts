@@ -18,6 +18,9 @@ five places a rendered manifest can claim a host:
 
   5. PlatformBootstrap.spec.zitadel.externalDomain. The platform-operator
      claims it in the instance header and refuses a port since gibson#223.
+  6. an Envoy host_rewrite_literal: Envoy sends it as the Host header of a
+     route to Zitadel. It also renders on a NodePort Envoy, where the chart
+     once appended the node port (charts#163), so that render is read too.
 
   check-zitadel-claimed-host.py             exit 1 on a finding
   check-zitadel-claimed-host.py --selftest  prove each of the four shapes fails
@@ -38,6 +41,7 @@ BASELINE = "helm/gibson/values-baseline.yaml"
 JWKS_URI = re.compile(r'uri:\s*"?(https?://([^/"\s]+)/oauth/v2/keys)"?')
 REQUEST_HEADERS = re.compile(r'CUSTOM_REQUEST_HEADERS="?([^"\n]*)"?')
 CLAIM_HEADER = re.compile(r'^(host|x-zitadel-[a-z]+-host)$', re.I)
+HOST_REWRITE = re.compile(r'host_rewrite_literal:\s*"?([^"\s]+)"?')
 CURL_HOST = re.compile(r'''-H\s+["']Host:''')
 HAS_PORT = re.compile(r':\d+$')
 
@@ -75,7 +79,7 @@ def envs(node):
 def judge(rendered: str) -> tuple[list[str], dict[str, int]]:
     """Findings, and how many of each surface the render held."""
     out: list[str] = []
-    seen = {"env": 0, "headers": 0, "jwks": 0, "bootstrap": 0}
+    seen = {"env": 0, "headers": 0, "jwks": 0, "bootstrap": 0, "rewrite": 0}
     for doc in yaml.safe_load_all(rendered):
         if not doc:
             continue
@@ -101,6 +105,10 @@ def judge(rendered: str) -> tuple[list[str], dict[str, int]]:
                 seen["jwks"] += 1
                 if HAS_PORT.search(m.group(2)):
                     out.append(f"{where}: the JWKS uri {m.group(1)} sends Host {m.group(2)}, which carries a port")
+            for m in HOST_REWRITE.finditer(text):
+                seen["rewrite"] += 1
+                if HAS_PORT.search(m.group(1)):
+                    out.append(f"{where}: an Envoy host_rewrite_literal claims {m.group(1)}, which carries a port")
             if CURL_HOST.search(text):
                 out.append(f"{where}: a curl call forges -H \"Host:\". Claim the host in the "
                            f"instance header from gibson.zitadel.env")
@@ -136,11 +144,12 @@ data:
     CUSTOM_REQUEST_HEADERS="Host:%(hdr)s,X-Zitadel-Public-Host:app.example.com"
   envoy: |
     uri: "http://%(jwks)s/oauth/v2/keys"
+    host_rewrite_literal: "%(rewrite)s"
   script: |
     curl -sS %(curl)s http://gibson-zitadel:8080/management/v1/users
 """
 CLEAN = {"env": "app.example.com", "hdr": "app.example.com", "jwks": "app.example.com",
-         "pb": "app.example.com",
+         "pb": "app.example.com", "rewrite": "app.example.com",
          "curl": '-H "x-zitadel-instance-host: app.example.com"'}
 
 
@@ -155,6 +164,7 @@ def selftest() -> int:
         "jwks": "app.example.com:443",
         "curl": '-H "Host: app.example.com"',
         "pb": "app.example.com:30443",
+        "rewrite": "app.example.com:30443",
     }
     for key, value in bad.items():
         found, _ = judge(FIXTURE % {**CLEAN, key: value})
@@ -162,7 +172,8 @@ def selftest() -> int:
             print(f"selftest: a bad {key} ({value}) must give one finding, gave {found}", file=sys.stderr)
             return 1
     print("check-zitadel-claimed-host selftest PASSED (a port in the env var, the login "
-          "header, the JWKS authority and the PlatformBootstrap field each fail, and "
+          "header, the JWKS authority, the PlatformBootstrap field and an Envoy host "
+          "rewrite each fail, and "
           "so does a forged curl Host)")
     return 0
 
@@ -175,7 +186,12 @@ def main() -> int:
         print("FAIL: no helm/gibson/values-*.yaml beside the baseline: nothing to read", file=sys.stderr)
         return 1
     problems: list[str] = []
-    for label, extra in [(BASELINE, [])] + [(p, ["-f", p]) for p in profs]:
+    # The NodePort Envoy of a local cluster: the path that once put the node
+    # port into the claimed host (charts#163).
+    nodeport = ["--set", "gibson-workloads.envoy.service.type=NodePort",
+                "--set", "gibson-workloads.envoy.service.nodePort=30443"]
+    renders = [(BASELINE, []), (BASELINE + " with a NodePort Envoy", nodeport)] + [(p, ["-f", p]) for p in profs]
+    for label, extra in renders:
         found, seen = judge(helm_template(extra))
         problems += [f"{label}: {f}" for f in found]
         # A render with none of a surface means the check stopped reading it.

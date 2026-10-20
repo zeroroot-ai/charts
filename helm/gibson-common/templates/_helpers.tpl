@@ -186,7 +186,7 @@ https
 {{- end -}}
 
 {{/* gibson.appHost / apiHost / wwwHost — the public ingress hostnames.
-     Bare hosts (no scheme, no port) — for hostAliases, SANs, Host header. */}}
+     Bare hosts (no scheme, no port) — for SANs and a claimed Host header. */}}
 {{- define "gibson.appHost" -}}{{ printf "app.%s" (include "gibson.domain" .) }}{{- end -}}
 {{- define "gibson.apiHost" -}}{{ printf "api.%s" (include "gibson.domain" .) }}{{- end -}}
 {{- define "gibson.wwwHost" -}}{{ printf "www.%s" (include "gibson.domain" .) }}{{- end -}}

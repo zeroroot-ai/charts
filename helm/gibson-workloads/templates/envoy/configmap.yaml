@@ -47,7 +47,6 @@ unconditionally — there is no `envoy.enabled` opt-out.
   Deployment rolls the pods when the Secret changes. No values key holds
   the client ID.
 */ -}}
-{{- $envoyNodePort := .Values.envoy.service.nodePort | default "" -}} {{/* allowlist-silent-default: nodePort is kind-only; empty signals ClusterIP/LoadBalancer mode. */}}
 {{- /* Spec eliminate-permissive-authz Req 1 — `zitadelJwksScheme` and
        `zitadelTlsEnabled` are deleted. The Envoy bootstrap fetches JWKS
        over HTTPS unconditionally; the scheme is no longer a configurable
@@ -204,8 +203,6 @@ unconditionally — there is no `envoy.enabled` opt-out.
     "extraClusters"    $extraClusters
     "release"          .Release.Name
     "namespace"        .Release.Namespace
-    "envoyServiceType"     .Values.envoy.service.type
-    "envoyServiceNodePort" $envoyNodePort
     "domains"          (dict
         "api"            (.Values.envoy.domains.api  | default (include "gibson.apiHost" .))
         "app"            (.Values.envoy.domains.app  | default (include "gibson.appHost" .))
