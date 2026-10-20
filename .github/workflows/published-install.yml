@@ -478,11 +478,23 @@ jobs:
       # The belief trainer of a tenant reaches the daemon under Cilium
       # (charts#519). The tenant-operator writes a trainer CronJob into each
       # tenant namespace, and the daemon admits it on its gRPC port only
-      # (daemon-tenant-callers, charts#505). The CronJob runs at night, so the
-      # step starts one run now. The claim is the flow, not the training: the
-      # run must reach the daemon gRPC port, Hubble must record that flow as
-      # forwarded, and no policy may drop a flow of the trainer. The next step
-      # then reads every drop of the release namespace, these flows included.
+      # (daemon-tenant-callers, charts#505). The CronJob runs at night
+      # (03:MM UTC, fixed by the tenant-operator), so the step starts one run
+      # now. The claim is the flow, not the training: the run must reach the
+      # daemon gRPC port, Hubble must record that flow as forwarded, and no
+      # policy may drop a flow of the trainer. The next step then reads every
+      # drop of the release namespace, these flows included.
+      #
+      # Who may start that run (charts#700, gibson#1170). The admission policy
+      # gibson-tenant-trainer-workloads admits a trainer Job only from the
+      # cronjob-controller or from a cluster admin in system:masters, and a
+      # trainer Pod only from the job-controller. The kind admin is in
+      # kubeadm:cluster-admins, not system:masters, so a plain
+      # `kubectl create job --from` is refused, and this step went red on the
+      # merge of charts#700. The step now proves both halves: the plain create
+      # is refused by that policy, and the manual run the policy names
+      # (--as-group system:masters) starts a Job from the operator's CronJob,
+      # whose Pod the job-controller makes.
       - name: The belief trainer of a tenant reaches the daemon
         run: |
           set -euo pipefail
@@ -494,8 +506,25 @@ jobs:
                     -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="GIBSON_DAEMON_GRPC_ADDRESS")].value}')"
           port="${addr##*:}"
           [ -n "$port" ] || { echo "::error::the tenant-operator sets no GIBSON_DAEMON_GRPC_ADDRESS"; exit 1; }
+          echo "▶ a trainer Job from a principal outside system:masters is refused"
+          if out="$(kubectl -n "$tns" create job --from=cronjob/belief-trainer belief-trainer-refused 2>&1)"; then
+            kubectl -n "$tns" delete job belief-trainer-refused --wait=false || true
+            echo "::error::the admission policy gibson-tenant-trainer-workloads admitted a trainer Job from the kind admin"; exit 1
+          fi
+          case "$out" in
+            *"gibson-tenant-trainer-workloads"*) echo "  ✓ refused by gibson-tenant-trainer-workloads" ;;
+            *) echo "::error::the trainer Job was refused, but not by gibson-tenant-trainer-workloads: $out"; exit 1 ;;
+          esac
+
+          echo "▶ the manual run the policy admits: a cluster admin in system:masters"
           since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          kubectl -n "$tns" create job --from=cronjob/belief-trainer belief-trainer-proof
+          kubectl -n "$tns" create job --from=cronjob/belief-trainer belief-trainer-proof \
+            --as=kubernetes-admin --as-group=system:masters
+          # The Job comes from the operator's CronJob, and the job-controller
+          # makes its Pod (the policy refuses a trainer Pod from anyone else).
+          owner="$(kubectl -n "$tns" get job belief-trainer-proof \
+                     -o jsonpath='{.metadata.annotations.cronjob\.kubernetes\.io/instantiate}')"
+          [ "$owner" = manual ] || { echo "::error::the proof Job does not come from the CronJob (instantiate=${owner:-<none>})"; exit 1; }
           phase=""
           for _ in $(seq 1 60); do
             phase="$(kubectl -n "$tns" get pod -l job-name=belief-trainer-proof \
