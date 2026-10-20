@@ -19,6 +19,6 @@ gibson-workloads:
           bundleEndpointURL: https://spire-fleet-server.spire-fleet.svc.cluster.local:8443
           bundleEndpointProfile: https_spiffe
           endpointSPIFFEID: spiffe://fleet.example.org/spire/server
-          # A placeholder in the SPIFFE bundle format: the render only checks
-          # that the value is there.
-          trustDomainBundle: '{"keys":[],"spiffe_refresh_hint":300}'
+          # A placeholder in the SPIFFE bundle format with one fake key: the
+          # render checks the JSON and that one key is there, not the key.
+          trustDomainBundle: '{"keys":[{"use":"x509-svid","kty":"EC","crv":"P-256"}],"spiffe_refresh_hint":300}'

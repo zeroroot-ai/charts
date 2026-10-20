@@ -1,0 +1,27 @@
+# The install half of the fleet federation exit test (setec#251,
+# .github/workflows/exit-test-fleet-federation.yml). The daemon of this
+# install dials a setec fleet in the trust domain fleet.test, which
+# tests/federation/run.sh installs after the platform.
+#
+# The SPIRE server of the fleet domain is the release spire-fleet in the
+# namespace spire-fleet, and the fleet is the setec release setec-fleet in
+# the namespace setec-fleet. The fleet frontend gets the default SPIFFE ID
+# of that SPIRE chart: spiffe://fleet.test/ns/<namespace>/sa/<ServiceAccount>.
+spire:
+  spire-server:
+    federation:
+      enabled: true
+global:
+  networkPolicy:
+    spireBundleEndpointFrom:
+      namespaces: [spire-fleet]
+gibson-workloads:
+  gibson:
+    sandbox:
+      setec:
+        address: setec-fleet-frontend.setec-fleet.svc.cluster.local:50051
+        spiffeID: spiffe://fleet.test/ns/setec-fleet/sa/setec-fleet-frontend
+        federation:
+          bundleEndpointURL: https://spire-fleet-server.spire-fleet.svc.cluster.local:8443
+          bundleEndpointProfile: https_spiffe
+          endpointSPIFFEID: spiffe://fleet.test/spire/server
