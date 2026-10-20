@@ -18,8 +18,13 @@ HOW. The scan finds the text by its content:
   * each command, args and ConfigMap data string of the golden renders
     (helm/testdata/golden), which holds every shell text of the chart.
 A text sets pipefail when its code (comments removed) holds the word
-pipefail. In such a text, a line that pipes into grep with -q, --quiet or
---silent is a finding. A finding names the file, the line or the object,
+pipefail. A script under scripts/ that a pipefail script sources (a
+`source` or `.` line that names it by its file name) runs with pipefail
+too, whatever its own text says: scripts/lib/cluster-probe.sh runs inside
+verify-selfhosted-seams.sh. In such a text, a line that pipes into grep,
+egrep or fgrep with -q, --quiet or --silent is a finding.
+The Makefile and the bats tests are out of scope: make runs each recipe
+line with sh -c and no pipefail, and bats sets no pipefail. A finding names the file, the line or the object,
 and a fixed label.
 
 Usage:
@@ -34,7 +39,7 @@ import sys
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PIPE_GREP_Q = re.compile(r"\|\s*grep\b[^|;&]*?\s(-[a-zA-Z]*q[a-zA-Z]*|--quiet|--silent)\b")
+PIPE_GREP_Q = re.compile(r"\|\s*[ef]?grep\b[^|;&]*?\s(-[a-zA-Z]*q[a-zA-Z]*|--quiet|--silent)\b")
 LABEL = "pipes into grep -q under pipefail (use grep -q ... <<<\"$x\" or [ -n \"$(... | grep ...)\" ])"
 
 
@@ -85,18 +90,51 @@ def is_shell(path):
     return first.startswith(b"#!") and (b"bash" in first or re.search(rb"\bsh\b", first) is not None)
 
 
+SOURCE_LINE = re.compile(r"^\s*(?:source|\.)\s+\S*?([A-Za-z0-9_.-]+\.sh)\b")
+
+
+def sets_pipefail(text):
+    return any(re.search(r"\bpipefail\b", c) for _, c in logical_lines(text))
+
+
+def sourced_by_pipefail(texts):
+    """The file names that a pipefail script sources, followed through
+    sourced files in turn."""
+    names, changed = set(), True
+    while changed:
+        changed = False
+        for p, text in texts.items():
+            if not (sets_pipefail(text) or os.path.basename(p) in names):
+                continue
+            for _, c in logical_lines(text):
+                m = SOURCE_LINE.match(c)
+                if m and m.group(1) not in names:
+                    names.add(m.group(1))
+                    changed = True
+    return names
+
+
+def scan_texts(texts, rel):
+    """Findings of a set of scripts {path: text}."""
+    sourced = sourced_by_pipefail(texts)
+    out = []
+    for p in sorted(texts):
+        pf = os.path.basename(p) in sourced
+        out += [f"{rel(p)}:{ln}: {lab}" for ln, lab in judge(texts[p], pf)]
+    return out
+
+
 def scan_scripts(root):
-    out, n = [], 0
+    texts = {}
     for d, dirs, files in os.walk(os.path.join(root, "scripts")):
         dirs[:] = sorted(x for x in dirs if not x.startswith("."))
         for name in sorted(files):
             p = os.path.join(d, name)
             if not is_shell(p):
                 continue
-            n += 1
             with open(p, encoding="utf-8", errors="replace") as f:
-                out += [f"{os.path.relpath(p, root)}:{ln}: {lab}" for ln, lab in judge(f.read())]
-    return out, n
+                texts[p] = f.read()
+    return scan_texts(texts, lambda p: os.path.relpath(p, root)), len(texts)
 
 
 def bash_shell(*shells):
@@ -186,6 +224,7 @@ CASES = {
     "ok-command-substitution": ('set -euo pipefail\n[ -n "$(kubectl get x | grep y)" ]\n', False, False),
     "ok-no-pipefail": ('set -eu\nif printf "%s" "$x" | grep -q y; then :; fi\n', False, False),
     "ok-comment": ('set -euo pipefail\n# printf ... | grep -q is what this replaced\n', False, False),
+    "egrep-q": ('set -euo pipefail\nif printf "%s" "$x" | egrep -q "a|b"; then :; fi\n', False, True),
     "ok-grep-c": ('set -euo pipefail\nn="$(printf "%s" "$x" | grep -c y || true)"\n', False, False),
 }
 
@@ -209,10 +248,22 @@ def selftest():
     ok = len(got) == 1 and n == 2 and "step a" in got[0]
     print(f"  {'ok  ' if ok else 'FAIL'} FAILING FIXTURE: a workflow step with shell bash, and none without")
     bad += 0 if ok else 1
+    # A lib with no pipefail word, sourced by a pipefail script, and a lib
+    # that only a script without pipefail sources.
+    texts = {
+        "/s/main.sh": '#!/usr/bin/env bash\nset -euo pipefail\nsource "${DIR}/lib/probe.sh"\n',
+        "/s/lib/probe.sh": '# shellcheck shell=bash\nis_ip() { if printf "%s" "$1" | grep -qE "^[0-9.]+$"; then return 0; fi; }\n',
+        "/s/other.sh": '#!/usr/bin/env bash\nset -eu\n. "$(dirname "$0")/lib/plain.sh"\n',
+        "/s/lib/plain.sh": 'f() { printf x | grep -q x; }\n',
+    }
+    got = scan_texts(texts, lambda p: p)
+    ok = len(got) == 1 and got[0].startswith("/s/lib/probe.sh:")
+    print(f"  {'ok  ' if ok else 'FAIL'} FAILING FIXTURE: a sourced lib with no pipefail word, and none in a lib of a script without it")
+    bad += 0 if ok else 1
     if bad:
         print(f"check-no-pipe-grep-q selftest: {bad} case(s) failed", file=sys.stderr)
         return 1
-    print(f"check-no-pipe-grep-q selftest: {len(CASES) + 1} cases passed")
+    print(f"check-no-pipe-grep-q selftest: {len(CASES) + 2} cases passed")
     return 0
 
 
