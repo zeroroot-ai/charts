@@ -142,6 +142,7 @@ spec:
           args:
             - |
               set -e
+              {{- include "gibson.sh.hcurl" . | nindent 14 }}
               BAO_ADDR="{{ include "gibson.openbaoAddr" . }}"
               JWKS_URL="{{ $spireOidcJwksURL }}"
               BOUND_ISSUER="{{ $spireOidcIssuer }}"
@@ -195,8 +196,8 @@ spec:
               # "path is already in use" is treated as success — the
               # method was enabled by a previous run of this Job.
               echo "--- Step 1: enable JWT auth method ---"
-              code=$(curl -sS -o /tmp/enable.json -w '%{http_code}' \
-                -X POST -H "$TOKEN_HEADER" -H "$CT" \
+              code=$(hcurl "$TOKEN_HEADER" -sS -o /tmp/enable.json -w '%{http_code}' \
+                -X POST -H "$CT" \
                 -d '{"type":"jwt"}' \
                 "${BAO_ADDR}/v1/sys/auth/jwt")
               if [ "$code" = "204" ] || [ "$code" = "200" ]; then
@@ -224,8 +225,8 @@ spec:
                 "jwks_ca_pem": ${JWKS_CA_PEM_JSON}
               }
               JSON
-              code=$(curl -sS -o /tmp/cfg.json -w '%{http_code}' \
-                -X POST -H "$TOKEN_HEADER" -H "$CT" \
+              code=$(hcurl "$TOKEN_HEADER" -sS -o /tmp/cfg.json -w '%{http_code}' \
+                -X POST -H "$CT" \
                 --data-binary "@/tmp/jwt-config.json" \
                 "${BAO_ADDR}/v1/auth/jwt/config")
               if [ "$code" = "204" ] || [ "$code" = "200" ]; then
@@ -238,7 +239,7 @@ spec:
               # Step 3: read-back assertion. Surface mismatches loudly so
               # operators don't ship a half-configured Vault.
               echo "--- Step 3: read-back assertion ---"
-              curl -sS -H "$TOKEN_HEADER" "${BAO_ADDR}/v1/auth/jwt/config" > /tmp/got.json
+              hcurl "$TOKEN_HEADER" -sS "${BAO_ADDR}/v1/auth/jwt/config" > /tmp/got.json
               GOT_JWKS=$(jq -r .data.jwks_url /tmp/got.json)
               GOT_ISSUER=$(jq -r .data.bound_issuer /tmp/got.json)
               if [ "$GOT_JWKS" != "$JWKS_URL" ] || [ "$GOT_ISSUER" != "$BOUND_ISSUER" ]; then

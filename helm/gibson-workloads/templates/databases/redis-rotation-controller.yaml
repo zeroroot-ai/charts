@@ -277,16 +277,24 @@ spec:
                       -o jsonpath='{.data.lastProcessedVersion}' | base64 -d)
                   fi
 
+                  # The state Secret holds the version and the password.
+                  # kubectl reads the password from stdin (--from-file of
+                  # /dev/stdin), so it is on no argv (GHSA-5c5h-rrh4-5xw3).
+                  save_state() {
+                    printf '%s' "$CURRENT_PASSWORD" \
+                      | kubectl create secret generic "$STATE_SECRET" -n "$NS" \
+                          --from-literal=lastProcessedVersion="$CURRENT_VERSION" \
+                          --from-file=lastKnownPassword=/dev/stdin \
+                          --save-config --dry-run=client -o yaml \
+                      | kubectl apply -f -
+                  }
+
                   # First-boot registration: no rotation-state exists yet.
                   # Record the current version as baseline and exit without
                   # touching any StatefulSets — version <none>→N is not a rotation.
                   if [ -z "$LAST_VERSION" ]; then
                     echo "First boot — recording version ${CURRENT_VERSION} in state; no rotation needed."
-                    kubectl create secret generic "$STATE_SECRET" -n "$NS" \
-                      --from-literal=lastProcessedVersion="$CURRENT_VERSION" \
-                      --from-literal=lastKnownPassword="$CURRENT_PASSWORD" \
-                      --save-config --dry-run=client -o yaml \
-                      | kubectl apply -f -
+                    save_state
                     exit 0
                   fi
 
@@ -307,14 +315,6 @@ spec:
                   # always "<sts>-0". Deriving the name lets the Role name-scope
                   # pods/exec to exactly this pod (deploy#1363).
                   REDIS_POD="${REDIS_STS}-0"
-
-                  save_state() {
-                    kubectl create secret generic "$STATE_SECRET" -n "$NS" \
-                      --from-literal=lastProcessedVersion="$CURRENT_VERSION" \
-                      --from-literal=lastKnownPassword="$CURRENT_PASSWORD" \
-                      --save-config --dry-run=client -o yaml \
-                      | kubectl apply -f -
-                  }
 
                   # A new Secret version with the same password is no rotation.
                   if [ "$PREV_PASSWORD" = "$CURRENT_PASSWORD" ]; then
@@ -347,9 +347,11 @@ spec:
                   }
                   # redis_acl <login password> <password> [resetpass]: run
                   # ACL SETUSER default [resetpass] ><password> in redis-stack.
+                  # redis-cli -x reads its last argument, ><password>, from
+                  # stdin, so the new password is on no argv in the pod.
                   redis_acl() {
                     redis_exec "$1"$'\n'"$2" \
-                      sh -c 'IFS= read -r p && IFS= read -r n && [ -n "$p" ] && [ -n "$n" ] || exit 97; REDISCLI_AUTH="$p" exec redis-cli --no-auth-warning ACL SETUSER default "$@" ">$n"' redis-cli ${3:-}
+                      sh -c 'IFS= read -r p && IFS= read -r n && [ -n "$p" ] && [ -n "$n" ] || exit 97; printf ">%s" "$n" | REDISCLI_AUTH="$p" redis-cli --no-auth-warning -x ACL SETUSER default "$@"' redis-cli ${3:-}
                   }
                   # redis_ping <password>: PONG when redis-stack accepts it.
                   redis_ping() {

@@ -22,7 +22,7 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
             for a in (c.get("command") or []) + (c.get("args") or []):
                 if "pg_engine_ensure()" in a:
                     lease = re.search(r"^\s*PG_LEASE_MAX_S=.*$", a, re.M).group(0).strip()
-                    open(sys.argv[2], "w").write(lease + "\n" + a[a.index('PG_ENGINE_HOST="'):a.index("cg_key_rotate() {")])
+                    open(sys.argv[2], "w").write(a[a.index("hcurl() {"):a.index("\n}\n", a.index("hcurl() {")) + 3] + lease + "\n" + a[a.index('PG_ENGINE_HOST="'):a.index("cg_key_rotate() {")])
                     sys.exit(0)
 sys.exit("no pg_engine_ensure in the rendered openbao sidecar")
 PY
@@ -63,7 +63,7 @@ run_engine() {
     kube_curl() {
       method=GET; data=""
       while [ $# -gt 0 ]; do case "$1" in
-        -X) method="$2"; shift 2 ;; --data-binary) data="$2"; shift 2 ;;
+        -X) method="$2"; shift 2 ;; --data-binary) data="$2"; [ "$data" != @- ] || data="$(cat)"; shift 2 ;;
         -o|-w|-H) shift 2 ;; *) shift ;; esac; done
       if [ "$method" = PATCH ]; then
         v=$(printf "%s" "$data" | jq -r ".data[\"pg-engine\"]")

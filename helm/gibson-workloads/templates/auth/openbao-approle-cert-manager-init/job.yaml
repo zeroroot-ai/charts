@@ -154,6 +154,7 @@ spec:
           args:
             - |
               set -e
+              {{- include "gibson.sh.hcurl" . | nindent 14 }}
               BAO_ADDR="{{ include "gibson.openbaoAddr" . }}"
               APPROLE_PATH="{{ $approlePath }}"
               PKI_MOUNT="{{ $pkiMount }}"
@@ -178,8 +179,8 @@ spec:
 
               # ---------- Step 1: enable auth/approle (idempotent) ----------
               echo "--- Step 1: enable auth/${APPROLE_PATH} ---"
-              code=$(curl -sS -o /tmp/enable.json -w '%{http_code}' \
-                -X POST -H "$TOKEN_HEADER" -H "$CT" \
+              code=$(hcurl "$TOKEN_HEADER" -sS -o /tmp/enable.json -w '%{http_code}' \
+                -X POST -H "$CT" \
                 -d '{"type":"approle"}' \
                 "${BAO_ADDR}/v1/sys/auth/${APPROLE_PATH}")
               if [ "$code" = "204" ] || [ "$code" = "200" ]; then
@@ -193,8 +194,8 @@ spec:
 
               # ---------- Step 2: enable PKI secrets engine (idempotent) ----------
               echo "--- Step 2: enable secrets/${PKI_MOUNT} ---"
-              code=$(curl -sS -o /tmp/pki_mount.json -w '%{http_code}' \
-                -X POST -H "$TOKEN_HEADER" -H "$CT" \
+              code=$(hcurl "$TOKEN_HEADER" -sS -o /tmp/pki_mount.json -w '%{http_code}' \
+                -X POST -H "$CT" \
                 -d '{"type":"pki","config":{"max_lease_ttl":"87600h"}}' \
                 "${BAO_ADDR}/v1/sys/mounts/${PKI_MOUNT}")
               if [ "$code" = "204" ] || [ "$code" = "200" ]; then
@@ -208,8 +209,8 @@ spec:
 
               # Tune PKI max-lease (idempotent).
               echo "  tune ${PKI_MOUNT} max_lease_ttl=87600h ..."
-              code=$(curl -sS -o /tmp/pki_tune.json -w '%{http_code}' \
-                -X POST -H "$TOKEN_HEADER" -H "$CT" \
+              code=$(hcurl "$TOKEN_HEADER" -sS -o /tmp/pki_tune.json -w '%{http_code}' \
+                -X POST -H "$CT" \
                 -d '{"max_lease_ttl":"87600h"}' \
                 "${BAO_ADDR}/v1/sys/mounts/${PKI_MOUNT}/tune")
               [ "$code" = "204" ] || [ "$code" = "200" ] || { echo "FATAL: tune (HTTP $code): $(cat /tmp/pki_tune.json)"; exit 1; }
@@ -223,8 +224,8 @@ spec:
                 echo "  root CA already present"
               else
                 echo "  generating self-signed root CA ..."
-                code=$(curl -sS -o /tmp/ca_gen.json -w '%{http_code}' \
-                  -X POST -H "$TOKEN_HEADER" -H "$CT" \
+                code=$(hcurl "$TOKEN_HEADER" -sS -o /tmp/ca_gen.json -w '%{http_code}' \
+                  -X POST -H "$CT" \
                   -d '{"common_name":"gibson-vault-pki","ttl":"87600h"}' \
                   "${BAO_ADDR}/v1/${PKI_MOUNT}/root/generate/internal")
                 [ "$code" = "200" ] || { echo "FATAL: root gen (HTTP $code): $(cat /tmp/ca_gen.json)"; exit 1; }
@@ -243,8 +244,8 @@ spec:
                 "ttl": "72h"
               }
               JSON
-              code=$(curl -sS -o /tmp/role.out.json -w '%{http_code}' \
-                -X POST -H "$TOKEN_HEADER" -H "$CT" \
+              code=$(hcurl "$TOKEN_HEADER" -sS -o /tmp/role.out.json -w '%{http_code}' \
+                -X POST -H "$CT" \
                 --data-binary "@/tmp/role.json" \
                 "${BAO_ADDR}/v1/${PKI_MOUNT}/roles/${PKI_ROLE}")
               [ "$code" = "204" ] || [ "$code" = "200" ] || { echo "FATAL: role upsert (HTTP $code): $(cat /tmp/role.out.json)"; exit 1; }
@@ -268,8 +269,8 @@ spec:
               )
               # PUT /v1/sys/policies/acl/<name> with JSON body { "policy": "<hcl>" }
               jq -Rn --arg p "$POLICY" '{policy:$p}' > /tmp/policy.json
-              code=$(curl -sS -o /tmp/policy.out.json -w '%{http_code}' \
-                -X PUT -H "$TOKEN_HEADER" -H "$CT" \
+              code=$(hcurl "$TOKEN_HEADER" -sS -o /tmp/policy.out.json -w '%{http_code}' \
+                -X PUT -H "$CT" \
                 --data-binary "@/tmp/policy.json" \
                 "${BAO_ADDR}/v1/sys/policies/acl/cert-manager-vault-pki")
               [ "$code" = "204" ] || [ "$code" = "200" ] || { echo "FATAL: policy write (HTTP $code): $(cat /tmp/policy.out.json)"; exit 1; }
@@ -285,8 +286,8 @@ spec:
                 "bind_secret_id": true
               }
               JSON
-              code=$(curl -sS -o /tmp/approle.out.json -w '%{http_code}' \
-                -X POST -H "$TOKEN_HEADER" -H "$CT" \
+              code=$(hcurl "$TOKEN_HEADER" -sS -o /tmp/approle.out.json -w '%{http_code}' \
+                -X POST -H "$CT" \
                 --data-binary "@/tmp/approle.json" \
                 "${BAO_ADDR}/v1/auth/${APPROLE_PATH}/role/cert-manager")
               [ "$code" = "204" ] || [ "$code" = "200" ] || { echo "FATAL: approle role upsert (HTTP $code): $(cat /tmp/approle.out.json)"; exit 1; }

@@ -176,12 +176,15 @@ spec:
                   - /bin/sh
                   - -c
                   - |
+                    # cypher-shell reads the user and the password from its
+                    # environment, so the password is on no argv.
                     A="${NEO4J_AUTH}"
-                    out="$(cypher-shell -a bolt://127.0.0.1:7687 -u "${A%%/*}" -p "${A#*/}" "CALL db.checkpoint()" 2>&1)" && { echo "$out"; exit 0; }
+                    export NEO4J_USERNAME="${A%%/*}" NEO4J_PASSWORD="${A#*/}"
+                    out="$(cypher-shell -a bolt://127.0.0.1:7687 "CALL db.checkpoint()" 2>&1)" && { echo "$out"; exit 0; }
                     case "$out" in
                       *"no procedure with the name"*)
                         echo "community edition has no db.checkpoint (measured on neo4j:5.26.0-community, deploy#1735): the periodic checkpoint bounds replay, asserting the store answers instead"
-                        exec cypher-shell -a bolt://127.0.0.1:7687 -u "${A%%/*}" -p "${A#*/}" "CALL db.ping()"
+                        exec cypher-shell -a bolt://127.0.0.1:7687 "CALL db.ping()"
                         ;;
                       *) echo "$out" >&2; exit 1 ;;
                     esac

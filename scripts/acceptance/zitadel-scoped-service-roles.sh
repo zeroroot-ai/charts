@@ -33,6 +33,8 @@
 # (scripts/check-xtrace-secrets.py).
 set +x
 set -euo pipefail
+# shellcheck source=../lib/curl-config.sh
+. "$(dirname "$0")/../lib/curl-config.sh"
 
 NS="${NS:-gibson}"
 RELEASE="${RELEASE:-gibson}"
@@ -80,28 +82,35 @@ log "ZITADEL_URL=$ZITADEL_URL ZITADEL_EXTERNAL_DOMAIN=$ZITADEL_EXTERNAL_DOMAIN"
 # way the real Go clients do. Run through kubectl exec against a pod that
 # already has network access to the in-cluster Zitadel Service and curl/jq
 # available (the daemon pod itself qualifies).
+#
+# pod_curl runs curl in that pod and gives it a config on stdin (curl -K -).
+# Each secret and each body is in that config, so no secret is on the argv
+# of kubectl, in the exec record of the API server, or on the argv of curl
+# in the pod (GHSA-5c5h-rrh4-5xw3).
+pod_curl() {
+  kubectl -n "$NS" exec -i "${RELEASE}-0" -c gibson -- curl -K - "$@"
+}
 token() {
   local client_id="$1" client_secret="$2" scope="$3"
-  kubectl -n "$NS" exec "${RELEASE}-0" -c gibson -- curl -s -X POST \
-    -H "x-zitadel-instance-host: ${ZITADEL_EXTERNAL_DOMAIN}" \
-    -H 'Content-Type: application/x-www-form-urlencoded' \
-    --data-urlencode 'grant_type=client_credentials' \
-    --data-urlencode "client_id=${client_id}" \
-    --data-urlencode "client_secret=${client_secret}" \
-    --data-urlencode "scope=${scope}" \
-    "${ZITADEL_URL}/oauth/v2/token" | jq -r '.access_token'
+  { curl_cfg data-urlencode 'grant_type=client_credentials'
+    curl_cfg data-urlencode "client_id=${client_id}"
+    curl_cfg data-urlencode "client_secret=${client_secret}"
+    curl_cfg data-urlencode "scope=${scope}"; } \
+    | pod_curl -s -X POST \
+        -H "x-zitadel-instance-host: ${ZITADEL_EXTERNAL_DOMAIN}" \
+        -H 'Content-Type: application/x-www-form-urlencoded' \
+        "${ZITADEL_URL}/oauth/v2/token" | jq -r '.access_token'
 }
 
 # call TOKEN METHOD PATH [BODY] — one authenticated call, prints the HTTP
 # status only.
 call() {
   local tok="$1" method="$2" path="$3" body="${4:-{\}}"
-  kubectl -n "$NS" exec "${RELEASE}-0" -c gibson -- curl -s -o /dev/null -w '%{http_code}' -X "$method" \
-    -H "x-zitadel-instance-host: ${ZITADEL_EXTERNAL_DOMAIN}" \
-    -H "Authorization: Bearer ${tok}" \
-    -H 'Content-Type: application/json' \
-    -d "$body" \
-    "${ZITADEL_URL}${path}"
+  { curl_cfg header "Authorization: Bearer ${tok}"; curl_cfg data "$body"; } \
+    | pod_curl -s -o /dev/null -w '%{http_code}' -X "$method" \
+        -H "x-zitadel-instance-host: ${ZITADEL_EXTERNAL_DOMAIN}" \
+        -H 'Content-Type: application/json' \
+        "${ZITADEL_URL}${path}"
 }
 
 MGMT_SCOPE='openid urn:zitadel:iam:org:project:id:zitadel:aud'
@@ -118,13 +127,12 @@ if [ -z "$DAEMON_TOKEN" ] || [ "$DAEMON_TOKEN" = "null" ]; then
 else
   # Allowed: user.read, within the org header (Management v1 user search) —
   # covered by IAM_ORG_MANAGER.
-  status="$(kubectl -n "$NS" exec "${RELEASE}-0" -c gibson -- curl -s -o /dev/null -w '%{http_code}' -X POST \
-    -H "x-zitadel-instance-host: ${ZITADEL_EXTERNAL_DOMAIN}" \
-    -H "Authorization: Bearer ${DAEMON_TOKEN}" \
-    -H "x-zitadel-orgid: ${DAEMON_ORG_ID}" \
-    -H 'Content-Type: application/json' \
-    -d '{"limit":1}' \
-    "${ZITADEL_URL}/management/v1/users/_search")"
+  status="$({ curl_cfg header "Authorization: Bearer ${DAEMON_TOKEN}"; curl_cfg data '{"limit":1}'; } \
+    | pod_curl -s -o /dev/null -w '%{http_code}' -X POST \
+        -H "x-zitadel-instance-host: ${ZITADEL_EXTERNAL_DOMAIN}" \
+        -H "x-zitadel-orgid: ${DAEMON_ORG_ID}" \
+        -H 'Content-Type: application/json' \
+        "${ZITADEL_URL}/management/v1/users/_search")"
   check "daemon: user.read (list users) succeeds under its granted role" "$status" "200"
 
   # Refused: iam.member.write (POST /admin/v1/members — adding an instance
@@ -153,12 +161,12 @@ if [ -z "$OPERATOR_TOKEN" ] || [ "$OPERATOR_TOKEN" = "null" ]; then
 else
   # Allowed: project.grant.read against the fixed gibson project — the exact
   # call EnsureProjectGrant makes.
-  status="$(kubectl -n "$NS" exec "${RELEASE}-0" -c gibson -- curl -s -o /dev/null -w '%{http_code}' -X POST \
-    -H "x-zitadel-instance-host: ${ZITADEL_EXTERNAL_DOMAIN}" \
-    -H "Authorization: Bearer ${OPERATOR_TOKEN}" \
-    -H 'Content-Type: application/json' \
-    -d "{\"filters\":[{\"inProjectIdsFilter\":{\"ids\":[\"${OPERATOR_PROJECT_ID}\"]}}]}" \
-    "${ZITADEL_URL}/zitadel.project.v2.ProjectService/ListProjectGrants")"
+  status="$({ curl_cfg header "Authorization: Bearer ${OPERATOR_TOKEN}"
+    curl_cfg data "{\"filters\":[{\"inProjectIdsFilter\":{\"ids\":[\"${OPERATOR_PROJECT_ID}\"]}}]}"; } \
+    | pod_curl -s -o /dev/null -w '%{http_code}' -X POST \
+        -H "x-zitadel-instance-host: ${ZITADEL_EXTERNAL_DOMAIN}" \
+        -H 'Content-Type: application/json' \
+        "${ZITADEL_URL}/zitadel.project.v2.ProjectService/ListProjectGrants")"
   check "tenant-operator: project.grant.read (ListProjectGrants) succeeds" "$status" "200"
 
   # Refused: same iam.member.write probe as the daemon.

@@ -33,8 +33,9 @@ env:
 {{- end -}}
 
 {{- define "gibson.masterkeyRotation.read" -}}
+{{ include "gibson.sh.hcurl" . }}
 # Step 1: write value and next of secret/zitadel-masterkey to /work.
-c="$(curl -sS -o /work/kv.json -w '%{http_code}' -H "X-Vault-Token: ${VAULT_TOKEN}" \
+c="$(hcurl "X-Vault-Token: ${VAULT_TOKEN}" -sS -o /work/kv.json -w '%{http_code}' \
   "${BAO_ADDR}/v1/secret/data/zitadel-masterkey")"
 [ "$c" = 200 ] || { echo "[masterkey] FATAL: read secret/zitadel-masterkey returned HTTP ${c}" >&2; exit 1; }
 jq -j '.data.data.value // ""' /work/kv.json > /work/value
@@ -44,6 +45,7 @@ echo none > /work/action
 {{- end -}}
 
 {{- define "gibson.masterkeyRotation.write" -}}
+{{ include "gibson.sh.hcurl" . }}
 # Step 3: when step 2 rewrapped the rows with next, write value = next and
 # next = "". ESO then updates gibson-zitadel-masterkey, and Reloader restarts
 # Zitadel on the new masterkey.
@@ -53,7 +55,7 @@ if [ "$action" != flip ]; then
   exit 0
 fi
 c="$(jq -nc --rawfile v /work/next '{data:{value:$v,next:""}}' \
-  | curl -sS -o /work/kvw.json -w '%{http_code}' -X POST -H "X-Vault-Token: ${VAULT_TOKEN}" \
+  | hcurl "X-Vault-Token: ${VAULT_TOKEN}" -sS -o /work/kvw.json -w '%{http_code}' -X POST \
       -H 'Content-Type: application/json' --data-binary @- "${BAO_ADDR}/v1/secret/data/zitadel-masterkey")"
 rm -f /work/kvw.json
 [ "$c" = 200 ] || [ "$c" = 204 ] || { echo "[masterkey] FATAL: write secret/zitadel-masterkey returned HTTP ${c}; the next run moves it" >&2; exit 1; }

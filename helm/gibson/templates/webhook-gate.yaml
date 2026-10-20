@@ -197,9 +197,9 @@ spec:
 
           probe() {
             # $1 url. Echoes the outcome, returns 0 only when the path answers.
-            code=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 \
+            code=$(printf '%s' "$REVIEW" | curl -sk -o /dev/null -w '%{http_code}' --max-time 5 \
                      -X POST -H 'Content-Type: application/json' \
-                     --data "$REVIEW" "$1" 2>/dev/null) || {
+                     --data-binary @- "$1" 2>/dev/null) || {
               echo "no answer (connection or TLS failure)"
               return 1
             }

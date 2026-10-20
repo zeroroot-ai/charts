@@ -481,6 +481,7 @@ spec:
             - -c
             - |
               set -u
+              {{- include "gibson.sh.hcurl" . | nindent 14 }}
               # Every scratch file lives in a per-process directory. A fixed
               # /tmp path is a shared-file race the moment two copies of this
               # script run on one host, which is exactly what the chart's
@@ -564,7 +565,7 @@ spec:
               # Token rotates; re-read at use time.
               kube_curl() {
                 tok=$(cat "$KUBE_TOKEN_FILE")
-                curl -sS --cacert "$KUBE_CACERT" -H "Authorization: Bearer ${tok}" "$@"
+                hcurl "Authorization: Bearer ${tok}" -sS --cacert "$KUBE_CACERT" "$@"
               }
 
               vault_status() {
@@ -641,8 +642,8 @@ spec:
                 # Idempotent: revoke-self on an already-revoked token returns
                 # 403, which is treated as success.
                 root="$1"
-                code=$(curl -sS -o ${TMPD}/revoke.json -w '%{http_code}' \
-                  -X POST -H "X-Vault-Token: ${root}" \
+                code=$(hcurl "X-Vault-Token: ${root}" -sS -o ${TMPD}/revoke.json -w '%{http_code}' \
+                  -X POST \
                   "${BAO_ADDR_LOCAL}/v1/auth/token/revoke-self")
                 if [ "$code" = "204" ] || [ "$code" = "200" ] || [ "$code" = "403" ]; then
                   echo "[openbao-auto-init] initial root token REVOKED (HTTP $code). No recovery key exists; the archive plus the bringup keyring is the recovery path. There is nothing else to keep"
@@ -655,7 +656,7 @@ spec:
               vault_revoke_self() {
                 # Revoke a short-lived login token at the end of a pass so the
                 # sidecar leaves nothing live behind it. Best effort.
-                curl -sS -o /dev/null -X POST -H "X-Vault-Token: $1" \
+                hcurl "X-Vault-Token: $1" -sS -o /dev/null -X POST \
                   "${BAO_ADDR_LOCAL}/v1/auth/token/revoke-self" || true
               }
 
@@ -663,8 +664,7 @@ spec:
                 # lookup-self answers 200 for a live token and nothing else.
                 tok="$1"
                 [ -n "$tok" ] || return 1
-                code=$(curl -sS -o /dev/null -w '%{http_code}' \
-                  -H "X-Vault-Token: ${tok}" \
+                code=$(hcurl "X-Vault-Token: ${tok}" -sS -o /dev/null -w '%{http_code}' \
                   "${BAO_ADDR_LOCAL}/v1/auth/token/lookup-self")
                 [ "$code" = "200" ]
               }
@@ -729,10 +729,10 @@ spec:
                 # refused or unreachable here means the fault is outside
                 # OpenBao; authenticated=true means OpenBao saw a good answer
                 # and refused anyway.
-                rv=$(kube_curl -o "${TMPD}/tr.json" -w '%{http_code}' -X POST \
+                rv=$(jq -nc --rawfile j "$KUBE_TOKEN_FILE" \
+                            '{apiVersion:"authentication.k8s.io/v1",kind:"TokenReview",spec:{token:($j|rtrimstr("\n"))}}' | kube_curl -o "${TMPD}/tr.json" -w '%{http_code}' -X POST \
                       -H 'Content-Type: application/json' \
-                      -d "$(jq -nc --rawfile j "$KUBE_TOKEN_FILE" \
-                            '{apiVersion:"authentication.k8s.io/v1",kind:"TokenReview",spec:{token:($j|rtrimstr("\n"))}}')" \
+                      --data-binary @- \
                       "${KUBE_API}/apis/authentication.k8s.io/v1/tokenreviews" 2>/dev/null) || rv="000"
                 case "$rv" in
                   200|201)
@@ -761,11 +761,10 @@ spec:
                 # back into the store on every profile: no stored credential,
                 # no root token, no recovery key (closes the deploy#1731 gap).
                 # Prints the client token and nothing else.
-                jwt=$(cat "$KUBE_TOKEN_FILE")
-                body=$(jq -nc --arg r "$SEEDER_ROLE" --arg j "$jwt" '{role:$r,jwt:$j}')
-                jwt=""
-                code=$(curl -sS -o ${TMPD}/login.json -w '%{http_code}' \
-                  -X POST -H "Content-Type: application/json" -d "$body" \
+                # jq reads the JWT from its file: no value is on an argv.
+                body=$(jq -nc --arg r "$SEEDER_ROLE" --rawfile j "$KUBE_TOKEN_FILE" '{role:$r,jwt:($j|rtrimstr("\n"))}')
+                code=$(printf '%s' "$body" | curl -sS -o ${TMPD}/login.json -w '%{http_code}' \
+                  -X POST -H "Content-Type: application/json" --data-binary @- \
                   "${BAO_ADDR_LOCAL}/v1/auth/${AUTH_MOUNT}/login")
                 body=""
                 if [ "$code" != "200" ]; then
@@ -827,12 +826,13 @@ spec:
                 # secret.reloader.stakater.com/reload annotation on each).
                 minter="$1"; policy="$2"; secret="$3"
                 period="$(token_period_s "$secret")s"
-                body=$(jq -nc --arg p "$policy" --arg t "$period" --argjson m "$(token_max_ttl_s "$secret")" \
-                  '{"policies":[$p],"period":$t,"renewable":true,"no_parent":true}
+                body=$(MAX_TTL_S="$(token_max_ttl_s "$secret")" jq -nc --arg p "$policy" --arg t "$period" \
+                  '(env.MAX_TTL_S | tonumber) as $m
+                   | {"policies":[$p],"period":$t,"renewable":true,"no_parent":true}
                    + (if $m > 0 then {"explicit_max_ttl": ($m | tostring + "s")} else {} end)')
-                code=$(curl -sS -o ${TMPD}/svc_tok.json -w '%{http_code}' \
-                  -X POST -H "X-Vault-Token: ${minter}" -H "Content-Type: application/json" \
-                  -d "$body" \
+                code=$(printf '%s' "$body" | hcurl "X-Vault-Token: ${minter}" -sS -o ${TMPD}/svc_tok.json -w '%{http_code}' \
+                  -X POST -H "Content-Type: application/json" \
+                  --data-binary @- \
                   "${BAO_ADDR_LOCAL}/v1/auth/token/create")
                 if [ "$code" != "200" ]; then
                   echo "[openbao-auto-init] FATAL: mint renewable service token (policy=${policy}) returned HTTP $code: $(cat ${TMPD}/svc_tok.json)" >&2
@@ -849,11 +849,10 @@ spec:
                 # Idempotent: tries POST first (create); on 409 (already
                 # exists) falls back to PATCH (update).
                 svc_tok_b64=$(printf '%s' "$svc_token" | base64 | tr -d '\n')
-                op_secret_body=$(jq -nc \
+                # The token reaches jq in its environment, never on an argv.
+                op_secret_body=$(SVC_TOK_B64="$svc_tok_b64" OBJ_NAME="$secret" jq -nc \
                   --arg ns "$NAMESPACE" \
-                  --arg name "$secret" \
-                  --arg b64 "$svc_tok_b64" \
-                  '{
+                  'env.SVC_TOK_B64 as $b64 | env.OBJ_NAME as $name | {
                     "apiVersion":"v1",
                     "kind":"Secret",
                     "metadata":{
@@ -867,22 +866,22 @@ spec:
                     "type":"Opaque",
                     "data":{"VAULT_ADMIN_TOKEN":$b64}
                   }')
-                op_code=$(kube_curl -o ${TMPD}/op_sec.json -w '%{http_code}' \
+                op_code=$(printf '%s' "$op_secret_body" | kube_curl -o ${TMPD}/op_sec.json -w '%{http_code}' \
                   -H "Content-Type: application/json" \
                   -X POST \
-                  --data-binary "$op_secret_body" \
+                  --data-binary @- \
                   "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets")
                 if [ "$op_code" = "201" ]; then
                   echo "[openbao-auto-init] created ${secret} Secret"
                   return 0
                 fi
                 if [ "$op_code" = "409" ]; then
-                  patch_body=$(jq -nc --arg b64 "$svc_tok_b64" \
-                    '{"data":{"VAULT_ADMIN_TOKEN":$b64}}')
-                  patch_code=$(kube_curl -o ${TMPD}/op_patch.json -w '%{http_code}' \
+                  patch_body=$(SVC_TOK_B64="$svc_tok_b64" jq -nc \
+                    '{"data":{"VAULT_ADMIN_TOKEN":env.SVC_TOK_B64}}')
+                  patch_code=$(printf '%s' "$patch_body" | kube_curl -o ${TMPD}/op_patch.json -w '%{http_code}' \
                     -H "Content-Type: application/strategic-merge-patch+json" \
                     -X PATCH \
-                    --data-binary "$patch_body" \
+                    --data-binary @- \
                     "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/${secret}")
                   if [ "$patch_code" = "200" ]; then
                     echo "[openbao-auto-init] patched ${secret} Secret (token refresh)"
@@ -923,21 +922,21 @@ spec:
                 # A Kubernetes error answer is a Status object, so only a
                 # Secret object counts as an answer.
                 printf '%s' "$sa_json" | jq -e '.kind == "Secret"' >/dev/null 2>&1 || return 1
-                printf '%s' "$sa_json" | jq -r --arg a "$2" '.metadata.annotations[$a] // empty'
+                printf '%s' "$sa_json" | ANN="$2" jq -r '.metadata.annotations[env.ANN] // empty'
               }
 
               secret_set_revoke() {
                 # $1 the Secret, $2 the accessor to revoke later ("" clears),
                 # $3 the Unix time after which it is revoked.
                 if [ -n "$2" ]; then
-                  body=$(jq -nc --arg a "$REVOKE_ACCESSOR_ANN" --arg t "$REVOKE_AFTER_ANN" \
-                    --arg acc "$2" --arg after "$3" '{metadata:{annotations:{($a):$acc,($t):$after}}}')
+                  body=$(ACC="$2" AFTER="$3" jq -nc --arg a "$REVOKE_ACCESSOR_ANN" --arg t "$REVOKE_AFTER_ANN" \
+                    '{metadata:{annotations:{($a):env.ACC,($t):env.AFTER}}}')
                 else
                   body=$(jq -nc --arg a "$REVOKE_ACCESSOR_ANN" --arg t "$REVOKE_AFTER_ANN" \
                     '{metadata:{annotations:{($a):null,($t):null}}}')
                 fi
-                c=$(kube_curl -o /dev/null -w '%{http_code}' \
-                  -H "Content-Type: application/merge-patch+json" -X PATCH --data-binary "$body" \
+                c=$(printf '%s' "$body" | kube_curl -o /dev/null -w '%{http_code}' \
+                  -H "Content-Type: application/merge-patch+json" -X PATCH --data-binary @- \
                   "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/$1")
                 [ "$c" = "200" ]
               }
@@ -979,9 +978,9 @@ spec:
                 esac
                 [ "$(date +%s)" -ge "$after" ] || return 0
                 [ -n "$2" ] || return 1
-                c=$(curl -sS -o ${TMPD}/revacc.json -w '%{http_code}' \
-                  -X POST -H "X-Vault-Token: $2" -H "Content-Type: application/json" \
-                  -d "$(jq -nc --arg a "$acc" '{accessor:$a}')" \
+                c=$(jq -nc --arg a "$acc" '{accessor:$a}' | hcurl "X-Vault-Token: $2" -sS -o ${TMPD}/revacc.json -w '%{http_code}' \
+                  -X POST -H "Content-Type: application/json" \
+                  --data-binary @- \
                   "${BAO_ADDR_LOCAL}/v1/auth/token/revoke-accessor")
                 # OpenBao answers an unknown accessor with 200 and a warning,
                 # and an accessor whose token entry is gone with 400 "token
@@ -1025,8 +1024,7 @@ spec:
                 rotating=0; rotate_old=""
                 current_tok=$(kube_read_token "$secret")
                 if [ -n "$current_tok" ]; then
-                  lookup_resp=$(curl -sS -o ${TMPD}/lookup.json -w '%{http_code}' \
-                    -H "X-Vault-Token: ${current_tok}" \
+                  lookup_resp=$(hcurl "X-Vault-Token: ${current_tok}" -sS -o ${TMPD}/lookup.json -w '%{http_code}' \
                     "${BAO_ADDR_LOCAL}/v1/auth/token/lookup-self")
                   if [ "$lookup_resp" = "200" ]; then
                     ttl=$(grep -o '"ttl":[0-9]*' ${TMPD}/lookup.json | head -1 | cut -d: -f2)
@@ -1058,8 +1056,8 @@ spec:
                       fi
                       if [ "$rotating" = 0 ]; then
                         echo "[openbao-auto-init] ${secret} token TTL=${ttl}s below $(token_renew_below_s "$secret")s — renewing"
-                        renew_code=$(curl -sS -o /dev/null -w '%{http_code}' \
-                          -X POST -H "X-Vault-Token: ${current_tok}" \
+                        renew_code=$(hcurl "X-Vault-Token: ${current_tok}" -sS -o /dev/null -w '%{http_code}' \
+                          -X POST \
                           "${BAO_ADDR_LOCAL}/v1/auth/token/renew-self")
                         if [ "$renew_code" = "200" ]; then
                           echo "[openbao-auto-init] ${secret} token renewed (same ID, extended TTL)"
@@ -1101,7 +1099,7 @@ spec:
                   # A rotation whose mint failed leaves the old token in force.
                   # It is still valid, so keep it alive.
                   if [ "$rotating" = 1 ]; then
-                    rn=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "X-Vault-Token: ${current_tok}" \
+                    rn=$(hcurl "X-Vault-Token: ${current_tok}" -sS -o /dev/null -w '%{http_code}' -X POST \
                       "${BAO_ADDR_LOCAL}/v1/auth/token/renew-self" || true)
                     if [ "$rn" = "200" ]; then
                       echo "[openbao-auto-init] the successor of ${secret} could not be minted; the old token was renewed and stays in force" >&2
@@ -1138,8 +1136,8 @@ spec:
                 # $1 token. Each token that carried the legacy policy was
                 # re-minted with its own policy before this call (vault_ensure_token
                 # replaces a token that lacks its policy). 204 and 404 are done.
-                c=$(curl -sS -o ${TMPD}/delpol.json -w '%{http_code}' \
-                  -X DELETE -H "X-Vault-Token: $1" \
+                c=$(hcurl "X-Vault-Token: $1" -sS -o ${TMPD}/delpol.json -w '%{http_code}' \
+                  -X DELETE \
                   "${BAO_ADDR_LOCAL}/v1/sys/policies/acl/${LEGACY_POLICY}")
                 case "$c" in 200|204|404) return 0 ;; *)
                   echo "[openbao-auto-init] WARN: delete policy ${LEGACY_POLICY} returned HTTP $c: $(cat ${TMPD}/delpol.json)" >&2
@@ -1196,8 +1194,8 @@ spec:
               kv_get() {
                 # Prints the current properties of secret/<key> as one JSON
                 # object, `{}` for an absent key. Fails on any other answer.
-                c=$(curl -sS -o ${TMPD}/kvget.json -w '%{http_code}' \
-                  -H "X-Vault-Token: $1" "${BAO_ADDR_LOCAL}/v1/secret/data/$2")
+                c=$(hcurl "X-Vault-Token: $1" -sS -o ${TMPD}/kvget.json -w '%{http_code}' \
+                  "${BAO_ADDR_LOCAL}/v1/secret/data/$2")
                 case "$c" in
                   200) jq -c '.data.data // {}' ${TMPD}/kvget.json ;;
                   404) printf '{}' ;;
@@ -1208,9 +1206,9 @@ spec:
 
               kv_put() {
                 # $1 token, $2 key, $3 JSON object of properties.
-                c=$(curl -sS -o ${TMPD}/kv.json -w '%{http_code}' \
-                  -X POST -H "X-Vault-Token: $1" -H "Content-Type: application/json" \
-                  -d "$(jq -nc --argjson d "$3" '{data: $d}')" \
+                c=$(KV_DATA="$3" jq -nc '{data: (env.KV_DATA | fromjson)}' | hcurl "X-Vault-Token: $1" -sS -o ${TMPD}/kv.json -w '%{http_code}' \
+                  -X POST -H "Content-Type: application/json" \
+                  --data-binary @- \
                   "${BAO_ADDR_LOCAL}/v1/secret/data/$2")
                 case "$c" in
                   200|204) return 0 ;;
@@ -1223,9 +1221,9 @@ spec:
                 # keys, so no openssl is needed and a private key is generated
                 # inside the store that will hold it. Creating a key that
                 # exists is a no-op.
-                c=$(curl -sS -o ${TMPD}/tkey.json -w '%{http_code}' -X POST -H "X-Vault-Token: $1" \
+                c=$(KEY_TYPE="$3" jq -nc '{type:env.KEY_TYPE,exportable:true}' | hcurl "X-Vault-Token: $1" -sS -o ${TMPD}/tkey.json -w '%{http_code}' -X POST \
                   -H "Content-Type: application/json" \
-                  -d "$(jq -nc --arg t "$3" '{type:$t,exportable:true}')" \
+                  --data-binary @- \
                   "${BAO_ADDR_LOCAL}/v1/transit/keys/$2")
                 case "$c" in
                   200|204) return 0 ;;
@@ -1236,7 +1234,7 @@ spec:
               transit_private_pem() {
                 # $1 token, $2 name, $3 type. Prints the private key PEM.
                 transit_ensure_key "$1" "$2" "$3" || return 1
-                v=$(curl -sS -H "X-Vault-Token: $1" \
+                v=$(hcurl "X-Vault-Token: $1" -sS \
                   "${BAO_ADDR_LOCAL}/v1/transit/export/signing-key/$2" \
                   | jq -r '.data.keys["1"] // empty')
                 [ -n "$v" ] || { echo "[openbao-auto-init] FATAL: transit export for $2 returned no key material" >&2; return 1; }
@@ -1246,7 +1244,7 @@ spec:
               transit_public_pem() {
                 # $1 token, $2 name, $3 type. Prints the public key PEM.
                 transit_ensure_key "$1" "$2" "$3" || return 1
-                v=$(curl -sS -H "X-Vault-Token: $1" \
+                v=$(hcurl "X-Vault-Token: $1" -sS \
                   "${BAO_ADDR_LOCAL}/v1/transit/keys/$2" \
                   | jq -r '.data.keys["1"].public_key // empty')
                 [ -n "$v" ] || { echo "[openbao-auto-init] FATAL: transit key $2 has no public key" >&2; return 1; }
@@ -1268,7 +1266,7 @@ spec:
                   echo "[openbao-auto-init] WARN: keyring input $2 is not a JSON object; treating it as not supplied" >&2
                   return 0
                 fi
-                jq -r --arg p "$3" '.[$p] // ""' "$f"
+                PROP="$3" jq -r '.[env.PROP] // ""' "$f"
               }
 
               seed_generate() {
@@ -1291,8 +1289,8 @@ spec:
                 # $1 token, $2 key. Prints the creation time of the current
                 # version of secret/<key> in Unix seconds, or nothing for an
                 # absent key. Fails on any other answer.
-                c=$(curl -sS -o ${TMPD}/kvmeta.json -w '%{http_code}' \
-                  -H "X-Vault-Token: $1" "${BAO_ADDR_LOCAL}/v1/secret/metadata/$2")
+                c=$(hcurl "X-Vault-Token: $1" -sS -o ${TMPD}/kvmeta.json -w '%{http_code}' \
+                  "${BAO_ADDR_LOCAL}/v1/secret/metadata/$2")
                 case "$c" in
                   200)
                     # TZ=UTC: some jq builds apply the local zone in
@@ -1402,7 +1400,8 @@ spec:
                       fi ;;
                   esac
                   if [ "$write" = 1 ]; then
-                    new=$(printf '%s' "$new" | jq -c --arg p "$prop" --arg v "$val" '.[$p]=$v')
+                    # The value reaches jq in its environment, never on an argv.
+                    new=$(printf '%s' "$new" | SEED_VAL="$val" jq -c --arg p "$prop" '.[$p]=env.SEED_VAL')
                     written="${written} ${prop}"
                   fi
                   val=""; curval=""
@@ -1498,9 +1497,9 @@ spec:
                 pt="$1"
                 [ -s "${PG_SU_DIR}/username" ] && [ -s "${PG_SU_DIR}/password" ] || {
                   echo "[openbao-auto-init] the CNPG superuser Secret is not mounted yet; the database engine waits" >&2; return 0; }
-                c=$(curl -sS -o ${TMPD}/mnt.json -w '%{http_code}' -H "X-Vault-Token: ${pt}" "${BAO_ADDR_LOCAL}/v1/sys/mounts/database")
+                c=$(hcurl "X-Vault-Token: ${pt}" -sS -o ${TMPD}/mnt.json -w '%{http_code}' "${BAO_ADDR_LOCAL}/v1/sys/mounts/database")
                 if [ "$c" != 200 ]; then
-                  c=$(curl -sS -o ${TMPD}/mnt.json -w '%{http_code}' -X POST -H "X-Vault-Token: ${pt}" \
+                  c=$(hcurl "X-Vault-Token: ${pt}" -sS -o ${TMPD}/mnt.json -w '%{http_code}' -X POST \
                     -H "Content-Type: application/json" -d '{"type":"database"}' "${BAO_ADDR_LOCAL}/v1/sys/mounts/database")
                   case "$c" in 200|204) ;; *) echo "[openbao-auto-init] FATAL: enable the database engine returned HTTP $c: $(cat ${TMPD}/mnt.json)" >&2; return 1 ;; esac
                 fi
@@ -1513,7 +1512,7 @@ spec:
                   # The connection, written again only when it is missing or
                   # the superuser credential changed (the hash rides on the
                   # connection as a verification-free plugin option).
-                  have=$(curl -sS -H "X-Vault-Token: ${pt}" "${BAO_ADDR_LOCAL}/v1/database/config/${role}" \
+                  have=$(hcurl "X-Vault-Token: ${pt}" -sS "${BAO_ADDR_LOCAL}/v1/database/config/${role}" \
                     | jq -r '.data.connection_details.username // empty')
                   mark=$(kv_get "$pt" "gibson-pg-engine" | jq -r --arg r "$role" '.[$r] // empty') || exit 1
                   if [ "$have" != "$pg_su_user" ] || [ "$mark" != "$pg_su_hash" ]; then
@@ -1521,7 +1520,7 @@ spec:
                       --arg url "postgresql://{{ "{{" }}username{{ "}}" }}:{{ "{{" }}password{{ "}}" }}@${PG_ENGINE_HOST}:5432/${db}?sslmode=require" \
                       '{plugin_name:"postgresql-database-plugin", connection_url:$url, username:$u, password:($p|rtrimstr("\n")),
                         allowed_roles:[$r], verify_connection:false, password_authentication:"scram-sha-256"}')
-                    c=$(printf '%s' "$body" | curl -sS -o ${TMPD}/dbc.json -w '%{http_code}' -X POST -H "X-Vault-Token: ${pt}" \
+                    c=$(printf '%s' "$body" | hcurl "X-Vault-Token: ${pt}" -sS -o ${TMPD}/dbc.json -w '%{http_code}' -X POST \
                       -H "Content-Type: application/json" --data-binary @- "${BAO_ADDR_LOCAL}/v1/database/config/${role}")
                     body=""
                     case "$c" in 200|204) ;; *) echo "[openbao-auto-init] FATAL: database/config/${role} returned HTTP $c: $(cat ${TMPD}/dbc.json)" >&2; exit 1 ;; esac
@@ -1539,7 +1538,7 @@ spec:
                       "DROP OWNED BY \"{{ "{{" }}name{{ "}}" }}\";",
                       "DROP ROLE IF EXISTS \"{{ "{{" }}name{{ "}}" }}\";"],
                     default_ttl: "48h", max_ttl: $m}')
-                  c=$(printf '%s' "$body" | curl -sS -o ${TMPD}/dbr.json -w '%{http_code}' -X POST -H "X-Vault-Token: ${pt}" \
+                  c=$(printf '%s' "$body" | hcurl "X-Vault-Token: ${pt}" -sS -o ${TMPD}/dbr.json -w '%{http_code}' -X POST \
                     -H "Content-Type: application/json" --data-binary @- "${BAO_ADDR_LOCAL}/v1/database/roles/${role}")
                   case "$c" in 200|204) ;; *) echo "[openbao-auto-init] FATAL: database/roles/${role} returned HTTP $c: $(cat ${TMPD}/dbr.json)" >&2; exit 1 ;; esac
                 done || return 1
@@ -1557,8 +1556,8 @@ spec:
                 cur=$(kube_curl "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/${PG_ENGINE_MARK_SECRET}" 2>/dev/null \
                   | jq -r '.data["pg-engine"] // empty' | base64 -d 2>/dev/null) || cur=""
                 [ "$cur" = "$1" ] && return 0
-                c=$(kube_curl -o /dev/null -w '%{http_code}' -H "Content-Type: application/merge-patch+json" -X PATCH \
-                  --data-binary "$(jq -nc --arg v "$(printf '%s' "$1" | base64 | tr -d '\n')" '{data:{"pg-engine":$v}}')" \
+                c=$(MARK="$1" jq -nc '{data:{"pg-engine":(env.MARK | @base64)}}' | kube_curl -o /dev/null -w '%{http_code}' -H "Content-Type: application/merge-patch+json" -X PATCH \
+                  --data-binary @- \
                   "${KUBE_API}/api/v1/namespaces/${NAMESPACE}/secrets/${PG_ENGINE_MARK_SECRET}")
                 if [ "$c" = "200" ]; then
                   echo "[openbao-auto-init] the database engine issues each login role; ${PG_ENGINE_MARK_SECRET} has the pg-engine mark" >&2
@@ -1601,7 +1600,7 @@ spec:
                   return 0
                 fi
                 [ "$cg_age" -ge "$CG_KEY_LIFETIME_S" ] || return 0
-                cg_body=$(jq -nc --arg kid "$(gen_rand 8)" --arg key "$(gen_rand 32)" '{kid:$kid,key:$key}')
+                cg_body=$(CG_KID="$(gen_rand 8)" CG_SECRET="$(gen_rand 32)" jq -nc '{kid:env.CG_KID,key:env.CG_SECRET}')
                 kv_put "$cgt" "${CG_KEY}-next" "$cg_body" || return 1
                 cg_body=""
                 echo "[openbao-auto-init] the CG signing key is older than its lifetime; published its next kid" >&2
@@ -1647,7 +1646,7 @@ spec:
                   sys_priv=$(transit_private_pem "$st" "$sys_name" rsa-2048) || return 1
                   sys_pub=$(transit_public_pem "$st" "$sys_name" rsa-2048) || return 1
                   kv_put "$st" "$(sys_slot_key "$sys_oth")" \
-                    "$(jq -nc --arg k "$sys_priv" --arg p "$sys_pub" '{private_key:$k,public_key:$p}')" || return 1
+                    "$(SYS_PRIV="$sys_priv" SYS_PUB="$sys_pub" jq -nc '{private_key:env.SYS_PRIV,public_key:env.SYS_PUB}')" || return 1
                   sys_priv=""
                   echo "[openbao-auto-init] the System API key of slot ${sys_oth} is new; Zitadel no longer trusts its old key" >&2
                   return 0
@@ -1679,16 +1678,16 @@ spec:
                 [ -z "$(printf '%s' "$mk_cur" | jq -r '.next // empty')" ] || return 0
                 mk_t=$(kv_created_epoch "$mt" "$MK_KEY") || return 1
                 [ $(( $(date +%s) - ${mk_t:-$(date +%s)} )) -ge "$MK_LIFETIME_S" ] || return 0
-                kv_put "$mt" "$MK_KEY" "$(printf '%s' "$mk_cur" | jq -c --arg n "$(gen_rand 32)" '.next = $n')" || return 1
+                kv_put "$mt" "$MK_KEY" "$(printf '%s' "$mk_cur" | MK_NEXT="$(gen_rand 32)" jq -c '.next = env.MK_NEXT')" || return 1
                 mk_cur=""
                 echo "[openbao-auto-init] the Zitadel masterkey is older than its lifetime; wrote the next masterkey" >&2
               }
 
               vault_write_policy() {
                 # $1 token, $2 name, $3 HCL.
-                c=$(curl -sS -o ${TMPD}/pol.json -w '%{http_code}' \
-                  -X PUT -H "X-Vault-Token: $1" -H "Content-Type: application/json" \
-                  -d "$(jq -nc --arg p "$3" '{policy:$p}')" \
+                c=$(POLICY_HCL="$3" jq -nc '{policy:env.POLICY_HCL}' | hcurl "X-Vault-Token: $1" -sS -o ${TMPD}/pol.json -w '%{http_code}' \
+                  -X PUT -H "Content-Type: application/json" \
+                  --data-binary @- \
                   "${BAO_ADDR_LOCAL}/v1/sys/policies/acl/$2")
                 case "$c" in 200|204) return 0 ;; *)
                   echo "[openbao-auto-init] FATAL: write policy $2 returned HTTP $c: $(cat ${TMPD}/pol.json)" >&2
@@ -1698,10 +1697,10 @@ spec:
 
               vault_write_k8s_role() {
                 # $1 token, $2 role, $3 SA name, $4 SA namespace, $5 policy, $6 ttl.
-                c=$(curl -sS -o ${TMPD}/role.json -w '%{http_code}' \
-                  -X POST -H "X-Vault-Token: $1" -H "Content-Type: application/json" \
-                  -d "$(jq -nc --arg n "$3" --arg ns "$4" --arg p "$5" --arg t "$6" \
-                        '{bound_service_account_names:$n,bound_service_account_namespaces:$ns,token_policies:$p,token_ttl:$t,token_max_ttl:"1h"}')" \
+                c=$(SA_N="$3" SA_NS="$4" SA_P="$5" SA_T="$6" jq -nc \
+                        '{bound_service_account_names:env.SA_N,bound_service_account_namespaces:env.SA_NS,token_policies:env.SA_P,token_ttl:env.SA_T,token_max_ttl:"1h"}' | hcurl "X-Vault-Token: $1" -sS -o ${TMPD}/role.json -w '%{http_code}' \
+                  -X POST -H "Content-Type: application/json" \
+                  --data-binary @- \
                   "${BAO_ADDR_LOCAL}/v1/auth/${AUTH_MOUNT}/role/$2")
                 case "$c" in 200|204) return 0 ;; *)
                   echo "[openbao-auto-init] FATAL: write role $2 returned HTTP $c: $(cat ${TMPD}/role.json)" >&2
@@ -1716,8 +1715,8 @@ spec:
 
                 # Enable the kubernetes auth method. 400 "path is already in
                 # use" is the idempotent re-run, same as the kv mount.
-                c=$(curl -sS -o ${TMPD}/auth.json -w '%{http_code}' \
-                  -X POST -H "X-Vault-Token: $tok" -H "Content-Type: application/json" \
+                c=$(hcurl "X-Vault-Token: $tok" -sS -o ${TMPD}/auth.json -w '%{http_code}' \
+                  -X POST -H "Content-Type: application/json" \
                   -d '{"type":"kubernetes"}' "${BAO_ADDR_LOCAL}/v1/sys/auth/${AUTH_MOUNT}")
                 if [ "$c" != "204" ] && [ "$c" != "200" ]; then
                   grep -q 'path is already in use' ${TMPD}/auth.json || {
@@ -1732,8 +1731,8 @@ spec:
                 # is pinned: a store restored from an archive into a NEW
                 # cluster must still authenticate that cluster's tokens, and a
                 # pinned CA from the old cluster would lock every login out.
-                c=$(curl -sS -o ${TMPD}/authcfg.json -w '%{http_code}' \
-                  -X POST -H "X-Vault-Token: $tok" -H "Content-Type: application/json" \
+                c=$(hcurl "X-Vault-Token: $tok" -sS -o ${TMPD}/authcfg.json -w '%{http_code}' \
+                  -X POST -H "Content-Type: application/json" \
                   -d '{"kubernetes_host":"https://kubernetes.default.svc"}' \
                   "${BAO_ADDR_LOCAL}/v1/auth/${AUTH_MOUNT}/config")
                 case "$c" in 200|204) ;; *)
@@ -1843,8 +1842,8 @@ spec:
                 # idempotent on every subsequent pass (400 "already in use" =
                 # success).
                 initial="$1"
-                code=$(curl -sS -o ${TMPD}/mount.json -w '%{http_code}' \
-                  -X POST -H "X-Vault-Token: ${initial}" -H "Content-Type: application/json" \
+                code=$(hcurl "X-Vault-Token: ${initial}" -sS -o ${TMPD}/mount.json -w '%{http_code}' \
+                  -X POST -H "Content-Type: application/json" \
                   -d '{"type":"kv","options":{"version":"2"},"description":"gibson platform kv v2"}' \
                   "${BAO_ADDR_LOCAL}/v1/sys/mounts/secret")
                 if [ "$code" = "204" ] || [ "$code" = "200" ]; then
@@ -1861,8 +1860,8 @@ spec:
               vault_ensure_transit_mount() {
                 # The transit engine mints the seed keypairs and holds the
                 # per-tenant KEK derivation root. Same idempotency as above.
-                code=$(curl -sS -o ${TMPD}/tmount.json -w '%{http_code}' \
-                  -X POST -H "X-Vault-Token: $1" -H "Content-Type: application/json" \
+                code=$(hcurl "X-Vault-Token: $1" -sS -o ${TMPD}/tmount.json -w '%{http_code}' \
+                  -X POST -H "Content-Type: application/json" \
                   -d '{"type":"transit"}' "${BAO_ADDR_LOCAL}/v1/sys/mounts/transit")
                 if [ "$code" = "204" ] || [ "$code" = "200" ]; then
                   echo "[openbao-auto-init] mounted transit at transit/ (HTTP $code)"

@@ -46,6 +46,7 @@ spec:
       args:
         - |
           set -eu
+          {{- include "gibson.sh.hcurl" . | nindent 10 }}
           ERR='{{ include "gibson-workloads.tests.errorPrefix" . }}'
           NS='{{ .Release.Namespace }}'
 
@@ -87,8 +88,7 @@ spec:
           # 3. Probe /management/v1/info with the PAT. A 200 OK proves Zitadel
           # accepts the token + can route the management API. If we get 401
           # the PAT is wrong; 403 means missing role grants.
-          code=$(curl -ksS -o /tmp/info -w '%{http_code}' --max-time 10 \
-            -H "Authorization: Bearer ${PAT}" \
+          code=$(hcurl "Authorization: Bearer ${PAT}" -ksS -o /tmp/info -w '%{http_code}' --max-time 10 \
             "${ISSUER}/management/v1/info" || echo "000")
           case "$code" in
             200)
