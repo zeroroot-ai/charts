@@ -19077,9 +19077,14 @@ spec:
   groups:
     - name: ratelimit-degradation
       rules:
+        # One Envoy pod emits both counters with the same labels. A name
+        # regex selector loses the name in increase(), so the two series
+        # collide and the rule fails to evaluate (charts#736). Each counter
+        # is summed alone, and a missing counter counts as zero.
         - alert: EdgePerClientQuotaFailingOpen
           expr: |
-            sum(increase({__name__=~"envoy_cluster_ratelimit_(public|api)_per_client_failure_mode_allowed"}[5m])) > 0
+            (sum(increase(envoy_cluster_ratelimit_public_per_client_failure_mode_allowed[5m])) or vector(0))
+              + (sum(increase(envoy_cluster_ratelimit_api_per_client_failure_mode_allowed[5m])) or vector(0)) > 0
           for: 2m
           labels:
             severity: page
