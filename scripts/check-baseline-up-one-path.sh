@@ -36,6 +36,12 @@ SCRIPT="${1:-$HERE/baseline-up.sh}"
 # umbrella last.
 ORDER=(gibson-operator-crds gibson-crds gibson-velero gibson)
 
+# Each grep below reads the body from a here-string, never from a pipe.
+# `printf ... | grep -q` under pipefail fails when grep -q exits at its first
+# match while printf still writes: printf gets SIGPIPE and the pipeline
+# returns 141. That raced on load and failed this check inside a parallel
+# make check (self-test 0 below makes it fail every time).
+#
 # code <file> — executable lines only. A comment that mentions a chart must
 # never satisfy an assertion; naming the property in prose is not shipping it.
 code() { grep -vE '^[[:space:]]*#' "$1"; }
@@ -47,14 +53,14 @@ assert_one_path() {
   body="$(code "$f")"
 
   # 2. No helm install may name the chart directory itself.
-  if printf '%s\n' "$body" | grep -E 'helm upgrade --install' -A2 | grep -qF 'CHART_DIR}/'; then
+  if [ -n "$(grep -E 'helm upgrade --install' -A2 <<<"$body" | grep -F 'CHART_DIR}/')" ]; then
     echo "a helm install names \$CHART_DIR directly, so the published mode cannot install that release"
     return 1
   fi
 
   # 1. Every release is named through chart_args.
   for name in "${ORDER[@]}"; do
-    if ! printf '%s\n' "$body" | grep -qE "chart_args ${name}\b"; then
+    if ! grep -qE "chart_args ${name}\b" <<<"$body"; then
       echo "release ${name} is not named through chart_args(), so the two modes can disagree about it"
       return 1
     fi
@@ -68,13 +74,13 @@ assert_one_path() {
   #    login fails, the secret store never validates, and the platform never
   #    finishes. The installer discovers that address already, for the Envoy
   #    ClusterIP anchor, so there is no reason for it to be optional.
-  if ! printf '%s\n' "$body" | grep -q 'apiServerCIDRs'; then
+  if ! grep -q 'apiServerCIDRs' <<<"$body"; then
     echo "the install passes no global.networkPolicy.apiServerCIDRs, so OpenBao has no egress to the apiserver and its Kubernetes-auth login fails wherever NetworkPolicy is actually enforced"
     return 1
   fi
 
   # 3. The order is fixed.
-  mapfile -t seen < <(printf '%s\n' "$body" | grep -oE "chart_args (gibson-operator-crds|gibson-crds|gibson-velero|gibson)\b" | awk '{print $2}')
+  mapfile -t seen < <(grep -oE "chart_args (gibson-operator-crds|gibson-crds|gibson-velero|gibson)\b" <<<"$body" | awk '{print $2}')
   if [ "${#seen[@]}" -ne "${#ORDER[@]}" ]; then
     echo "expected ${#ORDER[@]} chart_args calls, found ${#seen[@]}"
     return 1
@@ -90,6 +96,16 @@ assert_one_path() {
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+
+# --- self-test 0: a long script passes -------------------------------------
+#     200 KB of comment-free filler after the install lines is more than a
+#     pipe holds. A grep -q that read the body from a pipe exits at its match
+#     while the writer still writes, and the check failed on a good script.
+{ cat "$SCRIPT"; for _ in $(seq 1 4000); do echo ': filler line of the long-script self-test, no chart here'; done; } > "$WORK/long.sh"
+if ! assert_one_path "$WORK/long.sh" >/dev/null 2>&1; then
+  echo "✗ self-test broken: a good script with a long tail must pass (a grep read from a pipe?)" >&2
+  exit 1
+fi
 
 # --- self-test 1: a chart named directly is rejected -----------------------
 sed 's|mapfile -t CRDS_CHART < <(chart_args gibson-crds)||; s|helm upgrade --install gibson-crds "${CRDS_CHART\[@\]}"|helm upgrade --install gibson-crds "${CHART_DIR}/gibson-crds"|' \
