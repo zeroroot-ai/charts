@@ -595,8 +595,12 @@ gibson:
         # https_spiffe. It is in the fleet domain.
         endpointSPIFFEID: ""
         # trustDomainBundle is the first bundle of the fleet domain, in the
-        # SPIFFE format. Optional: with https_spiffe, SPIRE needs it before
-        # its first fetch can verify the endpoint.
+        # SPIFFE format (spire-server bundle show -format spiffe on the fleet
+        # SPIRE server). Required with https_spiffe: SPIRE verifies the
+        # endpoint with it before its first fetch. SPIRE also refuses the
+        # daemon registration (federatesWith) until it holds a bundle of the
+        # domain, so with no bundle the daemon gets no SVID at all. The
+        # kind exit test exit-test-fleet-federation.yml measured that.
         trustDomainBundle: ""
       # callTimeout bounds a single sandboxed tool call. Go duration string;
       # the daemon defaults empty to 5m.

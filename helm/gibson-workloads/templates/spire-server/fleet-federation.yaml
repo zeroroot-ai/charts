@@ -42,6 +42,12 @@ scripts/check-spire-federation.py renders both cases.
 {{- if not (hasPrefix (printf "spiffe://%s/" $domain) $eid) }}
 {{- fail (printf "sandbox.setec.federation.endpointSPIFFEID must be a SPIFFE ID in the fleet domain %q with the https_spiffe profile, got %q" $domain $eid) }}
 {{- end }}
+{{- /* SPIRE verifies an https_spiffe endpoint with a bundle of its domain,
+       and it refuses the daemon registration (federatesWith) until it
+       holds one: with no first bundle the daemon gets no SVID at all. */}}
+{{- if not (get $f "trustDomainBundle") }}
+{{- fail (printf "sandbox.setec.federation.trustDomainBundle is required with the https_spiffe profile: the first bundle of the fleet domain %q. Without it SPIRE cannot verify the bundle endpoint and refuses the daemon registration, so the daemon gets no SVID" $domain) }}
+{{- end }}
 {{- end }}
 apiVersion: spire.spiffe.io/v1alpha1
 kind: ClusterFederatedTrustDomain
