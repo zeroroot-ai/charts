@@ -1,0 +1,44 @@
+# The daemon of an install dials a setec fleet in another SPIFFE trust
+# domain, and the fleet accepts it (setec#251, ADR-0164, the outside fleet
+# seam of ADR-0087).
+#
+# In plain words: the chart source installs on kind with the values of an
+# outside fleet in the trust domain fleet.test (tests/federation/install-values.yaml).
+# tests/federation/run.sh then runs the fleet in that domain, with its own
+# SPIRE server, and a third domain that the fleet does not trust. A workload
+# with the SPIFFE ID of the daemon reaches the fleet and gets an application
+# answer. The caller of the third domain is refused in the TLS handshake.
+#
+# The steps are published-install.yml with from_source: true. One copy of
+# the install steps, so this test and the baseline install cannot drift.
+#
+# ADR-0080: an exit test never runs on a pull request. It runs on push to
+# main and on dispatch (charts#380).
+name: exit-test-fleet-federation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'helm/**'
+      - 'scripts/baseline-up.sh'
+      - 'tests/federation/**'
+      - '.github/workflows/published-install.yml'
+      - '.github/workflows/exit-test-fleet-federation.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: exit-test-fleet-federation-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    uses: ./.github/workflows/published-install.yml
+    with:
+      from_source: true
+      extra_values: tests/federation/install-values.yaml
+      after_install: tests/federation/run.sh
+    secrets: inherit

@@ -69,6 +69,25 @@ on:
         required: false
         type: string
         default: ""
+      extra_values:
+        description: >-
+          Space-separated repository paths of values files, layered on the
+          install as EXTRA_VALUES of baseline-up.sh. Only a caller that tests a
+          configuration the profile does not ship sets it (the fleet
+          federation exit test).
+        required: false
+        type: string
+        default: ""
+      after_install:
+        description: >-
+          A repository path of a script that runs after the install and its
+          assertions, before the network policy check, with the environment of
+          the install (NS, SUBSTRATE_ENV, RUNG, EXTRA_VALUES). A scenario that
+          needs more than the platform on the cluster runs here, so the
+          policy check also reads its flows.
+        required: false
+        type: string
+        default: ""
       upgrade_from_previous:
         description: >-
           Install the PREVIOUS published version first, converge it, then upgrade
@@ -294,6 +313,7 @@ jobs:
           SUBSTRATE_ENV: ${{ runner.temp }}/substrate/kind/substrate.env
           RUNG: developer
           OVERLAY: ${{ inputs.overlay }}
+          EXTRA_VALUES: ${{ inputs.extra_values }}
         run: scripts/baseline-up.sh
 
       - name: The guest install runs no second copy of the four operators
@@ -548,6 +568,20 @@ jobs:
       # Then the live fixture: a pod with no network label dials Postgres. The
       # policy must refuse it, and Hubble must show the drop. Without that the
       # first half could pass on a cluster that records no flow at all.
+      - name: The scenario of the caller
+        if: inputs.after_install != ''
+        env:
+          CHART_VERSION: ${{ steps.version.outputs.version }}
+          SUBSTRATE_ENV: ${{ runner.temp }}/substrate/kind/substrate.env
+          RUNG: developer
+          OVERLAY: ${{ inputs.overlay }}
+          EXTRA_VALUES: ${{ inputs.extra_values }}
+          SCENARIO: ${{ inputs.after_install }}
+        run: |
+          set -euo pipefail
+          [ -x "$SCENARIO" ] || { echo "::error::after_install names $SCENARIO, which is not an executable file of this checkout"; exit 1; }
+          "$SCENARIO"
+
       - name: No flow of the release is dropped by a network policy
         run: |
           set -euo pipefail
