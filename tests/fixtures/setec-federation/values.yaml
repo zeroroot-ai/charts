@@ -1,0 +1,23 @@
+# Two enrolled setec frontend clients in two foreign trust domains, one of
+# them twice, and the daemon of the install (scripts/check-setec-federation.py).
+gibson-workloads:
+  setec:
+    frontend:
+      clients:
+        - name: gibson
+          spiffePath: platform/daemon
+        - name: east
+          spiffeID: spiffe://east.example.org/platform/daemon
+          federation:
+            bundleEndpointURL: https://spire.east.example.org:8443
+            endpointSPIFFEID: spiffe://east.example.org/spire/server
+        - name: east-other
+          spiffeID: spiffe://east.example.org/platform/other
+          federation:
+            bundleEndpointURL: https://spire.east.example.org:8443
+            endpointSPIFFEID: spiffe://east.example.org/spire/server
+        - name: alpha
+          spiffeID: spiffe://alpha.example.net/platform/daemon
+          federation:
+            bundleEndpointURL: https://spire.alpha.example.net:8443
+            bundleEndpointProfile: https_web

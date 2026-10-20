@@ -117,6 +117,33 @@ frontend Pod, built from global.spire.trustDomain (ADR-0164).
 {{- end }}
 
 {{/*
+gibson.setecFrontendFederatesWith — the JSON list of the foreign SPIFFE trust
+domains whose bundles the setec frontend needs (setec#251, ADR-0164).
+
+An enrolled frontend client (setec.frontend.clients) with a full spiffeID in
+another trust domain than this install gets a ClusterFederatedTrustDomain
+from the setec chart (templates/federation.yaml). SPIRE gives a workload the
+bundle of a federated domain only when its registration lists that domain
+under federatesWith. So the frontend registration lists each such domain.
+A client with spiffePath is in the trust domain of the install, and adds
+nothing. The list is sorted and has each domain once. It is empty when no
+client is foreign, and the registration then has no federatesWith field.
+*/}}
+{{- define "gibson.setecFrontendFederatesWith" -}}
+{{- $own := include "gibson.trustDomain" . -}}
+{{- $out := list -}}
+{{- range ((.Values.setec).frontend).clients | default list -}}
+{{- if .spiffeID -}}
+{{- $domain := regexReplaceAll "^spiffe://([^/]+).*$" .spiffeID "${1}" -}}
+{{- if and (ne $domain $own) (not (has $domain $out)) -}}
+{{- $out = append $out $domain -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | sortAlpha | toJson -}}
+{{- end }}
+
+{{/*
 gibson.envoy.wafDirectives — read a files/coraza/<chain>.conf and emit the
 JSON array of directive lines the Coraza WASM filter takes in its
 `directives_map` (Edge WAF, deploy#1658). Comment and blank lines are

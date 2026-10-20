@@ -435,6 +435,15 @@ spec:
   workloadSelectorTemplates:
     - "k8s:ns:{{ $setecNs }}"
     - "k8s:sa:{{ printf "%s-frontend" (include "gibson.setecFullname" .) }}"
+  {{- /* The foreign trust domains of the enrolled clients (setec#251). The
+         setec chart writes a ClusterFederatedTrustDomain for each one, and
+         SPIRE serves its bundle to this workload only when it is listed. */}}
+  {{- with (include "gibson.setecFrontendFederatesWith" . | fromJsonArray) }}
+  federatesWith:
+    {{- range . }}
+    - {{ . | quote }}
+    {{- end }}
+  {{- end }}
 {{- end }}
 
 {{- if (.Values.gibson.e2eRunner).enabled }}
