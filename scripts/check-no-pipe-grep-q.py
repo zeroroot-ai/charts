@@ -90,7 +90,7 @@ def is_shell(path):
     return first.startswith(b"#!") and (b"bash" in first or re.search(rb"\bsh\b", first) is not None)
 
 
-SOURCE_LINE = re.compile(r"^\s*(?:source|\.)\s+\S*?([A-Za-z0-9_.-]+\.sh)\b")
+SOURCE_LINE = re.compile(r"^\s*(?:source|\.)\s+.*?([A-Za-z0-9_.-]+\.sh)\b")
 
 
 def sets_pipefail(text):
@@ -254,10 +254,12 @@ def selftest():
         "/s/main.sh": '#!/usr/bin/env bash\nset -euo pipefail\nsource "${DIR}/lib/probe.sh"\n',
         "/s/lib/probe.sh": '# shellcheck shell=bash\nis_ip() { if printf "%s" "$1" | grep -qE "^[0-9.]+$"; then return 0; fi; }\n',
         "/s/other.sh": '#!/usr/bin/env bash\nset -eu\n. "$(dirname "$0")/lib/plain.sh"\n',
+        "/s/up.sh": '#!/usr/bin/env bash\nset -euo pipefail\n. "$(dirname "$0")/lib/hosts.sh"\n',
+        "/s/lib/hosts.sh": 'h() { kubectl get cm | grep -q x; }\n',
         "/s/lib/plain.sh": 'f() { printf x | grep -q x; }\n',
     }
     got = scan_texts(texts, lambda p: p)
-    ok = len(got) == 1 and got[0].startswith("/s/lib/probe.sh:")
+    ok = len(got) == 2 and {g.split(":")[0] for g in got} == {"/s/lib/probe.sh", "/s/lib/hosts.sh"}
     print(f"  {'ok  ' if ok else 'FAIL'} FAILING FIXTURE: a sourced lib with no pipefail word, and none in a lib of a script without it")
     bad += 0 if ok else 1
     if bad:
