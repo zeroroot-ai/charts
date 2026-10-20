@@ -3949,20 +3949,89 @@ data:
     MARKER_TEXT="gibson-zitadel-masterkey-marker-v1"
     hex_of() { od -An -v -tx1 | tr -d ' \n'; }
     bin_of() { printf '%b' "$(printf '%s' "$1" | sed 's/../\\x&/g')"; }
+    # mk_cfb e|d IVHEX: AES-256-CFB (the cipher.NewCFBEncrypter of Zitadel).
+    # stdin is the key as hex on line 1 and the data as hex after it, and stdout
+    # is the result as hex. openssl enc takes its key only as -K on the argv,
+    # where each process of the pod and root on the node can read it
+    # (GHSA-5c5h-rrh4-5xw3). So the AES block cipher is this Perl program, and
+    # perl-base of the client image runs it. The program text and the IV are on
+    # the argv. The key and the data never are. tests/zitadel-masterkey-rotation.bats
+    # compares it with openssl on random keys and data.
+    MK_AES_PL='
+    use strict; use warnings;
+    my ($mode, $ivh) = @ARGV;
+    my $kh = <STDIN>; defined $kh or exit 2; chomp $kh;
+    my $dh = do { local $/; <STDIN> }; $dh = "" unless defined $dh; $dh =~ s/\s+//g;
+    length($kh) == 64 && $kh !~ /[^0-9a-fA-F]/ or exit 2;
+    length($ivh) == 32 && $ivh !~ /[^0-9a-fA-F]/ or exit 2;
+    $mode eq "e" || $mode eq "d" or exit 2;
+    sub rotl8 { my ($x, $s) = @_; return (($x << $s) | ($x >> (8 - $s))) & 0xff; }
+    my @sb = (0) x 256;
+    my ($p, $q) = (1, 1);
+    do {
+      $p = ($p ^ ($p << 1) ^ (($p & 0x80) ? 0x1b : 0)) & 0xff;
+      $q ^= $q << 1; $q ^= $q << 2; $q ^= $q << 4; $q &= 0xff;
+      $q ^= 0x09 if $q & 0x80;
+      $sb[$p] = ($q ^ rotl8($q, 1) ^ rotl8($q, 2) ^ rotl8($q, 3) ^ rotl8($q, 4) ^ 0x63) & 0xff;
+    } while ($p != 1);
+    $sb[0] = 0x63;
+    sub xt { my $a = shift; return (($a << 1) ^ (($a & 0x80) ? 0x1b : 0)) & 0xff; }
+    my @k = map { hex } unpack("(A2)*", $kh);
+    my @w = @k;
+    my $rc = 1;
+    for (my $i = 8; $i < 60; $i++) {
+      my @t = @w[4 * ($i - 1) .. 4 * ($i - 1) + 3];
+      if ($i % 8 == 0) {
+        @t = (@t[1, 2, 3], $t[0]);
+        @t = map { $sb[$_] } @t;
+        $t[0] ^= $rc; $rc = xt($rc);
+      } elsif ($i % 8 == 4) {
+        @t = map { $sb[$_] } @t;
+      }
+      push @w, map { $w[4 * ($i - 8) + $_] ^ $t[$_] } 0 .. 3;
+    }
+    sub block {
+      my @s = @_;
+      $s[$_] ^= $w[$_] for 0 .. 15;
+      for my $r (1 .. 14) {
+        @s = map { $sb[$_] } @s;
+        @s = map { $s[($_ % 4) + 4 * ((int($_ / 4) + ($_ % 4)) % 4)] } 0 .. 15;
+        if ($r != 14) {
+          for my $c (0 .. 3) {
+            my @a = @s[4 * $c .. 4 * $c + 3];
+            my $t = $a[0] ^ $a[1] ^ $a[2] ^ $a[3];
+            $s[4 * $c + $_] = $a[$_] ^ $t ^ xt($a[$_] ^ $a[($_ + 1) % 4]) for 0 .. 3;
+          }
+        }
+        $s[$_] ^= $w[16 * $r + $_] for 0 .. 15;
+      }
+      return @s;
+    }
+    my @prev = map { hex } unpack("(A2)*", $ivh);
+    my @in = map { hex } unpack("(A2)*", $dh);
+    my @out;
+    for (my $o = 0; $o < @in; $o += 16) {
+      my @ks = block(@prev);
+      my $n = @in - $o < 16 ? @in - $o : 16;
+      my @c = map { $in[$o + $_] ^ $ks[$_] } 0 .. $n - 1;
+      push @out, @c;
+      @prev = $mode eq "e" ? @c : @in[$o .. $o + 15] if $n == 16;
+    }
+    print join("", map { sprintf "%02x", $_ } @out);
+    '
+    mk_cfb() { perl -e "$MK_AES_PL" "$1" "$2"; }
     # mk_decrypt_hex STRING KEY: the plaintext of a Zitadel AESString, as hex.
     mk_decrypt_hex() {
-      local raw kh
+      local raw
       raw="$(printf '%s' "$1" | tr '_-' '/+' | base64 -d | hex_of)"
       [ "${#raw}" -ge 32 ] || return 1
-      kh="$(printf '%s' "$2" | hex_of)"
-      bin_of "${raw:32}" | openssl enc -d -aes-256-cfb -K "$kh" -iv "${raw:0:32}" -nopad | hex_of
+      { printf '%s' "$2" | hex_of; printf '\n%s' "${raw:32}"; } | mk_cfb d "${raw:0:32}"
     }
     # mk_encrypt_hex HEX KEY: a Zitadel AESString of the plaintext HEX.
     mk_encrypt_hex() {
-      local iv kh ct
+      local iv ct
       iv="$(openssl rand -hex 16)"
-      kh="$(printf '%s' "$2" | hex_of)"
-      ct="$(bin_of "$1" | openssl enc -aes-256-cfb -K "$kh" -iv "$iv" -nopad | hex_of)"
+      ct="$({ printf '%s' "$2" | hex_of; printf '\n%s' "$1"; } | mk_cfb e "$iv")"
       bin_of "${iv}${ct}" | base64 -w0 | tr '+/' '-_'
     }
     marker_hex="$(printf '%s' "$MARKER_TEXT" | hex_of)"
@@ -15588,20 +15657,89 @@ spec:
               MARKER_TEXT="gibson-zitadel-masterkey-marker-v1"
               hex_of() { od -An -v -tx1 | tr -d ' \n'; }
               bin_of() { printf '%b' "$(printf '%s' "$1" | sed 's/../\\x&/g')"; }
+              # mk_cfb e|d IVHEX: AES-256-CFB (the cipher.NewCFBEncrypter of Zitadel).
+              # stdin is the key as hex on line 1 and the data as hex after it, and stdout
+              # is the result as hex. openssl enc takes its key only as -K on the argv,
+              # where each process of the pod and root on the node can read it
+              # (GHSA-5c5h-rrh4-5xw3). So the AES block cipher is this Perl program, and
+              # perl-base of the client image runs it. The program text and the IV are on
+              # the argv. The key and the data never are. tests/zitadel-masterkey-rotation.bats
+              # compares it with openssl on random keys and data.
+              MK_AES_PL='
+              use strict; use warnings;
+              my ($mode, $ivh) = @ARGV;
+              my $kh = <STDIN>; defined $kh or exit 2; chomp $kh;
+              my $dh = do { local $/; <STDIN> }; $dh = "" unless defined $dh; $dh =~ s/\s+//g;
+              length($kh) == 64 && $kh !~ /[^0-9a-fA-F]/ or exit 2;
+              length($ivh) == 32 && $ivh !~ /[^0-9a-fA-F]/ or exit 2;
+              $mode eq "e" || $mode eq "d" or exit 2;
+              sub rotl8 { my ($x, $s) = @_; return (($x << $s) | ($x >> (8 - $s))) & 0xff; }
+              my @sb = (0) x 256;
+              my ($p, $q) = (1, 1);
+              do {
+                $p = ($p ^ ($p << 1) ^ (($p & 0x80) ? 0x1b : 0)) & 0xff;
+                $q ^= $q << 1; $q ^= $q << 2; $q ^= $q << 4; $q &= 0xff;
+                $q ^= 0x09 if $q & 0x80;
+                $sb[$p] = ($q ^ rotl8($q, 1) ^ rotl8($q, 2) ^ rotl8($q, 3) ^ rotl8($q, 4) ^ 0x63) & 0xff;
+              } while ($p != 1);
+              $sb[0] = 0x63;
+              sub xt { my $a = shift; return (($a << 1) ^ (($a & 0x80) ? 0x1b : 0)) & 0xff; }
+              my @k = map { hex } unpack("(A2)*", $kh);
+              my @w = @k;
+              my $rc = 1;
+              for (my $i = 8; $i < 60; $i++) {
+                my @t = @w[4 * ($i - 1) .. 4 * ($i - 1) + 3];
+                if ($i % 8 == 0) {
+                  @t = (@t[1, 2, 3], $t[0]);
+                  @t = map { $sb[$_] } @t;
+                  $t[0] ^= $rc; $rc = xt($rc);
+                } elsif ($i % 8 == 4) {
+                  @t = map { $sb[$_] } @t;
+                }
+                push @w, map { $w[4 * ($i - 8) + $_] ^ $t[$_] } 0 .. 3;
+              }
+              sub block {
+                my @s = @_;
+                $s[$_] ^= $w[$_] for 0 .. 15;
+                for my $r (1 .. 14) {
+                  @s = map { $sb[$_] } @s;
+                  @s = map { $s[($_ % 4) + 4 * ((int($_ / 4) + ($_ % 4)) % 4)] } 0 .. 15;
+                  if ($r != 14) {
+                    for my $c (0 .. 3) {
+                      my @a = @s[4 * $c .. 4 * $c + 3];
+                      my $t = $a[0] ^ $a[1] ^ $a[2] ^ $a[3];
+                      $s[4 * $c + $_] = $a[$_] ^ $t ^ xt($a[$_] ^ $a[($_ + 1) % 4]) for 0 .. 3;
+                    }
+                  }
+                  $s[$_] ^= $w[16 * $r + $_] for 0 .. 15;
+                }
+                return @s;
+              }
+              my @prev = map { hex } unpack("(A2)*", $ivh);
+              my @in = map { hex } unpack("(A2)*", $dh);
+              my @out;
+              for (my $o = 0; $o < @in; $o += 16) {
+                my @ks = block(@prev);
+                my $n = @in - $o < 16 ? @in - $o : 16;
+                my @c = map { $in[$o + $_] ^ $ks[$_] } 0 .. $n - 1;
+                push @out, @c;
+                @prev = $mode eq "e" ? @c : @in[$o .. $o + 15] if $n == 16;
+              }
+              print join("", map { sprintf "%02x", $_ } @out);
+              '
+              mk_cfb() { perl -e "$MK_AES_PL" "$1" "$2"; }
               # mk_decrypt_hex STRING KEY: the plaintext of a Zitadel AESString, as hex.
               mk_decrypt_hex() {
-                local raw kh
+                local raw
                 raw="$(printf '%s' "$1" | tr '_-' '/+' | base64 -d | hex_of)"
                 [ "${#raw}" -ge 32 ] || return 1
-                kh="$(printf '%s' "$2" | hex_of)"
-                bin_of "${raw:32}" | openssl enc -d -aes-256-cfb -K "$kh" -iv "${raw:0:32}" -nopad | hex_of
+                { printf '%s' "$2" | hex_of; printf '\n%s' "${raw:32}"; } | mk_cfb d "${raw:0:32}"
               }
               # mk_encrypt_hex HEX KEY: a Zitadel AESString of the plaintext HEX.
               mk_encrypt_hex() {
-                local iv kh ct
+                local iv ct
                 iv="$(openssl rand -hex 16)"
-                kh="$(printf '%s' "$2" | hex_of)"
-                ct="$(bin_of "$1" | openssl enc -aes-256-cfb -K "$kh" -iv "$iv" -nopad | hex_of)"
+                ct="$({ printf '%s' "$2" | hex_of; printf '\n%s' "$1"; } | mk_cfb e "$iv")"
                 bin_of "${iv}${ct}" | base64 -w0 | tr '+/' '-_'
               }
               marker_hex="$(printf '%s' "$MARKER_TEXT" | hex_of)"

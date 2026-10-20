@@ -79,13 +79,60 @@ CONNINFO_PW = re.compile(r"\bpassword=\$")
 ASSIGN_WORD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
-def sensitive_name(name):
-    return any(s.upper() in SENSITIVE for s in name.split("_") if s)
+# A KEY segment names a key value when another segment says which kind
+# (SEAL_KEY, API_KEY, PRIVATE_KEY, MASTER_KEY). A bare KEY is often the name
+# of a key (a KV path, a data key), so it alone is not sensitive: a variable
+# that holds key bytes is caught by TAINTED instead.
+KEY_KIND = {"SEAL", "UNSEAL", "API", "PRIVATE", "PRIV", "MASTER", "SIGNING", "ENCRYPTION", "ACCESS",
+            "HMAC", "AES", "KEK", "DEK", "SSH", "TLS", "CLIENT", "SESSION", "WRAP", "UNWRAP"}
+# A variable assigned from a command that reads or makes a secret holds one,
+# whatever its name (kh="$(printf '%s' "$2" | hex_of)" after a read of a
+# masterkey). scan_text fills TAINTED for each file before it judges a line.
+TAINT_SOURCES = re.compile(
+    r"\bget\s+secrets?\b|base64\s+(-d|--decode)\b|@base64d|\b(bao|vault)\s+(read|kv\s+get)\b"
+    r"|openssl\s+rand\b|/dev/u?random|\bkeyring_get\b|client_secret|access_token|refresh_token|id_token"
+    r"|client_token|X-Vault-Token|\bjq\b[^|;]*['\"\s]\.token\b|\bgen_(rand|pw)\b"
+    r"|\$\{?[A-Z_]*(MASTERKEY|PASSWORD|TOKEN|SECRET|SEAL_KEY)[A-Z_]*")
+TAINTED = set()
+# A read of a field that holds no secret (an id, a user name, the metadata of
+# an object) taints nothing, even from a Secret.
+NOT_SECRET_FIELD = re.compile(r"\.metadata\.|\.data\.\[?\"?(\w*_id|username|user|host|port|url)\b")
+
+
+def sensitive_name(name, tainted=True):
+    """True when the name says it holds a secret, or (tainted) when a secret
+    reached the variable of that name."""
+    segs = [x.upper() for x in name.split("_") if x]
+    if tainted and name in TAINTED:
+        return True
+    if any(x in SENSITIVE for x in segs):
+        return True
+    return "KEY" in segs and any(x in KEY_KIND for x in segs)
 
 
 def sensitive_word(word):
-    """True when the word expands a variable with a sensitive name."""
+    """True when the word expands a variable with a sensitive name, or one
+    assigned from a secret."""
     return any(sensitive_name(v) for v in VAR.findall(word))
+
+
+ASSIGN_LINE = re.compile(r"^\s*(?:(?:local|export|readonly)\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+
+
+def taint(lines):
+    """The variables of a file that a secret reaches, by assignment."""
+    out = set()
+    for _ in range(3):
+        for _, code in lines:
+            m = ASSIGN_LINE.match(code)
+            if not m:
+                continue
+            name, rhs = m.group(1), m.group(2)
+            if NOT_SECRET_FIELD.search(rhs):
+                continue
+            if TAINT_SOURCES.search(rhs) or any(v in out for v in VAR.findall(rhs)):
+                out.add(name)
+    return out
 
 
 def strip_comment(line):
@@ -237,7 +284,7 @@ def _line_findings(code):
             name, val = w[i + 1], w[i + 2]
             # A positional parameter ($1 .. $9) of a helper function can be
             # anything its caller passed, a token or a KV object included.
-            if "$" in val and (sensitive_name(name) or sensitive_word(val) or re.search(r"\$\{?[1-9]", val)
+            if "$" in val and (sensitive_name(name, False) or sensitive_word(val) or re.search(r"\$\{?[1-9]", val)
                                     or "$(" in val):
                 out.append("a secret in a jq --arg on the argv (use --rawfile, stdin or env)")
         # 5. kubectl --from-literal
@@ -246,7 +293,7 @@ def _line_findings(code):
             # A command substitution in a Secret is a value made here (a
             # random key, a line of a keyring file).
             if "$" in lit and ((re.search(r"create\s+secret", code) and "$(" in lit) or sensitive_word(lit)
-                               or sensitive_name(lit.split("=", 1)[0])):
+                               or sensitive_name(lit.split("=", 1)[0], False)):
                 out.append("a secret in kubectl --from-literal on the argv (use --from-file=NAME=/dev/stdin)")
         # 6. env program
         if word == "env" and (i == 0 or w[i - 1] in (";", "|", "&", "(", "--", "exec", "then", "do", "!")):
@@ -267,6 +314,14 @@ def _line_findings(code):
                 out.append("a secret after a password option on the argv")
         if re.search(r"(^|[^A-Za-z])pass:\$", word):
             out.append("a secret in an openssl pass: argument on the argv")
+        # openssl takes a raw key (-K) or a password (-k, -pass, -passin,
+        # -passout) on its argv. Only env:, file: and fd: sources stay off it.
+        if word in ("-K", "-k", "-pass", "-passin", "-passout", "-kfile") and "$" in nxt \
+                and re.search(r"\bopenssl\b", code) and not re.match(r"^(env|file|fd):", nxt):
+            out.append("a key or password in an openssl option on the argv (use -pass env: or file:)")
+        if re.search(r"\b(mysql|mariadb|mysqldump)\b", code) and (re.match(r"^-p.*\$", word)
+                                                                 or re.match(r"^--password=.*\$", word)):
+            out.append("a password in mysql -p on the argv (use MYSQL_PWD or an option file)")
         if re.search(r"\bredis-cli\b", code) and re.match(r"^>\$", word):
             out.append("a password in a redis-cli ACL argument on the argv (use redis-cli -x and stdin)")
         if word == "-a" and "$" in nxt and re.search(r"\bredis-cli\b", code):
@@ -303,7 +358,10 @@ def _line_findings(code):
 
 def scan_text(path, text):
     out = []
-    for n, code in logical_lines(text):
+    lines = logical_lines(text)
+    TAINTED.clear()
+    TAINTED.update(taint(lines))
+    for n, code in lines:
         for label in line_findings(code):
             out.append(f"{path}:{n}: {label}")
     return out
@@ -420,6 +478,18 @@ CASES = {
     "ok-env-value-url": ('              value: {{ printf "postgres://$(U):$(DB_PASSWORD)@%s" .h }}', False),
     "url-password": ('psql "postgres://app:${DB_PASSWORD}@db:5432/app" -c "select 1"', True),
     "conninfo-password": ('psql "host=db user=app password=$PGPASS" -c x', True),
+    "openssl-K": ('bin_of "$c" | openssl enc -d -aes-256-cfb -K "$kh" -iv "$iv" -nopad', True),
+    "openssl-k": ('openssl enc -aes-256-cbc -k "$x" -in f', True),
+    "openssl-passin": ('openssl rsa -in k.pem -passin "$P"', True),
+    "ok-openssl-pass-env": ('openssl rsa -in k.pem -passin env:KEY_PASS', False),
+    "mysql-p": ('mysql -u root -p"$DB_ROOT" -e "select 1"', True),
+    "seal-key-name": ('curl -d "x" -H "X-Seal: $UNSEAL_KEY" https://x', True),
+    "api-key-name": ('jq -n --arg k "$API_KEY" \'{k:$k}\'', True),
+    "tainted-opaque-name": ('kh="$(kubectl get secret s -o jsonpath={.data.k} | base64 -d)"\njq -n --arg k "$kh" \'{k:$k}\'', True),
+    "tainted-propagates": ('mk="$ZITADEL_MASTERKEY"\nkh="$(printf %s "$mk" | od -An -tx1)"\nfoo --opt "$kh" | jq -n --arg h "$kh" \'.\'', True),
+    "ok-secret-id-field": ('ORG="$(kubectl get secret s -o jsonpath={.data.org_id} | base64 -d)"\ncurl -H "x-org: ${ORG}" x', False),
+    "ok-arg-name-tainted": ('t="$(cat /run/token)"\njq -n --arg t "$PERIOD" \'{t:$t}\'', False),
+    "ok-key-name": ('jq -r --arg k "$KEYRING_KEY" \'.data[$k]\'', False),
     "openssl-pass": ('openssl enc -aes-256-cbc -pass "pass:$SEED" -in x', True),
     "bao-write": ('bao write auth/x/role/r secret_id="$SECRET_ID"', True),
     "bao-login": ('bao login "$ROOT_TOKEN"', True),
