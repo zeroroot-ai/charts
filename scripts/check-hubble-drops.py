@@ -40,6 +40,32 @@ import sys
 POLICY_REASONS = ("POLICY_DENIED", "POLICY_DENY", "AUTH_REQUIRED")
 
 
+def gone_peer(flow: dict) -> bool:
+    """True for a TCP packet with no SYN to the world entity: a late packet
+    of a connection whose peer pod is gone.
+
+    When a pod ends, Cilium removes its endpoint and the connection tracking
+    entries of its address. A late ACK, FIN or RST of a server to that
+    address then has no entry and no identity, so the policy of the server
+    sees new egress to the world entity and drops it. Main run 39447716168
+    showed it: the OpenFGA server sent two packets to 10.244.0.187 port 60814
+    (world), the ephemeral port of a client that had just ended. Such a drop
+    says nothing about a policy: the flow was allowed when it started, and a
+    packet with no SYN starts no connection. A SYN to the world entity, or
+    any packet to a live pod, stays a finding.
+    """
+    tcp = (flow.get("l4") or {}).get("TCP")
+    if not isinstance(tcp, dict):
+        return False
+    flags = tcp.get("flags") or {}
+    if not flags or flags.get("SYN"):
+        return False
+    dst = flow.get("destination") or {}
+    if dst.get("pod_name"):
+        return False
+    return "reserved:world" in (dst.get("labels") or [])
+
+
 def endpoint(e: dict, ip: str) -> str:
     e = e or {}
     if e.get("pod_name"):
@@ -79,6 +105,8 @@ def policy_drops(lines: list[str], namespace: str) -> list[dict]:
         src, dst = flow.get("source") or {}, flow.get("destination") or {}
         if namespace and namespace not in (src.get("namespace"), dst.get("namespace")):
             continue
+        if gone_peer(flow):
+            continue
         ip = flow.get("IP") or {}
         out.append({
             "source": endpoint(src, ip.get("source", "")),
@@ -88,6 +116,7 @@ def policy_drops(lines: list[str], namespace: str) -> list[dict]:
             "direction": flow.get("traffic_direction", "?"),
             "reason": reason,
             "time": flow.get("time", ""),
+            "flags": ",".join(sorted(k for k, v in (((flow.get("l4") or {}).get("TCP") or {}).get("flags") or {}).items() if v)),
         })
     return out
 
@@ -97,8 +126,9 @@ def lines_of(files: list[str]) -> list[str]:
 
 
 def describe(d: dict) -> str:
+    flags = f", TCP {d['flags']}" if d.get("flags") else ""
     return (f"{d['source']} -> {d['destination']} port {d['port']} "
-            f"({d['direction']}, {d['reason']}, {d['time']})")
+            f"({d['direction']}, {d['reason']}{flags}, {d['time']})")
 
 
 def forwarded(lines: list[str], prefix: str, port: str) -> list[dict]:
@@ -197,6 +227,27 @@ def selftest() -> int:
     if len(got) != 1 or "world" not in got[0]["source"]:
         print(f"SELFTEST FAIL: a drop from outside the cluster must fail and name the world entity: {got}")
         return 1
+    # A late packet of a connection whose peer pod is gone passes; a SYN to
+    # the world entity and a late packet to a live pod still fail.
+    late = {"flow": {**FIXTURE_UNLABELED_TO_POSTGRES["flow"],
+                     "IP": {"source": "10.244.0.30", "destination": "10.244.0.187"},
+                     "l4": {"TCP": {"source_port": 8080, "destination_port": 60814,
+                                    "flags": {"ACK": True, "FIN": True}}},
+                     "source": {"namespace": "gibson", "pod_name": "gibson-openfga-x"},
+                     "destination": {"labels": ["reserved:world"]}}}
+    if policy_drops([json.dumps(late)], "gibson"):
+        print("SELFTEST FAIL: a late FIN of a server to a peer pod that is gone (world, no SYN) must pass")
+        return 1
+    syn = {"flow": {**late["flow"], "l4": {"TCP": {"source_port": 40000, "destination_port": 443,
+                                                  "flags": {"SYN": True}}}}}
+    to_pod = {"flow": {**late["flow"], "destination": {"namespace": "gibson", "pod_name": "gibson-x",
+                                                       "labels": ["k8s:app=x"]}}}
+    no_flags = {"flow": {**late["flow"], "l4": {"TCP": {"source_port": 8080, "destination_port": 60814}}}}
+    for what, f in (("a SYN to the world entity", syn), ("a late packet to a live pod", to_pod),
+                    ("a packet with no TCP flags", no_flags)):
+        if len(policy_drops([json.dumps(f)], "gibson")) != 1:
+            print(f"SELFTEST FAIL: {what} must fail")
+            return 1
     trainer = {"flow": {**FIXTURE_FORWARDED["flow"], "l4": {"TCP": {"destination_port": 50051}},
                         "source": {"namespace": "tenant-primary", "pod_name": "belief-trainer-proof-x1"},
                         "destination": {"namespace": "gibson", "pod_name": "gibson-gibson-workloads-0"}}}
@@ -234,7 +285,8 @@ def selftest() -> int:
         print("SELFTEST FAIL: a drop at the destination must not count as an EGRESS drop")
         return 1
     print("  ✓ selftest: a policy drop fails and names its source, destination and port; a forwarded flow, "
-          "another drop reason and other namespaces pass; a caller fixture needs its forwarded flow to its port; "
+          "another drop reason, other namespaces and a late packet to a peer pod that is gone pass; a SYN to the "
+          "world entity fails; a caller fixture needs its forwarded flow to its port; "
           "an expected drop matches its pod and port only")
     return 0
 
