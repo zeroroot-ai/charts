@@ -22,10 +22,11 @@ HOW. It renders the umbrella:
      are one domain, and not the install domain; the Service has the
      federation port; the policy admits the peer namespace on that port
      and opens the fleet bundle endpoint, its namespace and its port;
-  3. four values that must fail the render: a fleet in another domain with
-     no bundle source, a federation value with a fleet in the install
-     domain, an endpoint ID outside the fleet domain, and the endpoint on
-     with no peer.
+  3. six values that must fail the render, each with its own reason: a
+     fleet in another domain with no bundle source, a federation value
+     with no fleet ID, an endpoint ID outside the fleet domain, an empty
+     endpoint ID, the endpoint on with no peer, and a fleet ID in the
+     install domain (read from the baseline render, not from a file).
 --selftest proves that a render with a part missing or wrong fails.
 
 Usage:
@@ -53,6 +54,13 @@ REFUSED = [
      "endpointSPIFFEID must be a SPIFFE ID in the fleet domain"),
     ("the bundle endpoint on with no peer",
      ["--set-json", "global.networkPolicy.spireBundleEndpointFrom.namespaces=[]"], "names no peer"),
+    ("an empty endpoint ID with the https_spiffe profile",
+     ["--set-string", "gibson-workloads.gibson.sandbox.setec.federation.endpointSPIFFEID="],
+     'must be a SPIFFE ID in the fleet domain "fleet.example.org" with the https_spiffe profile, got ""'),
+    # The install domain is read from the baseline render, so no file holds it.
+    ("the install domain as the fleet domain",
+     ["--set-string", "gibson-workloads.gibson.sandbox.setec.spiffeID=spiffe://{own}/ns/setec-fleet/sa/setec-frontend"],
+     "the federation would do nothing"),
 ]
 
 
@@ -192,8 +200,9 @@ def main():
         print("check-spire-federation selftest: 7 cases passed")
         return 0
     findings = [f"baseline: {x}" for x in check_base(base)] + [f"fixture: {x}" for x in check_fixture(fix)]
+    own = facts(base)["own"]
     for label, extra, reason in REFUSED:
-        docs, err = render(extra, fixture=True)
+        docs, err = render([x.replace("{own}", own) for x in extra], fixture=True)
         if docs is not None:
             findings.append(f"FAILING FIXTURE: {label} rendered, and it must fail the render")
         elif reason not in err:

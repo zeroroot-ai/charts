@@ -102,6 +102,10 @@ spec:
             - port: {{ $port | quote }}
               protocol: TCP
     {{- else }}
+    {{- /* A peer in this cluster: its namespace and port. The chart cannot
+           narrow to the pods of the peer SPIRE server, because it does not
+           know the chart or the labels of that server, so the rule names
+           the namespace of the bundle endpoint host and its one port. */}}
     {{- $labels := splitList "." $host }}
     {{- $peerNs := .Release.Namespace }}
     {{- if gt (len $labels) 1 }}
