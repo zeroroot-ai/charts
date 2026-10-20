@@ -600,7 +600,11 @@ gibson:
         # endpoint with it before its first fetch. SPIRE also refuses the
         # daemon registration (federatesWith) until it holds a bundle of the
         # domain, so with no bundle the daemon gets no SVID at all. The
-        # kind exit test exit-test-fleet-federation.yml measured that.
+        # kind exit test exit-test-fleet-federation.yml measured that. The
+        # render fails on a value that is not JSON or has no key.
+        # With https_web the value is optional, and setting it removes the
+        # same gate: without it the daemon has no SVID until the first fetch
+        # of the fleet endpoint by SPIRE succeeds.
         trustDomainBundle: ""
       # callTimeout bounds a single sandboxed tool call. Go duration string;
       # the daemon defaults empty to 5m.

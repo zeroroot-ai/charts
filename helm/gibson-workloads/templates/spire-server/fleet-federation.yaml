@@ -49,6 +49,14 @@ scripts/check-spire-federation.py renders both cases.
 {{- fail (printf "sandbox.setec.federation.trustDomainBundle is required with the https_spiffe profile: the first bundle of the fleet domain %q. Without it SPIRE cannot verify the bundle endpoint and refuses the daemon registration, so the daemon gets no SVID" $domain) }}
 {{- end }}
 {{- end }}
+{{- /* A bundle that is not a SPIFFE bundle with keys is the same outage
+       at run time: SPIRE holds no key of the domain. */}}
+{{- with get $f "trustDomainBundle" }}
+{{- $b := fromJson . }}
+{{- if or (hasKey $b "Error") (not (kindIs "slice" (get $b "keys"))) (eq (len (get $b "keys" | default list)) 0) }}
+{{- fail (printf "sandbox.setec.federation.trustDomainBundle must be a SPIFFE bundle in JSON with at least one key (spire-server bundle show -format spiffe on the server of %q)" $domain) }}
+{{- end }}
+{{- end }}
 apiVersion: spire.spiffe.io/v1alpha1
 kind: ClusterFederatedTrustDomain
 metadata:

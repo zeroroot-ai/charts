@@ -24,6 +24,7 @@ config must carry it.
   check-seam-conditions.py --selftest  prove each finding fails
 """
 import glob
+import json
 import os
 import subprocess
 import sys
@@ -136,7 +137,7 @@ def render_setec_off(root, address, spiffe_id):
         fed = "gibson-workloads.gibson.sandbox.setec.federation"
         cmd += ["--set-string", f"{fed}.bundleEndpointURL={OUTSIDE_BUNDLE_URL}",
                 "--set-string", f"{fed}.endpointSPIFFEID={OUTSIDE_BUNDLE_ID}",
-                "--set-string", f"{fed}.trustDomainBundle={{\"keys\":[]}}"]
+                "--set-json", f"{fed}.trustDomainBundle=" + json.dumps(json.dumps({"keys": [{"kty": "EC"}]}))]
     p = subprocess.run(cmd, capture_output=True, text=True, check=False)
     return p.returncode, p.stdout, p.stderr
 

@@ -22,10 +22,11 @@ HOW. It renders the umbrella:
      are one domain, and not the install domain; the Service has the
      federation port; the policy admits the peer namespace on that port
      and opens the fleet bundle endpoint, its namespace and its port;
-  3. seven values that must fail the render, each with its own reason: a
+  3. nine values that must fail the render, each with its own reason: a
      fleet in another domain with no bundle source, a federation value
      with no fleet ID, an endpoint ID outside the fleet domain, an empty
-     endpoint ID, no first bundle with https_spiffe, the endpoint on with no
+     endpoint ID, no first bundle with https_spiffe, a bundle that is not
+     JSON, a bundle with no key, the endpoint on with no
      peer, and a fleet ID in the
      install domain (read from the baseline render, not from a file).
 --selftest proves that a render with a part missing or wrong fails.
@@ -61,6 +62,12 @@ REFUSED = [
     ("no first bundle with the https_spiffe profile",
      ["--set-string", "gibson-workloads.gibson.sandbox.setec.federation.trustDomainBundle="],
      "trustDomainBundle is required with the https_spiffe profile"),
+    ("a first bundle that is not JSON",
+     ["--set-string", "gibson-workloads.gibson.sandbox.setec.federation.trustDomainBundle=not-json"],
+     "must be a SPIFFE bundle in JSON with at least one key"),
+    ("a first bundle with no key",
+     ["--set-json", 'gibson-workloads.gibson.sandbox.setec.federation.trustDomainBundle="{\\"keys\\":[]}"'],
+     "must be a SPIFFE bundle in JSON with at least one key"),
     # The install domain is read from the baseline render, so no file holds it.
     ("the install domain as the fleet domain",
      ["--set-string", "gibson-workloads.gibson.sandbox.setec.spiffeID=spiffe://{own}/ns/setec-fleet/sa/setec-frontend"],
