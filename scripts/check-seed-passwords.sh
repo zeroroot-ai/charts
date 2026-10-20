@@ -93,7 +93,7 @@ badpw="$(sample "$WORK/gen_pw.sh")"
 [ -z "$badpw" ] || fail "gen_pw emitted a value that is not 43 alphanumerics: '${badpw}'"
 
 # ---- self-test: the guard must fail on each planted defect ----------------
-printf 'gibson-redis-password password:rand\n' | table_violations | grep -q . \
+[ -n "$(printf 'gibson-redis-password password:rand\n' | table_violations)" ] \
   || die "self-test: password:rand in the table was not detected"
 printf 'gen_pw() {\n  head -c 32 /dev/urandom | base64 | tr -d "\\n=" | tr "+/" "-_"\n}\n' > "$WORK/old.sh"
 old_bad="$(sample "$WORK/old.sh")"

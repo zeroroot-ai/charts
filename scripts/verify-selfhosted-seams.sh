@@ -287,7 +287,7 @@ else
   # Offline installs only: the setup-link Secret exists and holds a link,
   # never a password.
   if kubectl -n "$NAMESPACE" get secret "$FIRST_ADMIN_SECRET" >/dev/null 2>&1; then
-    if kubectl -n "$NAMESPACE" get secret "$FIRST_ADMIN_SECRET" -o jsonpath='{.data.password}' 2>/dev/null | grep -q .; then
+    if [ -n "$(kubectl -n "$NAMESPACE" get secret "$FIRST_ADMIN_SECRET" -o jsonpath='{.data.password}' 2>/dev/null)" ]; then
       fail "offline setup-link Secret ${FIRST_ADMIN_SECRET} carries a password field — no password may ever be written to a Secret (ADR-0093)"
     else
       pass "offline setup-link Secret ${FIRST_ADMIN_SECRET} exists and carries no password"
