@@ -551,7 +551,10 @@ jobs:
       - name: No flow of the release is dropped by a network policy
         run: |
           set -euo pipefail
-          python3 scripts/check-hubble-drops.py --namespace "$NS" --since "$HUBBLE_SINCE"
+          # The raw flow of each policy drop goes to an artifact, so a red run
+          # shows its evidence (TCP flags, addresses, identities).
+          python3 scripts/check-hubble-drops.py --namespace "$NS" --since "$HUBBLE_SINCE" \
+            --evidence "$RUNNER_TEMP/hubble-drops.jsonl"
 
           echo "▶ the fixture: a pod with no client label dials Postgres"
           fixture_since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -667,6 +670,15 @@ jobs:
           done
           kubectl -n "$tns" delete pod hubble-proof-connector-runner --wait=false
           kubectl -n "$tns" delete connectorinstance hubble-proof --wait=false
+
+      - name: Keep the raw flow of each policy drop
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hubble-drops-${{ inputs.from_source && 'source' || 'published' }}-${{ inputs.overlay || 'baseline' }}
+          path: ${{ runner.temp }}/hubble-drops.jsonl
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Diagnose a failure
         if: failure()
