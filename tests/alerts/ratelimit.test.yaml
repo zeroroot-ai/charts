@@ -1,0 +1,101 @@
+# promtool unit test of the edge rate-limit alerts (charts#736).
+# scripts/check-alert-rules-test.sh renders the rules to ratelimit.rules.yaml.
+#
+# The alerts select Envoy metrics by name, and Envoy builds each name from the
+# stat_prefix of a ratelimit filter. A placeholder @ratelimit:<mode>:<n>@
+# stands for that prefix: the harness reads it from the rendered Envoy config.
+# <mode> is fail_open (failure_mode_deny is false) or fail_closed (true), and
+# <n> counts the filters of that mode in the order of their sorted prefixes.
+# A renamed stat_prefix renames the input series, the alert does not see it,
+# and the test fails. A rendered ratelimit filter that no placeholder names
+# fails the harness too.
+rule_files:
+  - ratelimit.rules.yaml
+evaluation_interval: 1m
+tests:
+  # The first fail-open filter lets requests through unchecked: the per-client
+  # alert fires after 2 minutes, and the signup alert stays quiet.
+  - interval: 1m
+    input_series:
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:0@_failure_mode_allowed{envoy_cluster_name="ratelimit_grpc"}'
+        values: '0x5 1+1x15'
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_closed:0@_error{envoy_cluster_name="ratelimit_grpc"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: EdgePerClientQuotaFailingOpen
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: EdgePerClientQuotaFailingOpen
+        exp_alerts: &fail_open
+          - exp_labels: {severity: page, component: ratelimit}
+            exp_annotations:
+              runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/ratelimit.md#edgeperclientquotafailingopen"
+              summary: "Edge per-client quota is failing open — requests pass unchecked"
+              description: |
+                The edge Envoy could not reach the ratelimit service for at least
+                one request in the last 5 minutes and let it through under the
+                per-pod fuse only. The per-client quotas of login and the other
+                fail-open routes are NOT enforced. POST /signup fails closed
+                instead and raises EdgeSignupQuotaFailingClosed (D92). Check
+                gibson-ratelimit pods, the SPIFFE mTLS sidecar, and
+                gibson-redis-stack.
+      - eval_time: 12m
+        alertname: EdgeSignupQuotaFailingClosed
+        exp_alerts: []
+  # The second fail-open filter, alone: the per-client alert fires on it too.
+  - interval: 1m
+    input_series:
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:1@_failure_mode_allowed{envoy_cluster_name="ratelimit_grpc"}'
+        values: '0x5 1+1x15'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: EdgePerClientQuotaFailingOpen
+        exp_alerts: *fail_open
+  # Both fail-open counters stay flat: the per-client alert does not fire.
+  - interval: 1m
+    input_series:
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:0@_failure_mode_allowed{envoy_cluster_name="ratelimit_grpc"}'
+        values: '7x20'
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:1@_failure_mode_allowed{envoy_cluster_name="ratelimit_grpc"}'
+        values: '3x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: EdgePerClientQuotaFailingOpen
+        exp_alerts: []
+  # The fail-closed signup filter gets no quota answer: the signup alert fires
+  # after 2 minutes, and the per-client alert stays quiet.
+  - interval: 1m
+    input_series:
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_closed:0@_error{envoy_cluster_name="ratelimit_grpc"}'
+        values: '0x5 1+1x15'
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_open:0@_failure_mode_allowed{envoy_cluster_name="ratelimit_grpc"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: EdgeSignupQuotaFailingClosed
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: EdgeSignupQuotaFailingClosed
+        exp_alerts:
+          - exp_labels: {severity: page, component: ratelimit}
+            exp_annotations:
+              runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/ratelimit.md#edgesignupquotafailingclosed"
+              summary: "Edge signup quota got no answer — signups are refused with 503"
+              description: |
+                The edge Envoy got no quota answer for at least one POST /signup
+                in the last 5 minutes and refused it with 503 (D92: signup fails
+                closed). New signups fail while this lasts. Check gibson-ratelimit
+                pods, the SPIFFE mTLS sidecar, and gibson-redis-stack.
+      - eval_time: 12m
+        alertname: EdgePerClientQuotaFailingOpen
+        exp_alerts: []
+  # The signup error counter stays flat: the signup alert does not fire.
+  - interval: 1m
+    input_series:
+      - series: 'envoy_cluster_ratelimit_@ratelimit:fail_closed:0@_error{envoy_cluster_name="ratelimit_grpc"}'
+        values: '4x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: EdgeSignupQuotaFailingClosed
+        exp_alerts: []
