@@ -772,33 +772,26 @@ zitadel:
     gibson.zeroroot.ai/client-postgres: "true"
     gibson.zeroroot.ai/kube-api: "true"
     gibson.zeroroot.ai/egress-fqdn: zitadel
+  # The upstream cleanup Job deletes, on uninstall, each Secret that carries
+  # app.kubernetes.io/managed-by=Zitadel. The setup Job writes no Secret
+  # (charts#407, ADR-0014), so no Secret carries that label and the Job has
+  # nothing to delete. It also needs the Secret grant that the chart no
+  # longer gives the Zitadel ServiceAccount.
   cleanupJob:
-    # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
-    podAdditionalLabels:
-      gibson.zeroroot.ai/net-role: platform
-      gibson.zeroroot.ai/client-postgres: "true"
-      gibson.zeroroot.ai/kube-api: "true"
+    enabled: false
   # Identity provider — sole canonical IdP for the gibson stack.
   # Postgres: shared platform-postgres-rw, role/db zitadel.
 
-  # deploy#1170 — the zitadel chart composes its two HELPER images (not the
+  # deploy#1170 — the zitadel chart composes its HELPER image (not the
   # core/login app images, which carry a full repository each) as
   # `{{ imageRegistry | default "docker.io" }}/{{ tools.<t>.image.repository }}`.
-  # Left alone that is two unauthenticated Docker Hub pulls: alpine/k8s for the
-  # setup + cleanup Jobs and wait4x for the login Deployment's init container.
-  # Point the prefix at ghcr and the repositories at the mirror.
-  #
-  # tools.kubectl.image.tag MUST be set explicitly. Empty means "derive from
-  # the live cluster's kubeVersion", so the tag changes with the control-plane
-  # minor and can name an alpine/k8s tag that was never mirrored (and, on
-  # Docker Hub, may not exist at all). Pin it, and add the new tag to
-  # zeroroot-ai/.github :: mirror-list.yaml before moving it.
+  # Left alone that is an unauthenticated Docker Hub pull of wait4x for the
+  # login Deployment's init container. Point the prefix at ghcr and the
+  # repository at the mirror. The other helper, the kubectl image, has no
+  # value here: only the upstream Secret writers of the setup Job and the
+  # cleanup Job run it, and the chart renders neither (charts#407).
   imageRegistry: ghcr.io
   tools:
-    kubectl:
-      image:
-        repository: zeroroot-ai/mirror/alpine-k8s
-        tag: "1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
     wait4x:
       image:
         repository: zeroroot-ai/mirror/wait4x
@@ -960,22 +953,26 @@ zitadel:
       # trips the hostname-guard (deploy#630/#938). Per-env overlays
       # (ci/values-staging.yaml) still pin the env-specific host explicitly.
       ExternalDomain: ""
-      # The setup Job mints no IAM admin PAT (charts#407). The upstream
-      # default creates iam-admin-pat next to the machine key; null deletes
-      # that block. The platform-operator mints the PAT with its System API
-      # key and writes it to OpenBao, and the ExternalSecret iam-admin-pat is
-      # the one writer of the Secret (gibson#794, ADR-0014).
-      # The setup Job mints no machine key of iam-admin either (ADR-0171,
-      # row zitadel-bringup-tokens). The upstream default mints one that
-      # lives until 2029 and writes it to the Secret iam-admin. No code
-      # authenticates with it, and the platform-operator reads the user id
-      # of iam-admin from iam-admin-pat (gibson#1047). The machine user
-      # itself stays: the platform-operator mints its PAT.
+      # The setup Job writes no Kubernetes Secret (charts#407, ADR-0014).
+      # The upstream chart starts one kubectl container for each block of
+      # FirstInstance.Org in this config map, and that container writes a
+      # Secret. null deletes both blocks of the upstream default:
+      #   Machine      iam-admin. The setup Job mints no machine key and no
+      #                PAT of it (ADR-0171, row zitadel-bringup-tokens). The
+      #                platform-operator creates the user, mints its PAT with
+      #                its System API key and writes the PAT to OpenBao
+      #                (gibson#794). No code authenticates with a machine key.
+      #   LoginClient  login-client. The setup Job still creates this user and
+      #                mints its first PAT, from the steps file of the
+      #                ConfigMap gibson-zitadel-first-instance. Its container
+      #                login-client-pat-store (setupJob.extraContainers)
+      #                writes the PAT straight to OpenBao.
+      # With neither block, the upstream chart renders no Secret writer and
+      # no Role that lets the Zitadel ServiceAccount write Secrets.
       FirstInstance:
         Org:
-          Machine:
-            MachineKey: null
-            Pat: null
+          Machine: null
+          LoginClient: null
       ExternalPort: 30443
       ExternalSecure: true
       TLS:
@@ -1100,10 +1097,43 @@ zitadel:
             path: system-bot-pub.pem
           - key: public-key-b.pem
             path: system-bot-b-pub.pem
+    # The setup Job (charts#407). The upstream chart has one list of volumes
+    # and mounts for the Deployment and the init and setup Jobs, so each pod
+    # gets these. Only the setup Job uses them:
+    #   zitadel-first-instance    the steps file of setupJob.additionalArgs
+    #   zitadel-login-client-pat  where Zitadel writes the first login-client
+    #                             PAT (ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH
+    #                             of the upstream chart, /login-client/pat)
+    #   openbao-ca, zitadel-setup-tmp
+    #                             the container login-client-pat-store
+    # The CA volume projects only ca.crt of the listener Secret
+    # (gibson.openbaoCAVolume), never its private key.
+    - name: zitadel-first-instance
+      configMap:
+        name: gibson-zitadel-first-instance
+    - name: zitadel-login-client-pat
+      emptyDir:
+        medium: Memory
+        sizeLimit: 1Mi
+    - name: openbao-ca
+      secret:
+        secretName: gibson-openbao-tls
+        defaultMode: 0444
+        items:
+          - key: ca.crt
+            path: ca.crt
+    - name: zitadel-setup-tmp
+      emptyDir:
+        sizeLimit: 16Mi
   extraVolumeMounts:
     - name: zitadel-system-key
       mountPath: /etc/zitadel-system-keys
       readOnly: true
+    - name: zitadel-first-instance
+      mountPath: /etc/zitadel-first-instance
+      readOnly: true
+    - name: zitadel-login-client-pat
+      mountPath: /login-client
 
   # The login role and its password (ADR-0171): the OpenBao database engine
   # issues a new login role of the owner zitadel every 24 hours, and Reloader
@@ -1137,6 +1167,9 @@ zitadel:
     # Without this, Zitadel keeps the old in-memory key and rejects
     # platform-operator System API JWTs signed with the new private key.
     secret.reloader.stakater.com/reload: "gibson-zitadel-system-key,gibson-zitadel-masterkey,zitadel-postgres-credentials"
+    # The two emptyDir volumes of zitadel.extraVolumes reach the Deployment
+    # too, and only the setup Job uses them (charts#407). They hold no data.
+    backup.velero.io/backup-volumes-excludes: "zitadel-login-client-pat,zitadel-setup-tmp"
   replicaCount: 1
   service:
     type: ClusterIP
@@ -1212,10 +1245,115 @@ zitadel:
       argocd.argoproj.io/sync-wave: "-4"
   setupJob:
     # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+    # client-openbao: the container login-client-pat-store writes to OpenBao.
+    # kube-api: the same container reads the state of its own pod.
     podAdditionalLabels:
       gibson.zeroroot.ai/net-role: platform
       gibson.zeroroot.ai/client-postgres: "true"
+      gibson.zeroroot.ai/client-openbao: "true"
       gibson.zeroroot.ai/kube-api: "true"
+    # The steps file that creates the login-client machine user and mints its
+    # first PAT (ConfigMap gibson-zitadel-first-instance, mounted through
+    # zitadel.extraVolumes). Zitadel merges it over the steps of the config
+    # map. It is not in configmapConfig, because there the upstream chart
+    # would start a kubectl container that writes the PAT to a Secret.
+    additionalArgs:
+      - --steps
+      - /etc/zitadel-first-instance/steps.yaml
+    # login-client-pat-store: the one writer of the first login-client PAT
+    # (charts#407, ADR-0014). Zitadel writes the PAT to /login-client/pat
+    # only when it creates the instance. This container waits until the
+    # setup container stops, then writes the PAT to the OpenBao entry
+    # gibson-zitadel-login-client-pat. The ExternalSecret login-client
+    # (creationPolicy Owner) is the one writer of the Secret. After a restore
+    # Zitadel finds its instance and writes no file, so the container writes
+    # nothing and the restored entry stays. The platform-operator then
+    # rotates the PAT in the same entry (ADR-0171).
+    #
+    # The image is the tool image of global.toolImage. The upstream chart
+    # takes this list verbatim, so the string is a copy. The alpine-k8s
+    # version link of zeroroot-ai/.github holds the two equal.
+    extraContainers:
+      - name: login-client-pat-store
+        image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
+        command: [bash, -ec]
+        args:
+          - |
+            set -euo pipefail
+            KEY=gibson-zitadel-login-client-pat
+            # The setup container writes the PAT before it stops. Read the
+            # state of this pod until that container has terminated.
+            for i in $(seq 1 240); do
+              code=$(kubectl -n "$POD_NAMESPACE" get pod "$POD_NAME" \
+                -o jsonpath="{.status.containerStatuses[?(@.name=='zitadel-setup')].state.terminated.exitCode}")
+              [ -n "$code" ] && break
+              echo "waiting for the container zitadel-setup to stop ($i/240)"; sleep 5
+            done
+            [ -n "$code" ] || { echo "ERROR: the container zitadel-setup did not stop in 20 minutes"; exit 1; }
+            echo "the container zitadel-setup stopped with exit code $code"
+            if [ ! -s /login-client/pat ]; then
+              echo "Zitadel minted no login-client PAT: the instance existed before this run. OpenBao keeps its entry."
+              exit 0
+            fi
+            # A new instance: this PAT is the one that Zitadel knows, so it
+            # replaces any value of the entry.
+            jq -nc --rawfile v /login-client/pat '{data: {pat: ($v | rtrimstr("\n"))}}' > /tmp/body.json
+            for i in $(seq 1 60); do
+              status=$(curl -sS -o /tmp/resp.json -w '%{http_code}' -X POST \
+                -H "X-Vault-Token: $VAULT_TOKEN" -H "Content-Type: application/json" \
+                --data @/tmp/body.json "$BAO_ADDR/v1/secret/data/$KEY") || status=000
+              case "$status" in
+                200|204) echo "STORED: the login-client PAT is in secret/$KEY"; exit 0 ;;
+              esac
+              echo "write of secret/$KEY returned HTTP $status ($i/60): $(cat /tmp/resp.json 2>/dev/null)"; sleep 5
+            done
+            echo "ERROR: the login-client PAT did not reach secret/$KEY. Zitadel mints it once, so recover it from Zitadel."
+            exit 1
+        env:
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          # kubectl writes its discovery cache under $HOME. /tmp is the one
+          # writable path.
+          - name: HOME
+            value: /tmp
+          # gibson.openbaoAddr and gibson.openbaoCAEnv of release gibson.
+          - name: BAO_ADDR
+            value: https://gibson-openbao.gibson.svc:8200
+          - name: CURL_CA_BUNDLE
+            value: /etc/gibson/openbao-ca/ca.crt
+          # The token of this container alone, policy zitadel-setup: write
+          # the KV entry above and nothing else. openbao-auto-init mints it.
+          - name: VAULT_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: gibson-openbao-zitadel-setup
+                key: VAULT_ADMIN_TOKEN
+        # User 1000, the user of the setup container: Zitadel writes the PAT
+        # file readable by its owner only.
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          seccompProfile:
+            type: RuntimeDefault
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+          - name: zitadel-login-client-pat
+            mountPath: /login-client
+            readOnly: true
+          - name: openbao-ca
+            mountPath: /etc/gibson/openbao-ca
+            readOnly: true
+          - name: zitadel-setup-tmp
+            mountPath: /tmp
     # The upstream default is 300s, and a COLD bringup does not fit in it.
     # MEASURED (kind, deploy#1737, 2026-09-02): 8m27s. The pod SUCCEEDED —
     # "setup completed", iam-admin, iam-admin-pat and login-client all

@@ -61,8 +61,8 @@ escrowed Zitadel owner credentials live), and
 `gibson-platform-operator-vault`, policy `platform-operator` (the transit
 mount, its one transit key and the one KV key of the Zitadel admin token).
 The Jobs that configure the store each get their own token in their own
-Secret, with only the paths of their script: `gibson-openbao-iam-admin-escrow`
-(policy `iam-admin-escrow`), `gibson-openbao-jwt-auth-init` (policy
+Secret, with only the paths of their script: `gibson-openbao-zitadel-setup`
+(policy `zitadel-setup`, the Zitadel setup Job), `gibson-openbao-jwt-auth-init` (policy
 `jwt-auth-init`) and, with the cert-manager Vault issuer,
 `gibson-openbao-approle-init` (policy `cert-manager-approle-init`) and
 `gibson-openbao-approle-reader` (policy `cert-manager-approle-reader`, the
@@ -543,7 +543,7 @@ spec:
               TENANT_OP_POLICY="tenant-operator"
               # The token of each Job that configures the store, as
               # <Secret>:<policy>. Each Job mounts its own Secret and nothing else.
-              JOB_TOKENS="gibson-openbao-iam-admin-escrow:iam-admin-escrow gibson-openbao-jwt-auth-init:jwt-auth-init gibson-openbao-masterkey-rotation:zitadel-masterkey-rotation gibson-openbao-pg-logins:postgres-logins{{ if $cmVault }} gibson-openbao-approle-init:cert-manager-approle-init gibson-openbao-approle-reader:cert-manager-approle-reader{{ end }}"
+              JOB_TOKENS="gibson-openbao-zitadel-setup:zitadel-setup gibson-openbao-jwt-auth-init:jwt-auth-init gibson-openbao-masterkey-rotation:zitadel-masterkey-rotation gibson-openbao-pg-logins:postgres-logins{{ if $cmVault }} gibson-openbao-approle-init:cert-manager-approle-init gibson-openbao-approle-reader:cert-manager-approle-reader{{ end }}"
               ESO_ROLE="eso-reader"
               ESO_POLICY="eso-reader"
               ESO_SA_NAME="{{ $esoSA.name | default "external-secrets" }}"
@@ -1773,8 +1773,8 @@ spec:
 
                 # The Jobs that configure the store, each with the paths of its
                 # own script (helpers in _openbao-policies.tpl).
-                vault_write_policy "$tok" iam-admin-escrow \
-                  '{{- include "gibson.openbaoPolicy.iamAdminEscrow" . | nindent 14 }}' || return 1
+                vault_write_policy "$tok" zitadel-setup \
+                  '{{- include "gibson.openbaoPolicy.zitadelSetup" . | nindent 14 }}' || return 1
                 vault_write_policy "$tok" jwt-auth-init \
                   '{{- include "gibson.openbaoPolicy.jwtAuthInit" . | nindent 14 }}' || return 1
                 vault_write_policy "$tok" zitadel-masterkey-rotation \
@@ -2293,7 +2293,7 @@ metadata:
 # the renewable service token of that consumer (deploy#454):
 #   gibson-platform-operator-vault — policy platform-operator
 #   gibson-tenant-operator-vault   — policy tenant-operator
-#   gibson-openbao-iam-admin-escrow, gibson-openbao-jwt-auth-init,
+#   gibson-openbao-zitadel-setup, gibson-openbao-jwt-auth-init,
 #   gibson-openbao-masterkey-rotation, gibson-openbao-pg-logins,
 #   gibson-openbao-approle-init, gibson-openbao-approle-reader — the Jobs
 # A non-renewable root token in either would cause VaultTransitReady=False,
@@ -2343,7 +2343,7 @@ rules:
     resourceNames:
       - gibson-platform-operator-vault
       - gibson-tenant-operator-vault
-      - gibson-openbao-iam-admin-escrow
+      - gibson-openbao-zitadel-setup
       - gibson-openbao-jwt-auth-init
       - gibson-openbao-masterkey-rotation
       - gibson-openbao-pg-logins
