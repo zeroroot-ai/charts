@@ -74,7 +74,7 @@ def wave(d: dict) -> int:
     return int(w) if w is not None else 0
 
 
-def externalsecret(docs: list[dict], target: str) -> dict | None:
+def es_for_target(docs: list[dict], target: str) -> dict | None:
     for d in docs:
         if d.get("kind") == "ExternalSecret" and d["spec"].get("target", {}).get("name") == target:
             return d
@@ -111,7 +111,7 @@ def check(docs: list[dict]) -> list[str]:
 
     # 1. One ExternalSecret writer of each token Secret, from the right key.
     for target, (data_key, store_key, props) in ZITADEL_ENTRIES.items():
-        es = externalsecret(docs, target)
+        es = es_for_target(docs, target)
         if es is None:
             bad.append(f"no ExternalSecret targets the Secret {target}: nothing writes it from OpenBao, so a restore cannot bring it back")
             continue
@@ -125,17 +125,17 @@ def check(docs: list[dict]) -> list[str]:
         for k in {data_key} | (props - {"pat"}):
             if k not in tmpl:
                 bad.append(f"the ExternalSecret {target} does not write the data key {k!r}, which its consumer reads")
-    if externalsecret(docs, "iam-admin") is not None:
+    if es_for_target(docs, "iam-admin") is not None:
         bad.append("an ExternalSecret writes the Secret iam-admin: the machine key of iam-admin is deleted (ADR-0171)")
 
     # 2. The waves. login-client: after the setup Job writes the key, before
     # wave 0 where zitadel-login and the platform-operator wait for it.
     # iam-admin-pat: not ahead of the platform-operator that writes its key.
     setup = [d for d in docs if d.get("kind") == "Job" and d["metadata"]["name"] == SETUP_JOB]
-    lc = externalsecret(docs, "login-client")
+    lc = es_for_target(docs, "login-client")
     if setup and lc is not None and not (wave(setup[0]) < wave(lc) < 0):
         bad.append(f"the ExternalSecret login-client (wave {wave(lc)}) must come after the setup Job (wave {wave(setup[0])}) and BEFORE wave 0: earlier it is Degraded on a fresh install, at 0 or later a restore deadlocks")
-    pat = externalsecret(docs, "iam-admin-pat")
+    pat = es_for_target(docs, "iam-admin-pat")
     ops = [d for d in docs if d.get("kind") == "Deployment" and d["metadata"]["name"].endswith("-platform-operator")]
     if pat is not None and ops and wave(pat) < min(wave(o) for o in ops):
         bad.append(f"the ExternalSecret iam-admin-pat (wave {wave(pat)}) is ahead of the platform-operator (wave {min(wave(o) for o in ops)}) that writes its key: a fresh install never ends")
@@ -292,7 +292,7 @@ def selftest(docs: list[dict]) -> None:
                                           "spec": {"template": {"metadata": {"labels": {"app.kubernetes.io/component": "iam-admin-pat-escrow"}},
                                                                 "spec": {"containers": []}}}}]
     iam_admin_back = copy.deepcopy(docs)
-    lc = externalsecret(docs, "login-client")
+    lc = es_for_target(docs, "login-client")
     if lc is not None:
         e = copy.deepcopy(lc)
         e["metadata"]["name"] = e["spec"]["target"]["name"] = "iam-admin"
