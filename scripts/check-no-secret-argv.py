@@ -497,7 +497,7 @@ CASES = {
     "yaml-list-item": ('                - curl -sS -H "X-Vault-Token: ${root}" "$A"', True),
     # Clean shapes.
     "ok-header-file": ('curl -sS -H "@$d/hdr" "$BAO/v1/x"', False),
-    "body-plain-name": ('code=$(curl -sS -X POST -d "$body" "$BAO/v1/auth/kubernetes/login")', True),
+    "body-plain-name": ('code=$(curl -sS -X POST -d "$body" "$BAO/v1/auth/jwt/login")', True),
     "kube-curl-body": ('kube_curl -X POST --data-binary "$op_secret_body" "$KUBE_API/x"', True),
     "ok-content-type": ('curl -H "$CT" -H "Content-Type: application/json" x', False),
     "ok-body-file": ('curl --data-binary "@$d/body" x', False),
