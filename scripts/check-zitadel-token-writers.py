@@ -44,7 +44,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts", "lib"))
 import cilium_policy as cp  # noqa: E402
 
 NS = "gibson"
-TOKENS = {
+ZITADEL_ENTRIES = {
     # Secret: (data key, store key, the properties its ExternalSecret reads)
     "iam-admin-pat": ("pat", "gibson-zitadel-iam-admin-pat", {"pat", "userId"}),
     "login-client": ("pat", "gibson-zitadel-login-client-pat", {"pat"}),
@@ -53,7 +53,7 @@ SETUP_JOB = "gibson-zitadel-setup"
 SETUP_CONTAINER = "zitadel-setup"
 STORE_CONTAINER = "login-client-pat-store"
 STEPS_CONFIGMAP = "gibson-zitadel-first-instance"
-STORE_TOKEN_SECRET = "gibson-openbao-zitadel-setup"
+STORE_AUTH_HOLDER = "gibson-openbao-zitadel-setup"
 STORE_POLICY = "zitadel-setup"
 ZITADEL_SA = "gibson-zitadel"
 
@@ -110,21 +110,21 @@ def check(docs: list[dict]) -> list[str]:
     bad: list[str] = []
 
     # 1. One ExternalSecret writer of each token Secret, from the right key.
-    for secret, (data_key, store_key, props) in TOKENS.items():
-        es = externalsecret(docs, secret)
+    for target, (data_key, store_key, props) in ZITADEL_ENTRIES.items():
+        es = externalsecret(docs, target)
         if es is None:
-            bad.append(f"no ExternalSecret targets the Secret {secret}: nothing writes it from OpenBao, so a restore cannot bring it back")
+            bad.append(f"no ExternalSecret targets the Secret {target}: nothing writes it from OpenBao, so a restore cannot bring it back")
             continue
         if es["spec"]["target"].get("creationPolicy") != "Owner":
-            bad.append(f"the ExternalSecret {secret} must use creationPolicy Owner: it is the one writer of the Secret (charts#407, ADR-0014)")
+            bad.append(f"the ExternalSecret {target} must use creationPolicy Owner: it is the one writer of the Secret (charts#407, ADR-0014)")
         got = {(x["remoteRef"]["key"], x["remoteRef"].get("property")) for x in es["spec"].get("data", [])}
         for p in props:
             if (store_key, p) not in got:
-                bad.append(f"the ExternalSecret {secret} does not read property {p} of {store_key}")
+                bad.append(f"the ExternalSecret {target} does not read property {p} of {store_key}")
         tmpl = (es["spec"]["target"].get("template") or {}).get("data") or {}
         for k in {data_key} | (props - {"pat"}):
             if k not in tmpl:
-                bad.append(f"the ExternalSecret {secret} does not write the data key {k!r}, which its consumer reads")
+                bad.append(f"the ExternalSecret {target} does not write the data key {k!r}, which its consumer reads")
     if externalsecret(docs, "iam-admin") is not None:
         bad.append("an ExternalSecret writes the Secret iam-admin: the machine key of iam-admin is deleted (ADR-0171)")
 
@@ -199,25 +199,25 @@ def check(docs: list[dict]) -> list[str]:
         bad.append(f"the Job {SETUP_JOB} has no container {STORE_CONTAINER}: the minted login-client PAT reaches no store")
     else:
         s = script_of(store)
-        if f"KEY={TOKENS['login-client'][1]}" not in s or "/v1/secret/data/$KEY" not in s:
-            bad.append(f"the container {STORE_CONTAINER} does not write secret/data/{TOKENS['login-client'][1]}")
+        if f"KEY={ZITADEL_ENTRIES['login-client'][1]}" not in s or "/v1/secret/data/$KEY" not in s:
+            bad.append(f"the container {STORE_CONTAINER} does not write secret/data/{ZITADEL_ENTRIES['login-client'][1]}")
         if "/login-client/pat" not in s or "/login-client" not in [m["mountPath"] for m in store.get("volumeMounts", [])]:
             bad.append(f"the container {STORE_CONTAINER} does not read /login-client/pat from the volume that Zitadel writes")
         if f"name=='{SETUP_CONTAINER}'" not in s:
             bad.append(f"the container {STORE_CONTAINER} does not wait for the container {SETUP_CONTAINER} to stop: it reads the file before Zitadel writes it")
-        refs = {(e["valueFrom"]["secretKeyRef"]["name"]) for e in store.get("env", []) if (e.get("valueFrom") or {}).get("secretKeyRef")}
-        if refs != {STORE_TOKEN_SECRET}:
-            bad.append(f"the container {STORE_CONTAINER} must read exactly one Secret, its OpenBao token {STORE_TOKEN_SECRET}; it reads {sorted(refs)}")
+        named = {(e["valueFrom"]["secretKeyRef"]["name"]) for e in store.get("env", []) if (e.get("valueFrom") or {}).get("secretKeyRef")}
+        if named != {STORE_AUTH_HOLDER}:
+            bad.append(f"the container {STORE_CONTAINER} must read exactly one Secret, the one that holds its OpenBao token ({len(named)} named)")
         if sc is not None:
             uid = lambda c: (c.get("securityContext") or {}).get("runAsUser") or (spec.get("securityContext") or {}).get("runAsUser")
             if uid(store) != uid(sc):
                 bad.append(f"the container {STORE_CONTAINER} runs as user {uid(store)}, the container {SETUP_CONTAINER} as {uid(sc)}: Zitadel writes the PAT readable by its owner only")
     bao = [d for d in docs if d.get("kind") == "StatefulSet"
            and (d["spec"]["template"]["metadata"].get("labels") or {}).get("app.kubernetes.io/component") == "openbao"]
-    minted = any(f"{STORE_TOKEN_SECRET}:{STORE_POLICY}" in script_of(c)
+    minted = any(f"{STORE_AUTH_HOLDER}:{STORE_POLICY}" in script_of(c)
                  for b in bao for c in pod_spec(b).get("containers", []) + (pod_spec(b).get("initContainers") or []))
     if not minted:
-        bad.append(f"openbao-auto-init does not mint {STORE_TOKEN_SECRET} with policy {STORE_POLICY} (JOB_TOKENS): the store container has no token")
+        bad.append(f"openbao-auto-init does not mint {STORE_AUTH_HOLDER} with policy {STORE_POLICY} (JOB_ZITADEL_ENTRIES): the store container has no token")
 
     # 6. The network half (D76): the setup pod reaches OpenBao on 8200.
     rules = cp.rules(docs, NS)
