@@ -32,6 +32,7 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
                 for v in ("TOKEN_LIFETIME_S", "TOKEN_REVOKE_GRACE_S", "PG_LOGINS_TOKEN_SECRET", "PG_LEASE_MAX_S",
                           "PG_LOGINS_PERIOD_S", "PG_LOGINS_MAX_TTL_S", "TOKEN_ROTATION_KEY", "REVOKE_ACCESSOR_ANN", "REVOKE_AFTER_ANN"):
                     out.append(re.search(r"^\s*%s=.*$" % v, a, re.M).group(0).strip())
+                out.append(a[a.index("hcurl() {"):a.index("\n}\n", a.index("hcurl() {")) + 3])
                 out.append(a[a.index("vault_mint_token() {"):a.index("vault_ensure_tokens() {")])
                 open(sys.argv[2], "w").write("\n".join(out) + "\n")
                 sys.exit(0)
@@ -61,8 +62,10 @@ simulate() {
       out=""; fmt=""; method=GET; data=""; url=""; vt=""
       while [ $# -gt 0 ]; do case "$1" in
         -o) out="$2"; shift 2 ;; -w) fmt="$2"; shift 2 ;; -X) method="$2"; shift 2 ;;
-        -d|--data-binary) data="$2"; shift 2 ;;
-        -H) case "$2" in X-Vault-Token:*) vt="${2#X-Vault-Token: }" ;; esac; shift 2 ;;
+        # A body and a token header come on stdin and in a file (GHSA-5c5h-rrh4-5xw3).
+        -d|--data-binary) data="$2"; [ "$data" != @- ] || data="$(cat)"; shift 2 ;;
+        -H) case "$2" in X-Vault-Token:*) vt="${2#X-Vault-Token: }" ;;
+              @*) h="$(sed -n "s/^X-Vault-Token: //p" "${2#@}")"; [ -z "$h" ] || vt="$h" ;; esac; shift 2 ;;
         -sS|-s) shift ;; *) url="$1"; shift ;; esac; done
       [ "$method" = GET ] && [ -n "$data" ] && method=POST
       body="$TMPD/body.$$"

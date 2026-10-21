@@ -192,11 +192,18 @@ if [ -n "${KEYRING_FILE:-}" ] && [ "${SKIP_RESTORE_DRILL:-}" != "1" ]; then
   # The previous seal key of a rotation (ADR-0171). The foreign key gets no
   # previous key, so no kept key can open the store.
   KEYRING_PREVIOUS_KEY="${KEYRING_PREVIOUS_KEY:-openbao-seal-previous-key}"
+  # The seal keys go to kubectl in files of a mode-0700 directory, never on
+  # its argv (GHSA-5c5h-rrh4-5xw3). The directory goes on exit.
+  kr_dir="$(mktemp -d)"
+  trap 'rm -rf "$kr_dir"' EXIT
   log "keyring drill: starting the store under a key that never sealed it"
+  head -c 32 /dev/urandom | base64 | tr -d '\n' > "$kr_dir/key"
+  : > "$kr_dir/previous"
   kubectl -n "$NS" create secret generic "$KEYRING_SECRET" \
-    --from-literal="${KEYRING_KEY}=$(head -c 32 /dev/urandom | base64 | tr -d '\n')" \
-    --from-literal="${KEYRING_PREVIOUS_KEY}=" \
+    --from-file="${KEYRING_KEY}=$kr_dir/key" \
+    --from-file="${KEYRING_PREVIOUS_KEY}=$kr_dir/previous" \
     --dry-run=client -o yaml | kubectl apply -n "$NS" -f - >/dev/null
+  rm -f "$kr_dir/key" "$kr_dir/previous"
   kubectl -n "$NS" delete pod "$POD" --wait=true --timeout=180s
 
   log "confirming OpenBao comes up SEALED without the keyring"
@@ -217,10 +224,13 @@ if [ -n "${KEYRING_FILE:-}" ] && [ "${SKIP_RESTORE_DRILL:-}" != "1" ]; then
   log "sealed, as expected"
 
   log "putting the keyring back from ${KEYRING_FILE}"
+  { grep -E '^OPENBAO_SEAL_KEY=' "$KEYRING_FILE" || true; } | head -n1 | cut -d= -f2- | tr -d '\n' > "$kr_dir/key"
+  { grep -E '^OPENBAO_SEAL_KEY_PREVIOUS=' "$KEYRING_FILE" || true; } | head -n1 | cut -d= -f2- | tr -d '\n' > "$kr_dir/previous"
   kubectl -n "$NS" create secret generic "$KEYRING_SECRET" \
-    --from-literal="${KEYRING_KEY}=$(grep -E '^OPENBAO_SEAL_KEY=' "$KEYRING_FILE" | head -n1 | cut -d= -f2-)" \
-    --from-literal="${KEYRING_PREVIOUS_KEY}=$(grep -E '^OPENBAO_SEAL_KEY_PREVIOUS=' "$KEYRING_FILE" | head -n1 | cut -d= -f2- || true)" \
+    --from-file="${KEYRING_KEY}=$kr_dir/key" \
+    --from-file="${KEYRING_PREVIOUS_KEY}=$kr_dir/previous" \
     --dry-run=client -o yaml | kubectl apply -n "$NS" -f - >/dev/null
+  rm -f "$kr_dir/key" "$kr_dir/previous"
   kubectl -n "$NS" delete pod "$POD" --wait=true --timeout=180s
   restored=0
   drill_deadline=$(( $(date +%s) + 240 ))

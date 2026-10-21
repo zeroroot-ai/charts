@@ -1563,3 +1563,30 @@ Invoke via: {{ include "gibson.fgaKey.volume" . | nindent 8 }} under volumes.
         path: key_previous
     defaultMode: 0444
 {{- end }}
+
+{{/*
+gibson.sh.hcurl: a POSIX sh function that runs curl with one header read from
+a file, so a token in that header is on no argv (GHSA-5c5h-rrh4-5xw3).
+
+The argv of a process is visible in /proc/<pid>/cmdline to each process of the
+pod and to root on the node. A token header given to curl as a literal
+argument puts the token there. hcurl writes the header to a mode-0600 file (mktemp), passes it as
+`-H @file`, and removes the file when curl returns. printf is a shell builtin,
+so the value is on no argv on the way to the file either.
+
+  hcurl "X-Vault-Token: ${tok}" -sS -o out.json "$URL"
+  printf '%s' "$body" | hcurl "Authorization: Bearer ${t}" --data-binary @- "$URL"
+
+The exit code is the exit code of curl. scripts/check-no-secret-argv.py fails
+a template that puts a credential header or a built body on an argv.
+*/}}
+{{- define "gibson.sh.hcurl" -}}
+hcurl() {
+  _hcurl_f="$(mktemp)" || return 1
+  printf '%s\n' "$1" > "$_hcurl_f"
+  shift
+  if curl -H "@$_hcurl_f" "$@"; then _hcurl_rc=0; else _hcurl_rc=$?; fi
+  rm -f "$_hcurl_f"
+  return "$_hcurl_rc"
+}
+{{- end -}}

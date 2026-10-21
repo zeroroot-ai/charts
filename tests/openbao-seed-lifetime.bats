@@ -23,7 +23,7 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
         for c in d["spec"]["template"]["spec"]["containers"]:
             for a in (c.get("command") or []) + (c.get("args") or []):
                 if "seed_one()" in a:
-                    open(sys.argv[2], "w").write(a[a.index("seed_input() {"):a.index("vault_seed_platform_secrets() {")])
+                    open(sys.argv[2], "w").write(a[a.index("hcurl() {"):a.index("\n}\n", a.index("hcurl() {")) + 3] + a[a.index("seed_input() {"):a.index("vault_seed_platform_secrets() {")])
                     sys.exit(0)
 sys.exit("no seed functions in the rendered openbao sidecar")
 PY

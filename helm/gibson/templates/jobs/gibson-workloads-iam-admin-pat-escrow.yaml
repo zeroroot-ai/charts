@@ -158,6 +158,7 @@ spec:
         args:
         - |
           set -euo pipefail
+          {{- include "gibson.sh.hcurl" . | nindent 10 }}
           NS=gibson
           # The Secret the Zitadel setup Job mints on the first instance (its
           # zitadel-login-client-pat container), as
@@ -178,8 +179,8 @@ spec:
             # it applies at wave -1, after this hook), so waiting for the
             # Secret here would deadlock the sync. A key in the store and no
             # Secret is the restore path: nothing to do.
-            code=$(curl -sS -o /tmp/kv.json -w '%{http_code}' \
-              -H "X-Vault-Token: $VAULT_ADMIN_TOKEN" "$BAO_ADDR/v1/secret/data/$KEY")
+            code=$(hcurl "X-Vault-Token: $VAULT_ADMIN_TOKEN" -sS -o /tmp/kv.json -w '%{http_code}' \
+              "$BAO_ADDR/v1/secret/data/$KEY")
             case "$code" in
               200) have=$(jq -r --arg p "$PROP" '.data.data[$p] // empty' /tmp/kv.json) ;;
               404) have="" ;;
@@ -217,9 +218,9 @@ spec:
               echo "ESCROWED already: secret/$KEY matches Secret $SECRET"
               continue
             fi
-            code=$(curl -sS -o /tmp/kv.json -w '%{http_code}' -X POST \
-              -H "X-Vault-Token: $VAULT_ADMIN_TOKEN" -H "Content-Type: application/json" \
-              -d "$(jq -nc --arg p "$PROP" --arg v "$VALUE" '{data: {($p): $v}}')" "$BAO_ADDR/v1/secret/data/$KEY")
+            code=$(ESCROW_VALUE="$VALUE" jq -nc --arg p "$PROP" '{data: {($p): env.ESCROW_VALUE}}' | hcurl "X-Vault-Token: $VAULT_ADMIN_TOKEN" -sS -o /tmp/kv.json -w '%{http_code}' -X POST \
+              -H "Content-Type: application/json" \
+              --data-binary @- "$BAO_ADDR/v1/secret/data/$KEY")
             case "$code" in
               200|204) echo "ESCROWED: wrote secret/$KEY from Secret $SECRET/$DATAKEY (len=${#VALUE})" ;;
               *) echo "ERROR: write secret/$KEY returned HTTP $code: $(cat /tmp/kv.json)"; exit 1 ;;

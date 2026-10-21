@@ -28,6 +28,7 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
                           "PG_LOGINS_PERIOD_S", "PG_LOGINS_MAX_TTL_S", "TOKEN_ROTATION_KEY", "REVOKE_ACCESSOR_ANN", "REVOKE_AFTER_ANN"):
                     m = re.search(r"^\s*%s=.*$" % v, a, re.M)
                     out.append(m.group(0).strip())
+                out.append(a[a.index("hcurl() {"):a.index("\n}\n", a.index("hcurl() {")) + 3])
                 out.append(a[a.index("token_rotation_requested_at() {"):a.index("vault_ensure_tokens() {")])
                 open(sys.argv[2], "w").write("\n".join(out) + "\n")
                 sys.exit(0)
@@ -64,7 +65,7 @@ run_ensure() {
     }
     kube_curl() {
       case "$*" in
-        *PATCH*) for a in "$@"; do case "$a" in {*) printf "%s\n" "$a" > "$TMPD/patch.json" ;; esac; done
+        *PATCH*) cat > "$TMPD/patch.json"
                  echo "annotate $(jq -r ".metadata.annotations[\"gibson.zeroroot.ai/revoke-accessor\"]" "$TMPD/patch.json") $(( $(jq -r ".metadata.annotations[\"gibson.zeroroot.ai/revoke-after\"] | tonumber" "$TMPD/patch.json") - NOW ))" >> "$EFFECTS"
                  printf 200 ;;
         *) if [ -n "$READFAIL" ]; then return 7; fi
@@ -118,12 +119,12 @@ run_revoke() {
     . "$WORK/tokens.sh"
     NOW=$(date +%s)
     curl() {
-      out=""; while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; -d) echo "revoke $2" >> "$TMPD/effects"; shift 2 ;; *) shift ;; esac; done
+      out=""; while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; --data-binary) echo "revoke $(cat | tr -d "\n")" >> "$TMPD/effects"; shift 2 ;; *) shift ;; esac; done
       printf "%s" "$BODY" > "$out"; printf "%s" "$CODE"
     }
     kube_curl() {
       case "$*" in
-        *PATCH*) case "$*" in *\":null*) echo cleared ;; *) echo rearmed ;; esac >> "$TMPD/effects"; printf 200 ;;
+        *PATCH*) case "$(cat)" in *\":null*) echo cleared ;; *) echo rearmed ;; esac >> "$TMPD/effects"; printf 200 ;;
         *) case "$LEFT" in -*|[0-9]*) after=$((NOW + LEFT)) ;; *) after="$LEFT" ;; esac
            printf "{\"kind\":\"Secret\",\"metadata\":{\"annotations\":{\"gibson.zeroroot.ai/revoke-accessor\":\"acc-old\",\"gibson.zeroroot.ai/revoke-after\":\"%s\"}}}" "$after" ;;
       esac

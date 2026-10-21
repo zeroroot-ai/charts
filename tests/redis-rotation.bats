@@ -60,7 +60,8 @@ case "$args" in
     for a in "$@"; do
       case "$a" in
         --from-literal=lastProcessedVersion=*) printf '%s' "${a#*=*=}" > "$S/state_ver" ;;
-        --from-literal=lastKnownPassword=*) printf '%s' "${a#*=*=}" > "$S/state_pw" ;;
+        # The password arrives on stdin (GHSA-5c5h-rrh4-5xw3).
+        --from-file=lastKnownPassword=/dev/stdin) cat > "$S/state_pw" ;;
       esac
     done ;;
   *"apply -f -"*) cat >/dev/null ;;
@@ -120,8 +121,12 @@ STUB
   mkdir -p "$S/podbin"
   cat > "$S/podbin/redis-cli" <<'CLI'
 #!/usr/bin/env bash
+# ARGV_LOG: record each argv, so a test can prove no password is on one.
+[ -z "${ARGV_LOG:-}" ] || printf 'redis-cli %s\n' "$*" >> "$ARGV_LOG"
 grep -qxF -- "$REDISCLI_AUTH" "$S/acl" || { echo "AUTH failed: WRONGPASS invalid username-password pair"; echo "NOAUTH Authentication required."; exit 0; }
 [ "$1" = --no-auth-warning ] && shift
+# -x: the last argument comes from stdin, as redis-cli reads it.
+if [ "$1" = -x ]; then shift; set -- "$@" "$(cat)"; fi
 case "$1" in
   PING) echo PONG ;;
   ACL)
@@ -185,6 +190,29 @@ run_job() { run env PATH="$S/bin:$PATH" S="$S" RESTART_PODS_POLL=0 bash "$WORK/r
   [ "$status" -ne 0 ]
   [ ! -s "$S/restarts" ]
   [ "$(cat "$S/state_ver")" = 1 ]
+}
+
+@test "no argv of kubectl or of redis-cli holds a password (GHSA-5c5h-rrh4-5xw3)" {
+  export KUBECTL_LOG="$S/calls.jsonl" ARGV_LOG="$S/argv.log"
+  world pw-first-6f1d 5 "" "" pw-first-6f1d; run_job; [ "$status" -eq 0 ]
+  world pw-new-9a2c 6 pw-first-6f1d 5 pw-first-6f1d; run_job; [ "$status" -eq 0 ]
+  [ "$(cat "$S/state_pw")" = pw-new-9a2c ]
+  # A floor: the log holds the calls, so the check below looked at them.
+  grep -q '"apply"' "$KUBECTL_LOG"
+  grep -q 'ACL SETUSER' "$ARGV_LOG"
+  # bats ignores a bare `!`, so the count is compared.
+  [ "$(cat "$KUBECTL_LOG" "$ARGV_LOG" | grep -c -e pw-first -e pw-new)" -eq 0 ]
+}
+
+@test "FAILING FIXTURE: a password on the argv of redis-cli fails the argv check" {
+  export ARGV_LOG="$S/argv.log"
+  sed 's|printf ">%s" "$n" \| REDISCLI_AUTH="$p" redis-cli --no-auth-warning -x ACL SETUSER default "$@"|REDISCLI_AUTH="$p" exec redis-cli --no-auth-warning ACL SETUSER default "$@" ">$n"|' \
+    "$WORK/rotation.sh" > "$S/rotation-argv.sh"
+  grep -q '">$n"' "$S/rotation-argv.sh"
+  world pw-new-9a2c 6 pw-first-6f1d 5 pw-first-6f1d
+  run env PATH="$S/bin:$PATH" S="$S" RESTART_PODS_POLL=0 bash "$S/rotation-argv.sh"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c pw-new "$ARGV_LOG")" -gt 0 ]
 }
 
 @test "every kubectl call of the rotation is allowed by the rendered Role of its ServiceAccount" {

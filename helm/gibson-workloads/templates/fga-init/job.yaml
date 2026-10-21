@@ -189,6 +189,7 @@ spec:
           args:
             - |
               set -e
+              {{- include "gibson.sh.hcurl" . | nindent 14 }}
               # jq + curl are baked into the image; apk-add not needed.
               command -v curl >/dev/null 2>&1 || { echo "FATAL: curl missing from fga-init image"; exit 1; }
               command -v jq   >/dev/null 2>&1 || { echo "FATAL: jq missing from fga-init image";   exit 1; }
@@ -241,8 +242,7 @@ spec:
               echo "  store_id=${STORE_ID}"
 
               echo "--- Step 2: write authorization model ---"
-              MODEL_JSON=$(cat /model/model.json)
-              RESP=$(fcurl -sS -H 'Content-Type: application/json' --data-binary "$MODEL_JSON" \
+              RESP=$(fcurl -sS -H 'Content-Type: application/json' --data-binary @/model/model.json \
                 "${FGA}/stores/${STORE_ID}/authorization-models") \
                 || { echo "FATAL: write model failed"; echo "$RESP"; exit 1; }
               MODEL_ID=$(echo "$RESP" | jq -r '.authorization_model_id')
@@ -280,16 +280,14 @@ spec:
                             labels:{"app.kubernetes.io/managed-by":"gibson-fga-init"}},
                   data:{"model.json":$model}}' > /tmp/model-cm.json
 
-              MCM_GET_HTTP=$(curl -sS -o /tmp/mcm-get.json -w '%{http_code}' \
+              MCM_GET_HTTP=$(hcurl "Authorization: Bearer ${TOKEN}" -sS -o /tmp/mcm-get.json -w '%{http_code}' \
                 --cacert "${CACERT}" \
-                -H "Authorization: Bearer ${TOKEN}" \
                 "${K8S}/api/v1/namespaces/${NS}/configmaps/${MODEL_CM}")
               if [ "${MCM_GET_HTTP}" = "200" ]; then
                 MRV=$(jq -r '.metadata.resourceVersion' /tmp/mcm-get.json)
                 jq --arg rv "${MRV}" '.metadata.resourceVersion = $rv' /tmp/model-cm.json > /tmp/model-cm-put.json
-                MCM_PUT_HTTP=$(curl -sS -o /tmp/mcm-put.json -w '%{http_code}' \
+                MCM_PUT_HTTP=$(hcurl "Authorization: Bearer ${TOKEN}" -sS -o /tmp/mcm-put.json -w '%{http_code}' \
                   --cacert "${CACERT}" \
-                  -H "Authorization: Bearer ${TOKEN}" \
                   -H "Content-Type: application/json" \
                   -X PUT --data-binary @/tmp/model-cm-put.json \
                   "${K8S}/api/v1/namespaces/${NS}/configmaps/${MODEL_CM}")
@@ -298,9 +296,8 @@ spec:
                   *) echo "FATAL: PUT ${MODEL_CM} returned ${MCM_PUT_HTTP}"; cat /tmp/mcm-put.json; exit 1 ;;
                 esac
               elif [ "${MCM_GET_HTTP}" = "404" ]; then
-                MCM_POST_HTTP=$(curl -sS -o /tmp/mcm-post.json -w '%{http_code}' \
+                MCM_POST_HTTP=$(hcurl "Authorization: Bearer ${TOKEN}" -sS -o /tmp/mcm-post.json -w '%{http_code}' \
                   --cacert "${CACERT}" \
-                  -H "Authorization: Bearer ${TOKEN}" \
                   -H "Content-Type: application/json" \
                   -X POST --data-binary @/tmp/model-cm.json \
                   "${K8S}/api/v1/namespaces/${NS}/configmaps")
@@ -330,29 +327,26 @@ spec:
                 }
               }"
 
-              CM_GET_HTTP=$(curl -sS -o /tmp/cm-get.json -w '%{http_code}' \
+              CM_GET_HTTP=$(hcurl "Authorization: Bearer ${TOKEN}" -sS -o /tmp/cm-get.json -w '%{http_code}' \
                 --cacert "${CACERT}" \
-                -H "Authorization: Bearer ${TOKEN}" \
                 "${K8S}/api/v1/namespaces/${NS}/configmaps/gibson-fga-config")
               if [ "${CM_GET_HTTP}" = "200" ]; then
                 RV=$(jq -r '.metadata.resourceVersion' /tmp/cm-get.json)
                 CM_BODY_REPLACE=$(echo "$CM_BODY" | sed "s|\"namespace\": \"${NS}\"|\"namespace\": \"${NS}\", \"resourceVersion\": \"${RV}\"|")
-                CM_PUT_HTTP=$(curl -sS -o /tmp/cm-put.json -w '%{http_code}' \
+                CM_PUT_HTTP=$(printf '%s' "$CM_BODY_REPLACE" | hcurl "Authorization: Bearer ${TOKEN}" -sS -o /tmp/cm-put.json -w '%{http_code}' \
                   --cacert "${CACERT}" \
-                  -H "Authorization: Bearer ${TOKEN}" \
                   -H "Content-Type: application/json" \
-                  -X PUT --data "$CM_BODY_REPLACE" \
+                  -X PUT --data-binary @- \
                   "${K8S}/api/v1/namespaces/${NS}/configmaps/gibson-fga-config")
                 case "${CM_PUT_HTTP}" in
                   20*) echo "  replaced gibson-fga-config" ;;
                   *) echo "FATAL: PUT gibson-fga-config returned ${CM_PUT_HTTP}"; cat /tmp/cm-put.json; exit 1 ;;
                 esac
               elif [ "${CM_GET_HTTP}" = "404" ]; then
-                CM_POST_HTTP=$(curl -sS -o /tmp/cm-post.json -w '%{http_code}' \
+                CM_POST_HTTP=$(printf '%s' "$CM_BODY" | hcurl "Authorization: Bearer ${TOKEN}" -sS -o /tmp/cm-post.json -w '%{http_code}' \
                   --cacert "${CACERT}" \
-                  -H "Authorization: Bearer ${TOKEN}" \
                   -H "Content-Type: application/json" \
-                  -X POST --data "$CM_BODY" \
+                  -X POST --data-binary @- \
                   "${K8S}/api/v1/namespaces/${NS}/configmaps")
                 case "${CM_POST_HTTP}" in
                   20*) echo "  created gibson-fga-config" ;;
@@ -413,7 +407,7 @@ spec:
               # sa-identity-map, or nothing when the entry is absent or
               # "<unset>".
               resolve_sub() {
-                echo "$MAP_JSON" | jq -r --arg k "$1" '.data[$k] // empty' 2>/dev/null | grep -v '^<unset>$' || true
+                echo "$MAP_JSON" | SA_KEY="$1" jq -r '.data[env.SA_KEY] // empty' 2>/dev/null | grep -v '^<unset>$' || true
               }
 
               # seed_tuple RELATION SA — writes user:<sub> RELATION
@@ -432,9 +426,9 @@ spec:
                 fi
                 KEEP="${KEEP} user:${numeric}"
                 TUPLE_BODY=$(jq -cn --arg u "user:${numeric}" --arg r "$relation" '{writes:{tuple_keys:[{user:$u,relation:$r,object:"system_tenant:_system"}]}}')
-                TUPLE_HTTP=$(fcurl -sS -o /tmp/tuple.json -w '%{http_code}' \
+                TUPLE_HTTP=$(printf '%s' "$TUPLE_BODY" | fcurl -sS -o /tmp/tuple.json -w '%{http_code}' \
                   -H 'Content-Type: application/json' \
-                  -X POST --data "$TUPLE_BODY" \
+                  -X POST --data-binary @- \
                   "${FGA}/stores/${STORE_ID}/write")
                 RESP=$(cat /tmp/tuple.json)
                 case "$RESP" in
@@ -466,9 +460,9 @@ spec:
                 CONT=""
                 while :; do
                   READ_BODY=$(jq -cn --arg r "$relation" --arg c "$CONT" '{tuple_key:{relation:$r,object:"system_tenant:_system"},page_size:100} + (if $c == "" then {} else {continuation_token:$c} end)')
-                  READ_HTTP=$(fcurl -sS -o /tmp/read.json -w '%{http_code}' \
+                  READ_HTTP=$(printf '%s' "$READ_BODY" | fcurl -sS -o /tmp/read.json -w '%{http_code}' \
                     -H 'Content-Type: application/json' \
-                    -X POST --data "$READ_BODY" \
+                    -X POST --data-binary @- \
                     "${FGA}/stores/${STORE_ID}/read")
                   if [ "$READ_HTTP" != "200" ]; then
                     echo "FATAL: read ${relation} tuples returned ${READ_HTTP}"
@@ -482,9 +476,9 @@ spec:
                 for holder in $HOLDERS; do
                   case " ${KEEP} " in *" ${holder} "*) continue ;; esac
                   DEL_BODY=$(jq -cn --arg u "$holder" --arg r "$relation" '{deletes:{tuple_keys:[{user:$u,relation:$r,object:"system_tenant:_system"}]}}')
-                  DEL_HTTP=$(fcurl -sS -o /tmp/del.json -w '%{http_code}' \
+                  DEL_HTTP=$(printf '%s' "$DEL_BODY" | fcurl -sS -o /tmp/del.json -w '%{http_code}' \
                     -H 'Content-Type: application/json' \
-                    -X POST --data "$DEL_BODY" \
+                    -X POST --data-binary @- \
                     "${FGA}/stores/${STORE_ID}/write")
                   if [ "$DEL_HTTP" != "200" ]; then
                     echo "FATAL: delete ${relation} tuple for ${holder} returned ${DEL_HTTP}"
@@ -506,8 +500,7 @@ spec:
               ALL_SET="false"
               i=0
               while [ $i -lt 30 ]; do
-                MAP_JSON=$(curl -sS --cacert "$CACERT" \
-                  -H "Authorization: Bearer ${TOKEN}" \
+                MAP_JSON=$(hcurl "Authorization: Bearer ${TOKEN}" -sS --cacert "$CACERT" \
                   "${K8S}/api/v1/namespaces/${NS}/configmaps/gibson-sa-identity-map" 2>/dev/null)
                 ALL_SET="true"
                 for sa in $REQUIRED $SIGNUP_SERVICE_SA; do

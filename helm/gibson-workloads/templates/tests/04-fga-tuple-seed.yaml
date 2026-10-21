@@ -76,8 +76,8 @@ spec:
           # OpenFGA runs with the preshared key method (charts#637): a call
           # with no key must get 401, and the platform key must work. The
           # header goes in a file, so the key is in no argv.
-          code=$(curl -ksS -o /dev/null -w '%{http_code}' \
-            -X POST -H 'Content-Type: application/json' -d "$BODY" \
+          code=$(printf '%s' "$BODY" | curl -ksS -o /dev/null -w '%{http_code}' \
+            -X POST -H 'Content-Type: application/json' --data-binary @- \
             --max-time 15 "${FGA}/stores/${STORE_ID}/check" || echo "000")
           if [ "$code" != "401" ]; then
             echo "$ERR fga-tuple-seed: OpenFGA answered HTTP $code to a Check with no key; want 401"
@@ -89,10 +89,10 @@ spec:
 
           # Note: -f makes curl exit non-zero on >=400, but for diagnostics we
           # want to keep the body. So we capture status separately.
-          code=$(curl -ksS -o /tmp/check.json -w '%{http_code}' \
+          code=$(printf '%s' "$BODY" | curl -ksS -o /tmp/check.json -w '%{http_code}' \
             -H @/tmp/fga-auth \
             -X POST -H 'Content-Type: application/json' \
-            -d "$BODY" \
+            --data-binary @- \
             --max-time 15 \
             "${FGA}/stores/${STORE_ID}/check" || echo "000")
 

@@ -118,8 +118,9 @@ _restart_pods_is_ready='([.status.conditions[]? | select(.type == "Ready" and .s
 # after the Nth delete. It counts only the new pods, so an old pod that is
 # not Ready (a crash loop) does not block it.
 _restart_pods_new_ready() {
-  kubectl -n "$1" get pods -l "$2" -o json | jq -e --argjson n "$3" --argjson old "$4" "
-    ${_restart_pods_live} as \$p
+  kubectl -n "$1" get pods -l "$2" -o json | RP_N="$3" RP_OLD="$4" jq -e "
+    (env.RP_N | tonumber) as \$n | (env.RP_OLD | fromjson) as \$old
+    | ${_restart_pods_live} as \$p
     | [\$p[] | select(${_restart_pods_is_ready}) | select((.metadata.uid as \$u | \$old | index(\$u)) == null)]
     | length >= \$n" >/dev/null
 }
@@ -128,8 +129,9 @@ _restart_pods_new_ready() {
 # pods are Ready, and no live pod has a UID of OLD_UIDS (a JSON list). This
 # is the final check, after each old pod is deleted.
 _restart_pods_ready() {
-  kubectl -n "$1" get pods -l "$2" -o json | jq -e --argjson want "$3" --argjson old "$4" "
-    ${_restart_pods_live} as \$p
+  kubectl -n "$1" get pods -l "$2" -o json | RP_WANT="$3" RP_OLD="$4" jq -e "
+    (env.RP_WANT | tonumber) as \$want | (env.RP_OLD | fromjson) as \$old
+    | ${_restart_pods_live} as \$p
     | ([\$p[] | select(${_restart_pods_is_ready})] | length) >= \$want
       and all(\$p[]; (.metadata.uid as \$u | \$old | index(\$u)) == null)" >/dev/null
 }

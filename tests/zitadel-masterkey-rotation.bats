@@ -233,3 +233,88 @@ need = {"gibson-zitadel", "gibson-zitadel-init", "gibson-zitadel-setup"}
 assert need <= seen, f"no masterkey guard on {sorted(need - seen)}"
 PY
 }
+
+# oenc TEXT KEY: a Zitadel AESString made by openssl, not by the step. The
+# test may put the key on an argv: it is a test key.
+oenc() {
+  local iv kh ct
+  iv="$(openssl rand -hex 16)"; kh="$(printf '%s' "${2:0:32}" | od -An -v -tx1 | tr -d ' \n')"
+  ct="$(printf '%s' "$1" | openssl enc -aes-256-cfb -K "$kh" -iv "$iv" -nopad | od -An -v -tx1 | tr -d ' \n')"
+  printf '%s%s' "$iv" "$ct" | sed 's/../\\x&/g' | xargs -0 printf '%b' | base64 -w0 | tr '+/' '-_'
+}
+
+@test "the AES-256-CFB of the step gives the NIST SP 800-38A F.3.13 and F.3.14 vectors (CFB128-AES256)" {
+  k=603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4
+  iv=000102030405060708090a0b0c0d0e0f
+  pt=6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710
+  ct=dc7e84bfda79164b7ecd8486985d386039ffed143b28b1c832113c6331e5407bdf10132415e54b92a13ed0a8267ae2f975a385741ab9cef82031623d55b1e471
+  got="$(bash -c ". '$D/crypto.sh'; printf '%s\n%s' \"\$1\" \"\$2\" | mk_cfb e \"\$3\"" _ "$k" "$pt" "$iv")"
+  [ "$got" = "$ct" ] || { echo "F.3.13 encrypt: got $got"; false; }
+  got="$(bash -c ". '$D/crypto.sh'; printf '%s\n%s' \"\$1\" \"\$2\" | mk_cfb d \"\$3\"" _ "$k" "$ct" "$iv")"
+  [ "$got" = "$pt" ] || { echo "F.3.14 decrypt: got $got"; false; }
+}
+
+@test "the AES-256-CFB of the step equals openssl enc -aes-256-cfb, the cipher of Zitadel" {
+  for n in 1 15 16 17 31 32 33 48 70; do
+    k="$(openssl rand -hex 32)"; iv="$(openssl rand -hex 16)"; d="$(openssl rand -hex "$n")"
+    want="$(printf '%s' "$d" | xxd -r -p | openssl enc -aes-256-cfb -K "$k" -iv "$iv" -nopad | xxd -p | tr -d '\n')"
+    got="$(bash -c ". '$D/crypto.sh'; printf '%s\n%s' \"\$1\" \"\$2\" | mk_cfb e \"\$3\"" _ "$k" "$d" "$iv")"
+    [ "$got" = "$want" ] || { echo "encrypt of $n bytes: got $got want $want"; false; }
+    back="$(bash -c ". '$D/crypto.sh'; printf '%s\n%s' \"\$1\" \"\$2\" | mk_cfb d \"\$3\"" _ "$k" "$want" "$iv")"
+    [ "$back" = "$d" ] || { echo "decrypt of $n bytes differs"; false; }
+  done
+  # A marker made by openssl opens in the guard, so the step reads what
+  # Zitadel and openssl write.
+  oenc "$marker_text" "$NXT" > "$D/db/marker"
+  run_guard "$NXT"
+  [ "$status" -eq 0 ]
+}
+
+# record <name>: a wrapper on PATH that logs each argv of the real tool.
+record() {
+  real="$(command -v "$1")"
+  printf '#!/usr/bin/env bash\nprintf "%%s" "%s" >> "%s/argv"; printf " [%%s]" "$@" >> "%s/argv"; echo >> "%s/argv"\nexec "%s" "$@"\n' \
+    "$1" "$D" "$D" "$D" "$real" > "$D/bin/$1"
+  chmod +x "$D/bin/$1"
+}
+
+@test "no argv of perl or openssl holds a masterkey (GHSA-5c5h-rrh4-5xw3)" {
+  record perl; record openssl
+  kv "$CUR" "$NXT"
+  oenc "$marker_text" "$CUR" > "$D/db/marker"
+  oenc "first-zitadel-key-value-0123456" "$CUR" > "$D/db/key.idA"
+  : > "$D/argv"
+  run_step
+  [ "$status" -eq 0 ]
+  run_guard "$NXT"
+  [ "$status" -eq 0 ]
+  # A floor: the record holds the cipher calls of the step and the guard.
+  [ "$(grep -c '^perl' "$D/argv")" -ge 4 ]
+  for k in "${CUR:0:32}" "${NXT:0:32}"; do
+    kh="$(printf '%s' "$k" | od -An -v -tx1 | tr -d ' \n')"
+    [ "$(grep -c -F -e "$k" -e "$kh" "$D/argv")" -eq 0 ] || { cat "$D/argv"; false; }
+  done
+}
+
+@test "FAILING FIXTURE: the old openssl enc -K form puts the masterkey on the argv" {
+  record openssl
+  # The old cipher call: openssl enc reads the key only as -K on its argv.
+  python3 - "$D/guard.sh" "$D/guard-old.sh" <<'PY'
+import sys
+s = open(sys.argv[1]).read()
+new = ('mk_cfb() { local kh dh; IFS= read -r kh; IFS= read -r dh; printf "%s" "$dh" | xxd -r -p '
+       '| openssl enc $([ "$1" = d ] && echo -d) -aes-256-cfb -K "$kh" -iv "$2" -nopad | hex_of; }')
+old = 'mk_cfb() { perl -e "$MK_AES_PL" "$1" "$2"; }'
+assert s.count(old) == 1
+open(sys.argv[2], "w").write(s.replace(old, new))
+PY
+  run cmp -s "$D/guard.sh" "$D/guard-old.sh"
+  [ "$status" -ne 0 ]
+  mv "$D/guard-old.sh" "$D/guard.sh"
+  oenc "$marker_text" "$NXT" > "$D/db/marker"
+  : > "$D/argv"
+  run_guard "$NXT"
+  [ "$status" -eq 0 ]
+  kh="$(printf '%s' "${NXT:0:32}" | od -An -v -tx1 | tr -d ' \n')"
+  [ "$(grep -c -F "$kh" "$D/argv")" -gt 0 ]
+}

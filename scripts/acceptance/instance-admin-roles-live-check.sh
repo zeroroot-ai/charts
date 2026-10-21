@@ -25,6 +25,8 @@
 # (scripts/check-xtrace-secrets.py).
 set +x
 set -euo pipefail
+# shellcheck source=../lib/curl-config.sh
+. "$(dirname "$0")/../lib/curl-config.sh"
 
 NS="${NS:-gibson}"
 RELEASE="${RELEASE:-gibson}"
@@ -53,9 +55,11 @@ PAT="$(kubectl -n "$NS" get secret iam-admin-pat -o jsonpath='{.data.pat}' | bas
 
 forward "${RELEASE}-zitadel" "$ZPORT" 8080
 log "Zitadel instance administrators (instance host ${EXT_DOMAIN})"
-MEMBERS="$(curl -sS -X POST "http://127.0.0.1:${ZPORT}/admin/v1/members/_search" \
-  -H "x-zitadel-instance-host: ${EXT_DOMAIN}" -H "Authorization: Bearer ${PAT}" \
-  -H 'Content-Type: application/json' -d '{}')"
+# The PAT goes to curl in a config on stdin, never on an argv.
+MEMBERS="$(curl_cfg header "Authorization: Bearer ${PAT}" \
+  | curl -sS -K - -X POST "http://127.0.0.1:${ZPORT}/admin/v1/members/_search" \
+      -H "x-zitadel-instance-host: ${EXT_DOMAIN}" \
+      -H 'Content-Type: application/json' -d '{}')"
 echo "$MEMBERS" | jq -e '.result' >/dev/null || { echo "member search failed: $(echo "$MEMBERS" | head -c 300)" >&2; exit 2; }
 
 owner_id=""
@@ -86,10 +90,10 @@ FGA_KEY="$(kubectl -n "$NS" get secret gibson-openfga-preshared-key -o jsonpath=
 [ -n "$FGA_KEY" ] || { echo "the Secret gibson-openfga-preshared-key holds no key" >&2; exit 1; }
 fga_users() { # relation -> sorted user ids
   local out code
-  out="$(printf 'header = "Authorization: Bearer %s"\n' "$FGA_KEY" \
+  out="$({ curl_cfg header "Authorization: Bearer ${FGA_KEY}"
+           curl_cfg data "{\"tuple_key\":{\"relation\":\"$1\",\"object\":\"system_tenant:_system\"}}"; } \
     | curl -sSk -K - -w '\n%{http_code}' -X POST "https://127.0.0.1:${FPORT}/stores/${STORE_ID}/read" \
-        -H 'Content-Type: application/json' \
-        -d "{\"tuple_key\":{\"relation\":\"$1\",\"object\":\"system_tenant:_system\"}}")"
+        -H 'Content-Type: application/json')"
   code="${out##*$'\n'}"
   [ "$code" = 200 ] || { echo "OpenFGA read of $1 answered HTTP ${code}: ${out%$'\n'*}" >&2; exit 1; }
   printf '%s' "${out%$'\n'*}" | jq -r '[.tuples[]?.key.user | sub("^user:"; "")] | sort | join(",")'
