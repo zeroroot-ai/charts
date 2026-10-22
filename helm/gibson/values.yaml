@@ -781,19 +781,6 @@ zitadel:
   # Identity provider — sole canonical IdP for the gibson stack.
   # Postgres: shared platform-postgres-rw, role/db zitadel.
 
-  # deploy#888: the login UI now ships from the PRIVATE first-party
-  # ghcr.io/zeroroot-ai/zitadel-login fork (see zitadel.login.image below), so
-  # the zitadel subchart pods need the ghcr pull secret. The zitadel chart's
-  # login Deployment reads only this chart-top-level `imagePullSecrets` (its
-  # `login.imagePullSecrets` value is not referenced by deployment_login.yaml
-  # in 9.34.1). `ghcr-credentials` is chart-owned — rendered by
-  # templates/externalsecrets/ghcr-credentials.yaml into the gibson namespace
-  # in every env (kind included; the login image is pulled from ghcr
-  # everywhere, never kind-loaded) — so this default is env-agnostic. Extra
-  # pull secrets on the public core-zitadel image are a no-op.
-  imagePullSecrets:
-    - name: ghcr-credentials
-
   # deploy#1170 — the zitadel chart composes its two HELPER images (not the
   # core/login app images, which carry a full repository each) as
   # `{{ imageRegistry | default "docker.io" }}/{{ tools.<t>.image.repository }}`.
