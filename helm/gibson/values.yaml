@@ -1297,11 +1297,15 @@ zitadel:
             fi
             # A new instance: this PAT is the one that Zitadel knows, so it
             # replaces any value of the entry.
+            # The token and the PAT go to curl in files, never on its argv
+            # (no-secret-argv). printf is a shell builtin.
+            umask 077
+            printf 'X-Vault-Token: %s\n' "$VAULT_TOKEN" > /tmp/auth.hdr
             jq -nc --rawfile v /login-client/pat '{data: {pat: ($v | rtrimstr("\n"))}}' > /tmp/body.json
             for i in $(seq 1 60); do
               status=$(curl -sS -o /tmp/resp.json -w '%{http_code}' -X POST \
-                -H "X-Vault-Token: $VAULT_TOKEN" -H "Content-Type: application/json" \
-                --data @/tmp/body.json "$BAO_ADDR/v1/secret/data/$KEY") || status=000
+                -H @/tmp/auth.hdr -H "Content-Type: application/json" \
+                --data-binary @/tmp/body.json "$BAO_ADDR/v1/secret/data/$KEY") || status=000
               case "$status" in
                 200|204) echo "STORED: the login-client PAT is in secret/$KEY"; exit 0 ;;
               esac
