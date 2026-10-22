@@ -39,10 +39,7 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
     spec:
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- include "gibson.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ .Values.platformOperator.serviceAccount.name | default "gibson-platform-operator" }}
       securityContext:
         runAsNonRoot: true

@@ -10391,8 +10391,6 @@ spec:
         prometheus.io/port: "8080"
     spec:
       
-      imagePullSecrets:
-        - name: ghcr-credentials
       serviceAccountName: gibson-connector-operator
       securityContext:
         runAsNonRoot: true
@@ -10566,8 +10564,7 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"
     spec:
-      imagePullSecrets:
-        - name: ghcr-credentials
+      
       serviceAccountName: gibson-platform-operator
       securityContext:
         runAsNonRoot: true
@@ -10799,8 +10796,6 @@ spec:
     spec:
       serviceAccountName: reloader
       
-      imagePullSecrets:
-        - name: ghcr-credentials
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534
@@ -10917,8 +10912,6 @@ spec:
         secret.reloader.stakater.com/reload: "gibson-tenant-operator-vault,tenant-admin-postgres-credentials,gibson-platform-postgres-credentials"
     spec:
       
-      imagePullSecrets:
-        - name: ghcr-credentials
       serviceAccountName: gibson-tenant-operator
       priorityClassName: gibson-platform
       topologySpreadConstraints:
@@ -11915,8 +11908,6 @@ spec:
         secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-gibson-workloads-dashboard-secrets,gibson-platform-postgres-credentials"
     spec:
       
-      imagePullSecrets:
-        - name: ghcr-credentials
       serviceAccountName: gibson-dashboard
       # The dashboard holds no Kubernetes access (dashboard src/lib/env-validator.ts),
       # and since ADR-0171 no init container reads a Secret through the API.
@@ -12585,8 +12576,6 @@ spec:
         gibson.zeroroot.ai/net-role: platform
     spec:
       
-      imagePullSecrets:
-        - name: ghcr-credentials
       # nginx serves static files and never calls the Kubernetes API, so the
       # pod mounts no ServiceAccount token (ADR-0165, charts#394).
       automountServiceAccountToken: false
@@ -12732,8 +12721,6 @@ spec:
         secret.reloader.stakater.com/reload: "gibson-envoy-tls,gibson-dashboard-oidc,gibson-native-login-oidc"
     spec:
       
-      imagePullSecrets:
-        - name: ghcr-credentials
       serviceAccountName: gibson-envoy
       automountServiceAccountToken: false
       priorityClassName: gibson-platform-critical
@@ -13091,8 +13078,6 @@ spec:
         secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc,gibson-ext-authz-health-tls"
     spec:
       
-      imagePullSecrets:
-        - name: ghcr-credentials
       serviceAccountName: gibson-ext-authz
       priorityClassName: gibson-platform-critical
       topologySpreadConstraints:
@@ -13583,8 +13568,6 @@ spec:
         checksum/config: 30962682d913a481f7f891c3e6762f82807aa5e3c0f8a1788b5a5fa5564d3c8c
     spec:
       
-      imagePullSecrets:
-        - name: ghcr-credentials
       serviceAccountName: gibson-ratelimit
       automountServiceAccountToken: false
       topologySpreadConstraints:
@@ -14183,8 +14166,6 @@ spec:
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/net-role: platform
     spec:
-      imagePullSecrets:
-        - name: ghcr-credentials
       serviceAccountName: gibson-zitadel-login
       securityContext:
         fsGroup: 1000
@@ -14333,8 +14314,6 @@ spec:
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/net-role: platform
     spec:
-      imagePullSecrets:
-        - name: ghcr-credentials
       serviceAccountName: gibson-zitadel
       securityContext:
         fsGroup: 1000
@@ -16955,8 +16934,6 @@ spec:
     spec:
       serviceAccountName: gibson
       
-      imagePullSecrets:
-        - name: ghcr-credentials
       # Gibson binary respects HOME via os.UserHomeDir(); HOME is set
       # explicitly in the container env below.
       # Spec 3 R3 — daemon runs as non-root (uid 65532, distroless nonroot).
@@ -18193,8 +18170,6 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       
-      imagePullSecrets:
-        - name: ghcr-credentials
       initContainers:
         # The authorization model comes OUT OF THE DAEMON IMAGE. The daemon
         # embeds model.fga (//go:embed, internal/platform/authz) and prints it
@@ -18731,8 +18706,6 @@ spec:
           restartPolicy: Never
           serviceAccountName: gibson-redis-rotation
           
-          imagePullSecrets:
-            - name: ghcr-credentials
           # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
           # profile, a read-only root filesystem and no capabilities. kubectl
           # writes its cache under HOME=/tmp, an emptyDir.
@@ -24803,8 +24776,6 @@ spec:
   volumes:
     - name: tmp
       emptyDir: {}
-  imagePullSecrets:
-    - name: ghcr-credentials
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/02-bootstrap-secrets.yaml
 apiVersion: v1
@@ -24924,8 +24895,6 @@ spec:
   volumes:
     - name: tmp
       emptyDir: {}
-  imagePullSecrets:
-    - name: ghcr-credentials
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/03-bootstrap-configmaps.yaml
 apiVersion: v1
@@ -25029,8 +24998,6 @@ spec:
           drop: ["ALL"]
         seccompProfile:
           type: RuntimeDefault
-  imagePullSecrets:
-    - name: ghcr-credentials
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/04-fga-tuple-seed.yaml
 apiVersion: v1
@@ -25175,8 +25142,6 @@ spec:
           - key: key_previous
             path: key_previous
         defaultMode: 0444
-  imagePullSecrets:
-    - name: ghcr-credentials
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/05-spire-attestation.yaml
 apiVersion: v1
@@ -25318,8 +25283,6 @@ spec:
         readOnly: true
     - name: tmp
       emptyDir: {}
-  imagePullSecrets:
-    - name: ghcr-credentials
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/06-envoy-admin.yaml
 apiVersion: v1
@@ -25464,8 +25427,6 @@ spec:
   volumes:
     - name: tmp
       emptyDir: {}
-  imagePullSecrets:
-    - name: ghcr-credentials
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/07-zitadel-auth-probe.yaml
 apiVersion: v1
@@ -25595,8 +25556,6 @@ spec:
   volumes:
     - name: tmp
       emptyDir: {}
-  imagePullSecrets:
-    - name: ghcr-credentials
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/08-data-plane.yaml
 apiVersion: v1
@@ -25745,8 +25704,6 @@ spec:
   volumes:
     - name: tmp
       emptyDir: {}
-  imagePullSecrets:
-    - name: ghcr-credentials
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/09-go-toolchain.yaml
 apiVersion: v1
@@ -25825,8 +25782,6 @@ spec:
   volumes:
     - name: tmp
       emptyDir: {}
-  imagePullSecrets:
-    - name: ghcr-credentials
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/10-sandbox-host-namespaces-denied.yaml
 apiVersion: v1
@@ -26391,8 +26346,6 @@ spec:
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/net-role: platform
     spec:
-      imagePullSecrets:
-        - name: ghcr-credentials
       serviceAccountName: gibson-zitadel
       securityContext:
         fsGroup: 1000
@@ -26463,8 +26416,6 @@ spec:
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/net-role: platform
     spec:
-      imagePullSecrets:
-        - name: ghcr-credentials
       serviceAccountName: gibson-zitadel
       securityContext:
         fsGroup: 1000
@@ -26662,8 +26613,6 @@ spec:
         gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/net-role: platform
     spec:
-      imagePullSecrets:
-        - name: ghcr-credentials
       serviceAccountName: gibson-zitadel
       securityContext:
         fsGroup: 1000
@@ -26975,8 +26924,6 @@ spec:
       restartPolicy: OnFailure
       serviceAccountName: gibson-gibson-workloads-first-admin
       
-      imagePullSecrets:
-        - name: ghcr-credentials
       # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault
       # seccomp profile, a read-only root filesystem and no capabilities.
       # kubectl writes its cache under HOME=/tmp, an emptyDir.

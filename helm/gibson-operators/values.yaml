@@ -279,10 +279,6 @@ connectorOperator:
     name: gibson-connector-operator
     annotations: {}
 
-# Image pull secret for ghcr.io private images. Materialised by ESO.
-imagePullSecrets:
-  - name: ghcr-credentials
-
 # -----------------------------------------------------------------------
 # Values bridge — cross-cutting umbrella values referenced by the lifted
 # tenant-operator templates. These carry forward the umbrella chart's
@@ -297,8 +293,11 @@ global:
   # gibson-common helpers fold it into gibson.oidcIssuer.
   # Declared here so the kind overlay's key has a base default (deploy#576 parity).
   externalPort: ""
-  imagePullSecrets:
-    - name: ghcr-credentials
+  # The pull Secrets of every pod of this chart. Empty: each image of the
+  # chart is a public package on ghcr.io, so the kubelet pulls it with no
+  # credential. An install that serves the images from a private registry of
+  # its own names the Secret here (ADR-0084).
+  imagePullSecrets: []
   environment: ""
 
 

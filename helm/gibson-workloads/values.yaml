@@ -22,9 +22,11 @@ global:
   # (deploy#1733): OpenBao is the one External Secrets backend, so
   # `secretBackend` and `secretPrefix` are DELETED. Setting either fails the
   # render (gibson.assertSecretKnobsDeleted).
-  # Image pull secrets for private registries
-  imagePullSecrets:
-    - name: ghcr-credentials
+  # The pull Secrets of every pod of this chart. Empty: each image of the
+  # chart is a public package on ghcr.io, so the kubelet pulls it with no
+  # credential. An install that serves the images from a private registry of
+  # its own names the Secret here (ADR-0084).
+  imagePullSecrets: []
   # Storage class for persistent volumes (leave empty for default)
   storageClass: ""
   # Single replica count used by dev overlays to reduce resource usage.
@@ -1867,7 +1869,7 @@ mailpit:
 # the registry to silently drift behind the deployed daemon and default-deny
 # newly-added RPCs.
 #
-# The `sdk.version` / `sdk.registry` / `sdk.imagePullSecret` fields are now
+# The `sdk.version` / `sdk.registry` fields are now
 # UNUSED in the default path and retained only so existing overlays that still
 # set them render without error. `sdk.allowPublicFallback` is gone: no template
 # read it, and a reader took it for a live fallback to a public registry. The
@@ -1894,19 +1896,6 @@ sdk:
   # For air-gapped installs, set bypassRegistryValidation=true and supply
   # embeddedRegistry instead.
   registry: "ghcr.io/zeroroot-ai/internal-authz-registry"
-  # Name of the kubernetes.io/dockerconfigjson Secret that the ext-authz
-  # `pull-registry` init container uses to authenticate `oras pull`, for an
-  # install that mirrors the registry into a private registry.
-  #
-  # Pod-level imagePullSecrets only authenticate KUBELET image pulls;
-  # they do NOT propagate to runtime tools like `oras` running inside an
-  # init container. This Secret is projected as $DOCKER_CONFIG/config.json
-  # into the init container so oras finds it via standard docker auth.
-  #
-  # The chart's registry-credentials ExternalSecret writes this Secret from
-  # the ClusterSecretStore (the keyring, OpenBao and ExternalSecret chain,
-  # ADR-0084). Nothing creates it by hand.
-  imagePullSecret: "ghcr-credentials"
   # Set true to bypass validateRegistryFromSDK — the operator commits to
   # supplying a baked-in registry on a custom ext-authz image. Discouraged
   # outside fully air-gapped installs; drift between the daemon's compiled
