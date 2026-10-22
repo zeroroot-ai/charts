@@ -57,13 +57,16 @@ path "secret/data/zitadel-masterkey" { capabilities = ["read", "update"] }
 {{- end -}}
 
 {{/*
-gibson.openbaoPolicy.iamAdminEscrow: the iam-admin-pat-escrow Job. It reads
-and writes the KV key of the one Secret the Zitadel setup Job mints. It has
-no path to the admin token entry: the platform-operator is its one writer,
-and its userId is an allowed service subject (ADR-0171).
+gibson.openbaoPolicy.zitadelSetup: the sidecar login-client-pat-store of the
+Zitadel setup Job (charts#407). It writes the first login-client PAT to its
+KV key. It reads the metadata of that key and never its value: a run that
+minted no PAT checks that the store holds one. It has no path to the admin token entry: the
+platform-operator is its one writer, and its userId is an allowed service
+subject (ADR-0171).
 */}}
-{{- define "gibson.openbaoPolicy.iamAdminEscrow" -}}
-path "secret/data/gibson-zitadel-login-client-pat" { capabilities = ["create", "read", "update"] }
+{{- define "gibson.openbaoPolicy.zitadelSetup" -}}
+path "secret/data/gibson-zitadel-login-client-pat" { capabilities = ["create", "update"] }
+path "secret/metadata/gibson-zitadel-login-client-pat" { capabilities = ["read"] }
 {{- end -}}
 
 {{/*

@@ -4572,17 +4572,7 @@ data:
     ExternalPort: 443
     ExternalSecure: true
     FirstInstance:
-      Org:
-        LoginClient:
-          Machine:
-            Name: Automatically Initialized IAM Login Client
-            Username: login-client
-          Pat:
-            ExpirationDate: "2029-01-01T00:00:00Z"
-        Machine:
-          Machine:
-            Name: Automatically Initialized IAM Admin
-            Username: iam-admin
+      Org: {}
       Skip: false
     Machine:
       Identification:
@@ -4607,6 +4597,29 @@ data:
         Path: /etc/zitadel-system-keys/system-bot-b-pub.pem
     TLS:
       Enabled: false
+---
+# Source: gibson/templates/jobs/zitadel-first-instance.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gibson-zitadel-first-instance
+  namespace: gibson
+  labels:
+    app.kubernetes.io/component: zitadel-first-instance
+  annotations:
+    argocd.argoproj.io/sync-wave: "-6"
+data:
+  steps.yaml: |
+    FirstInstance:
+      Org:
+        # The machine user of zitadel-login (role IAM_LOGIN_CLIENT). The
+        # platform-operator rotates its PAT after the first one (ADR-0171).
+        LoginClient:
+          Machine:
+            Username: login-client
+            Name: Automatically Initialized IAM Login Client
+          Pat:
+            ExpirationDate: "2029-01-01T00:00:00Z"
 ---
 # Source: gibson/templates/jobs/zitadel-masterkey-guard.yaml
 apiVersion: v1
@@ -7624,7 +7637,7 @@ rules:
 # the renewable service token of that consumer (deploy#454):
 #   gibson-platform-operator-vault — policy platform-operator
 #   gibson-tenant-operator-vault   — policy tenant-operator
-#   gibson-openbao-iam-admin-escrow, gibson-openbao-jwt-auth-init,
+#   gibson-openbao-zitadel-setup, gibson-openbao-jwt-auth-init,
 #   gibson-openbao-masterkey-rotation, gibson-openbao-pg-logins,
 #   gibson-openbao-approle-init, gibson-openbao-approle-reader — the Jobs
 # A non-renewable root token in either would cause VaultTransitReady=False,
@@ -7676,7 +7689,7 @@ rules:
     resourceNames:
       - gibson-platform-operator-vault
       - gibson-tenant-operator-vault
-      - gibson-openbao-iam-admin-escrow
+      - gibson-openbao-zitadel-setup
       - gibson-openbao-jwt-auth-init
       - gibson-openbao-masterkey-rotation
       - gibson-openbao-pg-logins
@@ -7870,28 +7883,6 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
----
-# Source: gibson/charts/zitadel/templates/rbac_zitadel.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: gibson-zitadel
-  namespace: gibson
-  labels:
-    helm.sh/chart: zitadel-9.34.1
-    app.kubernetes.io/name: zitadel
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v4.19.4"
-    app.kubernetes.io/managed-by: Helm
-  annotations:
-    argocd.argoproj.io/sync-wave: "-6"
-rules:
-  - apiGroups: [ "" ]
-    resources: [ "secrets" ]
-    verbs: [ "get", "create", "patch", "list", "delete" ]
-  - apiGroups: [ "" ]
-    resources: [ "pods" ]
-    verbs: [ "get" ]
 ---
 # Source: gibson/templates/operators/cert-manager-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -8416,28 +8407,6 @@ subjects:
 - kind: ServiceAccount
   name: gibson-server
   namespace: gibson
----
-# Source: gibson/charts/zitadel/templates/rbac_zitadel.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: gibson-zitadel
-  namespace: gibson
-  labels:
-    helm.sh/chart: zitadel-9.34.1
-    app.kubernetes.io/name: zitadel
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v4.19.4"
-    app.kubernetes.io/managed-by: Helm
-  annotations:
-    argocd.argoproj.io/sync-wave: "-6"
-subjects:
-  - kind: ServiceAccount
-    name:  gibson-zitadel
-roleRef:
-  kind: Role
-  name: gibson-zitadel
-  apiGroup: rbac.authorization.k8s.io
 ---
 # Source: gibson/templates/operators/cert-manager-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -14223,9 +14192,6 @@ spec:
           - name: login-config-dotenv
             mountPath: /.env-file/
             readOnly: true
-          - name: login-client
-            mountPath: /login-client
-            readOnly: true
           resources:
               limits:
                 cpu: 500m
@@ -14274,10 +14240,6 @@ spec:
       - name: login-config-dotenv
         configMap:
           name: gibson-zitadel-login-config-dotenv
-      - name: login-client
-        secret:
-          defaultMode: 444
-          secretName: login-client
 ---
 # Source: gibson/charts/zitadel/templates/deployment_zitadel.yaml
 apiVersion: apps/v1
@@ -14305,8 +14267,9 @@ spec:
   template:
     metadata:
       annotations:
+        backup.velero.io/backup-volumes-excludes: zitadel-login-client-pat,zitadel-setup-tmp
         secret.reloader.stakater.com/reload: gibson-zitadel-system-key,gibson-zitadel-masterkey,zitadel-postgres-credentials
-        checksum/configmap: bf68f57edfc928f299f83402c2217f3220a1110a158a6963138e55704896f2bd
+        checksum/configmap: fd284125e28f76ef7f37e610f271a89158ff070e039a590592230b83abbad52b
         checksum/secret-db-ssl-ca-crt: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         checksum/secret-zitadel-secrets: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
       labels:
@@ -14424,6 +14387,11 @@ spec:
           - mountPath: /etc/zitadel-system-keys
             name: zitadel-system-key
             readOnly: true
+          - mountPath: /etc/zitadel-first-instance
+            name: zitadel-first-instance
+            readOnly: true
+          - mountPath: /login-client
+            name: zitadel-login-client-pat
           resources:
               {}
       initContainers:
@@ -14521,6 +14489,23 @@ spec:
           - key: public-key-b.pem
             path: system-bot-b-pub.pem
           secretName: gibson-zitadel-system-key
+      - configMap:
+          name: gibson-zitadel-first-instance
+        name: zitadel-first-instance
+      - emptyDir:
+          medium: Memory
+          sizeLimit: 1Mi
+        name: zitadel-login-client-pat
+      - name: openbao-ca
+        secret:
+          defaultMode: 292
+          items:
+          - key: ca.crt
+            path: ca.crt
+          secretName: gibson-openbao-tls
+      - emptyDir:
+          sizeLimit: 16Mi
+        name: zitadel-setup-tmp
 ---
 # Source: gibson/charts/gibson-workloads/templates/auth/openbao-deployment.yaml
 apiVersion: apps/v1
@@ -14868,7 +14853,7 @@ spec:
               TENANT_OP_POLICY="tenant-operator"
               # The token of each Job that configures the store, as
               # <Secret>:<policy>. Each Job mounts its own Secret and nothing else.
-              JOB_TOKENS="gibson-openbao-iam-admin-escrow:iam-admin-escrow gibson-openbao-jwt-auth-init:jwt-auth-init gibson-openbao-masterkey-rotation:zitadel-masterkey-rotation gibson-openbao-pg-logins:postgres-logins"
+              JOB_TOKENS="gibson-openbao-zitadel-setup:zitadel-setup gibson-openbao-jwt-auth-init:jwt-auth-init gibson-openbao-masterkey-rotation:zitadel-masterkey-rotation gibson-openbao-pg-logins:postgres-logins"
               ESO_ROLE="eso-reader"
               ESO_POLICY="eso-reader"
               ESO_SA_NAME="external-secrets"
@@ -16207,9 +16192,10 @@ spec:
 
                 # The Jobs that configure the store, each with the paths of its
                 # own script (helpers in _openbao-policies.tpl).
-                vault_write_policy "$tok" iam-admin-escrow \
+                vault_write_policy "$tok" zitadel-setup \
                   '
-              path "secret/data/gibson-zitadel-login-client-pat" { capabilities = ["create", "read", "update"] }' || return 1
+              path "secret/data/gibson-zitadel-login-client-pat" { capabilities = ["create", "update"] }
+              path "secret/metadata/gibson-zitadel-login-client-pat" { capabilities = ["read"] }' || return 1
                 vault_write_policy "$tok" jwt-auth-init \
                   '
               path "sys/auth/jwt" { capabilities = ["create", "update", "read", "sudo"] }
@@ -21591,7 +21577,7 @@ spec:
     kind: ClusterSecretStore
   target:
     name: login-client
-    creationPolicy: Orphan
+    creationPolicy: Owner
     template:
       engineVersion: v2
       type: Opaque
@@ -24092,20 +24078,6 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     argocd.argoproj.io/sync-wave: "0"
 ---
-# Source: gibson/templates/jobs/gibson-workloads-iam-admin-pat-escrow.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: iam-admin-pat-escrow
-  namespace: gibson
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: '3'
-    helm.sh/hook-delete-policy: before-hook-creation
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "-2"
----
 # Source: gibson/templates/jobs/postgres-setup-serviceaccount.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -24274,30 +24246,6 @@ rules:
     resources: ["secrets"]
     verbs: ["create"]
 ---
-# Source: gibson/templates/jobs/gibson-workloads-iam-admin-pat-escrow.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: iam-admin-pat-escrow
-  namespace: gibson
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: '3'
-    helm.sh/hook-delete-policy: before-hook-creation
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "-2"
-rules:
-- apiGroups: ['']
-  resources: [secrets]
-  verbs: [get]
-  # Every Secret the escrow loop reads (ENTRIES in the Job below). A name
-  # missing here reads as "not there yet" to kubectl and the loop waits its
-  # whole window: hosted run 34271811189 (2026-09-08) sat 20 minutes on
-  # "waiting for iam-admin" with the Secret present and this list naming
-  # the PAT alone. The Job now refuses to wait on a Secret it may not read.
-  resourceNames: [login-client]
----
 # Source: gibson/charts/gibson-workloads/templates/tests/02-bootstrap-secrets.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -24380,28 +24328,6 @@ subjects:
   - kind: ServiceAccount
     name: gibson-gibson-workloads-first-admin
     namespace: gibson
----
-# Source: gibson/templates/jobs/gibson-workloads-iam-admin-pat-escrow.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: iam-admin-pat-escrow
-  namespace: gibson
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: '3'
-    helm.sh/hook-delete-policy: before-hook-creation
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "-2"
-subjects:
-- kind: ServiceAccount
-  name: iam-admin-pat-escrow
-  namespace: gibson
-roleRef:
-  kind: Role
-  name: iam-admin-pat-escrow
-  apiGroup: rbac.authorization.k8s.io
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/01-service-reachability.yaml
 apiVersion: v1
@@ -26107,73 +26033,6 @@ spec:
       restartPolicy: Never
   backoffLimit: 1
 ---
-# Source: gibson/charts/zitadel/templates/job_cleanup.yaml
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: "gibson-zitadel-cleanup"
-  namespace: gibson
-  labels:
-    helm.sh/chart: zitadel-9.34.1
-    app.kubernetes.io/name: zitadel
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v4.19.4"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: cleanup
-  annotations:
-    helm.sh/hook: post-delete
-    helm.sh/hook-delete-policy: hook-succeeded
-    helm.sh/hook-weight: "-1"
-spec:
-  backoffLimit: 3
-  activeDeadlineSeconds: 60
-  template:
-    metadata:
-      labels:
-        helm.sh/chart: zitadel-9.34.1
-        app.kubernetes.io/name: zitadel
-        app.kubernetes.io/instance: gibson
-        app.kubernetes.io/version: "v4.19.4"
-        app.kubernetes.io/managed-by: Helm
-        app.kubernetes.io/component: cleanup
-        gibson.zeroroot.ai/client-postgres: "true"
-        gibson.zeroroot.ai/kube-api: "true"
-        gibson.zeroroot.ai/net-role: platform
-    spec:
-      serviceAccountName: gibson-zitadel
-      securityContext:
-        fsGroup: 1000
-        runAsNonRoot: true
-        runAsUser: 1000
-      enableServiceLinks: false
-      restartPolicy: Never
-      containers:
-        - name: zitadel-cleanup
-          securityContext:
-              allowPrivilegeEscalation: false
-              capabilities:
-                drop:
-                - ALL
-              privileged: false
-              readOnlyRootFilesystem: true
-              runAsNonRoot: true
-              runAsUser: 1000
-              seccompProfile:
-                type: RuntimeDefault
-          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
-          imagePullPolicy: 'IfNotPresent'
-          command:
-            - sh
-            - -c
-            - |
-              echo "Cleaning up secrets created by zitadel-setup..."
-              kubectl --namespace=gibson delete secret \
-                --selector='app.kubernetes.io/managed-by=Zitadel,app.kubernetes.io/instance=gibson' \
-                --ignore-not-found=true
-              echo "Cleanup completed"
-          resources:
-              {}
----
 # Source: gibson/charts/zitadel/templates/job_init.yaml
 apiVersion: batch/v1
 kind: Job
@@ -26352,6 +26211,11 @@ spec:
           - mountPath: /etc/zitadel-system-keys
             name: zitadel-system-key
             readOnly: true
+          - mountPath: /etc/zitadel-first-instance
+            name: zitadel-first-instance
+            readOnly: true
+          - mountPath: /login-client
+            name: zitadel-login-client-pat
           resources:
               {}
       volumes:
@@ -26370,6 +26234,23 @@ spec:
           - key: public-key-b.pem
             path: system-bot-b-pub.pem
           secretName: gibson-zitadel-system-key
+      - configMap:
+          name: gibson-zitadel-first-instance
+        name: zitadel-first-instance
+      - emptyDir:
+          medium: Memory
+          sizeLimit: 1Mi
+        name: zitadel-login-client-pat
+      - name: openbao-ca
+        secret:
+          defaultMode: 292
+          items:
+          - key: ca.crt
+            path: ca.crt
+          secretName: gibson-openbao-tls
+      - emptyDir:
+          sizeLimit: 16Mi
+        name: zitadel-setup-tmp
 ---
 # Source: gibson/charts/zitadel/templates/job_setup.yaml
 apiVersion: batch/v1
@@ -26403,8 +26284,8 @@ spec:
         app.kubernetes.io/version: "v4.19.4"
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/component: setup
+        gibson.zeroroot.ai/client-openbao: "true"
         gibson.zeroroot.ai/client-postgres: "true"
-        gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/net-role: platform
     spec:
       serviceAccountName: gibson-zitadel
@@ -26494,6 +26375,91 @@ spec:
           - mountPath: /etc/zitadel-system-keys
             name: zitadel-system-key
             readOnly: true
+        - args:
+          - |
+            set -uo pipefail
+            KEY=gibson-zitadel-login-client-pat
+            PAT_FILE=/login-client/pat
+            T=/tmp
+            umask 077
+            # The token goes to curl in a file, never on its argv
+            # (no-secret-argv). printf is a shell builtin.
+            printf 'X-Vault-Token: %s\n' "$VAULT_TOKEN" > "$T/auth.hdr"
+            bao() { curl -sS --max-time 10 -o "$T/resp.json" -w '%{http_code}' -H @"$T/auth.hdr" "$@" || echo 000; }
+            store() {
+              # Zitadel writes the file once; wait until its size is stable.
+              s1=$(wc -c < "$PAT_FILE"); sleep 1; s2=$(wc -c < "$PAT_FILE")
+              [ "$s1" = "$s2" ] || return 1
+              jq -nc --rawfile v "$PAT_FILE" '{data: {pat: ($v | rtrimstr("\n"))}}' > "$T/body.json"
+              status=$(bao -X POST -H "Content-Type: application/json" \
+                --data-binary @"$T/body.json" "$BAO_ADDR/v1/secret/data/$KEY")
+              case "$status" in
+                200|204) echo "STORED: the login-client PAT is in secret/$KEY"; touch "$T/stored"; return 0 ;;
+              esac
+              echo "write of secret/$KEY returned HTTP $status: $(cat "$T/resp.json" 2>/dev/null)"
+              return 1
+            }
+            finish() {
+              # The setup container stopped. This is the last chance.
+              if [ -e "$T/stored" ]; then exit 0; fi
+              if [ -s "$PAT_FILE" ]; then
+                store && exit 0
+                echo "ERROR: Zitadel minted the login-client PAT, and it did not reach secret/$KEY. Zitadel mints it once."
+              else
+                status=$(bao "$BAO_ADDR/v1/secret/metadata/$KEY")
+                if [ "$status" = 200 ] && [ "$(jq -r '.data.current_version // 0' "$T/resp.json")" -gt 0 ]; then
+                  echo "OpenBao holds the login-client PAT, so the instance existed before this run. Nothing to store."
+                  exit 0
+                fi
+                echo "ERROR: this setup run wrote no login-client PAT, and OpenBao holds none (metadata HTTP $status)."
+                echo "If the container zitadel-setup failed, read its log first."
+              fi
+              echo "RECOVERY: as the machine user iam-admin (Secret iam-admin-pat), mint a PAT for the machine user"
+              echo "login-client: POST /management/v1/users/<id of login-client>/pats. Then store it:"
+              echo "  printf '%s\n' \"\$NEW_PAT\" | scripts/baseline-set-secret.sh $KEY pat"
+              echo "The ExternalSecret login-client stays Degraded until OpenBao holds it."
+              exit 1
+            }
+            trap finish TERM
+            while :; do
+              if [ ! -e "$T/stored" ] && [ -s "$PAT_FILE" ]; then store || true; fi
+              sleep 2 & wait $!
+            done
+          command:
+          - bash
+          - -c
+          env:
+          - name: BAO_ADDR
+            value: https://gibson-openbao.gibson.svc:8200
+          - name: CURL_CA_BUNDLE
+            value: /etc/gibson/openbao-ca/ca.crt
+          - name: VAULT_TOKEN
+            valueFrom:
+              secretKeyRef:
+                key: VAULT_ADMIN_TOKEN
+                name: gibson-openbao-zitadel-setup
+          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
+          name: login-client-pat-store
+          restartPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+          - mountPath: /login-client
+            name: zitadel-login-client-pat
+            readOnly: true
+          - mountPath: /etc/gibson/openbao-ca
+            name: openbao-ca
+            readOnly: true
+          - mountPath: /tmp
+            name: zitadel-setup-tmp
       containers:
         - name: zitadel-setup
           securityContext:
@@ -26516,7 +26482,8 @@ spec:
             - /config/zitadel-config-yaml
             - --steps
             - /config/zitadel-config-yaml
-            - --init-projections=true
+            - --steps
+            - /etc/zitadel-first-instance/steps.yaml
           env:
             - name: POD_IP
               valueFrom:
@@ -26559,109 +26526,14 @@ spec:
           - name: zitadel-config-yaml
             mountPath: /config
             readOnly: true
-          - name: machinekey
-            mountPath: "/machinekey"
-          - name: login-client
-            mountPath: "/login-client"
           - mountPath: /etc/zitadel-system-keys
             name: zitadel-system-key
             readOnly: true
-          resources:
-            {}
-        - name: zitadel-machinekey
-          securityContext:
-              allowPrivilegeEscalation: false
-              capabilities:
-                drop:
-                - ALL
-              privileged: false
-              readOnlyRootFilesystem: true
-              runAsNonRoot: true
-              runAsUser: 1000
-              seccompProfile:
-                type: RuntimeDefault
-          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
-          imagePullPolicy: 'IfNotPresent'
-          command:
-            - sh
-            - -c
-            - |
-              until [ -n "$(kubectl --namespace=gibson get pod ${POD_NAME} --output=jsonpath="{.status.containerStatuses[?(@.name=='zitadel-setup')].state.terminated}")" ]; do
-                echo 'waiting for zitadel-setup container to terminate';
-                sleep 5;
-              done &&
-              echo 'zitadel-setup container terminated' &&
-              if [ -f /machinekey/sa.json ]; then
-                kubectl --namespace=gibson create secret generic iam-admin \
-                  --from-file=iam-admin.json=/machinekey/sa.json \
-                  --dry-run=client --output=yaml | \
-                kubectl annotate --local --filename=- \
-                  helm.sh/resource-policy=keep \
-                  --output=yaml | \
-                kubectl label --local --filename=- \
-                  app.kubernetes.io/managed-by=Zitadel \
-                  app.kubernetes.io/name=zitadel \
-                  app.kubernetes.io/instance=gibson \
-                  --output=yaml | \
-                kubectl apply --filename=-;
-              fi;
-          env:
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-          volumeMounts:
-            - name: machinekey
-              mountPath: "/machinekey"
-              readOnly: true
-          resources:
-            {}
-        - name: zitadel-login-client-pat
-          securityContext:
-              allowPrivilegeEscalation: false
-              capabilities:
-                drop:
-                - ALL
-              privileged: false
-              readOnlyRootFilesystem: true
-              runAsNonRoot: true
-              runAsUser: 1000
-              seccompProfile:
-                type: RuntimeDefault
-          image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
-          imagePullPolicy: 'IfNotPresent'
-          command:
-            - sh
-            - -c
-            - |
-              until [ -n "$(kubectl --namespace=gibson get pod ${POD_NAME} --output=jsonpath="{.status.containerStatuses[?(@.name=='zitadel-setup')].state.terminated}")" ]; do
-                echo 'waiting for zitadel-setup container to terminate';
-                sleep 5;
-              done &&
-              echo 'zitadel-setup container terminated' &&
-              if [ -f /login-client/pat ]; then
-                kubectl --namespace=gibson create secret generic login-client \
-                  --from-file=pat=/login-client/pat \
-                  --dry-run=client --output=yaml | \
-                kubectl annotate --local --filename=- \
-                  helm.sh/resource-policy=keep \
-                  --output=yaml | \
-                kubectl label --local --filename=- \
-                  app.kubernetes.io/managed-by=Zitadel \
-                  app.kubernetes.io/name=zitadel \
-                  app.kubernetes.io/instance=gibson \
-                  --output=yaml | \
-                kubectl apply --filename=-;
-              fi;
-          env:
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-          volumeMounts:
-            - name: login-client
-              mountPath: "/login-client"
-              readOnly: true
+          - mountPath: /etc/zitadel-first-instance
+            name: zitadel-first-instance
+            readOnly: true
+          - mountPath: /login-client
+            name: zitadel-login-client-pat
           resources:
             {}
       volumes:
@@ -26669,10 +26541,6 @@ spec:
         configMap:
           name: gibson-zitadel-config-yaml
           defaultMode: 0440
-      - name: machinekey
-        emptyDir: { }
-      - name: login-client
-        emptyDir: { }
       - configMap:
           name: gibson-zitadel-masterkey-guard
         name: zitadel-masterkey-guard
@@ -26684,6 +26552,23 @@ spec:
           - key: public-key-b.pem
             path: system-bot-b-pub.pem
           secretName: gibson-zitadel-system-key
+      - configMap:
+          name: gibson-zitadel-first-instance
+        name: zitadel-first-instance
+      - emptyDir:
+          medium: Memory
+          sizeLimit: 1Mi
+        name: zitadel-login-client-pat
+      - name: openbao-ca
+        secret:
+          defaultMode: 292
+          items:
+          - key: ca.crt
+            path: ca.crt
+          secretName: gibson-openbao-tls
+      - emptyDir:
+          sizeLimit: 16Mi
+        name: zitadel-setup-tmp
 ---
 # Source: gibson/templates/jobs/gibson-workloads-first-admin.yaml
 apiVersion: batch/v1
@@ -26864,163 +26749,6 @@ spec:
               - key: key_previous
                 path: key_previous
             defaultMode: 0444
----
-# Source: gibson/templates/jobs/gibson-workloads-iam-admin-pat-escrow.yaml
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: iam-admin-pat-escrow
-  namespace: gibson
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: '3'
-    helm.sh/hook-delete-policy: before-hook-creation
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
-    argocd.argoproj.io/sync-wave: "-2"
-spec:
-  backoffLimit: 10
-  ttlSecondsAfterFinished: 600
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/component: iam-admin-pat-escrow
-        gibson.zeroroot.ai/net-role: platform
-        gibson.zeroroot.ai/client-openbao: "true"
-        gibson.zeroroot.ai/kube-api: "true"
-    spec:
-      restartPolicy: OnFailure
-      serviceAccountName: iam-admin-pat-escrow
-      # Secure pod (ADR-0165, charts#394): non-root, the RuntimeDefault seccomp
-      # profile, a read-only root filesystem and no capabilities. The script
-      # writes only to /tmp, an emptyDir.
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 65534
-        runAsGroup: 65534
-        seccompProfile:
-          type: RuntimeDefault
-      volumes:
-      - name: openbao-ca
-        secret:
-          secretName: gibson-openbao-tls
-          defaultMode: 0444
-          items:
-            - key: ca.crt
-              path: ca.crt
-      - name: tmp
-        emptyDir: {}
-      containers:
-      - name: escrow
-        image: "ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc"
-        securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          capabilities:
-            drop: ["ALL"]
-        volumeMounts:
-        - name: openbao-ca
-          mountPath: /etc/gibson/openbao-ca
-          readOnly: true
-        - name: tmp
-          mountPath: /tmp
-        env:
-        - name: SSL_CERT_DIR
-          value: "/etc/ssl/certs:/etc/gibson/openbao-ca"
-        - name: CURL_CA_BUNDLE
-          value: "/etc/gibson/openbao-ca/ca.crt"
-        # kubectl writes its discovery cache under $HOME; /tmp is the one
-        # writable path.
-        - name: HOME
-          value: /tmp
-        - name: BAO_ADDR
-          value: "https://gibson-openbao.gibson.svc:8200"
-        # The token of this Job alone, policy iam-admin-escrow: the KV key
-        # below and nothing else. openbao-auto-init mints it.
-        - name: VAULT_ADMIN_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: gibson-openbao-iam-admin-escrow
-              key: VAULT_ADMIN_TOKEN
-        command: [bash, -ec]
-        args:
-        - |
-          set -euo pipefail
-          hcurl() {
-            _hcurl_f="$(mktemp)" || return 1
-            printf '%s\n' "$1" > "$_hcurl_f"
-            shift
-            if curl -H "@$_hcurl_f" "$@"; then _hcurl_rc=0; else _hcurl_rc=$?; fi
-            rm -f "$_hcurl_f"
-            return "$_hcurl_rc"
-          }
-          NS=gibson
-          # The Secret the Zitadel setup Job mints on the first instance (its
-          # zitadel-login-client-pat container), as
-          #   <Secret>:<data key>:<store key>:<store property>
-          # zitadel-login mounts login-client. A restore does not bring it
-          # back (blocker 3 loop #14, 2026-09-08: zitadel-login on "secret
-          # login-client not found").
-          ENTRIES="login-client:pat:gibson-zitadel-login-client-pat:pat"
-          # The store key that the platform-operator rotates (ADR-0171). This
-          # hook writes it only when the store holds no value.
-          OPERATOR_ROTATED="gibson-zitadel-login-client-pat"
-          for entry in $ENTRIES; do
-            SECRET=${entry%%:*}; rest=${entry#*:}
-            DATAKEY=${rest%%:*}; rest=${rest#*:}
-            KEY=${rest%%:*}; PROP=${rest#*:}
-            # The store first. On a restore the store already holds the value
-            # and the Secret does not exist yet (the ExternalSecret that writes
-            # it applies at wave -1, after this hook), so waiting for the
-            # Secret here would deadlock the sync. A key in the store and no
-            # Secret is the restore path: nothing to do.
-            code=$(hcurl "X-Vault-Token: $VAULT_ADMIN_TOKEN" -sS -o /tmp/kv.json -w '%{http_code}' \
-              "$BAO_ADDR/v1/secret/data/$KEY")
-            case "$code" in
-              200) have=$(jq -r --arg p "$PROP" '.data.data[$p] // empty' /tmp/kv.json) ;;
-              404) have="" ;;
-              *) echo "ERROR: read secret/$KEY returned HTTP $code: $(cat /tmp/kv.json)"; exit 1 ;;
-            esac
-            # The store is the source of a key the platform-operator rotates
-            # there (ADR-0171). A value in the store is never written over for
-            # such a key: writing the Secret value over it would undo a
-            # rotation whenever this hook runs before ESO has refreshed the
-            # Secret.
-            if [ -n "$have" ] && [ "$KEY" = "$OPERATOR_ROTATED" ]; then
-              echo "ESCROWED already: secret/$KEY holds a value, and the platform-operator rotates it in the store"
-              continue
-            fi
-            # The restore path: the store holds the value and the Secret
-            # does not exist yet.
-            if [ -n "$have" ] && ! kubectl -n "$NS" get secret "$SECRET" >/dev/null 2>&1; then
-              echo "ESCROWED already: secret/$KEY is in the store and Secret $SECRET is not yet materialised (restore path)"
-              continue
-            fi
-            # A Secret this ServiceAccount may not read looks exactly like one
-            # that is not there yet. Refuse to wait on it.
-            if [ "$(kubectl -n "$NS" auth can-i get "secret/$SECRET")" != yes ]; then
-              echo "ERROR: the escrow ServiceAccount may not get secret/$SECRET: add it to the Role's resourceNames"; exit 1
-            fi
-            # The minted Secret (fresh bootstrap: the Zitadel setup Job writes it,
-            # up to ~9 min into a cold bringup). 180 x 5 s, the minter's window.
-            for i in $(seq 1 180); do
-              if kubectl -n "$NS" get secret "$SECRET" >/dev/null 2>&1; then break; fi
-              echo "  waiting for $SECRET ($i/180)"; sleep 5
-            done
-            VALUE=$(kubectl -n "$NS" get secret "$SECRET" -o json | jq -r --arg k "$DATAKEY" '.data[$k] // empty' | base64 -d)
-            [ -n "$VALUE" ] || { echo "ERROR: $SECRET never appeared or its $DATAKEY is empty"; exit 1; }
-            if [ "$have" = "$VALUE" ]; then
-              echo "ESCROWED already: secret/$KEY matches Secret $SECRET"
-              continue
-            fi
-            code=$(ESCROW_VALUE="$VALUE" jq -nc --arg p "$PROP" '{data: {($p): env.ESCROW_VALUE}}' | hcurl "X-Vault-Token: $VAULT_ADMIN_TOKEN" -sS -o /tmp/kv.json -w '%{http_code}' -X POST \
-              -H "Content-Type: application/json" \
-              --data-binary @- "$BAO_ADDR/v1/secret/data/$KEY")
-            case "$code" in
-              200|204) echo "ESCROWED: wrote secret/$KEY from Secret $SECRET/$DATAKEY (len=${#VALUE})" ;;
-              *) echo "ERROR: write secret/$KEY returned HTTP $code: $(cat /tmp/kv.json)"; exit 1 ;;
-            esac
-          done
 ---
 # Source: gibson/templates/jobs/gibson-workloads-postgres-setup-job.yaml
 apiVersion: batch/v1

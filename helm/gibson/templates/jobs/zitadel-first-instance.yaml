@@ -1,0 +1,37 @@
+{{/*
+zitadel-first-instance: the steps file that makes the Zitadel setup Job mint
+the first login-client PAT (charts#407, ADR-0014).
+
+values zitadel.setupJob.additionalArgs passes steps.yaml to `zitadel setup`.
+It is not in zitadel.configmapConfig, because there the upstream chart starts
+a kubectl container that writes the PAT to a Kubernetes Secret: a second
+writer of the Secret login-client. The sidecar login-client-pat-store (values
+zitadel.setupJob.initContainers) writes the PAT straight to OpenBao. It needs
+no Kubernetes API, so the chart gives the Zitadel ServiceAccount no grant.
+
+Wave -6, with the Zitadel config map: it exists before the init Job (-4) and
+the setup Job (-3).
+
+Guard: scripts/check-zitadel-token-writers.py.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-zitadel-first-instance
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: zitadel-first-instance
+  annotations:
+    argocd.argoproj.io/sync-wave: "-6"
+data:
+  steps.yaml: |
+    FirstInstance:
+      Org:
+        # The machine user of zitadel-login (role IAM_LOGIN_CLIENT). The
+        # platform-operator rotates its PAT after the first one (ADR-0171).
+        LoginClient:
+          Machine:
+            Username: login-client
+            Name: Automatically Initialized IAM Login Client
+          Pat:
+            ExpirationDate: "2029-01-01T00:00:00Z"
