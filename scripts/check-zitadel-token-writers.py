@@ -18,10 +18,15 @@ renders the baseline profile and fails when:
   - the waves let a fresh install or a restore deadlock;
   - the Zitadel config map holds FirstInstance.Org.Machine or LoginClient, so
     the upstream chart starts a kubectl container that writes a Secret;
-  - a container of a Zitadel Job runs `kubectl create secret`, or a Role bound
-    to the Zitadel ServiceAccount grants a verb on Secrets;
+  - a container of a Zitadel Job runs kubectl, or any Role or ClusterRole is
+    bound to the Zitadel ServiceAccount (the internet-facing Deployment runs
+    as it);
   - the setup Job does not mint the login-client PAT from the steps file, or
-    its store container does not write it to OpenBao with its own token;
+    its store sidecar does not write it to OpenBao with its own token;
+  - the store sidecar is not a native sidecar that traps SIGTERM, or a run
+    with no PAT does not check the OpenBao metadata and fail when it is gone;
+  - the OpenBao policy of the sidecar is more than: write the key, read its
+    metadata;
   - the setup pod cannot reach OpenBao on 8200;
   - the deleted escrow hook comes back.
 
@@ -150,22 +155,21 @@ def check(docs: list[dict]) -> list[str]:
             if org.get(block):
                 bad.append(f"{name} holds FirstInstance.Org.{block}: the upstream chart then starts a kubectl container that writes a Secret, a second writer (charts#407)")
 
-    # 4. No Zitadel Job writes a Secret, and the Zitadel ServiceAccount may not.
+    # 4. No Zitadel Job writes a Secret or calls the Kubernetes API, and the
+    # Zitadel ServiceAccount has no grant. The internet-facing Zitadel
+    # Deployment runs as that account.
     for j in zitadel_jobs(docs):
         for c in pod_spec(j).get("containers", []) + (pod_spec(j).get("initContainers") or []):
             s = script_of(c)
             if "kubectl" in s and "create secret" in s:
                 bad.append(f"the container {c['name']} of Job {j['metadata']['name']} runs `kubectl create secret`: a Secret writer outside its ExternalSecret (charts#407)")
-    roles = {(d["kind"], d["metadata"]["name"]): d for d in docs if d.get("kind") in ("Role", "ClusterRole")}
+            elif "kubectl" in s:
+                bad.append(f"the container {c['name']} of Job {j['metadata']['name']} runs kubectl: no Zitadel container calls the Kubernetes API")
     for b in docs:
         if b.get("kind") not in ("RoleBinding", "ClusterRoleBinding"):
             continue
-        if not any(s.get("kind") == "ServiceAccount" and s.get("name") == ZITADEL_SA for s in b.get("subjects") or []):
-            continue
-        role = roles.get((b["roleRef"]["kind"], b["roleRef"]["name"]))
-        for rule in (role or {}).get("rules", []):
-            if "secrets" in (rule.get("resources") or []) or "*" in (rule.get("resources") or []):
-                bad.append(f"{b['roleRef']['kind']} {b['roleRef']['name']} grants {rule.get('verbs')} on Secrets to the ServiceAccount {ZITADEL_SA}: the Zitadel pods write no Secret (charts#407)")
+        if any(s.get("kind") == "ServiceAccount" and s.get("name") == ZITADEL_SA for s in b.get("subjects") or []):
+            bad.append(f"{b['kind']} {b['metadata']['name']} gives the ServiceAccount {ZITADEL_SA} the {b['roleRef']['kind']} {b['roleRef']['name']}: the Zitadel Deployment runs as that account, so it gets no grant")
 
     # 5. The setup Job mints the login-client PAT from the steps file and
     # writes it straight to OpenBao.
@@ -184,6 +188,7 @@ def check(docs: list[dict]) -> list[str]:
     spec = pod_spec(setup[0])
     cs = {c["name"]: c for c in spec.get("containers", [])}
     sc = cs.get(SETUP_CONTAINER)
+    inits = {c["name"]: c for c in spec.get("initContainers") or []}
     vols = {v["name"]: v for v in spec.get("volumes", [])}
     if sc is not None:
         args = sc.get("args") or []
@@ -194,17 +199,25 @@ def check(docs: list[dict]) -> list[str]:
             bad.append(f"the container {SETUP_CONTAINER} does not pass the mounted steps file of {STEPS_CONFIGMAP} with --steps: Zitadel creates no login client")
         if "/login-client" not in mounts.values():
             bad.append(f"the container {SETUP_CONTAINER} mounts nothing at /login-client: Zitadel cannot write the login-client PAT there")
-    store = cs.get(STORE_CONTAINER)
+    store = inits.get(STORE_CONTAINER)
     if store is None:
-        bad.append(f"the Job {SETUP_JOB} has no container {STORE_CONTAINER}: the minted login-client PAT reaches no store")
+        bad.append(f"the Job {SETUP_JOB} has no init container {STORE_CONTAINER}: the minted login-client PAT reaches no store")
     else:
         s = script_of(store)
+        # A native sidecar: the kubelet sends it SIGTERM when the setup
+        # container stops. That is how it learns the end of the run without
+        # the Kubernetes API.
+        if store.get("restartPolicy") != "Always":
+            bad.append(f"the init container {STORE_CONTAINER} must be a native sidecar (restartPolicy Always): it learns the end of the setup run from SIGTERM")
+        if "trap finish TERM" not in s:
+            bad.append(f"the sidecar {STORE_CONTAINER} does not trap SIGTERM: it never checks the end of the setup run")
+        # A run that minted no PAT must find the PAT in OpenBao, or fail.
+        if "/v1/secret/metadata/$KEY" not in s or "exit 1" not in s:
+            bad.append(f"the sidecar {STORE_CONTAINER} does not check the OpenBao metadata of the key when no PAT was minted: a lost first PAT passes as success")
         if f"KEY={ZITADEL_ENTRIES['login-client'][1]}" not in s or "/v1/secret/data/$KEY" not in s:
             bad.append(f"the container {STORE_CONTAINER} does not write secret/data/{ZITADEL_ENTRIES['login-client'][1]}")
         if "/login-client/pat" not in s or "/login-client" not in [m["mountPath"] for m in store.get("volumeMounts", [])]:
             bad.append(f"the container {STORE_CONTAINER} does not read /login-client/pat from the volume that Zitadel writes")
-        if f"name=='{SETUP_CONTAINER}'" not in s:
-            bad.append(f"the container {STORE_CONTAINER} does not wait for the container {SETUP_CONTAINER} to stop: it reads the file before Zitadel writes it")
         named = {(e["valueFrom"]["secretKeyRef"]["name"]) for e in store.get("env", []) if (e.get("valueFrom") or {}).get("secretKeyRef")}
         if named != {STORE_AUTH_HOLDER}:
             bad.append(f"the container {STORE_CONTAINER} must read exactly one Secret, the one that holds its OpenBao token ({len(named)} named)")
@@ -217,7 +230,23 @@ def check(docs: list[dict]) -> list[str]:
     minted = any(f"{STORE_AUTH_HOLDER}:{STORE_POLICY}" in script_of(c)
                  for b in bao for c in pod_spec(b).get("containers", []) + (pod_spec(b).get("initContainers") or []))
     if not minted:
-        bad.append(f"openbao-auto-init does not mint {STORE_AUTH_HOLDER} with policy {STORE_POLICY} (JOB_ZITADEL_ENTRIES): the store container has no token")
+        bad.append(f"openbao-auto-init does not mint {STORE_AUTH_HOLDER} with policy {STORE_POLICY} (JOB_TOKENS): the store container has no token")
+    # The policy: write the value, read only the metadata.
+    want = [f'path "secret/data/{ZITADEL_ENTRIES["login-client"][1]}" {{ capabilities = ["create", "update"] }}',
+            f'path "secret/metadata/{ZITADEL_ENTRIES["login-client"][1]}" {{ capabilities = ["read"] }}']
+    pol = None
+    for b in bao:
+        for c in pod_spec(b).get("containers", []) + (pod_spec(b).get("initContainers") or []):
+            t = script_of(c)
+            i = t.find(f'vault_write_policy "$tok" {STORE_POLICY} ')
+            if i >= 0:
+                pol = t[i:t.find("|| return 1", i)]
+    if pol is None:
+        bad.append(f"openbao-auto-init writes no policy {STORE_POLICY}")
+    else:
+        paths = [ln.strip().rstrip("'").strip() for ln in pol.splitlines() if ln.strip().startswith("path ")]
+        if sorted(paths) != sorted(want):
+            bad.append(f"the policy {STORE_POLICY} must be exactly: write {ZITADEL_ENTRIES['login-client'][1]} and read its metadata, never its value; it is {paths}")
 
     # 6. The network half (D76): the setup pod reaches OpenBao on 8200.
     rules = cp.rules(docs, NS)
@@ -244,7 +273,7 @@ def mutate(docs: list[dict], fn) -> list[dict]:
 
 def store_container(d: dict) -> dict | None:
     if d.get("kind") == "Job" and d["metadata"]["name"] == SETUP_JOB:
-        for c in pod_spec(d)["containers"]:
+        for c in pod_spec(d).get("initContainers") or []:
             if c["name"] == STORE_CONTAINER:
                 return c
     return None
@@ -283,9 +312,20 @@ def selftest(docs: list[dict]) -> None:
             pod_spec(d)["containers"].append({"name": "zitadel-login-client-pat", "command": ["sh", "-c"],
                                               "args": ["kubectl --namespace=gibson create secret generic login-client --from-file=pat=/login-client/pat"]})
 
-    def secrets_role(d):
-        if d.get("kind") == "Role" and d["metadata"]["name"] == "gibson-zitadel-setup":
-            d["rules"].append({"apiGroups": [""], "resources": ["secrets"], "verbs": ["create"]})
+    pod_reader = copy.deepcopy(docs) + [
+        {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": "gibson-zitadel-setup", "namespace": NS},
+         "rules": [{"apiGroups": [""], "resources": ["pods"], "verbs": ["get"]}]},
+        {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": {"name": "gibson-zitadel-setup", "namespace": NS},
+         "subjects": [{"kind": "ServiceAccount", "name": ZITADEL_SA, "namespace": NS}],
+         "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "gibson-zitadel-setup"}}]
+
+    def policy_edit(old, new):
+        def f(d):
+            if d.get("kind") == "StatefulSet":
+                for c in pod_spec(d).get("containers", []) + (pod_spec(d).get("initContainers") or []):
+                    for k in ("command", "args"):
+                        c[k] = [a.replace(old, new) if isinstance(a, str) else a for a in c.get(k) or []]
+        return f
 
     with_escrow = copy.deepcopy(docs) + [{"apiVersion": "batch/v1", "kind": "Job",
                                           "metadata": {"name": "iam-admin-pat-escrow", "namespace": NS},
@@ -311,11 +351,15 @@ def selftest(docs: list[dict]) -> None:
         ("the config map creates the login client", mutate(docs, config_block("LoginClient", {"Machine": {"Username": "login-client"}, "Pat": {"ExpirationDate": "2029-01-01T00:00:00Z"}})), "FirstInstance.Org.LoginClient"),
         ("the config map creates iam-admin", mutate(docs, config_block("Machine", {"Machine": {"Username": "iam-admin"}, "MachineKey": {"Type": 1}})), "FirstInstance.Org.Machine"),
         ("a kubectl Secret writer in the setup Job", mutate(docs, kubectl_writer), "create secret"),
-        ("a Secret grant for the Zitadel ServiceAccount", mutate(docs, secrets_role), "on Secrets to the ServiceAccount"),
+        ("the pod-read Role for the Zitadel ServiceAccount", pod_reader, "so it gets no grant"),
         ("no steps file", drop(lambda d: d.get("kind") == "ConfigMap" and d["metadata"]["name"] == STEPS_CONFIGMAP), "creates FirstInstance.Org.LoginClient with a Pat"),
-        ("the store container removed", mutate(docs, lambda d: pod_spec(d).__setitem__("containers", [c for c in pod_spec(d)["containers"] if c["name"] != STORE_CONTAINER]) if store_container(d) is not None else None), f"has no container {STORE_CONTAINER}"),
+        ("the store sidecar removed", mutate(docs, lambda d: pod_spec(d).__setitem__("initContainers", [c for c in pod_spec(d)["initContainers"] if c["name"] != STORE_CONTAINER]) if store_container(d) is not None else None), f"has no init container {STORE_CONTAINER}"),
+        ("the store container as a plain init container", mutate(docs, store_edit(lambda c: c.pop("restartPolicy", None))), "must be a native sidecar"),
+        ("the store container with no SIGTERM trap", mutate(docs, store_edit(lambda c: c.__setitem__("args", [a.replace("trap finish TERM", "true") for a in c["args"]]))), "does not trap SIGTERM"),
+        ("a run with no PAT passes without the metadata check", mutate(docs, store_edit(lambda c: c.__setitem__("args", [a.replace("/v1/secret/metadata/$KEY", "/v1/sys/health") for a in c["args"]]))), "a lost first PAT passes as success"),
+        ("a kubectl call in the setup Job", mutate(docs, store_edit(lambda c: c.__setitem__("args", [a + "\nkubectl get pod x\n" for a in c["args"]]))), "calls the Kubernetes API"),
+        ("the policy reads the value", mutate(docs, policy_edit('path "secret/metadata/gibson-zitadel-login-client-pat" { capabilities = ["read"] }', 'path "secret/data/gibson-zitadel-login-client-pat" { capabilities = ["read"] }')), "never its value"),
         ("the store container writes another key", mutate(docs, store_edit(lambda c: c.__setitem__("args", [a.replace("KEY=gibson-zitadel-login-client-pat", "KEY=gibson-zitadel-other") for a in c["args"]]))), "does not write secret/data/gibson-zitadel-login-client-pat"),
-        ("the store container does not wait", mutate(docs, store_edit(lambda c: c.__setitem__("args", [a.replace("name=='zitadel-setup'", "name=='other'") for a in c["args"]]))), "does not wait for the container"),
         ("the store container reads another Secret", mutate(docs, store_edit(lambda c: c["env"].append({"name": "X", "valueFrom": {"secretKeyRef": {"name": "gibson-openbao-keys", "key": "VAULT_ADMIN_TOKEN"}}}))), "must read exactly one Secret"),
         ("the store container as another user", mutate(docs, store_edit(lambda c: c.setdefault("securityContext", {}).__setitem__("runAsUser", 65534))), "readable by its owner only"),
         ("the setup pod without the OpenBao label", mutate(docs, lambda d: d["spec"]["template"]["metadata"]["labels"].pop("gibson.zeroroot.ai/client-openbao", None) if d.get("kind") == "Job" and d["metadata"]["name"] == SETUP_JOB else None), "reach OpenBao on 8200"),

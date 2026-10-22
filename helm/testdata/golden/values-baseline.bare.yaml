@@ -7884,21 +7884,6 @@ rules:
     resources: ["events"]
     verbs: ["create", "patch"]
 ---
-# Source: gibson/templates/jobs/zitadel-first-instance.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: gibson-zitadel-setup
-  namespace: gibson
-  labels:
-    app.kubernetes.io/component: zitadel-first-instance
-  annotations:
-    argocd.argoproj.io/sync-wave: "-6"
-rules:
-  - apiGroups: [""]
-    resources: [pods]
-    verbs: [get]
----
 # Source: gibson/templates/operators/cert-manager-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -8422,25 +8407,6 @@ subjects:
 - kind: ServiceAccount
   name: gibson-server
   namespace: gibson
----
-# Source: gibson/templates/jobs/zitadel-first-instance.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: gibson-zitadel-setup
-  namespace: gibson
-  labels:
-    app.kubernetes.io/component: zitadel-first-instance
-  annotations:
-    argocd.argoproj.io/sync-wave: "-6"
-subjects:
-  - kind: ServiceAccount
-    name: gibson-zitadel
-    namespace: gibson
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: gibson-zitadel-setup
 ---
 # Source: gibson/templates/operators/cert-manager-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -16228,7 +16194,8 @@ spec:
                 # own script (helpers in _openbao-policies.tpl).
                 vault_write_policy "$tok" zitadel-setup \
                   '
-              path "secret/data/gibson-zitadel-login-client-pat" { capabilities = ["create", "update"] }' || return 1
+              path "secret/data/gibson-zitadel-login-client-pat" { capabilities = ["create", "update"] }
+              path "secret/metadata/gibson-zitadel-login-client-pat" { capabilities = ["read"] }' || return 1
                 vault_write_policy "$tok" jwt-auth-init \
                   '
               path "sys/auth/jwt" { capabilities = ["create", "update", "read", "sudo"] }
@@ -26319,7 +26286,6 @@ spec:
         app.kubernetes.io/component: setup
         gibson.zeroroot.ai/client-openbao: "true"
         gibson.zeroroot.ai/client-postgres: "true"
-        gibson.zeroroot.ai/kube-api: "true"
         gibson.zeroroot.ai/net-role: platform
     spec:
       serviceAccountName: gibson-zitadel
@@ -26409,57 +26375,60 @@ spec:
           - mountPath: /etc/zitadel-system-keys
             name: zitadel-system-key
             readOnly: true
-      containers:
         - args:
           - |
-            set -euo pipefail
+            set -uo pipefail
             KEY=gibson-zitadel-login-client-pat
-            # The setup container writes the PAT before it stops. Read the
-            # state of this pod until that container has terminated.
-            for i in $(seq 1 240); do
-              code=$(kubectl -n "$POD_NAMESPACE" get pod "$POD_NAME" \
-                -o jsonpath="{.status.containerStatuses[?(@.name=='zitadel-setup')].state.terminated.exitCode}")
-              [ -n "$code" ] && break
-              echo "waiting for the container zitadel-setup to stop ($i/240)"; sleep 5
-            done
-            [ -n "$code" ] || { echo "ERROR: the container zitadel-setup did not stop in 20 minutes"; exit 1; }
-            echo "the container zitadel-setup stopped with exit code $code"
-            if [ ! -s /login-client/pat ]; then
-              echo "Zitadel minted no login-client PAT: the instance existed before this run. OpenBao keeps its entry."
-              exit 0
-            fi
-            # A new instance: this PAT is the one that Zitadel knows, so it
-            # replaces any value of the entry.
-            # The token and the PAT go to curl in files, never on its argv
-            # (no-secret-argv). printf is a shell builtin.
+            PAT_FILE=/login-client/pat
+            T=/tmp
             umask 077
-            printf 'X-Vault-Token: %s\n' "$VAULT_TOKEN" > /tmp/auth.hdr
-            jq -nc --rawfile v /login-client/pat '{data: {pat: ($v | rtrimstr("\n"))}}' > /tmp/body.json
-            for i in $(seq 1 60); do
-              status=$(curl -sS -o /tmp/resp.json -w '%{http_code}' -X POST \
-                -H @/tmp/auth.hdr -H "Content-Type: application/json" \
-                --data-binary @/tmp/body.json "$BAO_ADDR/v1/secret/data/$KEY") || status=000
+            # The token goes to curl in a file, never on its argv
+            # (no-secret-argv). printf is a shell builtin.
+            printf 'X-Vault-Token: %s\n' "$VAULT_TOKEN" > "$T/auth.hdr"
+            bao() { curl -sS --max-time 10 -o "$T/resp.json" -w '%{http_code}' -H @"$T/auth.hdr" "$@" || echo 000; }
+            store() {
+              # Zitadel writes the file once; wait until its size is stable.
+              s1=$(wc -c < "$PAT_FILE"); sleep 1; s2=$(wc -c < "$PAT_FILE")
+              [ "$s1" = "$s2" ] || return 1
+              jq -nc --rawfile v "$PAT_FILE" '{data: {pat: ($v | rtrimstr("\n"))}}' > "$T/body.json"
+              status=$(bao -X POST -H "Content-Type: application/json" \
+                --data-binary @"$T/body.json" "$BAO_ADDR/v1/secret/data/$KEY")
               case "$status" in
-                200|204) echo "STORED: the login-client PAT is in secret/$KEY"; exit 0 ;;
+                200|204) echo "STORED: the login-client PAT is in secret/$KEY"; touch "$T/stored"; return 0 ;;
               esac
-              echo "write of secret/$KEY returned HTTP $status ($i/60): $(cat /tmp/resp.json 2>/dev/null)"; sleep 5
+              echo "write of secret/$KEY returned HTTP $status: $(cat "$T/resp.json" 2>/dev/null)"
+              return 1
+            }
+            finish() {
+              # The setup container stopped. This is the last chance.
+              if [ -e "$T/stored" ]; then exit 0; fi
+              if [ -s "$PAT_FILE" ]; then
+                store && exit 0
+                echo "ERROR: Zitadel minted the login-client PAT, and it did not reach secret/$KEY. Zitadel mints it once."
+              else
+                status=$(bao "$BAO_ADDR/v1/secret/metadata/$KEY")
+                if [ "$status" = 200 ] && [ "$(jq -r '.data.current_version // 0' "$T/resp.json")" -gt 0 ]; then
+                  echo "OpenBao holds the login-client PAT, so the instance existed before this run. Nothing to store."
+                  exit 0
+                fi
+                echo "ERROR: this setup run wrote no login-client PAT, and OpenBao holds none (metadata HTTP $status)."
+                echo "If the container zitadel-setup failed, read its log first."
+              fi
+              echo "RECOVERY: as the machine user iam-admin (Secret iam-admin-pat), mint a PAT for the machine user"
+              echo "login-client: POST /management/v1/users/<id of login-client>/pats. Then store it:"
+              echo "  printf '%s\n' \"\$NEW_PAT\" | scripts/baseline-set-secret.sh $KEY pat"
+              echo "The ExternalSecret login-client stays Degraded until OpenBao holds it."
+              exit 1
+            }
+            trap finish TERM
+            while :; do
+              if [ ! -e "$T/stored" ] && [ -s "$PAT_FILE" ]; then store || true; fi
+              sleep 2 & wait $!
             done
-            echo "ERROR: the login-client PAT did not reach secret/$KEY. Zitadel mints it once, so recover it from Zitadel."
-            exit 1
           command:
           - bash
-          - -ec
+          - -c
           env:
-          - name: POD_NAME
-            valueFrom:
-              fieldRef:
-                fieldPath: metadata.name
-          - name: POD_NAMESPACE
-            valueFrom:
-              fieldRef:
-                fieldPath: metadata.namespace
-          - name: HOME
-            value: /tmp
           - name: BAO_ADDR
             value: https://gibson-openbao.gibson.svc:8200
           - name: CURL_CA_BUNDLE
@@ -26471,6 +26440,7 @@ spec:
                 name: gibson-openbao-zitadel-setup
           image: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
           name: login-client-pat-store
+          restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -26490,6 +26460,7 @@ spec:
             readOnly: true
           - mountPath: /tmp
             name: zitadel-setup-tmp
+      containers:
         - name: zitadel-setup
           securityContext:
               allowPrivilegeEscalation: false

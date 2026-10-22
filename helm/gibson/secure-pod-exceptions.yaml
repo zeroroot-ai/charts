@@ -103,12 +103,21 @@ pods:
   'Deployment/gibson/gibson-spiffe-oidc-discovery-provider token':
     digest: e89690d6cef81447
     reason: "The SPIRE OIDC provider chart gives the pod a ServiceAccount with no grant. The chart has no value that turns the token mount off."
+  'Deployment/gibson/gibson-zitadel token':
+    digest: 75cba4781c15c19e
+    reason: "The ZITADEL chart has no value that turns the token mount off. The ServiceAccount gibson-zitadel has no grant (charts#407), so the token opens nothing."
   'Deployment/gibson/gibson-zitadel-login token':
     digest: 4bf5b735032c4641
     reason: "The ZITADEL chart has no value that turns the token mount of the login pod off."
   'Deployment/velero/velero token':
     digest: 5ab7d93a3431f72e
     reason: "Expected exception of ADR-0165: a vendored operator. Its upstream chart sets the pod."
+  'Job/gibson/gibson-zitadel-init token':
+    digest: 75cba4781c15c19e
+    reason: "The ZITADEL chart has no value that turns the token mount off. The ServiceAccount gibson-zitadel has no grant (charts#407), so the token opens nothing."
+  'Job/gibson/gibson-zitadel-setup token':
+    digest: 75cba4781c15c19e
+    reason: "The ZITADEL chart has no value that turns the token mount off. The ServiceAccount gibson-zitadel has no grant (charts#407), so the token opens nothing."
   'Pod/gibson/gibson-server-test-connection token':
     digest: f905b201ea835d99
     reason: "An upstream SPIRE helm test pod on the default ServiceAccount. The chart has no value for its ServiceAccount."
