@@ -13,8 +13,10 @@ curl reads a header with `-H @file` and a body with `--data-binary @file` or
 `@-`. jq reads a value with --rawfile, from stdin, or as `env.NAME`.
 
 HOW. The scan finds the text by its content, not by a list:
-  * shell text: every file under helm/*/templates and helm/*/files, and every
-    shell script under scripts/ (a .sh name or a sh/bash shebang). Each line
+  * shell text: every file under helm/*/templates and helm/*/files, each
+    values file helm/*/values*.yaml (a subchart renders some container lists
+    of it verbatim), and every shell script under scripts/ (a .sh name or a
+    sh/bash shebang). Each line
     that ends in a backslash is joined with the next one, and comments are
     removed. A line is split into words the way a shell splits it, with
     quotes and $(...) kept in one word.
@@ -383,6 +385,15 @@ def text_files(root):
     out = []
     helm = os.path.join(root, "helm")
     for chart in sorted(os.listdir(helm)) if os.path.isdir(helm) else []:
+        # The values files of a chart. A subchart takes some lists verbatim
+        # (zitadel.zitadel.initContainers, zitadel.setupJob.extraContainers),
+        # so the shell of those containers is in a values file and in no
+        # template.
+        base = os.path.join(helm, chart)
+        if os.path.isdir(base):
+            for name in sorted(os.listdir(base)):
+                if name.startswith("values") and name.endswith((".yaml", ".yml")):
+                    out.append(os.path.join(base, name))
         for sub in ("templates", "files"):
             base = os.path.join(helm, chart, sub)
             for d, dirs, files in os.walk(base):
@@ -541,10 +552,32 @@ def selftest():
         ok = len(got) == 1 and pods == 1
         print(f"  {'ok  ' if ok else 'FAIL'} FAILING FIXTURE: render-args-secret-env")
         bad += 0 if ok else 1
+    # A container of a values file that a subchart renders verbatim: the
+    # store container of the Zitadel setup Job (charts#758) passed the
+    # OpenBao token to curl as a header on its argv.
+    values = (
+        "zitadel:\n  setupJob:\n    extraContainers:\n      - name: login-client-pat-store\n"
+        "        command: [bash, -ec]\n        args:\n          - |\n"
+        "            status=$(curl -sS -o /tmp/resp.json -w '%{http_code}' -X POST \\\n"
+        "              HEADER -H \"Content-Type: application/json\" \\\n"
+        "              --data-binary @/tmp/body.json \"$BAO_ADDR/v1/secret/data/$KEY\")\n")
+    for name, header, want in (
+            ("values-subchart-container-token-header", '-H "X-Vault-Token: $VAULT_TOKEN"', True),
+            ("ok-values-subchart-container-header-file", "-H @/tmp/auth.hdr", False)):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "helm", "gibson"))
+            p = os.path.join(d, "helm", "gibson", "values.yaml")
+            with open(p, "w") as f:
+                f.write(values.replace("HEADER", header))
+            files = text_files(d)
+            got = [g for x in files for g in scan_text(os.path.relpath(x, d), open(x).read())]
+            ok = p in files and bool(got) == want
+            print(f"  {'ok  ' if ok else 'FAIL'} {'FAILING FIXTURE: ' if want else ''}{name}")
+            bad += 0 if ok else 1
     if bad:
         print(f"check-no-secret-argv selftest: {bad} case(s) failed", file=sys.stderr)
         return 1
-    print(f"check-no-secret-argv selftest: {len(CASES) + 1} cases passed")
+    print(f"check-no-secret-argv selftest: {len(CASES) + 3} cases passed")
     return 0
 
 
