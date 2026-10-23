@@ -29,6 +29,11 @@ pod. A namespace needs `pod-security.kubernetes.io/enforce: restricted`, or
 an entry. The chart does not render the release namespace, so the guard reads
 its label from the install script (scripts/baseline-up.sh).
 
+Two namespace rules take no entry (charts#762). The release namespace
+enforces restricted, so an entry cannot cover its label. The SPIRE namespace
+(global.spire.namespaces.system.name) is privileged, so only the SPIRE agent
+and the SPIFFE CSI driver DaemonSets run in it.
+
   check-secure-pod.py             exit 1 on a finding, 0 when clean
   check-secure-pod.py --selftest  prove that one fixture for each rule fails
   check-secure-pod.py --print     print each finding, with or without an entry
@@ -50,6 +55,7 @@ import cilium_policy as cp  # noqa: E402
 EXCEPTIONS = os.path.join(ROOT, "helm", "gibson", "secure-pod-exceptions.yaml")
 RBAC_ALLOWLIST = os.path.join(ROOT, "helm", "gibson", "rbac-allowlist.yaml")
 INSTALL_SCRIPT = os.path.join(ROOT, "scripts", "baseline-up.sh")
+VALUES = os.path.join(ROOT, "helm", "gibson", "values.yaml")
 NAMESPACE = "gibson"
 # The profiles that scripts/golden.sh renders, and the two rungs on the
 # baseline. A rung turns on pods that no profile renders (mailpit is on only
@@ -74,6 +80,9 @@ NET_ROLES = {"platform", "datastore", "system"}
 REGISTRY = "ghcr.io/zeroroot-ai/"
 DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 ENFORCE = "pod-security.kubernetes.io/enforce"
+# The workloads that may run in the privileged SPIRE namespace, by kind and
+# app.kubernetes.io/name (hosted#438, charts#762).
+SPIRE_NODE = {("DaemonSet", "agent"), ("DaemonSet", "spiffe-csi-driver")}
 RULES = ("restricted", "read-only", "token", "network", "image", "namespace-label")
 # Volume sources that the "restricted" standard allows.
 VOLUMES = {"configMap", "csi", "downwardAPI", "emptyDir", "ephemeral", "persistentVolumeClaim", "projected", "secret"}
@@ -316,6 +325,34 @@ def install_enforce_label(path: str = INSTALL_SCRIPT) -> str | None:
     return min(found, key=lambda lv: LEVELS.index(lv) if lv in LEVELS else -1)
 
 
+def spire_namespace(path: str = VALUES) -> str:
+    """The namespace of the SPIRE node components, from the chart values."""
+    data = yaml.safe_load(open(path)) or {}
+    name = (((data.get("global") or {}).get("spire") or {}).get("namespaces") or {}).get("system", {}).get("name")
+    if not name:
+        raise SystemExit(f"{path}: global.spire.namespaces.system.name is empty")
+    return name
+
+
+def no_entry_findings(renders: list[list[dict]], found: dict[str, set[str]], listed: dict,
+                      spire_ns: str | None) -> list[str]:
+    """The namespace rules that an entry cannot cover (charts#762)."""
+    bad = []
+    release = f"Namespace/{NAMESPACE} namespace-label"
+    if release in found or release in listed:
+        bad.append(f"{release}: the release namespace enforces restricted, and no entry can cover it (charts#762): "
+                   + "; ".join(sorted(found.get(release, {"an entry names it"}))))
+    if spire_ns:
+        for key in sorted({f"{d['kind']}/{spire_ns}/{d['metadata']['name']}"
+                           for docs in renders for d in docs
+                           if d.get("kind") in WORKLOADS and ns_of(d) == spire_ns
+                           and (d["kind"], (d["metadata"].get("labels") or {}).get("app.kubernetes.io/name"))
+                           not in SPIRE_NODE}):
+            bad.append(f"{key}: only the SPIRE agent and the SPIFFE CSI driver run in the privileged namespace "
+                       f"{spire_ns} (charts#762)")
+    return bad
+
+
 def findings(renders: list[list[dict]], granted: set[str], release_label: str | None) -> dict[str, set[str]]:
     """'<Kind>/<namespace>/<name> <rule>' -> the findings, over each render."""
     out: dict[str, set[str]] = {}
@@ -371,13 +408,17 @@ def load_exceptions(path: str = EXCEPTIONS) -> dict:
     return data
 
 
-def audit(renders: list[list[dict]], exceptions: dict, granted: set[str], release_label: str | None) -> list[str]:
+def audit(renders: list[list[dict]], exceptions: dict, granted: set[str], release_label: str | None,
+          spire_ns: str | None = None) -> list[str]:
     if not any(d.get("kind") in WORKLOADS for docs in renders for d in docs):
         return ["no pod in the render: this guard is blind"]
     found = findings(renders, granted, release_label)
     listed = exceptions.get("pods") or {}
-    bad = []
+    bad = no_entry_findings(renders, found, listed, spire_ns)
+    release = f"Namespace/{NAMESPACE} namespace-label"
     for key in sorted(found):
+        if key == release:
+            continue
         want = digest(found[key])
         entry = listed.get(key)
         if entry is None:
@@ -387,7 +428,7 @@ def audit(renders: list[list[dict]], exceptions: dict, granted: set[str], releas
             bad.append(f"{key}: the findings changed (digest {want}, the entry has {entry.get('digest')}): "
                        + "; ".join(sorted(found[key])))
     for key in sorted(listed):
-        if key not in found:
+        if key not in found and key != release:
             bad.append(f"stale entry in {os.path.relpath(EXCEPTIONS, ROOT)} (no render has this finding): {key!r}")
     # A runtime entry covers a pod that an operator creates. The chart renders
     # no such pod, so the target of the entry is the workload that creates it.
@@ -681,8 +722,34 @@ def selftest() -> int:
             if install_enforce_label(f.name) != want:
                 print(f"SELFTEST FAIL: the install script {text!r} must read as {want}")
                 return 1
+    # charts#762: an entry cannot cover the release namespace label.
+    want = digest(findings([docs], set(), "privileged")[f"Namespace/{NAMESPACE} namespace-label"])
+    entry = {"pods": {f"Namespace/{NAMESPACE} namespace-label": {"digest": want, "reason": "fixture"}}, "runtime": {}}
+    if not any("no entry can cover it" in x for x in audit([docs], entry, set(), "privileged")):
+        print("SELFTEST FAIL: an entry for the release namespace label must fail")
+        return 1
+    if not any("no entry can cover it" in x for x in audit([docs], entry, set(), "restricted")):
+        print("SELFTEST FAIL: an entry for the release namespace label must fail when the label is restricted")
+        return 1
+    # charts#762: only the SPIRE node DaemonSets run in the SPIRE namespace.
+    if any("privileged namespace" in x for x in audit([base], none, set(), None, "spire-fixture")):
+        print("SELFTEST FAIL: the SPIRE namespace rule must not fire on a namespace with no pod of its own")
+        return 1
+    spire = copy.deepcopy(base)
+    _workload(spire)["metadata"]["namespace"] = "spire-fixture"
+    if not any("Deployment/spire-fixture/app: only the SPIRE agent" in x
+               for x in audit([spire], none, set(), None, "spire-fixture")):
+        print("SELFTEST FAIL: a Deployment in the SPIRE namespace must fail")
+        return 1
+    agent = _workload(spire)
+    agent["kind"] = "DaemonSet"
+    agent["metadata"].setdefault("labels", {})["app.kubernetes.io/name"] = "agent"
+    if any("privileged namespace" in x for x in audit([spire], none, set(), None, "spire-fixture")):
+        print("SELFTEST FAIL: the SPIRE agent DaemonSet in the SPIRE namespace must pass")
+        return 1
     print(f"  ✓ selftest: {len(FIXTURES_THAT_MUST_FAIL)} insecure pods fail, a moved digest fails, a stale entry fails, "
           "a stale runtime entry fails, a blind render fails, a weaker release namespace label fails, "
+          "an entry for the release namespace fails, another pod in the SPIRE namespace fails, "
           "the secure pod passes")
     return 0
 
@@ -701,7 +768,7 @@ def main() -> int:
                 print(f"{key}\n    " + "\n    ".join(sorted(items)))
         return 0
     exceptions = load_exceptions()
-    bad = audit(renders, exceptions, granted, label)
+    bad = audit(renders, exceptions, granted, label, spire_namespace())
     if bad:
         print("a rendered pod is not a secure pod (ADR-0165), or helm/gibson/secure-pod-exceptions.yaml is stale:",
               file=sys.stderr)
