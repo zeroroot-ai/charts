@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.153.0](https://github.com/zeroroot-ai/charts/compare/v0.152.0...v0.153.0) (2026-10-23)
+
+
+### Features
+
+* **secrets:** the Zitadel setup Job writes the login-client PAT straight to OpenBao ([#758](https://github.com/zeroroot-ai/charts/issues/758)) ([96d1fb5](https://github.com/zeroroot-ai/charts/commit/96d1fb54aa69d6942a1d71a9ceb0bdeced4b7664))
+* **spire:** an install federates with the trust domain of an outside setec fleet ([#755](https://github.com/zeroroot-ai/charts/issues/755)) ([48eb1bd](https://github.com/zeroroot-ai/charts/commit/48eb1bdf958885d1f96159ddc9fc9e27a8e86314))
+
+
+### Bug Fixes
+
+* **dashboard:** pin dashboard v0.134.1 ([#763](https://github.com/zeroroot-ai/charts/issues/763)) ([02a6942](https://github.com/zeroroot-ai/charts/commit/02a694259e609ccb34217db0867df7ef346949a4))
+* **envoy:** the claimed Zitadel host never carries the NodePort ([#752](https://github.com/zeroroot-ai/charts/issues/752)) ([9366ef5](https://github.com/zeroroot-ai/charts/commit/9366ef5ab6d4823cc3e87daafd42b5ff41018d44))
+* **guards:** a grep -q reads its input from a here-string, never a pipe ([#754](https://github.com/zeroroot-ai/charts/issues/754)) ([d63f6f8](https://github.com/zeroroot-ai/charts/commit/d63f6f88c70ab554ffc6c9e06d6d4326af63de40))
+* **guards:** a late packet to a peer pod that is gone is not a policy drop ([#756](https://github.com/zeroroot-ai/charts/issues/756)) ([55331a4](https://github.com/zeroroot-ai/charts/commit/55331a49db9836aee66831353da76669451b8995))
+* **images:** no pod of the chart names a pull Secret for a public image ([#761](https://github.com/zeroroot-ai/charts/issues/761)) ([478aaaa](https://github.com/zeroroot-ai/charts/commit/478aaaa8b1e1819a848c650f06dfe76fb22aa3f4))
+* **rework:** no-secret-argv scans the shell text of the chart values files ([#760](https://github.com/zeroroot-ai/charts/issues/760)) ([40cf88c](https://github.com/zeroroot-ai/charts/commit/40cf88ca9707673f63ebdc24c2c8b00ffd24b1f8))
+* **rework:** the trainer proof runs as system:masters and proves the policy refuses a plain run ([#747](https://github.com/zeroroot-ai/charts/issues/747)) ([0c75fb5](https://github.com/zeroroot-ai/charts/commit/0c75fb5692854a79d2d5fdcad1d9e950d13c2cea)), closes [#746](https://github.com/zeroroot-ai/charts/issues/746)
+* **secrets:** no secret value is on the argv of a process ([#759](https://github.com/zeroroot-ai/charts/issues/759)) ([0dd3ebf](https://github.com/zeroroot-ai/charts/commit/0dd3ebfabf9308dc842e4e1c0927b0efb5a2c99f))
+* **spire:** the setec frontend registration lists each federated trust domain ([#751](https://github.com/zeroroot-ai/charts/issues/751)) ([1ae1abc](https://github.com/zeroroot-ai/charts/commit/1ae1abc9153cae675a7e0fa86c04a6ca6b36b0d8))
+
 ## [0.152.0](https://github.com/zeroroot-ai/charts/compare/v0.151.1...v0.152.0) (2026-10-19)
 
 
