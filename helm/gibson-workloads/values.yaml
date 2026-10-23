@@ -523,7 +523,10 @@ gibson:
 
 
   # e2eRunner gates the exit-test runner's identity: a ServiceAccount and a
-  # ClusterSPIFFEID minting spiffe://<td>/platform/e2e-runner.
+  # ClusterSPIFFEID minting spiffe://<td>/platform/e2e-runner. It renders the
+  # plain member too: a ServiceAccount and a ClusterSPIFFEID minting
+  # spiffe://<td>/platform/e2e-member, a member of the e2e tenant with no
+  # admin relation (gibson#1257).
   #
   # The daemon refuses a non-loopback plaintext listener (zero-trust-hardening
   # Req 1.2), so an exit test cannot dial it over a port-forward — it must be a
