@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.154.3](https://github.com/zeroroot-ai/charts/compare/v0.154.2...v0.154.3) (2026-10-25)
+
+
+### Bug Fixes
+
+* **dashboard:** pin dashboard v0.135.3 ([#775](https://github.com/zeroroot-ai/charts/issues/775)) ([225824b](https://github.com/zeroroot-ai/charts/commit/225824b83b4c38c781baffba413fd0f60e059367))
+
 ## [0.154.2](https://github.com/zeroroot-ai/charts/compare/v0.154.1...v0.154.2) (2026-10-25)
 
 
