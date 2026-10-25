@@ -14213,6 +14213,9 @@ spec:
           - name: login-config-dotenv
             mountPath: /.env-file/
             readOnly: true
+          - mountPath: /login-client
+            name: login-client
+            readOnly: true
           resources:
               limits:
                 cpu: 500m
@@ -14261,6 +14264,10 @@ spec:
       - name: login-config-dotenv
         configMap:
           name: gibson-zitadel-login-config-dotenv
+      - name: login-client
+        secret:
+          defaultMode: 292
+          secretName: login-client
 ---
 # Source: gibson/charts/zitadel/templates/deployment_zitadel.yaml
 apiVersion: apps/v1

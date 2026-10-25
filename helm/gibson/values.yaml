@@ -1455,6 +1455,24 @@ zitadel:
     annotations:
       configmap.reloader.stakater.com/reload: "zitadel-login-branding"
       secret.reloader.stakater.com/reload: "login-client"
+    # The login app reads its PAT from /login-client/pat
+    # (ZITADEL_SERVICE_USER_TOKEN_FILE in its dotenv ConfigMap). The upstream
+    # chart mounts the login-client Secret only when FirstInstance.Org.
+    # LoginClient is set, and that block is null here (charts#758). The
+    # ExternalSecret login-client still writes the Secret from OpenBao, so
+    # the chart mounts it here. Without the mount the pod waits for the file
+    # until its liveness probe kills it.
+    # scripts/check-login-token-mounted.py fails the render when the file
+    # has no mount.
+    extraVolumes:
+      - name: login-client
+        secret:
+          secretName: login-client
+          defaultMode: 0444
+    extraVolumeMounts:
+      - name: login-client
+        mountPath: /login-client
+        readOnly: true
     configMap:
       annotations:
         helm.sh/hook: null
