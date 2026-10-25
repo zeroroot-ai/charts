@@ -7,8 +7,13 @@ chart mounts the login-client Secret only when FirstInstance.Org.LoginClient
 is set, and the umbrella sets that block to null (charts#758). The pod then
 waited for the file until its liveness probe killed it, on each rollout.
 
-This guard renders each profile and fails when the login Deployment has no
-Secret volume mounted at the directory of that file.
+This guard renders each profile and fails unless three things hold:
+
+  1. The login container mounts a Secret volume at the directory of the file.
+  2. That volume is the Secret login-client.
+  3. The file name is a key of that Secret: the ExternalSecret login-client
+     writes the key, and the volume projects it (all keys, or an item with
+     that key and path).
 
   check-login-token-mounted.py             exit 1 on a finding, 0 when clean
   check-login-token-mounted.py --selftest  prove that each fixture fails
@@ -29,6 +34,7 @@ PROFILES = (
     ("values-baseline.yaml", "values-eks.yaml"),
     ("values-baseline.yaml", "values-guest.yaml"),
 )
+SECRET = "login-client"
 TOKEN = re.compile(r'^ZITADEL_SERVICE_USER_TOKEN_FILE="?([^"\n]+)"?', re.M)
 
 
@@ -51,12 +57,35 @@ def login_deployment(docs: list[dict]) -> dict | None:
     return None
 
 
+def secret_keys(docs: list[dict], name: str) -> set[str]:
+    """The keys of the Secret that the ExternalSecret with target `name` writes."""
+    for d in docs:
+        if d.get("kind") != "ExternalSecret":
+            continue
+        target = (d.get("spec") or {}).get("target") or {}
+        if (target.get("name") or d["metadata"]["name"]) != name:
+            continue
+        template = (target.get("template") or {}).get("data")
+        if template:
+            return set(template)
+        return {x.get("secretKey") for x in (d["spec"].get("data") or [])}
+    return set()
+
+
+def projected(volume: dict, key: str, filename: str, keys: set[str]) -> bool:
+    """The Secret volume puts `key` at `filename` in its mount directory."""
+    items = volume["secret"].get("items")
+    if items:
+        return any(i.get("key") == key and i.get("path") == filename for i in items) and key in keys
+    return filename in keys
+
+
 def findings(docs: list[dict]) -> list[str]:
     dep = login_deployment(docs)
     if dep is None:
         return ["the render holds no zitadel-login Deployment: this guard is blind"]
     spec = dep["spec"]["template"]["spec"]
-    secrets = {v["name"] for v in spec.get("volumes") or [] if "secret" in v}
+    secret_volumes = {v["name"]: v for v in spec.get("volumes") or [] if "secret" in v}
     cms = {v["name"]: v["configMap"]["name"] for v in spec.get("volumes") or [] if "configMap" in v}
     files = []
     for d in docs:
@@ -67,15 +96,35 @@ def findings(docs: list[dict]) -> list[str]:
         return ["the login dotenv ConfigMap names no ZITADEL_SERVICE_USER_TOKEN_FILE: this guard is blind"]
     bad = []
     for path in files:
-        parent = os.path.dirname(path)
-        mounted = [m for c in spec.get("containers") or [] for m in c.get("volumeMounts") or []
-                   if m.get("name") in secrets and m.get("mountPath", "").rstrip("/") == parent]
+        parent, filename = os.path.dirname(path), os.path.basename(path)
+        mounted = [secret_volumes[m["name"]] for c in spec.get("containers") or []
+                   for m in c.get("volumeMounts") or []
+                   if m.get("name") in secret_volumes and m.get("mountPath", "").rstrip("/") == parent]
         if not mounted:
             bad.append(f"the login pod reads {path}, and no Secret volume is mounted at {parent}")
+            continue
+        for vol in mounted:
+            got = vol["secret"].get("secretName")
+            if got != SECRET:
+                bad.append(f"the volume at {parent} is the Secret {got!r}, want {SECRET!r}")
+                continue
+            keys = secret_keys(docs, SECRET)
+            if not projected(vol, filename, filename, keys):
+                bad.append(f"the Secret {SECRET!r} puts no key {filename!r} at {path}: "
+                           f"the ExternalSecret writes {sorted(k for k in keys if k)}")
     return bad
 
 
 FIXTURE = """
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: {name: login-client}
+spec:
+  data: [{secretKey: pat, remoteRef: {key: gibson-zitadel-login-client-pat, property: pat}}]
+  target:
+    name: login-client
+    template: {data: {pat: "{{ .pat }}"}}
+---
 apiVersion: v1
 kind: ConfigMap
 metadata: {name: login-dotenv}
@@ -106,25 +155,42 @@ def selftest() -> int:
         return 1
 
     def no_volume(docs):
-        spec = docs[1]["spec"]["template"]["spec"]
+        spec = docs[2]["spec"]["template"]["spec"]
         spec["volumes"] = spec["volumes"][:1]
         spec["containers"][0]["volumeMounts"] = spec["containers"][0]["volumeMounts"][:1]
 
     def other_path(docs):
-        docs[1]["spec"]["template"]["spec"]["containers"][0]["volumeMounts"][1]["mountPath"] = "/elsewhere"
+        docs[2]["spec"]["template"]["spec"]["containers"][0]["volumeMounts"][1]["mountPath"] = "/elsewhere"
 
     def config_map_volume(docs):
-        docs[1]["spec"]["template"]["spec"]["volumes"][1] = {"name": "login-client", "configMap": {"name": "x"}}
+        docs[2]["spec"]["template"]["spec"]["volumes"][1] = {"name": "login-client", "configMap": {"name": "x"}}
+
+    def wrong_secret(docs):
+        docs[2]["spec"]["template"]["spec"]["volumes"][1]["secret"]["secretName"] = "iam-admin-pat"
+
+    def missing_key(docs):
+        docs[0]["spec"]["target"]["template"]["data"] = {"token": "{{ .pat }}"}
+
+    def item_elsewhere(docs):
+        docs[2]["spec"]["template"]["spec"]["volumes"][1]["secret"]["items"] = [{"key": "pat", "path": "token"}]
 
     def no_login(docs):
-        docs.pop(1)
+        docs.pop(2)
 
     cases = {
         "the upstream render with no login-client volume (charts#758)": no_volume,
         "the Secret mounted at a different directory": other_path,
         "a ConfigMap at the directory of the PAT": config_map_volume,
+        "the volume is a different Secret": wrong_secret,
+        "the Secret holds no key pat": missing_key,
+        "an item puts the key pat at a different path": item_elsewhere,
         "a render with no login Deployment": no_login,
     }
+    docs = copy.deepcopy(base)
+    docs[2]["spec"]["template"]["spec"]["volumes"][1]["secret"]["items"] = [{"key": "pat", "path": "pat"}]
+    if findings(docs):
+        print(f"SELFTEST FAIL: an item that puts the key pat at pat must pass: {findings(docs)}")
+        return 1
     for what, fn in cases.items():
         docs = copy.deepcopy(base)
         fn(docs)
