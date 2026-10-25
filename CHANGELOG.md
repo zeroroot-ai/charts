@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.154.0](https://github.com/zeroroot-ai/charts/compare/v0.153.0...v0.154.0) (2026-10-25)
+
+
+### Features
+
+* **e2e:** a second exit-test identity, the plain member of the e2e tenant ([#765](https://github.com/zeroroot-ai/charts/issues/765)) ([7df8d20](https://github.com/zeroroot-ai/charts/commit/7df8d200c7494012f2af852fd3781d3fd7333714))
+
+
+### Bug Fixes
+
+* **guard:** no entry covers the release namespace label, and only the SPIRE node pods run in the SPIRE namespace ([#764](https://github.com/zeroroot-ai/charts/issues/764)) ([0242e3a](https://github.com/zeroroot-ai/charts/commit/0242e3ad53c20d7b9ef37a2887ee2a11946dec8b)), closes [#762](https://github.com/zeroroot-ai/charts/issues/762)
+* **setec:** pin setec 0.128.0 ([#769](https://github.com/zeroroot-ai/charts/issues/769)) ([15bb209](https://github.com/zeroroot-ai/charts/commit/15bb209095f15c08990da93f000386c378cb9bf7))
+
 ## [0.153.0](https://github.com/zeroroot-ai/charts/compare/v0.152.0...v0.153.0) (2026-10-23)
 
 
