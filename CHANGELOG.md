@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.154.4](https://github.com/zeroroot-ai/charts/compare/v0.154.3...v0.154.4) (2026-10-25)
+
+
+### Bug Fixes
+
+* **rework:** the Zitadel login pod mounts the login-client Secret again ([#777](https://github.com/zeroroot-ai/charts/issues/777)) ([116b477](https://github.com/zeroroot-ai/charts/commit/116b477d73ca73005fea152ffba410eb05771484))
+
 ## [0.154.3](https://github.com/zeroroot-ai/charts/compare/v0.154.2...v0.154.3) (2026-10-25)
 
 
