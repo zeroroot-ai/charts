@@ -474,6 +474,29 @@ spec:
   workloadSelectorTemplates:
     - "k8s:ns:{{ $ns }}"
     - "k8s:sa:{{ printf "%s-e2e-runner" .Release.Name }}"
+---
+# The plain member of the e2e tenant (gibson#1257): the same gate, the same
+# selectors, and its own ServiceAccount. The fixture daemon gives it the
+# member relation only.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-e2e-member
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/e2e-member"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: e2e-member
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ printf "%s-e2e-member" .Release.Name }}"
 {{- end }}
 
 {{- if .Values.spire.tenantAgents.enabled }}

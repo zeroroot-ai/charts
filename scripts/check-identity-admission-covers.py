@@ -31,6 +31,11 @@ the check, so the list cannot grow stale:
   platform/e2e-runner  rendered only under gibson.e2eRunner.enabled, which no
                        shipped profile sets, and a production daemon holds no
                        policy for it.
+  platform/e2e-member  the plain member of the e2e tenant (gibson#1257), under
+                       the same gate and for the same reason.
+
+The check renders the gate on as well, and each named identity must be in a
+render.
 
   check-identity-admission-covers.py             exit 1 on an uncovered identity
   check-identity-admission-covers.py --selftest  prove each shape fails
@@ -46,7 +51,8 @@ import sys
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-UNPROTECTED_ON_PURPOSE = {"platform/helm-test", "platform/e2e-runner"}
+UNPROTECTED_ON_PURPOSE = {"platform/helm-test", "platform/e2e-runner", "platform/e2e-member"}
+E2E_GATE = ["--set", "gibson-workloads.gibson.e2eRunner.enabled=true"]
 FIRST_PARTY = ("platform/", "plugin/")
 # The subchart identities that have a workload here, by ClusterSPIFFEID name
 # suffix: the generic per-ServiceAccount fallback for other namespaces, and the
@@ -147,6 +153,12 @@ def csid(path: str, comp: str, sa: str | None) -> dict:
                      "workloadSelectorTemplates": sel}}
 
 
+def stale_exceptions(seen_paths: set[str]) -> list[str]:
+    """Each identity named as unprotected on purpose that no render holds."""
+    return [f"{p} is named as unprotected on purpose, and no render holds it"
+            for p in sorted(UNPROTECTED_ON_PURPOSE - seen_paths)]
+
+
 def selftest() -> int:
     good = [POLICY_FIXTURE, csid("platform/daemon", "daemon", "gibson"),
             csid("plugin/acme", "plugin", "gibson-plugin-acme"),
@@ -175,9 +187,16 @@ def selftest() -> int:
     if not judge([csid("platform/daemon", "daemon", "gibson")])[0]:
         print("selftest: a render with no policy must fail", file=sys.stderr)
         return 1
+    if stale_exceptions(set(UNPROTECTED_ON_PURPOSE)):
+        print("selftest: each named identity in a render must pass", file=sys.stderr)
+        return 1
+    if stale_exceptions(UNPROTECTED_ON_PURPOSE - {"platform/e2e-member"}) != [
+            "platform/e2e-member is named as unprotected on purpose, and no render holds it"]:
+        print("selftest: a named identity that no render holds must fail", file=sys.stderr)
+        return 1
     print("check-identity-admission-covers selftest PASSED (an uncovered component, an uncovered "
-          "ServiceAccount, an identity with no ServiceAccount, a registration with no workload "
-          "and a missing policy each fail)")
+          "ServiceAccount, an identity with no ServiceAccount, a registration with no workload, "
+          "a missing policy and a stale named identity each fail)")
     return 0
 
 
@@ -189,15 +208,19 @@ def main() -> int:
     found, total = judge(docs)
     seen_paths = {p for p, _, _ in identities(docs)}
     problems += [f"the baseline: {f}" for f in found]
-    # A named exception that no profile can render is checked only when its
-    # gate is on. helm-test renders on every profile, so it must be present.
-    if "platform/helm-test" not in seen_paths:
-        problems.append("platform/helm-test is named as unprotected on purpose, and no render holds it")
+    # The e2e identities render only with their gate on, so the check renders
+    # that too. Each named exception must be in one of the two renders.
+    gated = helm_template(E2E_GATE)
+    found, gated_total = judge(gated)
+    total += gated_total
+    problems += [f"the baseline with gibson.e2eRunner.enabled: {f}" for f in found]
+    seen_paths |= {p for p, _, _ in identities(gated)}
+    problems += stale_exceptions(seen_paths)
     for p in problems:
         print(f"FAIL: {p}", file=sys.stderr)
     if problems:
         return 1
-    print(f"check-identity-admission-covers PASSED ({total} identity checks over the baseline render)")
+    print(f"check-identity-admission-covers PASSED ({total} identity checks over the baseline renders)")
     return 0
 
 
