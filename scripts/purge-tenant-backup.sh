@@ -2,15 +2,18 @@
 # purge-tenant-backup.sh — delete the last backup of a deleted tenant before
 # it expires (ADR-0075, charts#419).
 #
-# A tenant delete takes one last Velero backup that expires after 30 days. A
-# tenant owner can ask for an earlier purge. This script is the one reviewed
-# way to do it, on every install type; the make verb of the hosted estate
-# calls it and adds only the environment.
+# A tenant delete takes a last Velero backup that expires after 30 days. When
+# an attempt fails, the tenant operator takes another one, so one delete can
+# leave up to five attempts (gibson operators/tenant/internal/finalbackup,
+# MaxAttempts). Each attempt can hold tenant data. A tenant owner can ask for
+# an earlier purge. This script is the one reviewed way to do it, on every
+# install type; the make verb of the hosted estate calls it and adds only the
+# environment.
 #
-# It deletes exactly one backup, through a Velero DeleteBackupRequest, which
-# removes the Backup object and its data in the bucket. It selects the backup
-# by the labels that the tenant operator sets (gibson
-# operators/tenant/internal/finalbackup), never by a part of its name:
+# It deletes every attempt of one delete, through one Velero
+# DeleteBackupRequest each, which removes the Backup object and its data in the
+# bucket. It selects the backups by the labels and the annotation that the
+# tenant operator sets, never by a part of their name:
 #
 #   gibson.zeroroot.ai/tenant=<tenant>
 #   gibson.zeroroot.ai/backup-type=final
@@ -20,7 +23,8 @@
 #   - no tenant name, or a name that is not a Kubernetes name;
 #   - a tenant that still exists (only the backup of a DELETED tenant goes);
 #   - no matching backup;
-#   - more than one matching backup, unless TENANT_UID names exactly one;
+#   - backups of more than one delete (more than one tenant uid), unless
+#     TENANT_UID names one of them;
 #   - a backup without the `final` label.
 #
 # Usage:
@@ -63,18 +67,27 @@ if [ -n "$TENANT_UID" ]; then
 fi
 count="$(printf '%s\n' "$rows" | awk 'NF' | wc -l | tr -d ' ')"
 [ "$count" -ge 1 ] || die "no last backup of the tenant $TENANT${TENANT_UID:+ with the uid $TENANT_UID} in namespace $VELERO_NS"
-if [ "$count" -gt 1 ]; then
-  echo "purge-tenant-backup: the tenant name $TENANT has $count last backups, one for each delete:" >&2
+uids="$(printf '%s\n' "$rows" | awk 'NF {print $2}' | sort -u)"
+if [ "$(printf '%s\n' "$uids" | wc -l | tr -d ' ')" -gt 1 ]; then
+  echo "purge-tenant-backup: the tenant name $TENANT has last backups of more than one delete:" >&2
   printf '%s\n' "$rows" | awk 'NF {print "  " $1 "  (" $2 ")"}' >&2
-  die "set TENANT_UID to the uid of the deleted tenant whose backup goes"
+  die "set TENANT_UID to the uid of the deleted tenant whose backups go"
 fi
-read -r BACKUP BUID TYPE <<<"$(printf '%s\n' "$rows" | awk 'NF' | head -n1)"
-[ "$TYPE" = final ] || die "the backup $BACKUP is not a last backup (${L_TYPE}=$TYPE)"
+BUID="$uids"
+# Each row must be a last backup before any of them goes.
+while read -r name _ type; do
+  [ -n "$name" ] || continue
+  [ "$type" = final ] || die "the backup $name is not a last backup (${L_TYPE}=$type)"
+done <<<"$rows"
+BACKUPS="$(printf '%s\n' "$rows" | awk 'NF {print $1}')"
 
-echo "purge-tenant-backup: deleting backup $BACKUP of the deleted tenant $TENANT (uid $BUID) in $VELERO_NS"
+echo "purge-tenant-backup: deleting $count backup(s) of the deleted tenant $TENANT (uid $BUID) in $VELERO_NS: $(printf '%s\n' "$BACKUPS" | tr '\n' ' ')"
 
-# 3. One DeleteBackupRequest. Velero deletes the Backup object and its data.
-req="$($KUBECTL create -f - -o name <<YAML
+# 3. One DeleteBackupRequest for each backup. Velero deletes the Backup object
+#    and its data.
+reqs=""
+for BACKUP in $BACKUPS; do
+  req="$($KUBECTL create -f - -o name <<YAML
 apiVersion: velero.io/v1
 kind: DeleteBackupRequest
 metadata:
@@ -86,20 +99,26 @@ spec:
   backupName: ${BACKUP}
 YAML
 )" || die "could not create the DeleteBackupRequest for $BACKUP"
-echo "purge-tenant-backup: created $req"
-
-# 4. Wait until the Backup is gone. A processed request with errors fails.
-deadline=$(( $(date +%s) + TIMEOUT ))
-while :; do
-  if ! $KUBECTL -n "$VELERO_NS" get backups.velero.io "$BACKUP" >/dev/null 2>&1; then
-    echo "purge-tenant-backup: backup $BACKUP is deleted"
-    exit 0
-  fi
-  phase="$($KUBECTL -n "$VELERO_NS" get "$req" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
-  errors="$($KUBECTL -n "$VELERO_NS" get "$req" -o jsonpath='{.status.errors}' 2>/dev/null || true)"
-  if [ "$phase" = Processed ] && [ -n "$errors" ] && [ "$errors" != "[]" ]; then
-    die "Velero could not delete $BACKUP: $errors"
-  fi
-  [ "$(date +%s)" -lt "$deadline" ] || die "the backup $BACKUP still exists after ${TIMEOUT}s (request $req, phase ${phase:-none})"
-  sleep "${POLL_SECONDS:-5}"
+  echo "purge-tenant-backup: created $req for $BACKUP"
+  reqs="$reqs $BACKUP=$req"
 done
+
+# 4. Wait until each Backup is gone. A processed request with errors fails.
+deadline=$(( $(date +%s) + TIMEOUT ))
+for pair in $reqs; do
+  BACKUP="${pair%%=*}" req="${pair#*=}"
+  while :; do
+    if ! $KUBECTL -n "$VELERO_NS" get backups.velero.io "$BACKUP" >/dev/null 2>&1; then
+      echo "purge-tenant-backup: backup $BACKUP is deleted"
+      break
+    fi
+    phase="$($KUBECTL -n "$VELERO_NS" get "$req" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    errors="$($KUBECTL -n "$VELERO_NS" get "$req" -o jsonpath='{.status.errors}' 2>/dev/null || true)"
+    if [ "$phase" = Processed ] && [ -n "$errors" ] && [ "$errors" != "[]" ]; then
+      die "Velero could not delete $BACKUP: $errors"
+    fi
+    [ "$(date +%s)" -lt "$deadline" ] || die "the backup $BACKUP still exists after ${TIMEOUT}s (request $req, phase ${phase:-none})"
+    sleep "${POLL_SECONDS:-5}"
+  done
+done
+echo "purge-tenant-backup: every last backup of the tenant $TENANT (uid $BUID) is deleted"

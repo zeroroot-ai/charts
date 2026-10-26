@@ -419,7 +419,7 @@ edge-grpc-routes: ## Each gRPC route of the edge names a service of the gibson a
 	@python3 scripts/check-edge-grpc-routes.py
 
 .PHONY: purge-tenant-backup-test purge-tenant-backup
-purge-tenant-backup-test: ## The purge script deletes one last backup of a deleted tenant and refuses each other case (charts#419)
+purge-tenant-backup-test: ## The purge script deletes every last backup of one deleted tenant and refuses each other case (charts#419)
 	@bats tests/purge-tenant-backup.bats
 
 preflight-kvm-test: ## The install preflight fails on a fleet node with no /dev/kvm, and skips the nodes when the setec seam is off (charts#413, ADR-0083)
