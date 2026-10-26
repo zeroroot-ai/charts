@@ -90,3 +90,42 @@ setup() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"could not delete"* ]]
 }
+
+# gibson#1324: a delete whose first attempt failed leaves more than one last
+# backup with one uid. Each attempt can hold tenant data, so each one goes.
+@test "every attempt of one delete is deleted" {
+  export STUB_ROWS='tenant-final-u1 u1 final\ntenant-final-u1-2 u1 final\ntenant-final-u1-3 u1 final\n'
+  run "$SCRIPT" acme
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'kind: DeleteBackupRequest' "$STUB_DIR/created")" -eq 3 ]
+  for b in tenant-final-u1 tenant-final-u1-2 tenant-final-u1-3; do
+    grep -qx "  backupName: $b" "$STUB_DIR/created"
+    [[ "$output" == *"backup $b is deleted"* ]]
+  done
+}
+
+@test "TENANT_UID selects every attempt of one delete, and no backup of another" {
+  export STUB_ROWS='tenant-final-u1 u1 final\ntenant-final-u2 u2 final\ntenant-final-u2-2 u2 final\n' TENANT_UID=u2
+  run "$SCRIPT" acme
+  [ "$status" -eq 0 ]
+  grep -qx "  backupName: tenant-final-u2" "$STUB_DIR/created"
+  grep -qx "  backupName: tenant-final-u2-2" "$STUB_DIR/created"
+  run grep -c "backupName: tenant-final-u1$" "$STUB_DIR/created"
+  [ "$output" = 0 ]
+}
+
+@test "two attempts of one delete and a third of another are refused without TENANT_UID" {
+  export STUB_ROWS='tenant-final-u1 u1 final\ntenant-final-u1-2 u1 final\ntenant-final-u2 u2 final\n'
+  run "$SCRIPT" acme
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"set TENANT_UID"* ]]
+  [ ! -e "$STUB_DIR/created" ]
+}
+
+@test "one attempt that is not a last backup stops the purge before any delete" {
+  export STUB_ROWS='tenant-final-u1 u1 final\ntenant-final-u1-2 u1 daily\n'
+  run "$SCRIPT" acme
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is not a last backup"* ]]
+  [ ! -e "$STUB_DIR/created" ]
+}
