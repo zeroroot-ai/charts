@@ -129,3 +129,17 @@ setup() {
   [[ "$output" == *"is not a last backup"* ]]
   [ ! -e "$STUB_DIR/created" ]
 }
+
+# Only NotFound proves that a tenant is deleted. A tenant read that fails for
+# another reason must not let the backups of a live tenant go.
+@test "a tenant read that fails for another reason than NotFound stops the purge" {
+  for why in forbidden timeout nocrd; do
+    rm -f "$STUB_DIR/created"
+    export STUB_TENANT_EXISTS="$why" STUB_ROWS='tenant-final-u1 u1 final\n'
+    run "$SCRIPT" acme
+    [ "$status" -eq 1 ] || { echo "$why: $output"; false; }
+    [[ "$output" == *"could not tell whether the tenant acme exists"* ]]
+    [ ! -e "$STUB_DIR/created" ]
+  done
+}
+
