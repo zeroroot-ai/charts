@@ -10,7 +10,10 @@ case "$args" in
       forbidden) echo 'Error from server (Forbidden): tenants.gibson.zeroroot.ai "acme" is forbidden: User "x" cannot get resource "tenants"' >&2; exit 1 ;;
       timeout) echo 'Unable to connect to the server: dial tcp 127.0.0.1:6443: i/o timeout' >&2; exit 1 ;;
       nocrd) echo 'error: the server doesn'"'"'t have a resource type "tenants"' >&2; exit 1 ;;
-      *) echo 'Error from server (NotFound): tenants.gibson.zeroroot.ai "acme" not found' >&2; exit 1 ;;
+      unserved) echo 'Error from server (NotFound): the server could not find the requested resource' >&2; exit 1 ;;
+      # A deleted tenant: --ignore-not-found answers nothing, with exit 0.
+      *) case " $* " in *" --ignore-not-found "*) exit 0 ;; esac
+         echo 'Error from server (NotFound): tenants.gibson.zeroroot.ai "acme" not found' >&2; exit 1 ;;
     esac ;;
   *"get backups.velero.io -l "*)
     printf '%b' "${STUB_ROWS:-}"; exit 0 ;;
