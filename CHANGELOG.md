@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.154.6](https://github.com/zeroroot-ai/charts/compare/v0.154.5...v0.154.6) (2026-10-26)
+
+
+### Bug Fixes
+
+* **setec:** pin setec 0.129.0 ([#786](https://github.com/zeroroot-ai/charts/issues/786)) ([9c1db92](https://github.com/zeroroot-ai/charts/commit/9c1db92022b935f771c835380e0bf33355761ae3))
+
 ## [0.154.5](https://github.com/zeroroot-ai/charts/compare/v0.154.4...v0.154.5) (2026-10-26)
 
 
