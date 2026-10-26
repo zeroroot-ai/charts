@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.154.5](https://github.com/zeroroot-ai/charts/compare/v0.154.4...v0.154.5) (2026-10-26)
+
+
+### Bug Fixes
+
+* **gibson:** pin gibson v0.162.2 ([#782](https://github.com/zeroroot-ai/charts/issues/782)) ([123039a](https://github.com/zeroroot-ai/charts/commit/123039a500432b90c474ff6eab9aba3e79b4f29f))
+* **velero:** the tenant backup purge deletes every attempt of one delete ([#781](https://github.com/zeroroot-ai/charts/issues/781)) ([4c71102](https://github.com/zeroroot-ai/charts/commit/4c71102bc40ca0505a26770c642ac372bb7a8398))
+
 ## [0.154.4](https://github.com/zeroroot-ai/charts/compare/v0.154.3...v0.154.4) (2026-10-25)
 
 
