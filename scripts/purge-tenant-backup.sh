@@ -22,6 +22,7 @@
 # It refuses:
 #   - no tenant name, or a name that is not a Kubernetes name;
 #   - a tenant that still exists (only the backup of a DELETED tenant goes);
+#   - a tenant read that fails for another reason than NotFound;
 #   - no matching backup;
 #   - backups of more than one delete (more than one tenant uid), unless
 #     TENANT_UID names one of them;
@@ -52,10 +53,13 @@ TENANT="$1"
 [[ "$TENANT" =~ ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$ ]] \
   || die "'$TENANT' is not a tenant name (a Kubernetes name)"
 
-# 1. Only the backup of a DELETED tenant goes.
-if $KUBECTL get tenants.gibson.zeroroot.ai "$TENANT" >/dev/null 2>&1; then
-  die "the tenant $TENANT still exists. Only the last backup of a deleted tenant can be purged"
-fi
+# 1. Only the backup of a DELETED tenant goes. With --ignore-not-found, an
+#    answer with no name is the proof that the tenant is deleted. Any error (no
+#    access, no answer, a resource the server does not serve) proves nothing,
+#    so the purge stops. No error text is matched.
+out="$($KUBECTL get tenants.gibson.zeroroot.ai "$TENANT" --ignore-not-found -o name 2>&1)" \
+  || die "could not tell whether the tenant $TENANT exists, so nothing is purged: $out"
+[ -z "$out" ] || die "the tenant $TENANT still exists. Only the last backup of a deleted tenant can be purged"
 
 # 2. Select by label. Each line: <name> <tenant-uid> <backup-type>.
 rows="$($KUBECTL -n "$VELERO_NS" get backups.velero.io \
