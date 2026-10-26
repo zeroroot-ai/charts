@@ -17,6 +17,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/helm/testdata/golden"
+
+# The Helm of Argo CD 3.5.6 (argo-cd hack/tool-versions.sh, helm4_version), the
+# same version that ci.yml installs. The goldens record what Argo CD deploys
+# (charts#789). Move all three with the Argo CD version of hosted.
+GOLDEN_HELM_VERSION="v4.2.1"
+"$ROOT/scripts/require-helm.sh" "$GOLDEN_HELM_VERSION"
 # A profile is one or more values files, layered left to right. The guest
 # entry is the brownfield shape: the same baseline install with the four
 # operator-substitution seams off, proving the chart is a guest on a cluster

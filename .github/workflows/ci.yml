@@ -58,7 +58,11 @@ jobs:
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5
         with:
-          version: v3.18.4
+          # The Helm of Argo CD 3.5.6 (argo-cd hack/tool-versions.sh,
+          # helm4_version). Argo CD renders the chart with it, so the goldens
+          # and the guards test what Argo CD deploys (charts#789). Move it
+          # with the Argo CD version of hosted bootstrap/modules/argocd.
+          version: v4.2.1
 
       # bats, for `make check`'s purge-tenant-backup gate (tests/*.bats).
       # From its pinned release on GitHub, not from apt: the Ubuntu mirror
@@ -155,7 +159,11 @@ jobs:
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5
         with:
-          version: v3.18.4
+          # The Helm of Argo CD 3.5.6 (argo-cd hack/tool-versions.sh,
+          # helm4_version). Argo CD renders the chart with it, so the goldens
+          # and the guards test what Argo CD deploys (charts#789). Move it
+          # with the Argo CD version of hosted bootstrap/modules/argocd.
+          version: v4.2.1
 
       # Same reason as ci-required: the generator vendors the sub-charts from
       # ghcr, and an anonymous pull is rate-limited by IP.

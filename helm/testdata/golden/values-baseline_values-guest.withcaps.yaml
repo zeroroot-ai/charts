@@ -40,6 +40,7 @@ description: >
   Gibson platform components — dashboard, tenant-operator. Customer-visible
   but not on the daemon-handler hot path; preempted by gibson-platform-critical
   but ahead of unpriced workloads.
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/operations/tenant-neo4j-resource-quota.yaml
 # Cluster-scoped PriorityClass referenced by:
@@ -73,6 +74,7 @@ globalDefault: false
 description: >
   Per-tenant Neo4j StatefulSet pods. Used by gibson-tenant-neo4j-cap
   ResourceQuota to scope the kind memory cap (Task 33 / Req 10.4).
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/namespace.yaml
 apiVersion: v1
@@ -99,6 +101,7 @@ metadata:
     setec.zeroroot.ai/sandbox-namespace: "true"
   annotations:
     argocd.argoproj.io/sync-wave: "-10"
+
 ---
 # Source: gibson/charts/spire/templates/namespaces.yaml
 apiVersion: v1
@@ -167,6 +170,7 @@ spec:
   policyTypes:
     - Ingress
     - Egress
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/pdb.yaml
 apiVersion: policy/v1
@@ -187,6 +191,7 @@ spec:
     matchLabels:
       app.kubernetes.io/name: gibson-tenant-operator
       app.kubernetes.io/component: tenant-operator
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/pdb.yaml
 # The operator serves admission for every Sandbox launch. With
@@ -212,6 +217,7 @@ spec:
       app.kubernetes.io/name: setec
       app.kubernetes.io/instance: gibson
       app.kubernetes.io/component: operator
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/envoy/pdb.yaml
 apiVersion: policy/v1
@@ -233,6 +239,7 @@ spec:
       app.kubernetes.io/name: gibson-workloads
       app.kubernetes.io/instance: gibson
       app.kubernetes.io/component: envoy
+
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/service-account.yaml
 apiVersion: v1
@@ -244,6 +251,7 @@ metadata:
     app.kubernetes.io/name: gibson-connector-operator
     app.kubernetes.io/part-of: gibson
     app.kubernetes.io/managed-by: Helm
+
 ---
 # Source: gibson/charts/gibson-operators/templates/platform-operator/sa.yaml
 apiVersion: v1
@@ -255,6 +263,7 @@ metadata:
     app.kubernetes.io/name: gibson-platform-operator
     app.kubernetes.io/part-of: gibson
     app.kubernetes.io/managed-by: Helm
+
 ---
 # Source: gibson/charts/gibson-operators/templates/reloader/reloader.yaml
 apiVersion: v1
@@ -276,6 +285,7 @@ metadata:
     app.kubernetes.io/name: gibson-tenant-operator
     app.kubernetes.io/part-of: gibson
     app.kubernetes.io/managed-by: Helm
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/frontend.yaml
 apiVersion: v1
@@ -349,6 +359,7 @@ metadata:
     app.kubernetes.io/version: "0.154.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: dashboard
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/databases/redis-rotation-controller.yaml
 apiVersion: v1
@@ -378,6 +389,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: envoy
 automountServiceAccountToken: false
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/ext-authz/serviceaccount.yaml
 apiVersion: v1
@@ -392,6 +404,7 @@ metadata:
     app.kubernetes.io/version: "0.154.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ext-authz
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/fga-init/job.yaml
 apiVersion: v1
@@ -421,6 +434,7 @@ metadata:
     app.kubernetes.io/instance: gibson
     app.kubernetes.io/version: "0.154.0"
     app.kubernetes.io/managed-by: Helm
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/ratelimit/serviceaccount.yaml
 apiVersion: v1
@@ -436,6 +450,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: ratelimit
 automountServiceAccountToken: false
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/00-helm-test-serviceaccount.yaml
 apiVersion: v1
@@ -451,6 +466,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: helm-test
 automountServiceAccountToken: false
+
 ---
 # Source: gibson/charts/openfga/templates/serviceaccount.yaml
 apiVersion: v1
@@ -468,6 +484,7 @@ metadata:
     app.kubernetes.io/version: "v1.15.1"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/part-of: openfga
+
 ---
 # Source: gibson/charts/spire/charts/spiffe-csi-driver/templates/serviceaccount.yaml
 apiVersion: v1
@@ -481,6 +498,7 @@ metadata:
     app.kubernetes.io/instance: gibson
     app.kubernetes.io/version: "0.2.7"
     app.kubernetes.io/managed-by: Helm
+
 ---
 # Source: gibson/charts/spire/charts/spiffe-oidc-discovery-provider/templates/serviceaccount.yaml
 apiVersion: v1
@@ -494,6 +512,7 @@ metadata:
     app.kubernetes.io/instance: gibson
     app.kubernetes.io/version: "1.14.5"
     app.kubernetes.io/managed-by: Helm
+
 ---
 # Source: gibson/charts/spire/charts/spire-agent/templates/serviceaccount.yaml
 apiVersion: v1
@@ -507,6 +526,7 @@ metadata:
     app.kubernetes.io/instance: "gibson"
     app.kubernetes.io/version: "1.14.5"
     app.kubernetes.io/managed-by: "Helm"
+
 ---
 # Source: gibson/charts/spire/charts/spire-server/templates/serviceaccount.yaml
 apiVersion: v1
@@ -520,6 +540,7 @@ metadata:
     app.kubernetes.io/instance: gibson
     app.kubernetes.io/version: "1.14.5"
     app.kubernetes.io/managed-by: Helm
+
 ---
 # Source: gibson/charts/zitadel/templates/serviceaccount_login.yaml
 apiVersion: v1
@@ -536,6 +557,7 @@ metadata:
     app.kubernetes.io/component: login
   annotations:
     argocd.argoproj.io/sync-wave: "-6"
+
 ---
 # Source: gibson/charts/zitadel/templates/serviceaccount_zitadel.yaml
 apiVersion: v1
@@ -551,6 +573,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
   annotations:
     argocd.argoproj.io/sync-wave: "-6"
+
 ---
 # Source: gibson/templates/jobs/zitadel-masterkey-rotation.yaml
 apiVersion: v1
@@ -578,6 +601,7 @@ metadata:
     app.kubernetes.io/part-of: openfga
 data:
   uri: "cG9zdGdyZXM6Ly9wbGFjZWhvbGRlckBwbGF0Zm9ybS1wb3N0Z3Jlcy1ydy5naWJzb24uc3ZjLmNsdXN0ZXIubG9jYWw6NTQzMi9vcGVuZmdhP3NzbG1vZGU9cmVxdWlyZQ=="
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/plans-configmap.yaml
 # gibson-tenant-operator-plans — canonical plan registry mounted into the
@@ -670,6 +694,8 @@ data:
           concurrent_missions: 0
           concurrent_agents: 0
           concurrent_connectors: 0
+    
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/auth/openbao-deployment.yaml
 apiVersion: v1
@@ -749,6 +775,7 @@ metadata:
     helm.sh/resource-policy: keep
     gibson.zeroroot.ai/spec: canonical-service-identity
     gibson.zeroroot.ai/owner: zitadel-post-install-job
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/dashboard/configmap.yaml
 apiVersion: v1
@@ -769,6 +796,7 @@ data:
 
   # Next.js Configuration
   NEXT_TELEMETRY_DISABLED: "1"
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/databases/redis-stack.yaml
 apiVersion: v1
@@ -838,6 +866,7 @@ data:
     - "www.localhost.zeroroot.ai"
     - "docs.localhost.zeroroot.ai"
     - "localhost.zeroroot.ai"
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/envoy/configmap.yaml
 apiVersion: v1
@@ -3090,6 +3119,8 @@ data:
                   - endpoint:
                       address:
                         socket_address: { address: 127.0.0.1, port_value: 9902 }
+    
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/ext-authz/configmap-registry.yaml
 apiVersion: v1
@@ -3129,6 +3160,7 @@ data:
     sdk.embeddedRegistry set), this ConfigMap's data carries the
     rpc_registry.yaml content directly and the init container is
     skipped.
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/gibson/configmap.yaml
 apiVersion: v1
@@ -3330,6 +3362,7 @@ data:
         # class. Separate from sandbox_class (tool/catalog dispatch) so the
         # agent workload can carry a different isolation posture.
         agent_sandbox_class: "agent"
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/gibson/reserved-names-configmap.yaml
 apiVersion: v1
@@ -3372,6 +3405,7 @@ data:
     gibson-
     openshift-
     kyverno-
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/operations/tenant-neo4j-template.yaml
 apiVersion: v1
@@ -3404,6 +3438,7 @@ data:
       storage: "10Gi"
       cpu: "100m"
       memory: "1Gi"
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/ratelimit/configmap.yaml
 apiVersion: v1
@@ -3550,6 +3585,7 @@ data:
                   - endpoint:
                       address:
                         socket_address: { address: 127.0.0.1, port_value: 8082 }
+
 ---
 # Source: gibson/charts/spire/charts/spiffe-oidc-discovery-provider/templates/configmap.yaml
 apiVersion: v1
@@ -3589,6 +3625,7 @@ data:
     svid_file_name = "tls.crt"
     svid_key_file_name = "tls.key"
     svid_bundle_file_name = "ca.pem"
+
 ---
 # Source: gibson/charts/spire/charts/spire-agent/templates/configmap.yaml
 apiVersion: v1
@@ -3650,6 +3687,7 @@ data:
         ]
       }
     }
+
 ---
 # Source: gibson/charts/spire/charts/spire-server/templates/configmap.yaml
 apiVersion: v1
@@ -3765,6 +3803,7 @@ data:
         "trust_domain": "zeroroot.ai"
       }
     }
+
 ---
 # Source: gibson/charts/spire/charts/spire-server/templates/controller-manager-configmap.yaml
 apiVersion: v1
@@ -3818,6 +3857,7 @@ data:
       clusterSPIFFEIDs: true
       clusterStaticEntries: true
       clusterFederatedTrustDomains: true
+
 ---
 # Source: gibson/charts/zitadel/templates/configmap_login.yaml
 apiVersion: v1
@@ -3839,6 +3879,7 @@ data:
       ZITADEL_SERVICE_USER_TOKEN_FILE="/login-client/pat"
       ZITADEL_API_URL="http://gibson-zitadel:8080"
       CUSTOM_REQUEST_HEADERS="Host:app.localhost.zeroroot.ai,X-Zitadel-Public-Host:app.localhost.zeroroot.ai"
+
 ---
 # Source: gibson/charts/zitadel/templates/configmap_zitadel.yaml
 apiVersion: v1
@@ -3888,7 +3929,11 @@ data:
     ExternalPort: 443
     ExternalSecure: true
     FirstInstance:
-      Org: {}
+      LoginClientPatPath: null
+      MachineKeyPath: null
+      Org:
+        Skip: null
+      PatPath: null
       Skip: false
     Machine:
       Identification:
@@ -3913,6 +3958,7 @@ data:
         Path: /etc/zitadel-system-keys/system-bot-b-pub.pem
     TLS:
       Enabled: false
+
 ---
 # Source: gibson/templates/jobs/zitadel-first-instance.yaml
 apiVersion: v1
@@ -3936,6 +3982,7 @@ data:
             Name: Automatically Initialized IAM Login Client
           Pat:
             ExpirationDate: "2029-01-01T00:00:00Z"
+
 ---
 # Source: gibson/templates/jobs/zitadel-masterkey-guard.yaml
 apiVersion: v1
@@ -4068,6 +4115,7 @@ data:
     [ "$(mk_decrypt_hex "$marker" "${mk:0:32}")" = "$marker_hex" ] \
       || { echo "[masterkey-guard] FATAL: the masterkey of this pod does not open the marker; the Zitadel keys use another masterkey. Zitadel waits for the new Secret." >&2; exit 1; }
     echo "[masterkey-guard] the masterkey opens the marker"
+
 ---
 # Source: gibson/templates/zitadel-login-branding.yaml
 apiVersion: v1
@@ -4122,6 +4170,8 @@ data:
       <path fill-rule="evenodd" fill="#0e0d09" d="M 18 6 H 46 A 6 6 0 0 1 52 12 V 52 A 6 6 0 0 1 46 58 H 18 A 6 6 0 0 1 12 52 V 12 A 6 6 0 0 1 18 6 Z M 22 14 H 42 A 2 2 0 0 1 44 16 V 48 A 2 2 0 0 1 42 50 H 22 A 2 2 0 0 1 20 48 V 16 A 2 2 0 0 1 22 14 Z"/>
       <line x1="6" y1="58" x2="58" y2="6" stroke="#0e0d09" stroke-width="5" stroke-linecap="butt"/>
     </svg>
+    
+
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/cluster-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -4364,6 +4414,7 @@ rules:
   - apiGroups: ["cilium.io"]
     resources: [ciliumnetworkpolicies]
     verbs: [get, list, create, update, delete]
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/tenant-namespace-cluster-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -4402,6 +4453,7 @@ rules:
   - apiGroups: ["batch"]
     resources: [cronjobs]
     verbs: [get, list, watch, create, update, patch, delete]
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/clusterrole.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -4541,6 +4593,7 @@ rules:
       - get
       - list
       - watch
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/frontend.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -4711,6 +4764,7 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
 ---
 # Source: gibson/charts/spire/charts/spire-agent/templates/roles.yaml
 # Required cluster role to allow spire-agent to query k8s API server
@@ -4811,6 +4865,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: gibson-connector-operator
+
 ---
 # Source: gibson/charts/gibson-operators/templates/platform-operator/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -4828,6 +4883,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: gibson-platform-operator
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/cluster-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -4845,6 +4901,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: gibson-tenant-operator
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/clusterrolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -4866,6 +4923,7 @@ subjects:
   - kind: ServiceAccount
     name: setec
     namespace: setec-system
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/frontend.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -4927,6 +4985,7 @@ subjects:
   - kind: ServiceAccount
     name: gibson-openbao
     namespace: gibson
+
 ---
 # Source: gibson/charts/spire/charts/spire-agent/templates/roles.yaml
 # Binds above cluster role to spire-agent service account
@@ -4942,6 +5001,7 @@ roleRef:
   kind: ClusterRole
   name: "gibson-agent"
   apiGroup: rbac.authorization.k8s.io
+
 ---
 # Source: gibson/charts/spire/charts/spire-server/templates/controller-manager-roles.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -4957,6 +5017,7 @@ subjects:
 - kind: ServiceAccount
   name: gibson-server
   namespace: gibson
+
 ---
 # Source: gibson/charts/spire/charts/spire-server/templates/roles.yaml
 # Binds above cluster role to spire-server service account
@@ -4973,6 +5034,7 @@ roleRef:
   kind: ClusterRole
   name: gibson-gibson-server
   apiGroup: rbac.authorization.k8s.io
+
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5364,6 +5426,7 @@ rules:
   # - gibson.zeroroot.ai/tenants (templates/gibson/rbac.yaml, deleted
   #   in this PR) DROPPED — startup_migration_check + recover_missions
   #   both deleted; daemon no longer enumerates tenants.
+
 ---
 # Source: gibson/charts/openfga/templates/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5462,6 +5525,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: gibson-connector-operator-leader-election
+
 ---
 # Source: gibson/charts/gibson-operators/templates/reloader/reloader.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5516,6 +5580,7 @@ subjects:
   - kind: ServiceAccount
     name: gibson-tenant-operator
     namespace: gibson
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/disk-builder-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5538,6 +5603,7 @@ subjects:
   - kind: ServiceAccount
     name: setec
     namespace: setec-system
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/frontend.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5560,6 +5626,7 @@ subjects:
   - kind: ServiceAccount
     name: setec-frontend
     namespace: setec-system
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5582,6 +5649,7 @@ subjects:
   - kind: ServiceAccount
     name: setec
     namespace: setec-system
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/sandbox-namespace-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5604,6 +5672,7 @@ subjects:
   - kind: ServiceAccount
     name: setec
     namespace: setec-system
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/auth/openbao-deployment.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5682,6 +5751,7 @@ subjects:
   - kind: ServiceAccount
     name: gibson-ext-authz
     namespace: gibson
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/fga-init/job.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5706,6 +5776,7 @@ roleRef:
   kind: Role
   apiGroup: rbac.authorization.k8s.io
   name: gibson-fga-init
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/gibson/rolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5727,6 +5798,7 @@ subjects:
   - kind: ServiceAccount
     name: gibson
     namespace: gibson
+
 ---
 # Source: gibson/charts/openfga/templates/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5751,6 +5823,7 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: gibson-openfga
+
 ---
 # Source: gibson/charts/spire/charts/spire-server/templates/controller-manager-roles.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5811,6 +5884,7 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: spire-bundle
+
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
 apiVersion: v1
@@ -5850,6 +5924,7 @@ spec:
       port: 8080
       targetPort: metrics
       protocol: TCP
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/deployment.yaml
 apiVersion: v1
@@ -5867,6 +5942,8 @@ spec:
       port: 8080
       targetPort: metrics
       protocol: TCP
+
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/webhook.yaml
 apiVersion: v1
@@ -6015,6 +6092,7 @@ spec:
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
     app.kubernetes.io/component: dashboard
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/databases/redis-stack.yaml
 apiVersion: v1
@@ -6040,6 +6118,7 @@ spec:
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
     app.kubernetes.io/component: redis
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/docs/service.yaml
 apiVersion: v1
@@ -6064,6 +6143,7 @@ spec:
   selector:
     app.kubernetes.io/name: docs-svc
     app.kubernetes.io/instance: gibson
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/envoy/service.yaml
 apiVersion: v1
@@ -6107,6 +6187,7 @@ spec:
       port: 443
       targetPort: https
       protocol: TCP
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/ext-authz/service.yaml
 apiVersion: v1
@@ -6143,6 +6224,7 @@ spec:
       port: 9003
       targetPort: metrics
       protocol: TCP
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/gibson/service.yaml
 apiVersion: v1
@@ -6193,6 +6275,7 @@ spec:
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
     app.kubernetes.io/component: daemon
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/ratelimit/service.yaml
 apiVersion: v1
@@ -6219,6 +6302,7 @@ spec:
       targetPort: grpc
       protocol: TCP
       appProtocol: grpc
+
 ---
 # Source: gibson/charts/openfga/templates/service.yaml
 apiVersion: v1
@@ -6251,6 +6335,7 @@ spec:
   selector:
     app.kubernetes.io/name: openfga
     app.kubernetes.io/instance: gibson
+
 ---
 # Source: gibson/charts/spire/charts/spiffe-oidc-discovery-provider/templates/service.yaml
 apiVersion: v1
@@ -6268,6 +6353,7 @@ spec:
   selector:
     app.kubernetes.io/name: spiffe-oidc-discovery-provider
     app.kubernetes.io/instance: gibson
+
 ---
 # Source: gibson/charts/spire/charts/spire-server/templates/controller-manager-service.yaml
 apiVersion: v1
@@ -6291,6 +6377,7 @@ spec:
   selector:
     app.kubernetes.io/name: server
     app.kubernetes.io/instance: gibson
+
 ---
 # Source: gibson/charts/spire/charts/spire-server/templates/service.yaml
 apiVersion: v1
@@ -6314,6 +6401,7 @@ spec:
   selector:
     app.kubernetes.io/name: server
     app.kubernetes.io/instance: gibson
+
 ---
 # Source: gibson/charts/zitadel/templates/service_login.yaml
 apiVersion: v1
@@ -6341,6 +6429,7 @@ spec:
     app.kubernetes.io/name: zitadel-login
     app.kubernetes.io/instance: gibson
     app.kubernetes.io/component: login
+
 ---
 # Source: gibson/charts/zitadel/templates/service_zitadel.yaml
 apiVersion: v1
@@ -6368,6 +6457,7 @@ spec:
     app.kubernetes.io/name: zitadel
     app.kubernetes.io/instance: gibson
     app.kubernetes.io/component: start
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/device-plugin-daemonset.yaml
 apiVersion: apps/v1
@@ -6448,6 +6538,7 @@ spec:
           hostPath:
             path: /dev
             type: Directory
+
 ---
 # Source: gibson/charts/spire/charts/spiffe-csi-driver/templates/daemonset.yaml
 apiVersion: apps/v1
@@ -6570,6 +6661,7 @@ spec:
           hostPath:
             path: /var/lib/kubelet/plugins_registry
             type: Directory
+
 ---
 # Source: gibson/charts/spire/charts/spire-agent/templates/daemonset.yaml
 apiVersion: apps/v1
@@ -6700,6 +6792,7 @@ spec:
           hostPath:
             path: /run/spire/agent-sockets
             type: DirectoryOrCreate
+
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/deployment.yaml
 apiVersion: apps/v1
@@ -6874,6 +6967,7 @@ spec:
             driver: csi.spiffe.io
             readOnly: true
       terminationGracePeriodSeconds: 30
+
 ---
 # Source: gibson/charts/gibson-operators/templates/platform-operator/deployment.yaml
 apiVersion: apps/v1
@@ -7120,6 +7214,7 @@ spec:
               - key: user
                 path: user
       terminationGracePeriodSeconds: 30
+
 ---
 # Source: gibson/charts/gibson-operators/templates/reloader/reloader.yaml
 apiVersion: apps/v1
@@ -7213,6 +7308,7 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/deployment.yaml
 apiVersion: apps/v1
@@ -8125,6 +8221,7 @@ spec:
           secret:
             secretName: setec-webhook-cert
       terminationGracePeriodSeconds: 30
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/frontend.yaml
 apiVersion: apps/v1
@@ -8914,6 +9011,8 @@ spec:
             defaultMode: 0444
         - name: shared-identity
           emptyDir: {}
+
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/docs/deployment.yaml
 apiVersion: apps/v1
@@ -9038,6 +9137,7 @@ spec:
           emptyDir: {}
         - name: nginx-run
           emptyDir: {}
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/envoy/deployment.yaml
 apiVersion: apps/v1
@@ -9406,6 +9506,8 @@ spec:
         - name: wasm
           emptyDir:
             sizeLimit: 64Mi
+
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/ext-authz/deployment.yaml
 apiVersion: apps/v1
@@ -9899,6 +10001,7 @@ spec:
             defaultMode: 0444
         - name: tmp
           emptyDir: {}
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/ratelimit/deployment.yaml
 apiVersion: apps/v1
@@ -10174,6 +10277,7 @@ spec:
             readOnly: true
         - name: tmp
           emptyDir: {}
+
 ---
 # Source: gibson/charts/openfga/templates/deployment.yaml
 apiVersion: apps/v1
@@ -10345,6 +10449,7 @@ spec:
           secret:
             defaultMode: 288
             secretName: gibson-openfga-http-tls
+
 ---
 # Source: gibson/charts/spire/charts/spiffe-oidc-discovery-provider/templates/deployment.yaml
 apiVersion: apps/v1
@@ -10502,6 +10607,7 @@ spec:
           emptyDir: {}
         - name: certdir
           emptyDir: {}
+
 ---
 # Source: gibson/charts/zitadel/templates/deployment_login.yaml
 apiVersion: apps/v1
@@ -10648,6 +10754,7 @@ spec:
         secret:
           defaultMode: 292
           secretName: login-client
+
 ---
 # Source: gibson/charts/zitadel/templates/deployment_zitadel.yaml
 apiVersion: apps/v1
@@ -10677,7 +10784,7 @@ spec:
       annotations:
         backup.velero.io/backup-volumes-excludes: zitadel-login-client-pat,zitadel-setup-tmp
         secret.reloader.stakater.com/reload: gibson-zitadel-system-key,gibson-zitadel-masterkey,zitadel-postgres-credentials
-        checksum/configmap: fd284125e28f76ef7f37e610f271a89158ff070e039a590592230b83abbad52b
+        checksum/configmap: 42dabe90fe017312e631e06a2ea57bddbc37acd932c549cee36bf44e8ae25486
         checksum/secret-db-ssl-ca-crt: 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
         checksum/secret-zitadel-secrets: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
       labels:
@@ -10914,6 +11021,7 @@ spec:
       - emptyDir:
           sizeLimit: 16Mi
         name: zitadel-setup-tmp
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/auth/openbao-deployment.yaml
 apiVersion: apps/v1
@@ -14058,6 +14166,8 @@ spec:
         resources:
           requests:
             storage: 20Gi
+
+
 ---
 # Source: gibson/charts/spire/charts/spire-server/templates/server-resource.yaml
 apiVersion: apps/v1
@@ -14253,6 +14363,7 @@ spec:
         resources:
           requests:
             storage: 1Gi
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/auth/openbao-jwt-auth-init/job.yaml
 apiVersion: batch/v1
@@ -14520,6 +14631,7 @@ spec:
           configMap:
             name: "spire-bundle"
             defaultMode: 0o444
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/fga-init/job.yaml
 apiVersion: batch/v1
@@ -15493,6 +15605,7 @@ spec:
                   # (deploy#858).
                   cpu: 100m
                   memory: 64Mi
+
 ---
 # Source: gibson/templates/jobs/zitadel-masterkey-rotation.yaml
 apiVersion: batch/v1
@@ -15870,21 +15983,243 @@ spec:
               rm -f /work/kvw.json
               [ "$c" = 200 ] || [ "$c" = 204 ] || { echo "[masterkey] FATAL: write secret/zitadel-masterkey returned HTTP ${c}; the next run moves it" >&2; exit 1; }
               echo "[masterkey] moved the next masterkey to value"
+
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/webhook.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: gibson-tenant-operator-owner-ref
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/component: tenant-operator-webhook
+  annotations:
+    cert-manager.io/inject-ca-from: "gibson/gibson-tenant-operator-webhook-cert"
+webhooks:
+  - name: ownerref.gibson.zeroroot.ai
+    clientConfig:
+      service:
+        name: gibson-tenant-operator-webhook
+        namespace: gibson
+        path: /mutate-owner-ref
+        port: 443
+      # caBundle populated by cert-manager cainjector at runtime from the
+      # `cert-manager.io/inject-ca-from` annotation above.
+    rules:
+      - apiGroups: ["gibson.zeroroot.ai"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE"]
+        resources: ["agentenrollments", "tenantmembers"]
+        scope: Namespaced
+    # Fail-closed (one-code-path / deploy#204): webhook outage rejects
+    # writes rather than silently admitting malformed CRDs. Availability
+    # is guaranteed by replicas≥2 + PodDisruptionBudget. The previous
+    # Ignore posture let a single-replica outage admit unowned/malformed
+    # resources that the reconciler then had to repair after the fact —
+    # a worse failure mode than the API server returning "webhook
+    # unavailable" to the client.
+    failurePolicy: Fail
+    sideEffects: None
+    timeoutSeconds: 3
+    admissionReviewVersions: ["v1"]
+    # Scope to tenant-* namespaces only so we never intercept creates
+    # outside the tenant scope.
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: Exists
+    objectSelector: {}
+---
+# Source: gibson/charts/gibson-workloads/charts/setec/templates/admission-webhook-sandboxclass.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: setec-mutating-sandboxclass
+  labels:
+    helm.sh/chart: setec-0.129.0
+    app.kubernetes.io/name: setec
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v0.129.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: setec
+    app.kubernetes.io/component: webhook
+  annotations:
+    cert-manager.io/inject-ca-from: "setec-system/setec-webhook-cert"
+webhooks:
+  - name: msandboxclass.setec.zeroroot.ai
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    reinvocationPolicy: Never
+    rules:
+      - apiGroups: ["setec.zeroroot.ai"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["sandboxclasses"]
+        scope: "Cluster"
+    clientConfig:
+      service:
+        name: setec-webhook
+        namespace: setec-system
+        path: /mutate-setec-zeroroot-ai-v1alpha1-sandboxclass
+        port: 443
+
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/webhook.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: gibson-tenant-operator-tenant-validator
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/component: tenant-operator-webhook
+  annotations:
+    cert-manager.io/inject-ca-from: "gibson/gibson-tenant-operator-webhook-cert"
+webhooks:
+  - name: tenant.gibson.zeroroot.ai
+    clientConfig:
+      service:
+        name: gibson-tenant-operator-webhook
+        namespace: gibson
+        path: /validate-tenant
+        port: 443
+      # caBundle populated by cert-manager cainjector at runtime.
+    rules:
+      - apiGroups: ["gibson.zeroroot.ai"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["tenants"]
+        scope: Cluster
+    # Fail-closed — invalid Tenant slugs (e.g. starting with a digit, the
+    # daemon admin API rejects those) MUST be blocked at admission. Letting
+    # one through means the saga runs 10 steps before failing at the
+    # Entitlements step, which the dashboard sees as a hung provisioning.
+    failurePolicy: Fail
+    sideEffects: None
+    timeoutSeconds: 3
+    admissionReviewVersions: ["v1"]
+
+---
+# Source: gibson/charts/gibson-workloads/charts/setec/templates/admission-webhook-sandboxclass.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: setec-validating-sandboxclass
+  labels:
+    helm.sh/chart: setec-0.129.0
+    app.kubernetes.io/name: setec
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v0.129.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: setec
+    app.kubernetes.io/component: webhook
+  annotations:
+    cert-manager.io/inject-ca-from: "setec-system/setec-webhook-cert"
+webhooks:
+  - name: vsandboxclass.setec.zeroroot.ai
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    rules:
+      - apiGroups: ["setec.zeroroot.ai"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["sandboxclasses"]
+        scope: "Cluster"
+    clientConfig:
+      service:
+        name: setec-webhook
+        namespace: setec-system
+        path: /validate-setec-zeroroot-ai-v1alpha1-sandboxclass
+        port: 443
+---
+# Source: gibson/charts/gibson-workloads/charts/setec/templates/webhook.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: setec-validating-webhook
+  labels:
+    helm.sh/chart: setec-0.129.0
+    app.kubernetes.io/name: setec
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v0.129.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: setec
+  annotations:
+    cert-manager.io/inject-ca-from: "setec-system/setec-webhook-cert"
+webhooks:
+  - name: vsandbox.setec.zeroroot.ai
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    rules:
+      - apiGroups: ["setec.zeroroot.ai"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["sandboxes"]
+        scope: "Namespaced"
+    clientConfig:
+      service:
+        name: setec-webhook
+        namespace: setec-system
+        path: /validate-setec-zeroroot-ai-v1alpha1-sandbox
+        port: 443
+---
+# Source: gibson/charts/spire/charts/spire-server/templates/controller-manager-webhook.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: gibson-gibson-controller-manager-webhook
+webhooks:
+  - admissionReviewVersions: ["v1"]
+    clientConfig:
+      service:
+        name: gibson-controller-manager-webhook
+        namespace: gibson
+        path: /validate-spire-spiffe-io-v1alpha1-clusterfederatedtrustdomain
+    failurePolicy: Ignore # Actual value to be set by post install/upgrade hooks
+    name: vclusterfederatedtrustdomain.kb.io
+    rules:
+      - apiGroups: ["spire.spiffe.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["clusterfederatedtrustdomains"]
+    sideEffects: None
+  - admissionReviewVersions: ["v1"]
+    clientConfig:
+      service:
+        name: gibson-controller-manager-webhook
+        namespace: gibson
+        path: /validate-spire-spiffe-io-v1alpha1-clusterspiffeid
+    failurePolicy: Ignore # Actual value to be set by post install/upgrade hooks
+    name: vclusterspiffeid.kb.io
+    rules:
+      - apiGroups: ["spire.spiffe.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["clusterspiffeids"]
+    sideEffects: None
+
 ---
 # Source: gibson/charts/zitadel/templates/hpa_login.yaml
 #file: noinspection ExcessiveWhitespaceTrimInspection,KubernetesUnknownResourcesInspection
+
 ---
 # Source: gibson/charts/zitadel/templates/hpa_zitadel.yaml
 #file: noinspection ExcessiveWhitespaceTrimInspection,KubernetesUnknownResourcesInspection
+
 ---
 # Source: gibson/charts/zitadel/templates/secret_self-signed.yaml
 #file: noinspection HelmUnknownValues
+
 ---
 # Source: gibson/charts/zitadel/templates/servicemonitor.yaml
 #file: noinspection KubernetesUnknownResourcesInspection
+
 ---
 # Source: gibson/charts/zitadel/templates/servicemonitor_login.yaml
 #file: noinspection KubernetesUnknownResourcesInspection
+
 ---
 # Source: gibson/charts/spire/charts/spiffe-csi-driver/templates/spiffe-csi-driver.yaml
 apiVersion: storage.k8s.io/v1
@@ -15908,6 +16243,7 @@ spec:
   # Declare support for ephemeral volumes only.
   volumeLifecycleModes:
     - Ephemeral
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/webhook.yaml
 apiVersion: cert-manager.io/v1
@@ -15957,6 +16293,7 @@ spec:
   issuerRef:
     kind: ClusterIssuer
     name: setec-webhook-selfsigned
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/auth/openbao-tls.yaml
 apiVersion: cert-manager.io/v1
@@ -16029,6 +16366,7 @@ spec:
     name: gibson-openbao-ca
     kind: Issuer
     group: cert-manager.io
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/cert-manager/certificate.yaml
 apiVersion: cert-manager.io/v1
@@ -16060,6 +16398,7 @@ spec:
   privateKey:
     algorithm: ECDSA
     size: 256
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/cert-manager/cluster-issuer.yaml
 # Root CA cert. Signed by selfsigned-bootstrap; lives in the Secret
@@ -16214,6 +16553,7 @@ spec:
     name: "selfsigned-ca"
     kind: "Issuer"
     group: "cert-manager.io"
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/system-namespace-policy.yaml
 apiVersion: cilium.io/v2
@@ -16500,6 +16840,7 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+
 ---
 # Source: gibson/templates/network-policies.yaml
 apiVersion: cilium.io/v2
@@ -17162,6 +17503,7 @@ specs:
           - ports:
               - port: "9901"
                 protocol: TCP
+
 ---
 # Source: gibson/templates/postgres/platform-postgres-cluster.yaml
 apiVersion: postgresql.cnpg.io/v1
@@ -17341,6 +17683,7 @@ metadata:
     app.kubernetes.io/component: cert-manager-issuer
 spec:
   selfSigned: {}
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/spire-server/clusterspiffeids.yaml
 # ============================================================================
@@ -17642,6 +17985,7 @@ spec:
   workloadSelectorTemplates:
     - "k8s:ns:setec-system"
     - "k8s:sa:setec-frontend"
+
 ---
 # Source: gibson/charts/spire/charts/spire-server/templates/controller-manager-cluster-ids.yaml
 apiVersion: spire.spiffe.io/v1alpha1
@@ -17710,6 +18054,7 @@ spec:
       - gibson
       - spire-server
       - spire-system
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/cluster-secret-store.yaml
 apiVersion: external-secrets.io/v1
@@ -17759,6 +18104,7 @@ spec:
           serviceAccountRef:
             name: "external-secrets"
             namespace: "external-secrets"
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/dashboard/secret.yaml
 apiVersion: external-secrets.io/v1
@@ -17799,6 +18145,7 @@ spec:
       remoteRef: { key: gibson-dashboard-session-secrets, property: server_actions_key }
     - secretKey: captcha_secret_key
       remoteRef: { key: gibson-dashboard-auth-hardening, property: captcha_secret_key }
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/iam-admin-pat-externalsecret.yaml
 apiVersion: external-secrets.io/v1
@@ -17874,6 +18221,7 @@ spec:
   data:
     - secretKey: pat
       remoteRef: { key: gibson-zitadel-login-client-pat, property: pat }
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/missing-secrets.yaml
 # gibson-workloads-redis-stack — Redis auth password. Consumer wiring is
@@ -17966,6 +18314,7 @@ spec:
 # (epic-447 #730) but it raced the gitops producer and won with an incomplete
 # (private-only) definition, wedging zitadel-init on a missing public-key.pem
 # (deploy#769/#770). One producer, no race.
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/openfga-preshared-key.yaml
 apiVersion: external-secrets.io/v1
@@ -18011,6 +18360,7 @@ spec:
       remoteRef: { key: gibson-openfga-preshared-key, property: key }
     - secretKey: key_previous
       remoteRef: { key: gibson-openfga-preshared-key, property: key_previous }
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/zitadel-masterkey-externalsecret.yaml
 apiVersion: external-secrets.io/v1
@@ -18061,6 +18411,7 @@ spec:
       # `zitadel-masterkey`, and the remoteRef reads it verbatim: one backend,
       # one key name, no prefix.
       remoteRef: { key: zitadel-masterkey, property: value }
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/secrets/cg-signing-key.yaml
 apiVersion: external-secrets.io/v1
@@ -18105,6 +18456,7 @@ spec:
       remoteRef: { key: gibson-cg-signing-key-previous, property: kid }
     - secretKey: previous_key
       remoteRef: { key: gibson-cg-signing-key-previous, property: key }
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/secrets/openbao-keys.yaml
 apiVersion: external-secrets.io/v1
@@ -18136,6 +18488,7 @@ spec:
   data:
     - secretKey: vault_admin_token
       remoteRef: { key: gibson-vault-admin-token, property: token }
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/setec/disk-registry.yaml
 apiVersion: external-secrets.io/v1
@@ -18167,6 +18520,7 @@ spec:
       engineVersion: v2
       data:
         .dockerconfigjson: "{{ .config }}"
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/setec/disk-signing-externalsecret.yaml
 apiVersion: external-secrets.io/v1
@@ -18194,6 +18548,7 @@ spec:
       remoteRef:
         key: setec-disk-signing
         property: seed
+
 ---
 # Source: gibson/templates/externalsecrets/gibson-zitadel-system-key.yaml
 apiVersion: external-secrets.io/v1
@@ -18253,6 +18608,7 @@ spec:
         user: '{{ if eq .slot "a" }}gibson-system-bot{{ else if eq .slot "b" }}gibson-system-bot-b{{ end }}'
         public-key.pem: '{{ .a_public }}'
         public-key-b.pem: '{{ .b_public }}'
+
 ---
 # Source: gibson/templates/externalsecrets/openfga-postgres-credentials.yaml
 apiVersion: external-secrets.io/v1
@@ -18285,6 +18641,7 @@ spec:
       data:
         username: '{{ .username }}'
         password: '{{ .password }}'
+
 ---
 # Source: gibson/templates/externalsecrets/registry-credentials.yaml
 apiVersion: external-secrets.io/v1
@@ -18323,6 +18680,7 @@ spec:
         # sets imageCredentials.username.
         .dockerconfigjson: |
           {"auths":{"ghcr.io":{"username":"x-access-token","password":"{{ .pat }}","auth":"{{ printf "x-access-token:%s" .pat | b64enc }}"}}}
+
 ---
 # Source: gibson/templates/externalsecrets/spire-postgres-credentials.yaml
 apiVersion: external-secrets.io/v1
@@ -18355,6 +18713,7 @@ spec:
       data:
         username: '{{ .username }}'
         password: '{{ .password }}'
+
 ---
 # Source: gibson/templates/externalsecrets/tenant-admin-postgres-credentials.yaml
 apiVersion: external-secrets.io/v1
@@ -18387,6 +18746,7 @@ spec:
       data:
         username: '{{ .username }}'
         password: '{{ .password }}'
+
 ---
 # Source: gibson/templates/externalsecrets/zitadel-postgres-credentials.yaml
 apiVersion: external-secrets.io/v1
@@ -18419,6 +18779,7 @@ spec:
       data:
         username: '{{ .username }}'
         password: '{{ .password }}'
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/setec/disk-registry.yaml
 apiVersion: generators.external-secrets.io/v1alpha1
@@ -18510,85 +18871,7 @@ metadata:
 spec:
   ca:
     secretName: gibson-selfsigned-ca
----
-# Source: gibson/charts/gibson-operators/templates/tenant-operator/webhook.yaml
-apiVersion: admissionregistration.k8s.io/v1
-kind: MutatingWebhookConfiguration
-metadata:
-  name: gibson-tenant-operator-owner-ref
-  labels:
-    app.kubernetes.io/name: gibson-tenant-operator
-    app.kubernetes.io/component: tenant-operator-webhook
-  annotations:
-    cert-manager.io/inject-ca-from: "gibson/gibson-tenant-operator-webhook-cert"
-webhooks:
-  - name: ownerref.gibson.zeroroot.ai
-    clientConfig:
-      service:
-        name: gibson-tenant-operator-webhook
-        namespace: gibson
-        path: /mutate-owner-ref
-        port: 443
-      # caBundle populated by cert-manager cainjector at runtime from the
-      # `cert-manager.io/inject-ca-from` annotation above.
-    rules:
-      - apiGroups: ["gibson.zeroroot.ai"]
-        apiVersions: ["v1alpha1"]
-        operations: ["CREATE"]
-        resources: ["agentenrollments", "tenantmembers"]
-        scope: Namespaced
-    # Fail-closed (one-code-path / deploy#204): webhook outage rejects
-    # writes rather than silently admitting malformed CRDs. Availability
-    # is guaranteed by replicas≥2 + PodDisruptionBudget. The previous
-    # Ignore posture let a single-replica outage admit unowned/malformed
-    # resources that the reconciler then had to repair after the fact —
-    # a worse failure mode than the API server returning "webhook
-    # unavailable" to the client.
-    failurePolicy: Fail
-    sideEffects: None
-    timeoutSeconds: 3
-    admissionReviewVersions: ["v1"]
-    # Scope to tenant-* namespaces only so we never intercept creates
-    # outside the tenant scope.
-    namespaceSelector:
-      matchExpressions:
-        - key: kubernetes.io/metadata.name
-          operator: Exists
-    objectSelector: {}
----
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/admission-webhook-sandboxclass.yaml
-apiVersion: admissionregistration.k8s.io/v1
-kind: MutatingWebhookConfiguration
-metadata:
-  name: setec-mutating-sandboxclass
-  labels:
-    helm.sh/chart: setec-0.129.0
-    app.kubernetes.io/name: setec
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.129.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: webhook
-  annotations:
-    cert-manager.io/inject-ca-from: "setec-system/setec-webhook-cert"
-webhooks:
-  - name: msandboxclass.setec.zeroroot.ai
-    admissionReviewVersions: ["v1"]
-    sideEffects: None
-    failurePolicy: Fail
-    reinvocationPolicy: Never
-    rules:
-      - apiGroups: ["setec.zeroroot.ai"]
-        apiVersions: ["v1alpha1"]
-        operations: ["CREATE", "UPDATE"]
-        resources: ["sandboxclasses"]
-        scope: "Cluster"
-    clientConfig:
-      service:
-        name: setec-webhook
-        namespace: setec-system
-        path: /mutate-setec-zeroroot-ai-v1alpha1-sandboxclass
-        port: 443
+
 ---
 # Source: gibson/charts/gibson-operators/templates/platform-operator/platformbootstrap.yaml
 apiVersion: gibson.zeroroot.ai/v1alpha1
@@ -18720,6 +19003,7 @@ spec:
         owner: "openfga"
       - name: "spire"
         owner: "spire"
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/envoy/podmonitor.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -18744,6 +19028,7 @@ spec:
     - port: admin
       path: /stats/prometheus
       interval: 30s
+
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -18773,6 +19058,7 @@ spec:
               revoke deadline, and the retry has not revoked the grant for one
               hour. Each record is a ConfigMap connector-unrevoked-<name> in
               the tenant namespace.
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/prometheusrule.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -18896,6 +19182,7 @@ spec:
               deterministic. Inspect the daemon's spiffePlatformBypass
               allow-list and the platform_operator FGA tuples for the
               operator service account.
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/dashboard/auth-prometheusrule.yaml
 # Spec auth-resolution-hardening (R3, R8) — SLO recording rules + alert
@@ -19052,6 +19339,7 @@ spec:
               branch increments once per pod start, which `for: 10m` absorbs;
               a missing Workload API socket sustains it. Read the dashboard
               logs for the fallback reason.
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/databases/redis-alertrule.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -19094,6 +19382,7 @@ spec:
               will be failing.
 
               Check: kubectl describe statefulset/gibson-redis-stack -n gibson
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/ext-authz/alertrule.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -19128,6 +19417,7 @@ spec:
               with Unavailable. Every component call fails until Redis answers.
               Check gibson-redis-stack, its password Secret and the network
               policy between ext-authz and Redis.
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/gibson/audit-alertrule.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -19162,6 +19452,7 @@ spec:
               caller waits. Common causes: the platform Postgres does not
               answer, the audit_log table is full or locked, or a migration
               changed the table under the daemon.
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/gibson/audit-export-alertrule.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -19212,6 +19503,7 @@ spec:
               the lag grows until a write succeeds. Common causes: a bucket
               credential that changed, a lock mode or lock days that the
               bucket policy refuses, or a store that does not answer.
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/ratelimit/alertrule.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -19272,6 +19564,7 @@ spec:
               in the last 5 minutes and refused it with 503 (D92: signup fails
               closed). New signups fail while this lasts. Check gibson-ratelimit
               pods, the SPIFFE mTLS sidecar, and gibson-redis-stack.
+
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -19313,6 +19606,7 @@ spec:
       path: /metrics
       interval: 60s
       scheme: http
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/dashboard/servicemonitor.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -19338,6 +19632,7 @@ spec:
       path: /metrics
       interval: 30s
       scheme: http
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/ext-authz/servicemonitor.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -19464,6 +19759,7 @@ spec:
   # only filter that matters.
   namespaceSelector:
     any: true
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/clusterspiffeid-scope-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -20120,6 +20416,7 @@ metadata:
 spec:
   policyName: gibson-tenant-operator-clusterspiffeid-scope
   validationActions: ["Deny"]
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/namespace-label-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -20132,6 +20429,7 @@ metadata:
 spec:
   policyName: gibson-tenant-namespace-label
   validationActions: ["Deny"]
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/plugin-namespace-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -20144,6 +20442,7 @@ metadata:
 spec:
   policyName: gibson-tenant-plugin-workloads
   validationActions: ["Deny"]
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/rolebinding-scope-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -20156,6 +20455,7 @@ metadata:
 spec:
   policyName: gibson-tenant-operator-rolebinding-scope
   validationActions: ["Deny"]
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/trainer-workload-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -20168,6 +20468,7 @@ metadata:
 spec:
   policyName: gibson-tenant-trainer-workloads
   validationActions: ["Deny"]
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/frontend-scope-policy.yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -20185,6 +20486,7 @@ spec:
   policyName: setec-frontend-scope
   validationActions:
     - Deny
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/sandbox-namespace-host-guard.yaml
 # The binding is what scopes the policy to Sandbox namespaces. The policy
@@ -20249,6 +20551,7 @@ spec:
     namespaceSelector:
       matchLabels:
         setec.zeroroot.ai/sandbox-namespace: "true"
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/spire-server/platform-identity-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -20302,140 +20605,7 @@ spec:
         - key: kubernetes.io/metadata.name
           operator: In
           values: ["gibson", "setec-system"]
----
-# Source: gibson/charts/gibson-operators/templates/tenant-operator/webhook.yaml
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingWebhookConfiguration
-metadata:
-  name: gibson-tenant-operator-tenant-validator
-  labels:
-    app.kubernetes.io/name: gibson-tenant-operator
-    app.kubernetes.io/component: tenant-operator-webhook
-  annotations:
-    cert-manager.io/inject-ca-from: "gibson/gibson-tenant-operator-webhook-cert"
-webhooks:
-  - name: tenant.gibson.zeroroot.ai
-    clientConfig:
-      service:
-        name: gibson-tenant-operator-webhook
-        namespace: gibson
-        path: /validate-tenant
-        port: 443
-      # caBundle populated by cert-manager cainjector at runtime.
-    rules:
-      - apiGroups: ["gibson.zeroroot.ai"]
-        apiVersions: ["v1alpha1"]
-        operations: ["CREATE", "UPDATE"]
-        resources: ["tenants"]
-        scope: Cluster
-    # Fail-closed — invalid Tenant slugs (e.g. starting with a digit, the
-    # daemon admin API rejects those) MUST be blocked at admission. Letting
-    # one through means the saga runs 10 steps before failing at the
-    # Entitlements step, which the dashboard sees as a hung provisioning.
-    failurePolicy: Fail
-    sideEffects: None
-    timeoutSeconds: 3
-    admissionReviewVersions: ["v1"]
----
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/admission-webhook-sandboxclass.yaml
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingWebhookConfiguration
-metadata:
-  name: setec-validating-sandboxclass
-  labels:
-    helm.sh/chart: setec-0.129.0
-    app.kubernetes.io/name: setec
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.129.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: setec
-    app.kubernetes.io/component: webhook
-  annotations:
-    cert-manager.io/inject-ca-from: "setec-system/setec-webhook-cert"
-webhooks:
-  - name: vsandboxclass.setec.zeroroot.ai
-    admissionReviewVersions: ["v1"]
-    sideEffects: None
-    failurePolicy: Fail
-    rules:
-      - apiGroups: ["setec.zeroroot.ai"]
-        apiVersions: ["v1alpha1"]
-        operations: ["CREATE", "UPDATE"]
-        resources: ["sandboxclasses"]
-        scope: "Cluster"
-    clientConfig:
-      service:
-        name: setec-webhook
-        namespace: setec-system
-        path: /validate-setec-zeroroot-ai-v1alpha1-sandboxclass
-        port: 443
----
-# Source: gibson/charts/gibson-workloads/charts/setec/templates/webhook.yaml
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingWebhookConfiguration
-metadata:
-  name: setec-validating-webhook
-  labels:
-    helm.sh/chart: setec-0.129.0
-    app.kubernetes.io/name: setec
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "v0.129.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/part-of: setec
-  annotations:
-    cert-manager.io/inject-ca-from: "setec-system/setec-webhook-cert"
-webhooks:
-  - name: vsandbox.setec.zeroroot.ai
-    admissionReviewVersions: ["v1"]
-    sideEffects: None
-    failurePolicy: Fail
-    rules:
-      - apiGroups: ["setec.zeroroot.ai"]
-        apiVersions: ["v1alpha1"]
-        operations: ["CREATE", "UPDATE"]
-        resources: ["sandboxes"]
-        scope: "Namespaced"
-    clientConfig:
-      service:
-        name: setec-webhook
-        namespace: setec-system
-        path: /validate-setec-zeroroot-ai-v1alpha1-sandbox
-        port: 443
----
-# Source: gibson/charts/spire/charts/spire-server/templates/controller-manager-webhook.yaml
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingWebhookConfiguration
-metadata:
-  name: gibson-gibson-controller-manager-webhook
-webhooks:
-  - admissionReviewVersions: ["v1"]
-    clientConfig:
-      service:
-        name: gibson-controller-manager-webhook
-        namespace: gibson
-        path: /validate-spire-spiffe-io-v1alpha1-clusterfederatedtrustdomain
-    failurePolicy: Ignore # Actual value to be set by post install/upgrade hooks
-    name: vclusterfederatedtrustdomain.kb.io
-    rules:
-      - apiGroups: ["spire.spiffe.io"]
-        apiVersions: ["v1alpha1"]
-        operations: ["CREATE", "UPDATE"]
-        resources: ["clusterfederatedtrustdomains"]
-    sideEffects: None
-  - admissionReviewVersions: ["v1"]
-    clientConfig:
-      service:
-        name: gibson-controller-manager-webhook
-        namespace: gibson
-        path: /validate-spire-spiffe-io-v1alpha1-clusterspiffeid
-    failurePolicy: Ignore # Actual value to be set by post install/upgrade hooks
-    name: vclusterspiffeid.kb.io
-    rules:
-      - apiGroups: ["spire.spiffe.io"]
-        apiVersions: ["v1alpha1"]
-        operations: ["CREATE", "UPDATE"]
-        resources: ["clusterspiffeids"]
-    sideEffects: None
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/postgres-logins.yaml
 apiVersion: generators.external-secrets.io/v1alpha1
@@ -20729,6 +20899,7 @@ metadata:
     helm.sh/hook-weight: '-7'
     helm.sh/hook-delete-policy: before-hook-creation
 automountServiceAccountToken: false
+
 ---
 # Source: gibson/templates/jobs/gibson-workloads-first-admin.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -21131,6 +21302,7 @@ spec:
   volumes:
     - name: tmp
       emptyDir: {}
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/02-bootstrap-secrets.yaml
 apiVersion: v1
@@ -21250,6 +21422,7 @@ spec:
   volumes:
     - name: tmp
       emptyDir: {}
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/03-bootstrap-configmaps.yaml
 apiVersion: v1
@@ -21353,6 +21526,7 @@ spec:
           drop: ["ALL"]
         seccompProfile:
           type: RuntimeDefault
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/04-fga-tuple-seed.yaml
 apiVersion: v1
@@ -21497,6 +21671,7 @@ spec:
           - key: key_previous
             path: key_previous
         defaultMode: 0444
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/05-spire-attestation.yaml
 apiVersion: v1
@@ -21638,6 +21813,7 @@ spec:
         readOnly: true
     - name: tmp
       emptyDir: {}
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/06-envoy-admin.yaml
 apiVersion: v1
@@ -21782,6 +21958,7 @@ spec:
   volumes:
     - name: tmp
       emptyDir: {}
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/07-zitadel-auth-probe.yaml
 apiVersion: v1
@@ -21911,6 +22088,7 @@ spec:
   volumes:
     - name: tmp
       emptyDir: {}
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/08-data-plane.yaml
 apiVersion: v1
@@ -22059,6 +22237,7 @@ spec:
   volumes:
     - name: tmp
       emptyDir: {}
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/09-go-toolchain.yaml
 apiVersion: v1
@@ -22137,6 +22316,7 @@ spec:
   volumes:
     - name: tmp
       emptyDir: {}
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/tests/10-sandbox-host-namespaces-denied.yaml
 apiVersion: v1
@@ -22216,6 +22396,7 @@ spec:
           # privileged is gated on the container, not the pod spec fragment
           out="$(printf '{"apiVersion":"v1","kind":"Pod","metadata":{"name":"vap-probe-priv"},"spec":{"containers":[{"name":"c","image":"busybox","securityContext":{"privileged":true}}]}}' | kubectl -n "setec-sandboxes" create --dry-run=server -f - 2>&1)" && { echo "$ERR setec-sandboxes: a privileged container was ADMITTED"; fail=1; } || { printf '%s' "$out" | grep -q "$POLICY" && echo "  ok  setec-sandboxes: privileged refused by $POLICY" || { echo "$ERR setec-sandboxes: privileged refused, but not by $POLICY: $out"; fail=1; }; }
           exit "$fail"
+
 ---
 # Source: gibson/charts/openfga/templates/tests/test-connection.yaml
 apiVersion: v1
@@ -22258,6 +22439,7 @@ spec:
     runAsUser: 65532
     seccompProfile:
       type: RuntimeDefault
+
 ---
 # Source: gibson/charts/spire/charts/spiffe-oidc-discovery-provider/templates/tests/test-connection.yaml
 apiVersion: v1
@@ -22320,6 +22502,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
   restartPolicy: Never
+
 ---
 # Source: gibson/charts/spire/charts/spiffe-oidc-discovery-provider/templates/tests/test-keys.yaml
 apiVersion: v1
@@ -22505,6 +22688,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
   restartPolicy: Never
+
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/postgres-logins-gate.yaml
 apiVersion: batch/v1
@@ -22581,6 +22765,7 @@ spec:
                 sleep 10
               done
               echo "[postgres-logins-gate] the database engine issues each login role"
+
 ---
 # Source: gibson/charts/openfga/templates/job.yaml
 apiVersion: batch/v1
@@ -22667,6 +22852,7 @@ spec:
             {}
       restartPolicy: Never
   backoffLimit: 1
+
 ---
 # Source: gibson/charts/zitadel/templates/job_init.yaml
 apiVersion: batch/v1
@@ -22886,6 +23072,8 @@ spec:
       - emptyDir:
           sizeLimit: 16Mi
         name: zitadel-setup-tmp
+
+
 ---
 # Source: gibson/charts/zitadel/templates/job_setup.yaml
 apiVersion: batch/v1
@@ -23204,6 +23392,7 @@ spec:
       - emptyDir:
           sizeLimit: 16Mi
         name: zitadel-setup-tmp
+
 ---
 # Source: gibson/templates/jobs/gibson-workloads-first-admin.yaml
 apiVersion: batch/v1
@@ -23384,6 +23573,7 @@ spec:
               - key: key_previous
                 path: key_previous
             defaultMode: 0444
+
 ---
 # Source: gibson/templates/jobs/gibson-workloads-postgres-setup-job.yaml
 apiVersion: batch/v1
@@ -23550,6 +23740,7 @@ spec:
           GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_neo4j_endpoints TO tenant_admin;
           SQL
           echo "[postgres-setup] ALL_ROLES_SETUP_OK"
+
 ---
 # Source: gibson/templates/jobs/openfga-postgres-setup-job.yaml
 apiVersion: batch/v1
@@ -23679,6 +23870,7 @@ spec:
           }
           setup "openfga" "openfga" "NOLOGIN"
           echo "[postgres-setup] ALL_ROLES_SETUP_OK"
+
 ---
 # Source: gibson/templates/jobs/spire-postgres-setup-job.yaml
 apiVersion: batch/v1
@@ -23808,6 +24000,7 @@ spec:
           }
           setup "spire" "spire" "NOLOGIN"
           echo "[postgres-setup] ALL_ROLES_SETUP_OK"
+
 ---
 # Source: gibson/templates/jobs/zitadel-postgres-setup-job.yaml
 apiVersion: batch/v1
@@ -23937,6 +24130,7 @@ spec:
           }
           setup "zitadel" "zitadel" "NOLOGIN CREATEDB"
           echo "[postgres-setup] ALL_ROLES_SETUP_OK"
+
 ---
 # Source: gibson/templates/webhook-gate.yaml
 apiVersion: batch/v1
@@ -24075,6 +24269,7 @@ spec:
           fi
 
           echo "WEBHOOK_GATE_OK $(wc -l </tmp/probes) endpoint(s) answered"
+
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/sandboxclass-default.yaml
 apiVersion: setec.zeroroot.ai/v1alpha1
@@ -24178,6 +24373,7 @@ spec:
   requests:
     cpu: 250m
     memory: 768Mi
+
 ---
 # Source: gibson/templates/postgres/platform-postgres-cluster.yaml
 apiVersion: postgresql.cnpg.io/v1
@@ -24229,3 +24425,4 @@ spec:
   target: "prefer-standby"
   cluster:
     name: platform-postgres
+

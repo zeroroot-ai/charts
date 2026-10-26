@@ -3570,6 +3570,7 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     helm.sh/chart: velero-12.1.0
 automountServiceAccountToken: true
+
 ---
 # Source: gibson-velero/charts/velero/templates/repo-maintenance-configmap.yaml
 apiVersion: v1
@@ -4051,6 +4052,7 @@ roleRef:
   kind: Role
   name: velero-server
   apiGroup: rbac.authorization.k8s.io
+
 ---
 # Source: gibson-velero/templates/tenant-operator-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -4071,6 +4073,7 @@ roleRef:
   kind: Role
   name: gibson-tenant-operator-final-backup
   apiGroup: rbac.authorization.k8s.io
+
 ---
 # Source: gibson-velero/charts/velero/templates/service.yaml
 apiVersion: v1
@@ -4094,6 +4097,7 @@ spec:
     name: velero
     app.kubernetes.io/name: velero
     app.kubernetes.io/instance: gibson-velero
+
 ---
 # Source: gibson-velero/charts/velero/templates/node-agent-daemonset.yaml
 apiVersion: apps/v1
@@ -4196,6 +4200,7 @@ spec:
             requests:
               cpu: 50m
               memory: 128Mi
+
 ---
 # Source: gibson-velero/charts/velero/templates/deployment.yaml
 apiVersion: apps/v1
@@ -4350,6 +4355,7 @@ spec:
         runAsUser: 65532
         seccompProfile:
           type: RuntimeDefault
+
 ---
 # Source: gibson-velero/templates/backupstoragelocation.yaml
 apiVersion: velero.io/v1
@@ -4392,6 +4398,7 @@ spec:
   config:
     region: "us-east-1"
     s3ForcePathStyle: "false"
+
 ---
 # Source: gibson-velero/templates/network-policy.yaml
 apiVersion: cilium.io/v2
@@ -4501,6 +4508,7 @@ specs:
             - ports:
                 - port: "443"
                   protocol: TCP
+
 ---
 # Source: gibson-velero/templates/schedule.yaml
 apiVersion: velero.io/v1

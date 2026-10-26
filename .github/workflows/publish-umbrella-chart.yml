@@ -51,7 +51,9 @@ jobs:
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5
         with:
-          version: v3.16.2
+          # The Helm of Argo CD 3.5.6, as ci.yml: the smoke render of the
+          # pulled package tests the renderer that deploys it (charts#789).
+          version: v4.2.1
 
       - name: Resolve chart version
         id: ver
