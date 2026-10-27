@@ -15905,6 +15905,11 @@ spec:
               sed -i 1d /work/rows
               echo "BEGIN;" >> "$sql"
               echo "LOCK TABLE system.encryption_keys IN EXCLUSIVE MODE;" >> "$sql"
+              # Zitadel can insert a key between the read and the lock. Under the lock,
+              # and before the first UPDATE of this transaction, the rows must be the rows
+              # read. After the UPDATEs the check would see the rewrapped keys and always
+              # refuse, so it must stay here.
+              printf "DO \$\$ BEGIN IF (SELECT md5(coalesce(string_agg(id || ':' || key, ',' ORDER BY id), '')) FROM system.encryption_keys) <> '%s' THEN RAISE EXCEPTION 'system.encryption_keys changed after the read'; END IF; END \$\$;\n" "$rows_md5" >> "$sql"
               n=0
               while IFS='|' read -r id key; do
                 [ -n "$id" ] || continue
@@ -15916,9 +15921,6 @@ spec:
                 n=$((n + 1))
               done < /work/rows
               rm -f /work/rows
-              # Zitadel can insert a key between the read and the COMMIT. The transaction
-              # locks the table and refuses to commit when its rows are not the rows read.
-              printf "DO \$\$ BEGIN IF (SELECT md5(coalesce(string_agg(id || ':' || key, ',' ORDER BY id), '')) FROM system.encryption_keys) <> '%s' THEN RAISE EXCEPTION 'system.encryption_keys changed after the read'; END IF; END \$\$;\n" "$rows_md5" >> "$sql"
               printf "UPDATE gibson_rotation.masterkey_marker SET marker = '%s' WHERE id = 1;\nCOMMIT;\n" \
                 "$(mk_encrypt_hex "$marker_hex" "$nxt")" >> "$sql"
               "${PSQL[@]}" -f "$sql"
