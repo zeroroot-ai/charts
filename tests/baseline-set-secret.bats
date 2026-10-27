@@ -54,7 +54,12 @@ case "$url" in
   */login) printf '%s' '{"auth":{"client_token":"s.FAKEBAOTOKEN42"}}' > "$out" ;;
   */token/revoke-self) ;;
   */v1/secret/data/*) if [ -n "$body" ]; then cp "$body" "$STUB/write.body"; printf '200'
-                      else printf '%s' '{"data":{"data":{"other":"keep"}}}' > "$out"; fi ;;
+                      else case "${STUB_READ_CODE:-200}" in
+                             200) printf '%s' '{"data":{"data":{"other":"keep"}}}' > "$out" ;;
+                             *) printf '%s' '{"errors":["permission denied"]}' > "$out" ;;
+                           esac
+                           printf '%s' "${STUB_READ_CODE:-200}"
+                           [ "${STUB_READ_CODE:-200}" != 000 ] || exit 7; fi ;;
 esac
 C
   chmod +x "$STUB/bin/"*
@@ -243,4 +248,36 @@ run_object_in_pod() { # run_object_in_pod <key> <stdin json>
   run bash -c 'printf "{\"kid\":\"\"}" | PATH="$STUB/bin:$PATH" "$0" --object k p' "$SCRIPT"
   [ "$status" -eq 2 ]
   [ ! -f "$STUB/kubectl.argv" ]
+}
+
+# The read of the current entry must succeed before the merge. A refused read
+# wrote the new property alone and dropped every other property of the key,
+# for example the `value` of the Zitadel master key while its `next` is set.
+@test "FAILING FIXTURE: a refused read of the current entry writes nothing, and the script exits 1" {
+  printf '%s\n' "$HOSTILE" | run_script k p
+  pod_script="$(pod_script_from_argv)"
+  for code in 403 500 503 000; do
+    rm -f "$STUB/write.body"
+    run bash -c 'printf "%s" "$HOSTILE" | STUB_READ_CODE="$2" SET_KEY=k SET_PROP=p SA_TOKEN_FILE="$STUB/sa-token" PATH="$STUB/bin:$PATH" sh -c "$1"' _ "$pod_script" "$code"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"returned HTTP $code, so nothing was written"* ]] || { echo "code $code: $output"; return 1; }
+    [ "${lines[${#lines[@]}-1]}" = "000" ]
+    [ ! -e "$STUB/write.body" ] || { echo "code $code wrote: $(cat "$STUB/write.body")"; return 1; }
+  done
+  # The host side turns the 000 into exit 1.
+  cat > "$STUB/bin/kubectl" <<'K'
+#!/usr/bin/env bash
+case "$*" in *" exec "*) cat >/dev/null; printf '000' ;; esac
+K
+  run bash -c 'printf "v\n" | PATH="$STUB/bin:$PATH" "$0" k p' "$SCRIPT"
+  [ "$status" -eq 1 ]
+}
+
+@test "a key with no entry yet (404) is written with the new property alone" {
+  printf '%s\n' "$HOSTILE" | run_script k p
+  pod_script="$(pod_script_from_argv)"
+  run bash -c 'printf "%s" "v1" | STUB_READ_CODE=404 SET_KEY=k SET_PROP=p SA_TOKEN_FILE="$STUB/sa-token" PATH="$STUB/bin:$PATH" sh -c "$1"' _ "$pod_script"
+  [ "$status" -eq 0 ]
+  [ "$output" = "200" ]
+  [ "$("$REAL_JQ" -c '.data' "$STUB/write.body")" = '{"p":"v1"}' ]
 }
