@@ -42,12 +42,21 @@ setup() {
   for f in rewrap write guard; do
     sed -e "s#/tmp/#$D/tmp/#g" -e "s#/work/#$D/work/#g" "$WORK_DIR/$f.sh" > "$D/$f.sh"
   done
-  export ROWS_MD5=0123456789abcdef0123456789abcdef
   # Helpers of the rendered step, for the test's own encryption.
   sed -n '/^hex_of()/,/^marker_hex=/p' "$D/rewrap.sh" > "$D/crypto.sh"
   cat > "$D/bin/psql" <<'SH'
 #!/usr/bin/env bash
 # A stub psql: the marker and the encryption keys live in files under $D/db.
+# digest DIR: md5 of string_agg(id || ':' || key, ',' ORDER BY id), as the
+# rendered SQL computes it, over the key files of DIR.
+digest() {
+  local f first=1
+  for f in $(cd "$1" && LC_ALL=C ls key.* 2>/dev/null); do
+    [ "$first" = 1 ] || printf ','
+    first=0
+    printf '%s:%s' "${f#key.}" "$(cat "$1/$f")"
+  done | md5sum | cut -d' ' -f1
+}
 args="$*"
 case "$args" in
   *"CREATE SCHEMA"*) exit 0 ;;
@@ -56,23 +65,40 @@ case "$args" in
     printf '%s' "$args" | sed -n "s/.*VALUES (1, '\([^']*\)').*/\1/p" > "$D/db/marker"; exit 0 ;;
   *"to_regclass"*) [ -e "$D/db/marker" ] && echo t || echo f; exit 0 ;;
   *"REPEATABLE READ"*)
-    echo "$ROWS_MD5"
-    for f in "$D"/db/key.*; do [ -e "$f" ] && printf '%s|%s\n' "${f##*/key.}" "$(cat "$f")"; done; exit 0 ;;
+    digest "$D/db"
+    for f in "$D"/db/key.*; do [ -e "$f" ] && printf '%s|%s\n' "${f##*/key.}" "$(cat "$f")"; done
+    # A key that Zitadel inserts between the read and the rewrap.
+    if [ -n "${INSERT_AFTER_READ:-}" ]; then printf '%s' "$INSERT_AFTER_READ" > "$D/db/key.idLate"; fi
+    exit 0 ;;
 esac
 # -f FILE: apply the UPDATEs of one transaction.
 file=""; while [ $# -gt 0 ]; do [ "$1" = -f ] && file="$2"; shift; done
 [ -n "$file" ] || { echo "stub psql: unexpected call: $args" >&2; exit 3; }
 cp "$file" "$D/db/last.sql"
+# One transaction, as Postgres runs it: each statement in order on a copy of
+# the tables, so the digest check sees the UPDATEs before it. The copy
+# replaces the tables only at COMMIT. An error rolls everything back.
+tx="$D/tx"; rm -rf "$tx"; cp -r "$D/db" "$tx"
 while IFS= read -r line; do
   case "$line" in
     "UPDATE system.encryption_keys SET key = '"*)
       k="$(printf '%s' "$line" | sed -n "s/.*SET key = '\([^']*\)' WHERE id = '\([^']*\)'.*/\1/p")"
       i="$(printf '%s' "$line" | sed -n "s/.*WHERE id = '\([^']*\)'.*/\1/p")"
-      printf '%s' "$k" > "$D/db/key.$i" ;;
+      printf '%s' "$k" > "$tx/key.$i" ;;
     "UPDATE gibson_rotation.masterkey_marker SET marker = '"*)
-      printf '%s' "$line" | sed -n "s/.*SET marker = '\([^']*\)'.*/\1/p" > "$D/db/marker" ;;
+      printf '%s' "$line" | sed -n "s/.*SET marker = '\([^']*\)'.*/\1/p" > "$tx/marker" ;;
+    "DO \$\$"*"changed after the read"*)
+      want="$(printf '%s' "$line" | sed -n "s/.*<> '\([0-9a-f]*\)' THEN.*/\1/p")"
+      if [ "$(digest "$tx")" != "$want" ]; then
+        echo "psql: ERROR:  system.encryption_keys changed after the read" >&2
+        rm -rf "$tx"; exit 3
+      fi ;;
+    "COMMIT;")
+      rm -rf "$D/db"; mv "$tx" "$D/db"; exit 0 ;;
   esac
 done < "$file"
+echo "stub psql: no COMMIT in $file" >&2
+rm -rf "$tx"; exit 3
 SH
   chmod +x "$D/bin/psql"
 }
@@ -113,9 +139,42 @@ marker_text="gibson-zitadel-masterkey-marker-v1"
   [ "$(dec "$(cat "$D/db/marker")" "$NXT")" = "$marker_text" ]
   [ "$(head -n1 "$D/db/last.sql")" = "BEGIN;" ]
   [ "$(sed -n 2p "$D/db/last.sql")" = "LOCK TABLE system.encryption_keys IN EXCLUSIVE MODE;" ]
-  grep -q "<> '${ROWS_MD5}' THEN RAISE EXCEPTION" "$D/db/last.sql"
+  # The digest check runs on the locked table before the first UPDATE.
+  sed -n 3p "$D/db/last.sql" | grep -q "changed after the read"
   [ "$(tail -n1 "$D/db/last.sql")" = "COMMIT;" ]
   [ ! -e "$D/work/rows" ]
+}
+
+@test "FAILING FIXTURE: a key that Zitadel inserts after the read stops the rewrap, and nothing changes" {
+  kv "$CUR" "$NXT"
+  enc "$marker_text" "$CUR" > "$D/db/marker"
+  enc "first-zitadel-key-value-0123456" "$CUR" > "$D/db/key.idA"
+  before_key="$(cat "$D/db/key.idA")"; before_marker="$(cat "$D/db/marker")"
+  INSERT_AFTER_READ="$(enc "late-zitadel-key-value-9876543" "$CUR")"
+  export INSERT_AFTER_READ
+  run_step
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"changed after the read"* ]]
+  [ "$(cat "$D/db/key.idA")" = "$before_key" ]
+  [ "$(cat "$D/db/marker")" = "$before_marker" ]
+  [ "$(cat "$D/work/action")" = none ]
+}
+
+@test "FAILING FIXTURE: a digest check after the UPDATEs of its own transaction always stops the rewrap" {
+  # The defect of charts 0.154.7: the check ran after the transaction's own
+  # UPDATEs, so it never saw the rows it read, and no rotation completed.
+  kv "$CUR" "$NXT"
+  enc "$marker_text" "$CUR" > "$D/db/marker"
+  enc "first-zitadel-key-value-0123456" "$CUR" > "$D/db/key.idA"
+  awk '/changed after the read/ && !moved { held = $0; moved = 1; next }
+       /^printf "UPDATE gibson_rotation.masterkey_marker/ && held != "" { print held }
+       { print }' "$D/rewrap.sh" > "$D/rewrap.late.sh"
+  run cmp -s "$D/rewrap.sh" "$D/rewrap.late.sh"
+  [ "$status" -ne 0 ]
+  run env PATH="$D/bin:$PATH" bash -ec "$(cat "$D/rewrap.late.sh")"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"changed after the read"* ]]
+  [ "$(dec "$(cat "$D/db/key.idA")" "$CUR")" = "first-zitadel-key-value-0123456" ]
 }
 
 @test "rows that already use the next masterkey only move next to value" {
