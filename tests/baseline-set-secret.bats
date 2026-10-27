@@ -58,7 +58,8 @@ case "$url" in
                              200) printf '%s' '{"data":{"data":{"other":"keep"}}}' > "$out" ;;
                              *) printf '%s' '{"errors":["permission denied"]}' > "$out" ;;
                            esac
-                           printf '%s' "${STUB_READ_CODE:-200}"; fi ;;
+                           printf '%s' "${STUB_READ_CODE:-200}"
+                           [ "${STUB_READ_CODE:-200}" != 000 ] || exit 7; fi ;;
 esac
 C
   chmod +x "$STUB/bin/"*
@@ -255,7 +256,7 @@ run_object_in_pod() { # run_object_in_pod <key> <stdin json>
 @test "FAILING FIXTURE: a refused read of the current entry writes nothing, and the script exits 1" {
   printf '%s\n' "$HOSTILE" | run_script k p
   pod_script="$(pod_script_from_argv)"
-  for code in 403 500 503; do
+  for code in 403 500 503 000; do
     rm -f "$STUB/write.body"
     run bash -c 'printf "%s" "$HOSTILE" | STUB_READ_CODE="$2" SET_KEY=k SET_PROP=p SA_TOKEN_FILE="$STUB/sa-token" PATH="$STUB/bin:$PATH" sh -c "$1"' _ "$pod_script" "$code"
     [ "$status" -eq 0 ]

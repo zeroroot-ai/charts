@@ -127,7 +127,8 @@ trap 'curl -sS -o /dev/null -X POST -H "@$d/hdr" "$BAO/v1/auth/token/revoke-self
 # leave an error object in cur, and the write would then replace the key with
 # the new properties alone: every other property, such as the `value` of a
 # key in rotation, would be gone. Only 404 means "no entry yet".
-rc="$(curl -sS -w '%{http_code}' -H "@$d/hdr" -o "$d/cur" "$BAO/v1/secret/data/$SET_KEY")"
+# A failed connection has no HTTP code. It takes the same path as a refusal.
+rc="$(curl -sS -w '%{http_code}' -H "@$d/hdr" -o "$d/cur" "$BAO/v1/secret/data/$SET_KEY")" || rc=000
 case "$rc" in
   200) ;;
   404) printf '{}' > "$d/cur" ;;
