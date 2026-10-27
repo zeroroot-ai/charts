@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.154.8](https://github.com/zeroroot-ai/charts/compare/v0.154.7...v0.154.8) (2026-10-27)
+
+
+### Bug Fixes
+
+* **scripts:** baseline-set-secret.sh writes nothing after a failed read ([#796](https://github.com/zeroroot-ai/charts/issues/796)) ([27fe855](https://github.com/zeroroot-ai/charts/commit/27fe85566a456d7826db346a8d2754cf5e3ede5a))
+* **zitadel:** the masterkey rewrap checks the rows before its own UPDATEs ([#799](https://github.com/zeroroot-ai/charts/issues/799)) ([24e0b87](https://github.com/zeroroot-ai/charts/commit/24e0b87f59e333afd761ce7e6f85ac54f585e760)), closes [#798](https://github.com/zeroroot-ai/charts/issues/798)
+
 ## [0.154.7](https://github.com/zeroroot-ai/charts/compare/v0.154.6...v0.154.7) (2026-10-26)
 
 
