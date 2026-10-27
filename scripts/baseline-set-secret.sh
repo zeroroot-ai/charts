@@ -123,7 +123,16 @@ curl -sS -X POST -H 'Content-Type: application/json' --data-binary "@$d/login" \
 jq -r '"X-Vault-Token: " + (.auth.client_token // empty)' "$d/auth" > "$d/hdr"
 grep -q 'X-Vault-Token: .' "$d/hdr" || { echo 000; exit 0; }
 trap 'curl -sS -o /dev/null -X POST -H "@$d/hdr" "$BAO/v1/auth/token/revoke-self" || true; rm -rf "$d"' EXIT
-curl -sS -H "@$d/hdr" -o "$d/cur" "$BAO/v1/secret/data/$SET_KEY"
+# The read must succeed before the merge. A refused read (403, 5xx) would
+# leave an error object in cur, and the write would then replace the key with
+# the new properties alone: every other property, such as the `value` of a
+# key in rotation, would be gone. Only 404 means "no entry yet".
+rc="$(curl -sS -w '%{http_code}' -H "@$d/hdr" -o "$d/cur" "$BAO/v1/secret/data/$SET_KEY")"
+case "$rc" in
+  200) ;;
+  404) printf '{}' > "$d/cur" ;;
+  *) echo "reading secret/$SET_KEY returned HTTP $rc, so nothing was written" >&2; echo 000; exit 0 ;;
+esac
 # The stderr of these jq calls goes nowhere: a jq error message can quote the
 # value. A failure prints a fixed message and the code 000.
 if [ "${SET_MODE:-property}" = object ]; then
