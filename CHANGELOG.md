@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.154.9](https://github.com/zeroroot-ai/charts/compare/v0.154.8...v0.154.9) (2026-10-28)
+
+
+### Bug Fixes
+
+* **docs-site:** bump to v0.6.20 ([#768](https://github.com/zeroroot-ai/charts/issues/768)) ([69d1090](https://github.com/zeroroot-ai/charts/commit/69d1090446c69941fc6d94881da7690804774f5b))
+* **pin:** bump the gibson-build images to v0.163.3 ([#804](https://github.com/zeroroot-ai/charts/issues/804)) ([4de4a11](https://github.com/zeroroot-ai/charts/commit/4de4a11f9f6b1fd63416ede0932b6e5aceb61bb6))
+* **zitadel:** pin the login image at its latest v4.19.4 build ([#800](https://github.com/zeroroot-ai/charts/issues/800)) ([e80c813](https://github.com/zeroroot-ai/charts/commit/e80c813ea34f7d350158fe5b13a689823bc5b08a))
+
 ## [0.154.8](https://github.com/zeroroot-ai/charts/compare/v0.154.7...v0.154.8) (2026-10-27)
 
 
