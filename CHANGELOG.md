@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.154.10](https://github.com/zeroroot-ai/charts/compare/v0.154.9...v0.154.10) (2026-10-29)
+
+
+### Bug Fixes
+
+* **pin:** bump the gibson-build images to v0.163.4 ([#805](https://github.com/zeroroot-ai/charts/issues/805)) ([94d4105](https://github.com/zeroroot-ai/charts/commit/94d4105808e8c5854077abc40477328a648f10b8))
+
 ## [0.154.9](https://github.com/zeroroot-ai/charts/compare/v0.154.8...v0.154.9) (2026-10-28)
 
 
