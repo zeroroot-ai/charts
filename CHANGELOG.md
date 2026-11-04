@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.154.11](https://github.com/zeroroot-ai/charts/compare/v0.154.10...v0.154.11) (2026-11-04)
+
+
+### Bug Fixes
+
+* **gibson:** pin daemon image to v0.163.5 (executor v0.114.3 fold fix) ([#809](https://github.com/zeroroot-ai/charts/issues/809)) ([5c92f94](https://github.com/zeroroot-ai/charts/commit/5c92f94058eb97c70c129d663367bf4f519ebbdc))
+
 ## [0.154.10](https://github.com/zeroroot-ai/charts/compare/v0.154.9...v0.154.10) (2026-10-29)
 
 
