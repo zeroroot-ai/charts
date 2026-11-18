@@ -398,6 +398,82 @@ static_resources:
                         # below) and ext_authz is disabled per-route — OIDC
                         # discovery is public by design (mirrors the in-cluster
                         # cluster_oidc vhost). deploy#661.
+                        # The Model gateway for a sandbox (charts#815). A sandbox reaches
+                        # the cluster only through the Edge, so the Edge forwards
+                        # /gateway/model/ to the model listener of the
+                        # agentgateway Gateway, with the prefix removed, over TLS
+                        # that verifies the component CA. ext_authz stays on: its
+                        # route class "gateway forward" verifies the Capability
+                        # Grant, and the gateway does the full authorization. The
+                        # caller keeps x-capability-grant and the route claim
+                        # (x-gibson-route-tenant, x-gibson-route-provider); the
+                        # four trusted headers of the gateway never pass from the
+                        # caller. No buffer: timeout 0s and idle_timeout 0s, the
+                        # same as the daemon stream routes, so an SSE reply flows
+                        # and the HTTP/2 PINGs of the listener reap a dead one.
+                        # The quota is the class of the daemon agent routes.
+                        - match: { prefix: "/gateway/model/" }
+                          route:
+                            cluster: agentgateway_model
+                            prefix_rewrite: "/"
+                            timeout: 0s
+                            idle_timeout: 0s
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_authenticated
+                                  - request_headers:
+                                      header_name: x-gibson-identity-tenant
+                                      descriptor_key: tenant
+                                      skip_if_absent: false
+                                  - request_headers:
+                                      header_name: x-gibson-identity-subject
+                                      descriptor_key: subject
+                                      skip_if_absent: false
+                          request_headers_to_remove:
+                            - x-gibson-tenant
+                            - x-gibson-subject
+                            - x-gibson-mission
+                            - x-gibson-task
+                        # The Agent gateway for a sandbox (charts#815). A sandbox reaches
+                        # the cluster only through the Edge, so the Edge forwards
+                        # /gateway/agent/ to the agent listener of the
+                        # agentgateway Gateway, with the prefix removed, over TLS
+                        # that verifies the component CA. ext_authz stays on: its
+                        # route class "gateway forward" verifies the Capability
+                        # Grant, and the gateway does the full authorization. The
+                        # caller keeps x-capability-grant and the route claim
+                        # (x-gibson-route-tenant, x-gibson-route-provider); the
+                        # four trusted headers of the gateway never pass from the
+                        # caller. No buffer: timeout 0s and idle_timeout 0s, the
+                        # same as the daemon stream routes, so an SSE reply flows
+                        # and the HTTP/2 PINGs of the listener reap a dead one.
+                        # The quota is the class of the daemon agent routes.
+                        - match: { prefix: "/gateway/agent/" }
+                          route:
+                            cluster: agentgateway_agent
+                            prefix_rewrite: "/"
+                            timeout: 0s
+                            idle_timeout: 0s
+                            rate_limits:
+                              - actions:
+                                  - generic_key:
+                                      descriptor_key: route
+                                      descriptor_value: api_authenticated
+                                  - request_headers:
+                                      header_name: x-gibson-identity-tenant
+                                      descriptor_key: tenant
+                                      skip_if_absent: false
+                                  - request_headers:
+                                      header_name: x-gibson-identity-subject
+                                      descriptor_key: subject
+                                      skip_if_absent: false
+                          request_headers_to_remove:
+                            - x-gibson-tenant
+                            - x-gibson-subject
+                            - x-gibson-mission
+                            - x-gibson-task
                         - match: { prefix: "/.well-known/openid-configuration" }
                           route:
                             cluster: zitadel_upstream
@@ -1015,6 +1091,15 @@ static_resources:
                         - match: { prefix: "/gibson.harness.v1.HarnessCallbackService/" }
                           requires:
                             allow_missing_or_failed: {}
+                        # The gateway forward routes (charts#815): a sandbox
+                        # sends its Capability Grant and no Zitadel JWT, and
+                        # ext_authz verifies the grant.
+                        - match: { prefix: "/gateway/model/" }
+                          requires:
+                            allow_missing_or_failed: {}
+                        - match: { prefix: "/gateway/agent/" }
+                          requires:
+                            allow_missing_or_failed: {}
                         # A dispatched component renews its own task grant with
                         # that grant as its only credential (gibson#1605). It has
                         # no Zitadel JWT, so the /gibson. catch-all would reject
@@ -1396,6 +1481,76 @@ static_resources:
                       # Service, not the daemon's).
                       address: "{{ .gibsonService }}"
                       port_value: {{ .gibsonCallbackPort }}
+
+    # The model listener of the agentgateway Gateway (charts#815). TLS that
+    # verifies the component CA and the name of the proxy Service. The
+    # protocol follows ALPN, so an SSE reply streams over HTTP/1.1 or HTTP/2.
+    - name: agentgateway_model
+      type: STRICT_DNS
+      connect_timeout: 5s
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          auto_config:
+            http2_protocol_options: {}
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: "{{ .gateway.host }}"
+          common_tls_context:
+            alpn_protocols: ["h2", "http/1.1"]
+            validation_context:
+              trusted_ca:
+                filename: /etc/envoy/component-ca/ca.crt
+              match_typed_subject_alt_names:
+                - san_type: DNS
+                  matcher:
+                    exact: "{{ .gateway.host }}"
+      load_assignment:
+        cluster_name: agentgateway_model
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: "{{ .gateway.host }}"
+                      port_value: {{ .gateway.modelPort }}
+
+    # The agent listener of the agentgateway Gateway (charts#815). TLS that
+    # verifies the component CA and the name of the proxy Service. The
+    # protocol follows ALPN, so an SSE reply streams over HTTP/1.1 or HTTP/2.
+    - name: agentgateway_agent
+      type: STRICT_DNS
+      connect_timeout: 5s
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          auto_config:
+            http2_protocol_options: {}
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: "{{ .gateway.host }}"
+          common_tls_context:
+            alpn_protocols: ["h2", "http/1.1"]
+            validation_context:
+              trusted_ca:
+                filename: /etc/envoy/component-ca/ca.crt
+              match_typed_subject_alt_names:
+                - san_type: DNS
+                  matcher:
+                    exact: "{{ .gateway.host }}"
+      load_assignment:
+        cluster_name: agentgateway_agent
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: "{{ .gateway.host }}"
+                      port_value: {{ .gateway.agentPort }}
 
     - name: gibson_dashboard
       type: STRICT_DNS

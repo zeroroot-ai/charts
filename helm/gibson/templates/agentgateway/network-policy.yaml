@@ -8,8 +8,9 @@ its own default deny. Every flow below crosses that namespace, so each peer
 names its namespace. Cilium allows a flow only when both sides allow it, so
 each flow has an egress rule and an ingress rule:
 
-  proxy in    the daemon, the dashboard backend and the pods of each sandbox
-              namespace reach the two listeners (model, agent).
+  proxy in    the daemon, the dashboard backend, the Edge (the gateway
+              forward routes for a sandbox, charts#815) and the pods of each
+              sandbox namespace reach the two listeners (model, agent).
   proxy out   the proxy reaches ext-authz on its gRPC port, the controller
               on its xDS port and the trace collector on its OTLP port, all
               in the release namespace. It reaches each LLM provider outside
@@ -50,13 +51,13 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "The daemon, the dashboard backend and the sandboxes reach the listeners of the agentgateway proxy. The proxy reaches ext-authz, its controller, the trace collector and the LLM providers."
+  description: "The daemon, the dashboard backend, the Edge and the sandboxes reach the listeners of the agentgateway proxy. The proxy reaches ext-authz, its controller, the trace collector and the LLM providers."
   endpointSelector:
     matchLabels:
       app.kubernetes.io/component: agentgateway-proxy
   ingress:
     - fromEndpoints:
-        {{- range $c := list "daemon" "dashboard" }}
+        {{- range $c := list "daemon" "dashboard" "envoy" }}
         - matchLabels:
             {{ $podNs }}: {{ $ns }}
             app.kubernetes.io/component: {{ $c }}
@@ -116,12 +117,12 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 specs:
-  - description: "The daemon and the dashboard backend reach the listeners of the agentgateway proxy."
+  - description: "The daemon, the dashboard backend and the Edge reach the listeners of the agentgateway proxy."
     endpointSelector:
       matchExpressions:
         - key: app.kubernetes.io/component
           operator: In
-          values: [daemon, dashboard]
+          values: [daemon, dashboard, envoy]
         - key: {{ $role }}
           operator: In
           values: [platform]

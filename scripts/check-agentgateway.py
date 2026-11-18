@@ -41,6 +41,16 @@ The check renders each shipped profile and fails when:
                 ReferenceGrant in the namespace of its target. The gateway
                 namespace keeps the provider credential Secrets apart from
                 the Secrets of the platform.
+  8. edge       a sandbox reaches the gateway only through the Edge
+                (charts#815). For /gateway/model/ and /gateway/agent/ the
+                Edge config of the render must hold a route to the cluster
+                agentgateway_<listener> with the prefix removed, timeout 0s
+                and idle_timeout 0s (no cap on a streamed reply), no
+                per-route ext_authz switch-off, the removal of the four
+                trusted headers and never of x-capability-grant or the
+                route claim, a JWT rule that lets the Capability Grant
+                through, and a cluster that verifies the component CA and
+                the proxy name on the listener port of the Gateway.
   6. trace      no frontend policy on the Gateway sets maxBufferSize and
                 adds the six trace fields that the daemon reads, each with
                 its expression (TRACE_FIELDS), or the ext-authz policy does
@@ -135,6 +145,77 @@ def header_names(docs: list[dict]) -> set[str]:
             continue
         names |= {h for h in HEADER.findall(yaml.safe_dump(d, width=1 << 20)) if not h.endswith("-")}
     return names
+
+
+EDGE_PREFIXES = {"model": "/gateway/model/", "agent": "/gateway/agent/"}
+TRUSTED_HEADERS = {"x-gibson-tenant", "x-gibson-subject", "x-gibson-mission", "x-gibson-task"}
+PASS_HEADERS = {"x-capability-grant", "x-gibson-route-tenant", "x-gibson-route-provider"}
+
+
+def walk(node):
+    yield node
+    if isinstance(node, dict):
+        for v in node.values():
+            yield from walk(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from walk(v)
+
+
+def edge_config(docs: list[dict]) -> dict:
+    cm = next((d for d in of_kind(docs, "ConfigMap") if d["metadata"]["name"] == "gibson-envoy"), None)
+    return yaml.safe_load(((cm or {}).get("data") or {}).get("envoy.yaml") or "{}") or {}
+
+
+def judge_edge(edge: dict, gw: dict) -> list[str]:
+    bad: list[str] = []
+    ports = {li.get("name"): li.get("port") for li in (gw.get("spec") or {}).get("listeners") or []}
+    host = f"{gw['metadata']['name']}.{ns(gw)}.svc"
+    route_configs = [n for n in walk(edge) if isinstance(n, dict) and "virtual_hosts" in n]
+    jwt_rules = [n for n in walk(edge) if isinstance(n, dict) and "requires" in n and "match" in n]
+    clusters = {c.get("name"): c for c in ((edge.get("static_resources") or {}).get("clusters") or [])}
+    for listener, prefix in EDGE_PREFIXES.items():
+        found = []
+        for rc in route_configs:
+            for vh in rc.get("virtual_hosts") or []:
+                for r in vh.get("routes") or []:
+                    if (r.get("match") or {}).get("prefix") == prefix:
+                        found.append((rc, r))
+        if not found:
+            bad.append(f"edge: no route for {prefix}")
+            continue
+        for rc, r in found:
+            rt = r.get("route") or {}
+            want = f"agentgateway_{listener}"
+            if rt.get("cluster") != want or rt.get("prefix_rewrite") != "/":
+                bad.append(f"edge: {prefix} goes to {rt.get('cluster')} with prefix_rewrite "
+                           f"{rt.get('prefix_rewrite')!r}, want {want} and '/'")
+            if rt.get("timeout") != "0s" or rt.get("idle_timeout") != "0s":
+                bad.append(f"edge: {prefix} caps a streamed reply (timeout {rt.get('timeout')}, "
+                           f"idle_timeout {rt.get('idle_timeout')}), want 0s and 0s")
+            off = ((r.get("typed_per_filter_config") or {}).get("envoy.filters.http.ext_authz") or {})
+            if off.get("disabled") or off:
+                bad.append(f"edge: {prefix} changes ext_authz on its route; the Edge keeps ext_authz there")
+            removed = {h.lower() for h in (r.get("request_headers_to_remove") or [])}
+            removed_all = removed | {h.lower() for h in (rc.get("request_headers_to_remove") or [])}
+            if TRUSTED_HEADERS - removed:
+                bad.append(f"edge: {prefix} lets the caller send {sorted(TRUSTED_HEADERS - removed)}")
+            if PASS_HEADERS & removed_all:
+                bad.append(f"edge: {prefix} strips {sorted(PASS_HEADERS & removed_all)}, which the gateway needs")
+        if not any((j.get("match") or {}).get("prefix") == prefix and "allow_missing_or_failed" in (j.get("requires") or {})
+                   for j in jwt_rules):
+            bad.append(f"edge: no JWT rule lets the Capability Grant through on {prefix}")
+        c = clusters.get(f"agentgateway_{listener}") or {}
+        tls = ((c.get("transport_socket") or {}).get("typed_config") or {})
+        vc = ((tls.get("common_tls_context") or {}).get("validation_context") or {})
+        sans = [((m.get("matcher") or {}).get("exact")) for m in vc.get("match_typed_subject_alt_names") or []]
+        if not (vc.get("trusted_ca") or {}).get("filename") or host not in sans or tls.get("sni") != host:
+            bad.append(f"edge: cluster agentgateway_{listener} does not verify the component CA and the name {host}")
+        addrs = [n for n in walk(c.get("load_assignment") or {}) if isinstance(n, dict) and "socket_address" in n]
+        if not addrs or any(a["socket_address"].get("address") != host
+                            or a["socket_address"].get("port_value") != ports.get(listener) for a in addrs):
+            bad.append(f"edge: cluster agentgateway_{listener} does not dial {host}:{ports.get(listener)}")
+    return bad
 
 
 def proxy_image(params: dict) -> str:
@@ -276,6 +357,9 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     if FORMAT_PATHS - set(routes):
         bad.append(f"formats: the model listener has no format for {sorted(FORMAT_PATHS - set(routes))}")
 
+    # 8. The Edge routes of a sandbox.
+    bad += judge_edge(edge_config(docs), gw)
+
     # 6. The trace policy.
     ok = False
     for p in pols:
@@ -288,6 +372,16 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     if not ok:
         bad.append(f"trace: no frontend policy on Gateway {name} sets maxBufferSize and adds {TRACE_FIELDS}")
     return bad
+
+
+def edge_mutate(ds: list[dict], change) -> None:
+    """Apply change to the /gateway/model/ route of the Edge config, in place."""
+    cm = next(d for d in ds if d.get("kind") == "ConfigMap" and d["metadata"]["name"] == "gibson-envoy")
+    edge = yaml.safe_load(cm["data"]["envoy.yaml"])
+    route = next(n for n in walk(edge) if isinstance(n, dict) and (n.get("match") or {}).get("prefix")
+                 == EDGE_PREFIXES["model"] and "route" in n)
+    change(route)
+    cm["data"]["envoy.yaml"] = yaml.safe_dump(edge)
 
 
 def selftest() -> int:
@@ -352,6 +446,16 @@ def selftest() -> int:
             namespace="gibson"),
         "no ReferenceGrant for the cross-namespace references": lambda ds: [
             ds.remove(d) for d in [d for d in ds if d.get("kind") == "ReferenceGrant"]],
+        "an Edge gateway route with no ext_authz": lambda ds: edge_mutate(ds, lambda r: r.update(
+            typed_per_filter_config={"envoy.filters.http.ext_authz": {
+                "@type": "type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute",
+                "disabled": True}})),
+        "an Edge gateway route that strips the grant": lambda ds: edge_mutate(ds, lambda r: r.update(
+            request_headers_to_remove=r["request_headers_to_remove"] + ["x-capability-grant"])),
+        "an Edge gateway route that passes a trusted header": lambda ds: edge_mutate(ds, lambda r: r.update(
+            request_headers_to_remove=[h for h in r["request_headers_to_remove"] if h != "x-gibson-task"])),
+        "an Edge gateway route that caps a stream": lambda ds: edge_mutate(ds, lambda r: r["route"].update(
+            idle_timeout="300s")),
         "no agent listener": lambda ds: gateway(ds)["spec"].update(
             listeners=[li for li in gateway(ds)["spec"]["listeners"] if li["name"] != "agent"]),
         "an agent listener policy that replaces ext-authz": lambda ds: ds.append({
@@ -391,7 +495,7 @@ def main() -> int:
         print("❌ the agentgateway Gateway lost a platform policy (charts#815):\n  " + "\n  ".join(bad))
         return 1
     print("✓ agentgateway: ext-authz before routing on both listeners, TLS and no public listener, a pinned "
-          "mirror proxy image, header strip, format map and trace fields on each profile")
+          "mirror proxy image, header strip, format map, trace fields and the Edge routes of a sandbox on each profile")
     return 0
 
 
