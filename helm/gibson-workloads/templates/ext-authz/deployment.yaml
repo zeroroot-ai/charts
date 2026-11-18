@@ -447,6 +447,10 @@ spec:
             # of the install and the fixed path platform/envoy.
             - name: EXT_AUTHZ_ENVOY_SVID
               value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/envoy") | quote }}
+            # The agentgateway proxy (charts#815). ext-authz accepts it for a
+            # model call and an A2A call only. Unset, no gateway call passes.
+            - name: EXT_AUTHZ_GATEWAY_SVID
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/agentgateway") | quote }}
             {{- /* EXT_AUTHZ_HMAC_SECRET — symmetric-key identity-header signing
                    path removed by Spec 3 R14 (SPIFFE-mTLS roots trust now). The
                    legacyHmacEnabled toggle was a transitional shim and is

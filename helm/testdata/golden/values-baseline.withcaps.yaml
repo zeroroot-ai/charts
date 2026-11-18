@@ -5747,6 +5747,29 @@ rules:
     resources: ["connectorinstances/finalizers"]
     verbs: ["update"]
 
+  # ModelProvider (gibson#1366, gibson#1387). A tenant's model provider. The
+  # operator renders one AgentgatewayBackend and one HTTPRoute for each, in
+  # the gateway namespace, and attaches the route to the one agentgateway
+  # Gateway. These five rules match the generated role of the operator on
+  # the gibson branch epic/aaif-alignment (operators/tenant/config/rbac/
+  # role.yaml). helm/contracts/gibson-operator-rbac-tenant.yaml takes them
+  # when the chart pins the gibson release that carries them.
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["modelproviders"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["modelproviders/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["modelproviders/finalizers"]
+    verbs: ["update"]
+  - apiGroups: ["agentgateway.dev"]
+    resources: ["agentgatewaybackends"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+
   # Namespace is inherently cluster-scoped — operator creates per-tenant namespaces.
   - apiGroups: [""]
     resources: ["namespaces"]
@@ -11904,6 +11927,19 @@ spec:
             # fixed path platform/daemon.
             - name: GIBSON_DAEMON_SPIFFE_ID
               value: "spiffe://zeroroot.ai/platform/daemon"
+            # The Model gateway (gibson#1366). The operator writes the backend and
+            # the route of each ModelProvider in the gateway namespace, attaches
+            # the route to the one agentgateway Gateway, and gives each backend
+            # an ext-authz policy on this Service and port. The operator of the
+            # epic does not start without them.
+            - name: GIBSON_MODEL_GATEWAY_NAMESPACE
+              value: "gibson"
+            - name: GIBSON_MODEL_GATEWAY_NAME
+              value: "gibson-agentgateway"
+            - name: GIBSON_MODEL_GATEWAY_EXTAUTHZ_SERVICE
+              value: "gibson-ext-authz"
+            - name: GIBSON_MODEL_GATEWAY_EXTAUTHZ_PORT
+              value: "9001"
             # The image of the belief trainer CronJob of each tenant
             # (gibson#616). The operator exits at start when it is empty.
             - name: BELIEF_TRAINER_IMAGE
@@ -14149,6 +14185,10 @@ spec:
             # of the install and the fixed path platform/envoy.
             - name: EXT_AUTHZ_ENVOY_SVID
               value: "spiffe://zeroroot.ai/platform/envoy"
+            # The agentgateway proxy (charts#815). ext-authz accepts it for a
+            # model call and an A2A call only. Unset, no gateway call passes.
+            - name: EXT_AUTHZ_GATEWAY_SVID
+              value: "spiffe://zeroroot.ai/platform/agentgateway"
           volumeMounts:
             # NOTE: sa-identity-map ConfigMap is NOT mounted on ext-authz.
             # The ext-authz binary does not consume it — only the daemon
@@ -18112,6 +18152,11 @@ spec:
             # Peer SPIFFE IDs for the harness callback listener allowlist.
             # REQUIRED when SPIFFE is configured — the daemon fails to start
             # otherwise (fail-closed per critical-tls-no-fallbacks Req 1.5).
+            # The trace collector (charts#816). The daemon accepts this SVID on
+            # its gRPC port for the OTLP TraceService Export method only, and
+            # adds it to its allowed peers by itself.
+            - name: GIBSON_TRACE_COLLECTOR_SVID
+              value: "spiffe://zeroroot.ai/platform/otel-collector"
             # Comma-separated list built from the paths in .Values.spiffe.callbackPeers.
             - name: GIBSON_CALLBACK_PEER_SVIDS
               value: "spiffe://zeroroot.ai/platform/dashboard,spiffe://zeroroot.ai/platform/envoy,spiffe://zeroroot.ai/platform/daemon"
@@ -24407,14 +24452,10 @@ spec:
       allowedRoutes:
         kinds:
           - kind: HTTPRoute
-        # The routes of a tenant live in the namespace of that tenant. Only
-        # the tenant-operator sets this label on a namespace
-        # (namespace-label-admission.yaml).
+        # The tenant-operator writes the route of each ModelProvider in the
+        # gateway namespace (gibson#1387), so only that namespace attaches.
         namespaces:
-          from: Selector
-          selector:
-            matchLabels:
-              gibson.zeroroot.ai/managed-by: tenant-operator
+          from: Same
     - name: agent
       # TLS on each listener: a caller token never crosses the pod network
       # in clear text. The certificate comes from the component issuer
@@ -24430,14 +24471,10 @@ spec:
       allowedRoutes:
         kinds:
           - kind: HTTPRoute
-        # The routes of a tenant live in the namespace of that tenant. Only
-        # the tenant-operator sets this label on a namespace
-        # (namespace-label-admission.yaml).
+        # The tenant-operator writes the route of each ModelProvider in the
+        # gateway namespace (gibson#1387), so only that namespace attaches.
         namespaces:
-          from: Selector
-          selector:
-            matchLabels:
-              gibson.zeroroot.ai/managed-by: tenant-operator
+          from: Same
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/webhook.yaml
 apiVersion: cert-manager.io/v1

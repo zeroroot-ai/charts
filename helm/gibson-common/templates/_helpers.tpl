@@ -696,6 +696,13 @@ The daemon's own SA is `gibson.serviceAccountName` above — release-derived
 gibson-ext-authz
 {{- end -}}
 
+{{- define "gibson.extAuthzGrpcPort" -}}
+{{- /* The gRPC port of the ext-authz Service. gibson-workloads sets it in
+       extAuthz.ports.grpc. The tenant-operator of gibson-operators cannot
+       read that value, so it gets the default (charts#815). */ -}}
+{{- ((.Values.extAuthz | default dict).ports | default dict).grpc | default 9001 -}}
+{{- end -}}
+
 {{- define "gibson.extAuthzServiceAccountName" -}}
 {{- (((.Values.extAuthz | default dict).serviceAccount) | default dict).name | default "gibson-ext-authz" -}}
 {{- end }}

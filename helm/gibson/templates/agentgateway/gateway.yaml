@@ -70,14 +70,10 @@ spec:
       allowedRoutes:
         kinds:
           - kind: HTTPRoute
-        # The routes of a tenant live in the namespace of that tenant. Only
-        # the tenant-operator sets this label on a namespace
-        # (namespace-label-admission.yaml).
+        # The tenant-operator writes the route of each ModelProvider in the
+        # gateway namespace (gibson#1387), so only that namespace attaches.
         namespaces:
-          from: Selector
-          selector:
-            matchLabels:
-              gibson.zeroroot.ai/managed-by: tenant-operator
+          from: Same
     {{- end }}
 ---
 apiVersion: agentgateway.dev/v1alpha1

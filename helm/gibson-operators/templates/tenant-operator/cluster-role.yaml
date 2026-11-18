@@ -82,6 +82,29 @@ rules:
     resources: ["connectorinstances/finalizers"]
     verbs: ["update"]
 
+  # ModelProvider (gibson#1366, gibson#1387). A tenant's model provider. The
+  # operator renders one AgentgatewayBackend and one HTTPRoute for each, in
+  # the gateway namespace, and attaches the route to the one agentgateway
+  # Gateway. These five rules match the generated role of the operator on
+  # the gibson branch epic/aaif-alignment (operators/tenant/config/rbac/
+  # role.yaml). helm/contracts/gibson-operator-rbac-tenant.yaml takes them
+  # when the chart pins the gibson release that carries them.
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["modelproviders"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["modelproviders/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["modelproviders/finalizers"]
+    verbs: ["update"]
+  - apiGroups: ["agentgateway.dev"]
+    resources: ["agentgatewaybackends"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+
   # Namespace is inherently cluster-scoped — operator creates per-tenant namespaces.
   - apiGroups: [""]
     resources: ["namespaces"]

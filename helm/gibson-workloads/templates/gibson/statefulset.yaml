@@ -581,6 +581,11 @@ spec:
             # Peer SPIFFE IDs for the harness callback listener allowlist.
             # REQUIRED when SPIFFE is configured — the daemon fails to start
             # otherwise (fail-closed per critical-tls-no-fallbacks Req 1.5).
+            # The trace collector (charts#816). The daemon accepts this SVID on
+            # its gRPC port for the OTLP TraceService Export method only, and
+            # adds it to its allowed peers by itself.
+            - name: GIBSON_TRACE_COLLECTOR_SVID
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/otel-collector") | quote }}
             # Comma-separated list built from the paths in .Values.spiffe.callbackPeers.
             {{- if .Values.spiffe.callbackPeers }}
             - name: GIBSON_CALLBACK_PEER_SVIDS
