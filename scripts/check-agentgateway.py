@@ -12,6 +12,8 @@ The check renders each shipped profile and fails when:
                 calls the rendered ext-authz Service on its grpc port, over
                 the gRPC protocol, with failureMode FailClosed and the
                 expression json(request.body).model in grpc.requestMetadata.
+                The Gateway must have the two listeners model and agent, and
+                no listener policy may replace the ext-authz of either one.
   2. listener   the Gateway names an address or a listener hostname, a
                 listener is not HTTPS with mode Terminate and a certificate
                 Secret that a rendered cert-manager Certificate writes (a
@@ -57,6 +59,7 @@ PROFILES = (
 )
 GW_GROUP = "gateway.networking.k8s.io"
 FORMAT_PATHS = {"/v1/messages", "/v1/responses", "/v1/embeddings", "/v1/models"}
+LISTENERS = {"model", "agent"}
 TRUSTED = ("tenant", "subject", "mission", "task")
 # The trace attributes that the daemon reads, by name, with their expression.
 TRACE_FIELDS = {
@@ -143,6 +146,14 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     if not ok:
         bad.append(f"ext-authz: no PreRouting, Override, FailClosed gRPC extAuth policy on the whole Gateway {name} "
                    f"that calls the ext-authz Service on its grpc port and sends {MODEL_EXPR}")
+    names = {li.get("name") for li in spec.get("listeners") or []}
+    if LISTENERS - names:
+        bad.append(f"ext-authz: Gateway {name} has no listener {sorted(LISTENERS - names)}")
+    for li in sorted(names):
+        for p in pols:
+            t = (p.get("spec") or {}).get("traffic") or {}
+            if targets(p, name, li) and "extAuth" in t:
+                bad.append(f"ext-authz: the policy {p['metadata']['name']} sets an extAuth on the listener {li}")
     # The trusted headers go into the request metadata after ext-authz ran.
     meta = {}
     for p in pols:
@@ -267,6 +278,15 @@ def selftest() -> int:
             or gateway(ds)["spec"]["listeners"][0].pop("tls"),
         "a listener certificate no Certificate writes": lambda ds: gateway(ds)["spec"]["listeners"][1]["tls"][
             "certificateRefs"][0].update(name="hand-made-secret"),
+        "no agent listener": lambda ds: gateway(ds)["spec"].update(
+            listeners=[li for li in gateway(ds)["spec"]["listeners"] if li["name"] != "agent"]),
+        "an agent listener policy that replaces ext-authz": lambda ds: ds.append({
+            "apiVersion": "agentgateway.dev/v1alpha1", "kind": "AgentgatewayPolicy",
+            "metadata": {"name": "open-agent"},
+            "spec": {"targetRefs": [{"group": GW_GROUP, "kind": "Gateway", "name": gateway(ds)["metadata"]["name"],
+                                     "sectionName": "agent"}],
+                     "traffic": {"extAuth": {"backendRef": {"name": "other", "port": 1}, "grpc": {},
+                                             "failureMode": "FailOpen"}}}}),
         "a trace with the default buffer": lambda ds: pol(ds, "-trace")["spec"]["frontend"].pop("http"),
     }
     failed = 0
@@ -296,7 +316,7 @@ def main() -> int:
     if bad:
         print("❌ the agentgateway Gateway lost a platform policy (charts#815):\n  " + "\n  ".join(bad))
         return 1
-    print("✓ agentgateway: ext-authz before routing, TLS and no public listener, a pinned "
+    print("✓ agentgateway: ext-authz before routing on both listeners, TLS and no public listener, a pinned "
           "mirror proxy image, header strip, format map and trace fields on each profile")
     return 0
 
