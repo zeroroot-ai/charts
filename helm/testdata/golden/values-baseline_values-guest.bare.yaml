@@ -16689,6 +16689,20 @@ spec:
         # with no JSON body (GET /v1/models, an A2A GET) sends no entry.
         requestMetadata:
           gibson: '{"model": json(request.body).model}'
+    # The trusted headers, kept as request metadata for the trace. The
+    # gateway runs this transformation after ext-authz set the headers and
+    # before routing. The model listener removes the headers before the
+    # provider call, and the trace reads the request as it went upstream, so
+    # a trace field on request.headers would be empty on that listener
+    # (crates/agentgateway/src/proxy/httpproxy.rs: the request header
+    # modifier runs before take_and_snapshot).
+    transformation:
+      request:
+        metadata:
+          tenant: 'request.headers["x-gibson-tenant"]'
+          subject: 'request.headers["x-gibson-subject"]'
+          mission: 'request.headers["x-gibson-mission"]'
+          task: 'request.headers["x-gibson-task"]'
 ---
 # Source: gibson/templates/agentgateway/policies.yaml
 apiVersion: agentgateway.dev/v1alpha1
@@ -16744,16 +16758,27 @@ spec:
       randomSampling: "true"
       attributes:
         add:
-          # The message content is off by default. The record needs the
-          # whole request and reply, with the tool calls and the tool results.
-          - name: request.body
+          # The daemon reads these six attributes by name (gibson#1366 wave
+          # 2). The message content is off by default, and the record needs
+          # the whole request and reply, with the tool calls and the tool
+          # results.
+          - name: gibson.request_body
             expression: string(request.body)
-          - name: response.body
+          - name: gibson.response_body
             expression: string(response.body)
-          # The cost of the call from the model catalog of the gateway. The
-          # span holds no cost by default.
-          - name: llm.cost
-            expression: llm.cost
+          # The trusted headers, from the metadata that the ext-authz policy
+          # sets after ext-authz ran. A caller copy never reaches the span.
+          - name: gibson.tenant
+            expression: metadata.tenant
+          - name: gibson.subject
+            expression: metadata.subject
+          - name: gibson.mission
+            expression: metadata.mission
+          - name: gibson.task
+            expression: metadata.task
+          # No cost attribute here. The span holds agw.ai.usage.cost.total
+          # and the agw.ai.usage.cost.* parts when the model has a price
+          # (crates/agentgateway/src/telemetry/log.rs, trace_cost_fields).
 ---
 # Source: gibson/templates/agentgateway/policies.yaml
 apiVersion: agentgateway.dev/v1alpha1

@@ -30,8 +30,10 @@ The check renders each shipped profile and fails when:
                 paths /v1/messages, /v1/responses, /v1/embeddings and
                 /v1/models.
   6. trace      no frontend policy on the Gateway sets maxBufferSize and
-                adds the trace fields request.body, response.body and
-                llm.cost.
+                adds the six trace fields that the daemon reads, each with
+                its expression (TRACE_FIELDS), or the ext-authz policy does
+                not copy the four trusted headers into the request metadata
+                that those fields read.
 
   check-agentgateway.py             exit 1 on a finding, 0 when clean
   check-agentgateway.py --selftest  prove each rule fails on a broken fixture
@@ -55,7 +57,13 @@ PROFILES = (
 )
 GW_GROUP = "gateway.networking.k8s.io"
 FORMAT_PATHS = {"/v1/messages", "/v1/responses", "/v1/embeddings", "/v1/models"}
-TRACE_FIELDS = {"request.body", "response.body", "llm.cost"}
+TRUSTED = ("tenant", "subject", "mission", "task")
+# The trace attributes that the daemon reads, by name, with their expression.
+TRACE_FIELDS = {
+    "gibson.request_body": "string(request.body)",
+    "gibson.response_body": "string(response.body)",
+    **{f"gibson.{f}": f"metadata.{f}" for f in TRUSTED},
+}
 MODEL_EXPR = "json(request.body).model"
 # A whole header name. A name that ends in "-" is a prefix match of the Edge,
 # not a header, and is skipped.
@@ -135,6 +143,16 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     if not ok:
         bad.append(f"ext-authz: no PreRouting, Override, FailClosed gRPC extAuth policy on the whole Gateway {name} "
                    f"that calls the ext-authz Service on its grpc port and sends {MODEL_EXPR}")
+    # The trusted headers go into the request metadata after ext-authz ran.
+    meta = {}
+    for p in pols:
+        t = (p.get("spec") or {}).get("traffic") or {}
+        if targets(p, name, None) and t.get("phase") == "PreRouting" and "extAuth" in t:
+            meta = ((t.get("transformation") or {}).get("request") or {}).get("metadata") or {}
+    for f in TRUSTED:
+        if meta.get(f) != f'request.headers["x-gibson-{f}"]':
+            bad.append(f"trace: the ext-authz policy does not copy x-gibson-{f} into the request metadata {f}")
+
     # 2. No public listener, and TLS on each listener.
     cert_secrets = {(c.get("spec") or {}).get("secretName") for c in of_kind(docs, "Certificate")}
     if spec.get("addresses"):
@@ -190,11 +208,13 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     ok = False
     for p in pols:
         fe = (p.get("spec") or {}).get("frontend") or {}
-        added = {a.get("name") for a in ((fe.get("tracing") or {}).get("attributes") or {}).get("add") or []}
-        if targets(p, name, None) and (fe.get("http") or {}).get("maxBufferSize") and TRACE_FIELDS <= added:
+        added = {a.get("name"): a.get("expression")
+                 for a in ((fe.get("tracing") or {}).get("attributes") or {}).get("add") or []}
+        if (targets(p, name, None) and (fe.get("http") or {}).get("maxBufferSize")
+                and all(added.get(k) == v for k, v in TRACE_FIELDS.items())):
             ok = True
     if not ok:
-        bad.append(f"trace: no frontend policy on Gateway {name} sets maxBufferSize and adds {sorted(TRACE_FIELDS)}")
+        bad.append(f"trace: no frontend policy on Gateway {name} sets maxBufferSize and adds {TRACE_FIELDS}")
     return bad
 
 
@@ -235,9 +255,14 @@ def selftest() -> int:
         "a strip policy a route can replace": lambda ds: pol(ds, "-model-strip")["spec"].pop("strategy"),
         "a format map with no /v1/models": lambda ds: pol(ds, "-model-formats")["spec"]["backend"]["ai"][
             "routes"].pop("/v1/models"),
-        "a trace with no cost": lambda ds: pol(ds, "-trace")["spec"]["frontend"]["tracing"]["attributes"].update(
+        "a trace with no tenant": lambda ds: pol(ds, "-trace")["spec"]["frontend"]["tracing"]["attributes"].update(
             add=[a for a in pol(ds, "-trace")["spec"]["frontend"]["tracing"]["attributes"]["add"]
-                 if a["name"] != "llm.cost"]),
+                 if a["name"] != "gibson.tenant"]),
+        "a trace field that reads the caller header": lambda ds: next(
+            a for a in pol(ds, "-trace")["spec"]["frontend"]["tracing"]["attributes"]["add"]
+            if a["name"] == "gibson.task").update(expression='request.headers["x-gibson-task"]'),
+        "no metadata copy of the trusted headers": lambda ds: pol(ds, "-ext-authz")["spec"]["traffic"].pop(
+            "transformation"),
         "a plain HTTP listener": lambda ds: gateway(ds)["spec"]["listeners"][0].update(protocol="HTTP")
             or gateway(ds)["spec"]["listeners"][0].pop("tls"),
         "a listener certificate no Certificate writes": lambda ds: gateway(ds)["spec"]["listeners"][1]["tls"][
