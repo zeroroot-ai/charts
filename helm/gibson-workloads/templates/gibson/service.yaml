@@ -60,6 +60,14 @@ spec:
       port: {{ .Values.gibson.service.authzRegistry.port | default 8086 }}
       targetPort: authz-registry
       protocol: TCP
+    # The A2A listener (gibson#1400). The appProtocol tells agentgateway to
+    # apply its a2a policy: it rewrites the interface URL of an Agent Card
+    # to the gateway and records the A2A method in the trace.
+    - name: a2a
+      port: {{ include "gibson.daemonA2APort" . }}
+      targetPort: a2a
+      protocol: TCP
+      appProtocol: agentgateway.dev/a2a
     # The trace listener (charts#816).
     - name: otlp-grpc
       port: {{ include "gibson.daemonTracePort" . }}

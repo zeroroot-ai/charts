@@ -15,6 +15,9 @@ each flow has an egress rule and an ingress rule:
               on its xDS port and the trace collector on its OTLP port, all
               in the release namespace. It reaches each LLM provider outside
               the cluster, and it resolves each name.
+  a2a         the proxy reaches the A2A listener of the daemon
+              (gibson.daemonA2APort), and no other pod reaches that port. Its
+              TLS layer accepts the proxy SVID and no other peer.
   collector   the trace collector reaches the trace listener of the daemon
               (gibson.daemonTracePort). The TLS layer of that listener
               accepts the collector SVID and no other peer. Only the proxy
@@ -34,6 +37,7 @@ a sandbox to the gateway is the business of setec, not of this chart.
 {{- $ports := include "gibson.gatewayPorts" . | fromYaml }}
 {{- $listeners := list $ports.model $ports.agent }}
 {{- $daemonTrace := include "gibson.daemonTracePort" . }}
+{{- $daemonA2A := include "gibson.daemonA2APort" . }}
 {{- $collector := dict "app.kubernetes.io/component" "trace-collector" "gibson.zeroroot.ai/datastore" "trace" }}
 {{- $proxy := dict "app.kubernetes.io/component" "agentgateway-proxy" $podNs $gwNs }}
 {{- /* The namespace label that setec sets on each sandbox namespace.
@@ -100,6 +104,16 @@ spec:
       toPorts:
         - ports:
             - port: {{ $otlpPort | quote }}
+              protocol: TCP
+    # The A2A listener of the daemon (gibson#1400).
+    - toEndpoints:
+        - matchLabels:
+            {{ $podNs }}: {{ $ns }}
+            app.kubernetes.io/component: daemon
+            {{ $role }}: platform
+      toPorts:
+        - ports:
+            - port: {{ $daemonA2A | quote }}
               protocol: TCP
     # The LLM providers, outside the cluster.
     - toEntities:
@@ -195,4 +209,17 @@ specs:
         toPorts:
           - ports:
               - port: {{ $daemonTrace | quote }}
+                protocol: TCP
+  - description: "The A2A listener of the daemon accepts the agentgateway proxy."
+    endpointSelector:
+      matchLabels:
+        app.kubernetes.io/component: daemon
+        {{ $role }}: platform
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              {{- toYaml $proxy | nindent 14 }}
+        toPorts:
+          - ports:
+              - port: {{ $daemonA2A | quote }}
                 protocol: TCP

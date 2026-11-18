@@ -279,6 +279,11 @@ spec:
             - name: otlp-grpc
               containerPort: {{ include "gibson.daemonTracePort" . }}
               protocol: TCP
+            # The A2A listener (gibson#1400). Only the agentgateway proxy
+            # reaches it (GIBSON_A2A_GATEWAY_SVID, the network policy).
+            - name: a2a
+              containerPort: {{ include "gibson.daemonA2APort" . }}
+              protocol: TCP
           env:
             # the daemon reads FGA store_id + model_id from env
             # vars instead of calling the Kubernetes API to GET the
@@ -617,6 +622,14 @@ spec:
             # adds it to its allowed peers by itself.
             - name: GIBSON_TRACE_COLLECTOR_SVID
               value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/otel-collector") | quote }}
+            # The A2A listener (gibson#1400): A2A JSON-RPC and the Agent Cards of
+            # the Gibson agents, behind the agent listener of the gateway. Its
+            # TLS layer accepts the one identity of the agentgateway proxy, the
+            # same value as EXT_AUTHZ_GATEWAY_SVID of ext-authz.
+            - name: GIBSON_A2A_ADDR
+              value: {{ printf ":%s" (include "gibson.daemonA2APort" .) | quote }}
+            - name: GIBSON_A2A_GATEWAY_SVID
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/agentgateway") | quote }}
             # The listen address of the trace listener. It has its own port
             # and a message limit of 48 MiB: one span holds the whole request
             # and response bodies.

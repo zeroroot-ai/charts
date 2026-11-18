@@ -743,6 +743,14 @@ gibson-agentgateway
 4317
 {{- end -}}
 
+{{- define "gibson.daemonA2APort" -}}
+{{- /* The A2A listener of the daemon (gibson contract round 7, gibson#1400):
+       HTTPS with SPIFFE mTLS that accepts only the agentgateway proxy. The
+       daemon port, its Service port, the HTTPRoute of the agent listener,
+       its backend TLS policy and the network rule read this one number. */ -}}
+8443
+{{- end -}}
+
 {{- define "gibson.traceCollectorName" -}}
 {{- /* The trace collector (charts#816): its StatefulSet, Service and
        ServiceAccount. gibson-workloads renders it, and the umbrella

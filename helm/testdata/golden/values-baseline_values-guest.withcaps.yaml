@@ -6971,6 +6971,14 @@ spec:
       port: 8086
       targetPort: authz-registry
       protocol: TCP
+    # The A2A listener (gibson#1400). The appProtocol tells agentgateway to
+    # apply its a2a policy: it rewrites the interface URL of an Agent Card
+    # to the gateway and records the A2A method in the trace.
+    - name: a2a
+      port: 8443
+      targetPort: a2a
+      protocol: TCP
+      appProtocol: agentgateway.dev/a2a
     # The trace listener (charts#816).
     - name: otlp-grpc
       port: 4317
@@ -14581,6 +14589,11 @@ spec:
             - name: otlp-grpc
               containerPort: 4317
               protocol: TCP
+            # The A2A listener (gibson#1400). Only the agentgateway proxy
+            # reaches it (GIBSON_A2A_GATEWAY_SVID, the network policy).
+            - name: a2a
+              containerPort: 8443
+              protocol: TCP
           env:
             # the daemon reads FGA store_id + model_id from env
             # vars instead of calling the Kubernetes API to GET the
@@ -14821,6 +14834,14 @@ spec:
             # adds it to its allowed peers by itself.
             - name: GIBSON_TRACE_COLLECTOR_SVID
               value: "spiffe://zeroroot.ai/platform/otel-collector"
+            # The A2A listener (gibson#1400): A2A JSON-RPC and the Agent Cards of
+            # the Gibson agents, behind the agent listener of the gateway. Its
+            # TLS layer accepts the one identity of the agentgateway proxy, the
+            # same value as EXT_AUTHZ_GATEWAY_SVID of ext-authz.
+            - name: GIBSON_A2A_ADDR
+              value: ":8443"
+            - name: GIBSON_A2A_GATEWAY_SVID
+              value: "spiffe://zeroroot.ai/platform/agentgateway"
             # The listen address of the trace listener. It has its own port
             # and a message limit of 48 MiB: one span holds the whole request
             # and response bodies.
@@ -18479,6 +18500,16 @@ spec:
         - ports:
             - port: "4317"
               protocol: TCP
+    # The A2A listener of the daemon (gibson#1400).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gibson
+            app.kubernetes.io/component: daemon
+            gibson.zeroroot.ai/net-role: platform
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
     # The LLM providers, outside the cluster.
     - toEntities:
         - world
@@ -18596,6 +18627,20 @@ specs:
         toPorts:
           - ports:
               - port: "4317"
+                protocol: TCP
+  - description: "The A2A listener of the daemon accepts the agentgateway proxy."
+    endpointSelector:
+      matchLabels:
+        app.kubernetes.io/component: daemon
+        gibson.zeroroot.ai/net-role: platform
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              app.kubernetes.io/component: agentgateway-proxy
+              k8s:io.kubernetes.pod.namespace: gibson-gateway
+        toPorts:
+          - ports:
+              - port: "8443"
                 protocol: TCP
 
 ---
