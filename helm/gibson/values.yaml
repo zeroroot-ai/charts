@@ -1932,12 +1932,15 @@ gateway:
   stripRequestHeaders:
     # The route claim. The caller sends the two headers, each route matches
     # on them, and ext-authz refuses a claimed tenant that is not the
-    # tenant of the Capability Grant (gibson aaif-chart-contract.md, round 4).
-    - x-gibson-tenant
-    - x-gibson-provider
+    # tenant of the Capability Grant (gibson internal/server/extauthz/
+    # modelcall/modelcall.go, HeaderRouteTenant and HeaderRouteProvider).
+    - x-gibson-route-tenant
+    - x-gibson-route-provider
     # The Capability Grant of the caller. ext-authz reads it.
     - x-capability-grant
-    # The trusted headers that ext-authz sets.
+    # The trusted headers that ext-authz sets. ext-authz overwrites a caller
+    # copy, so only its own value reaches this point.
+    - x-gibson-tenant
     - x-gibson-subject
     - x-gibson-mission
     - x-gibson-task

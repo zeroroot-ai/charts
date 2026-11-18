@@ -17300,8 +17300,8 @@ spec:
       failureMode: FailClosed
       # The Envoy gRPC Authorization/Check protocol, the same as the Edge.
       # The gRPC check carries the path, the method and every request
-      # header, so ext-authz gets the route claim (x-gibson-tenant,
-      # x-gibson-provider) and x-capability-grant. ext-authz knows a gateway
+      # header, so ext-authz gets the route claim (x-gibson-route-tenant,
+      # x-gibson-route-provider) and x-capability-grant. ext-authz knows a gateway
       # call from the SPIFFE ID of the proxy, and it refuses a claimed
       # tenant that is not the tenant of the Capability Grant, so a caller
       # of tenant A cannot match a route of tenant B.
@@ -17460,9 +17460,10 @@ spec:
     headerModifiers:
       request:
         remove:
-          - x-gibson-tenant
-          - x-gibson-provider
+          - x-gibson-route-tenant
+          - x-gibson-route-provider
           - x-capability-grant
+          - x-gibson-tenant
           - x-gibson-subject
           - x-gibson-mission
           - x-gibson-task
