@@ -586,6 +586,15 @@ spec:
             # Peer SPIFFE IDs for the harness callback listener allowlist.
             # REQUIRED when SPIFFE is configured — the daemon fails to start
             # otherwise (fail-closed per critical-tls-no-fallbacks Req 1.5).
+            # The Model gateway (charts#815). The daemon sends its own model
+            # calls there, and it gives each sandbox the URL and the CA in the
+            # ResolveModel reply. The listener certificate comes from the
+            # component issuer, the issuer of the OpenFGA certificate, so the
+            # CA is the ca.crt that /etc/ssl/fga-ca holds.
+            - name: GIBSON_MODEL_GATEWAY_URL
+              value: {{ include "gibson.modelGatewayURL" . | quote }}
+            - name: GIBSON_MODEL_GATEWAY_CA_FILE
+              value: "/etc/ssl/fga-ca/ca.crt"
             # The trace collector (charts#816). The daemon accepts this SVID on
             # its gRPC port for the OTLP TraceService Export method only, and
             # adds it to its allowed peers by itself.

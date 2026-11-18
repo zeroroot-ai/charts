@@ -27,11 +27,11 @@ a sandbox to the gateway is the business of setec, not of this chart.
 {{- $rel := .Release.Name }}
 {{- $role := "gibson.zeroroot.ai/net-role" }}
 {{- $podNs := "k8s:io.kubernetes.pod.namespace" }}
-{{- $gw := .Values.gateway }}
 {{- $extAuthzPort := ((((index .Values "gibson-workloads") | default dict).extAuthz | default dict).ports | default dict).grpc | default 9001 }}
 {{- $xdsPort := ((((.Values.agentgateway.controller | default dict).service | default dict).ports | default dict).agwGrpc) | default 9978 }}
 {{- $otlpPort := (index .Values "gibson-workloads").traceCollector.ports.otlp }}
-{{- $listeners := list $gw.ports.model $gw.ports.agent }}
+{{- $ports := include "gibson.gatewayPorts" . | fromYaml }}
+{{- $listeners := list $ports.model $ports.agent }}
 {{- $daemonTrace := include "gibson.daemonTracePort" . }}
 {{- $collector := dict "app.kubernetes.io/component" "trace-collector" "gibson.zeroroot.ai/datastore" "trace" }}
 {{- $proxy := dict "app.kubernetes.io/component" "agentgateway-proxy" $podNs $gwNs }}

@@ -58,7 +58,7 @@ spec:
       # in clear text. The certificate comes from the component issuer
       # (gibson-workloads cert-manager/component-certificates.yaml).
       protocol: HTTPS
-      port: {{ index $gw.ports $l }}
+      port: {{ index (include "gibson.gatewayPorts" $ | fromYaml) $l }}
       tls:
         mode: Terminate
         # The Certificate lives in the release namespace, where its issuer

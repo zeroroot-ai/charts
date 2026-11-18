@@ -757,6 +757,20 @@ gibson-trace-collector
 gibson-agentgateway-tls
 {{- end -}}
 
+{{- define "gibson.gatewayPorts" -}}
+{{- /* The two listener ports of the agentgateway Gateway (charts#815), as a
+       YAML map: model (the Model gateway) and agent (the Agent gateway). The
+       umbrella Gateway and network policy and the daemon URL read them. */ -}}
+model: 8080
+agent: 8081
+{{- end -}}
+
+{{- define "gibson.modelGatewayURL" -}}
+{{- /* The URL of the Model gateway listener, HTTPS, with the in-cluster name
+       that the listener certificate holds (gibson-agentgateway-tls). */ -}}
+{{- printf "https://%s.%s.svc:%v" (include "gibson.agentgatewayName" .) (include "gibson.gatewayNamespace" .) (get (include "gibson.gatewayPorts" . | fromYaml) "model") -}}
+{{- end -}}
+
 {{- define "gibson.agentgatewayControllerName" -}}
 {{- /* The name of the agentgateway controller, its Service and its
        ServiceAccount. The umbrella sets agentgateway.fullnameOverride to

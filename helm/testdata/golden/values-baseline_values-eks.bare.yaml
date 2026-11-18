@@ -12699,7 +12699,7 @@ spec:
         # PodVolumeRestores in a preserve backup were volumes like these.
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
-        backup.velero.io/backup-volumes-excludes: "spire-agent-socket,shared-identity,next-cache,tmp"
+        backup.velero.io/backup-volumes-excludes: "node-ca,spire-agent-socket,shared-identity,next-cache,tmp"
         checksum/config: e563bc5ecf6d646d021bd5dc33d7a7dd726b0e8eda1299977e4b43923b0c2089
         checksum/secret: a63fb887766463a15afacd6caaa488d50993cff1c5300f5559dad586b60df704
         # Pod-roll-on-Secret-change is delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). The prior pattern
@@ -12786,6 +12786,36 @@ spec:
             - name: spire-agent-socket
               mountPath: /run/spire/agent
               readOnly: true
+        # The CA bundle of NODE_EXTRA_CA_CERTS: the component CA (the Model
+        # gateway, charts#815) and, when the Edge CA is private, the Edge CA.
+        - name: ca-bundle
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              cat /etc/ssl/component-ca/ca.crt > /etc/ssl/node-ca/bundle.crt
+          volumeMounts:
+            - name: component-ca
+              mountPath: /etc/ssl/component-ca
+              readOnly: true
+            - name: node-ca
+              mountPath: /etc/ssl/node-ca
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
         - name: wait-for-gibson
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           securityContext:
@@ -13146,6 +13176,19 @@ spec:
                 secretKeyRef:
                   name: gibson-dashboard-oidc
                   key: client_secret
+            # NODE_EXTRA_CA_CERTS appends one PEM file to the trust store of
+            # Node, and Node rejects an unknown CA by default. The init
+            # container ca-bundle writes the file from two CAs:
+            #   - the Edge CA, when it is NOT in the system trust bundle
+            #     (kind selfsigned-ca, vault-issuer). Auth.js's server-side
+            #     calls to Zitadel go through Envoy at https://app.<domain>.
+            #     Letsencrypt / awspca issuers chain to roots already in the
+            #     system bundle, and then this CA is not added (deploy#126).
+            #   - the component CA, always: the Model gateway listener
+            #     (charts#815) has a certificate of the component issuer,
+            #     which is a private CA in every profile.
+            - name: NODE_EXTRA_CA_CERTS
+              value: /etc/ssl/node-ca/bundle.crt
 
             # Gibson Platform Public URL (spec: naming-and-config-standardization).
             # Required by the dashboard to render user-facing links to the platform
@@ -13278,6 +13321,10 @@ spec:
           # resolve-sa-identity-map init container always runs and the
           # dashboard reads /shared/sa-identity-map.json for log enrichment.
           volumeMounts:
+            # The CA bundle of NODE_EXTRA_CA_CERTS (init container ca-bundle).
+            - name: node-ca
+              mountPath: /etc/ssl/node-ca
+              readOnly: true
             # SPIRE agent socket — matches SPIFFE_ENDPOINT_SOCKET above.
             # Without this the wait-for-spire-socket init container gated the
             # Pod on a socket the dashboard container could not then reach
@@ -13298,6 +13345,19 @@ spec:
       volumes:
         - name: next-cache
           emptyDir: {}
+        - name: node-ca
+          emptyDir:
+            sizeLimit: 1Mi
+        # The CA of the component issuer, from the Model gateway listener
+        # certificate (charts#815). Only ca.crt: the dashboard never holds
+        # the key of the listener.
+        - name: component-ca
+          secret:
+            secretName: gibson-agentgateway-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 0444
         - name: tmp
           emptyDir: {}
         - name: spire-agent-socket
@@ -18187,6 +18247,15 @@ spec:
             # Peer SPIFFE IDs for the harness callback listener allowlist.
             # REQUIRED when SPIFFE is configured — the daemon fails to start
             # otherwise (fail-closed per critical-tls-no-fallbacks Req 1.5).
+            # The Model gateway (charts#815). The daemon sends its own model
+            # calls there, and it gives each sandbox the URL and the CA in the
+            # ResolveModel reply. The listener certificate comes from the
+            # component issuer, the issuer of the OpenFGA certificate, so the
+            # CA is the ca.crt that /etc/ssl/fga-ca holds.
+            - name: GIBSON_MODEL_GATEWAY_URL
+              value: "https://gibson-agentgateway.gibson-gateway.svc:8080"
+            - name: GIBSON_MODEL_GATEWAY_CA_FILE
+              value: "/etc/ssl/fga-ca/ca.crt"
             # The trace collector (charts#816). The daemon accepts this SVID on
             # its gRPC port for the OTLP TraceService Export method only, and
             # adds it to its allowed peers by itself.
