@@ -64,6 +64,8 @@ PODDED = ("Deployment", "StatefulSet", "DaemonSet", "Job")
 # timeoutSeconds value, at the version helm/gibson/Chart.yaml pins. Checked in
 # both directions: a chart listed here with no gap left is a failure.
 EXEMPT = {
+    "agentgateway": "agentgateway v1.7.0 hard-codes the readinessProbe and the startupProbe of "
+                    "the controller and reads no probe value (charts#815)",
     "cnpg": "cloudnative-pg 0.29.0 templates the probes inline and reads only "
             "webhook.{liveness,readiness}Probe.initialDelaySeconds and "
             "webhook.startupProbe.{failureThreshold,periodSeconds}",

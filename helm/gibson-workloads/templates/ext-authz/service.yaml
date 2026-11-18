@@ -20,7 +20,7 @@ unconditionally; the extAuthz.enabled toggle was deleted.
 apiVersion: v1
 kind: Service
 metadata:
-  name: gibson-ext-authz
+  name: {{ include "gibson.extAuthzServiceName" . }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "gibson.labels" . | nindent 4 }}

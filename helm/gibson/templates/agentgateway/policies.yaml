@@ -1,0 +1,146 @@
+{{/*
+The policies that the platform attaches to the one agentgateway Gateway
+(charts#815). Each field below names its CRD path in agentgateway v1.7.0
+(agentgateway.dev_agentgatewaypolicies.yaml). scripts/check-agentgateway.py
+proves each policy on each render.
+
+  ext-authz     spec.traffic.extAuth, phase PreRouting, on the Gateway. It
+                runs before the route is chosen, for each request on each
+                listener, so no route can skip it. A route policy cannot set
+                a PreRouting field (only a Gateway or a ListenerSet can), and
+                inheritance Override keeps a listener policy from replacing it.
+  ext-authz TLS spec.backend.tls on the ext-authz Service. The proxy presents
+                its SPIFFE SVID, and it accepts only the SVID of ext-authz.
+  trace         spec.frontend.tracing and spec.frontend.http.maxBufferSize, on
+                the Gateway.
+  strip         spec.traffic.headerModifiers.request.remove, on the listener
+                `model`, with inheritance Override, so a tenant route cannot
+                replace it. The provider request holds no x-gibson-* header.
+  formats       spec.backend.ai.routes, on the listener `model`. A path with
+                no entry reads its body as Chat Completions.
+*/}}
+{{- $name := include "gibson.agentgatewayName" . }}
+{{- $gw := .Values.gateway }}
+{{- $extAuthzPort := ((((index .Values "gibson-workloads") | default dict).extAuthz | default dict).ports | default dict).grpc | default 9001 }}
+{{- $gatewayRef := dict "group" "gateway.networking.k8s.io" "kind" "Gateway" "name" $name }}
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $name }}-ext-authz
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - {{ toYaml $gatewayRef | nindent 6 | trim }}
+  strategy:
+    inheritance: Override
+  traffic:
+    phase: PreRouting
+    extAuth:
+      backendRef:
+        name: {{ include "gibson.extAuthzServiceName" . }}
+        port: {{ $extAuthzPort }}
+      # The gateway refuses each request when ext-authz is down or errs.
+      failureMode: FailClosed
+      # The Envoy gRPC Authorization/Check protocol, the same as the Edge.
+      grpc:
+        # metadata_context.filter_metadata["gibson"].model holds the exact
+        # model name of the call. A filter_metadata value must be a map, so
+        # the expression `json(request.body).model` sits in a map. A request
+        # with no JSON body (GET /v1/models, an A2A GET) sends no entry.
+        requestMetadata:
+          gibson: '{"model": json(request.body).model}'
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $name }}-ext-authz-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: {{ include "gibson.extAuthzServiceName" . }}
+  backend:
+    tls:
+      certificateSource: SPIFFE
+      sni: {{ include "gibson.extAuthzServiceName" . }}
+      verifySubjectAltNames:
+        - {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/ext-authz") | quote }}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $name }}-trace
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - {{ toYaml $gatewayRef | nindent 6 | trim }}
+  frontend:
+    http:
+      # gibson#1386 measures the real bodies and sets this number.
+      maxBufferSize: {{ $gw.maxBufferSize | quote }}
+    tracing:
+      url: {{ $gw.trace.endpoint | quote }}
+      protocol: GRPC
+      # Each request gets a span: the trace is the record of model calls.
+      randomSampling: "true"
+      attributes:
+        add:
+          # The message content is off by default. The record needs the
+          # whole request and reply, with the tool calls and the tool results.
+          - name: request.body
+            expression: string(request.body)
+          - name: response.body
+            expression: string(response.body)
+          # The cost of the call from the model catalog of the gateway. The
+          # span holds no cost by default.
+          - name: llm.cost
+            expression: llm.cost
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $name }}-model-strip
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - {{ toYaml (merge (dict "sectionName" "model") $gatewayRef) | nindent 6 | trim }}
+  strategy:
+    inheritance: Override
+  traffic:
+    headerModifiers:
+      request:
+        remove:
+          {{- toYaml $gw.stripRequestHeaders | nindent 10 }}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $name }}-model-formats
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - {{ toYaml (merge (dict "sectionName" "model") $gatewayRef) | nindent 6 | trim }}
+  backend:
+    ai:
+      routes:
+        /v1/messages: Messages
+        /v1/responses: Responses
+        /v1/embeddings: Embeddings
+        # The model list passes through unchanged (decision 6 of gibson#1366).
+        /v1/models: Passthrough

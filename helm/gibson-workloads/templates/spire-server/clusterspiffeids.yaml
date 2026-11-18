@@ -143,6 +143,30 @@ spec:
     - "k8s:ns:{{ $ns }}"
     - "k8s:sa:{{ include "gibson.extAuthzServiceAccountName" . }}"
 ---
+# --- agentgateway proxy (charts#815) ---
+# The agentgateway controller starts the proxy pods of the one Gateway, and
+# it names their ServiceAccount after the Gateway. The proxy presents this
+# SVID to ext-authz on each authorization call.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-agentgateway
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/agentgateway"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: agentgateway-proxy
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ include "gibson.agentgatewayName" . }}"
+---
 # --- ratelimit (deploy#1657) ---
 # The pod's Envoy mTLS sidecar presents this SVID to the edge Envoy, whose
 # ratelimit_grpc cluster pins the SAN to exactly platform/ratelimit.

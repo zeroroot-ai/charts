@@ -1,0 +1,105 @@
+{{/*
+The one agentgateway Gateway (gibson#1366, charts#815).
+
+The Gateway carries two route sets. The Model gateway is the routes from
+Gibson to each LLM provider, on the listener `model`. The Agent gateway is
+the MCP and A2A routes between components in the cluster, on the listener
+`agent`. The chart renders no route. The tenant-operator renders the routes
+and the backends of each tenant (gibson#1387).
+
+The Gateway is cluster-internal. The AgentgatewayParameters set the proxy
+Service to ClusterIP, the Gateway names no address, and the Edge has no
+route to it. scripts/check-agentgateway.py fails the render on a public
+listener.
+
+The controller of the agentgateway subchart reads the Gateway and starts the
+proxy Deployment, Service and ServiceAccount, each named after the Gateway
+(gibson.agentgatewayName). The proxy pods get the labels of
+spec.infrastructure.labels.
+*/}}
+{{- $name := include "gibson.agentgatewayName" . }}
+{{- $ctrl := include "gibson.agentgatewayControllerName" . }}
+{{- if ne .Values.agentgateway.fullnameOverride $ctrl }}
+{{- fail (printf "agentgateway.fullnameOverride must be %q, the name gibson.agentgatewayControllerName gives the admission policy and the network policy" $ctrl) }}
+{{- end }}
+{{- $gw := .Values.gateway }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    # The labels of the proxy pods. The component label selects them in the
+    # network policy and in the ClusterSPIFFEID. The proxy calls each LLM
+    # provider, so it has the egress-internet label.
+    labels:
+      app.kubernetes.io/component: agentgateway-proxy
+      gibson.zeroroot.ai/egress-internet: "true"
+    annotations:
+      # Velero fs-backup skips these: a socket, a token and a ConfigMap.
+      backup.velero.io/backup-volumes-excludes: "spiffe-workload-api,xds-token,config-volume"
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: {{ $name }}
+  listeners:
+    {{- range $l := list "model" "agent" }}
+    - name: {{ $l }}
+      protocol: HTTP
+      port: {{ index $gw.ports $l }}
+      allowedRoutes:
+        kinds:
+          - kind: HTTPRoute
+        # The routes of a tenant live in the namespace of that tenant. Only
+        # the tenant-operator sets this label on a namespace
+        # (namespace-label-admission.yaml).
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              gibson.zeroroot.ai/managed-by: tenant-operator
+    {{- end }}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  image:
+    {{- toYaml $gw.proxy.image | nindent 4 }}
+  resources:
+    {{- toYaml $gw.proxy.resources | nindent 4 }}
+  logging:
+    format: json
+  # The proxy gets its X.509-SVID from the SPIRE agent through the CSI
+  # driver, the same socket as the other platform pods. It presents the
+  # SVID to ext-authz (policies.yaml, the backend TLS policy).
+  spiffe:
+    source:
+      csi:
+        driver: csi.spiffe.io
+      mountPath: /run/spire/sockets
+      socketName: api.sock
+  # No public listener: the Service of the proxy is ClusterIP. The upstream
+  # default is LoadBalancer.
+  service:
+    spec:
+      type: ClusterIP
+  deployment:
+    spec:
+      replicas: {{ $gw.proxy.replicas }}
+      template:
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault

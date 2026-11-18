@@ -93,6 +93,16 @@ dependencies:
     alias: spire
     version: "0.28.4"
     repository: "https://spiffe.github.io/helm-charts-hardened"
+  # The agentgateway controller (gibson#1366, charts#815). It reconciles the one
+  # Gateway of templates/agentgateway/, which carries the Model gateway and
+  # the Agent gateway, and it starts the proxy pods of that Gateway. It has
+  # no condition: no service is optional. Its CRDs and the Gateway API CRDs
+  # install with gibson-crds, because this release renders CRs of them.
+  # scripts/vendor-gateway-crds.py reads this version and vendors the CRDs
+  # of the same release, so the two cannot drift apart.
+  - name: agentgateway
+    version: "v1.7.0"
+    repository: "oci://cr.agentgateway.dev/charts"
   # The cluster operators the platform depends on (deploy#1728).
   # The umbrella owns them on every substrate: kind, EKS and a customer
   # cluster all get the same four controllers from this chart, and stage 1

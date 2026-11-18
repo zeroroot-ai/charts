@@ -80,6 +80,12 @@ def pods(docs: list) -> list[dict]:
             t = d
         elif d.get("kind") in WORKLOADS:
             t = (d.get("spec") or {}).get("template") or {}
+        elif (d.get("kind") == "Gateway" and group(d) == "gateway.networking.k8s.io"
+              and (d.get("spec") or {}).get("gatewayClassName") == "agentgateway"):
+            # The agentgateway controller creates the proxy pods of a Gateway
+            # at run time. They carry the labels of spec.infrastructure.labels
+            # (charts#815).
+            t = {"metadata": {"labels": ((d.get("spec") or {}).get("infrastructure") or {}).get("labels") or {}}}
         elif d.get("kind") == "Cluster" and group(d) == "postgresql.cnpg.io":
             # The CNPG operator creates the Postgres pods at run time. They
             # carry the labels of inheritedMetadata.

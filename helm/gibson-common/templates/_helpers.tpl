@@ -690,6 +690,12 @@ The daemon's own SA is `gibson.serviceAccountName` above — release-derived
 {{- (((.Values.envoy | default dict).serviceAccount) | default dict).name | default "gibson-envoy" -}}
 {{- end }}
 
+{{- define "gibson.extAuthzServiceName" -}}
+{{- /* The Service of ext-authz. gibson-workloads renders it, and the
+       agentgateway ext-authz policy of the umbrella calls it (charts#815). */ -}}
+gibson-ext-authz
+{{- end -}}
+
 {{- define "gibson.extAuthzServiceAccountName" -}}
 {{- (((.Values.extAuthz | default dict).serviceAccount) | default dict).name | default "gibson-ext-authz" -}}
 {{- end }}
@@ -701,6 +707,23 @@ The daemon's own SA is `gibson.serviceAccountName` above — release-derived
 {{- define "gibson.dashboardServiceAccountName" -}}
 {{- (((.Values.dashboard | default dict).serviceAccount) | default dict).name | default "gibson-dashboard" -}}
 {{- end }}
+
+{{- define "gibson.agentgatewayName" -}}
+{{- /* The name of the one agentgateway Gateway (charts#815). The controller
+       names the proxy Deployment, Service and ServiceAccount after the
+       Gateway, so this is also the ServiceAccount of the proxy pods. The
+       umbrella renders the Gateway, and gibson-workloads renders its
+       ClusterSPIFFEID and its admission rule. */ -}}
+gibson-agentgateway
+{{- end -}}
+
+{{- define "gibson.agentgatewayControllerName" -}}
+{{- /* The name of the agentgateway controller, its Service and its
+       ServiceAccount. The umbrella sets agentgateway.fullnameOverride to
+       this name, and templates/agentgateway/gateway.yaml fails the render
+       when the two differ. The proxy pods dial its xDS port. */ -}}
+agentgateway
+{{- end -}}
 
 {{- define "gibson.connectorOperatorServiceAccountName" -}}
 {{- /* The gibson-operators sub-chart hardcodes this literal in the
