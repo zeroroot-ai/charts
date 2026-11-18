@@ -100,10 +100,13 @@ MODEL_EXPR = "json(request.body).model"
 # not a header, and is skipped.
 HEADER = re.compile(r"\bx-gibson-[a-z0-9-]+")
 # The headers that the provider must never get: the route claim that each
-# route matches on, the Capability Grant, and the four trusted headers that
-# ext-authz sets (gibson internal/server/extauthz/modelcall/modelcall.go).
+# route matches on, the Capability Grant, the four trusted headers that
+# ext-authz sets (gibson internal/server/extauthz/modelcall/modelcall.go),
+# and the two Edge quota headers that the gateway forward class sets
+# (gibson contract round 7, gibson#1388).
 MUST_STRIP = {"x-gibson-route-tenant", "x-gibson-route-provider", "x-capability-grant",
-              "x-gibson-tenant", "x-gibson-subject", "x-gibson-mission", "x-gibson-task"}
+              "x-gibson-tenant", "x-gibson-subject", "x-gibson-mission", "x-gibson-task",
+              "x-gibson-identity-tenant", "x-gibson-identity-subject"}
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -497,6 +500,9 @@ def selftest() -> int:
         "a strip list that keeps the route provider": lambda ds: pol(ds, "-model-strip")["spec"]["traffic"][
             "headerModifiers"]["request"].update(remove=[h for h in pol(ds, "-model-strip")["spec"]["traffic"][
                 "headerModifiers"]["request"]["remove"] if h != "x-gibson-route-provider"]),
+        "a strip list that keeps an Edge quota header": lambda ds: pol(ds, "-model-strip")["spec"]["traffic"][
+            "headerModifiers"]["request"].update(remove=[h for h in pol(ds, "-model-strip")["spec"]["traffic"][
+                "headerModifiers"]["request"]["remove"] if h != "x-gibson-identity-subject"]),
         "a strip policy a route can replace": lambda ds: pol(ds, "-model-strip")["spec"].pop("strategy"),
         "a format map with no /v1/models": lambda ds: pol(ds, "-model-formats")["spec"]["backend"]["ai"][
             "routes"].pop("/v1/models"),
