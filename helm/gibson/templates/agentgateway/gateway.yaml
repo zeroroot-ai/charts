@@ -118,8 +118,9 @@ spec:
               type: RuntimeDefault
 ---
 {{- /* The cross-namespace references of the gateway namespace into the
-       release namespace: the listener certificate Secret, and the
-       ext-authz and trace collector Services that the policies call. */}}
+       release namespace: the listener certificate Secret, the ext-authz and
+       trace collector Services that the policies call, and the daemon
+       Service of the agent route. */}}
 apiVersion: gateway.networking.k8s.io/v1
 kind: ReferenceGrant
 metadata:
@@ -136,6 +137,9 @@ spec:
     - group: agentgateway.dev
       kind: AgentgatewayPolicy
       namespace: {{ include "gibson.gatewayNamespace" . }}
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: {{ include "gibson.gatewayNamespace" . }}
   to:
     - group: ""
       kind: Secret
@@ -146,3 +150,8 @@ spec:
     - group: ""
       kind: Service
       name: {{ include "gibson.traceCollectorName" . }}
+    # The A2A listener of the daemon, the backend of the agent route
+    # (a2a-route.yaml).
+    - group: ""
+      kind: Service
+      name: {{ include "gibson.daemonAddress" . | splitList "." | first }}

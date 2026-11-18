@@ -21658,6 +21658,61 @@ spec:
             seccompProfile:
               type: RuntimeDefault
 ---
+# Source: gibson/templates/agentgateway/a2a-route.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: gibson-agentgateway-agent-strip
+  namespace: gibson-gateway
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gibson-agentgateway
+      sectionName: agent
+  strategy:
+    inheritance: Override
+  traffic:
+    headerModifiers:
+      request:
+        remove:
+          - x-capability-grant
+          - x-gibson-identity-tenant
+          - x-gibson-identity-subject
+---
+# Source: gibson/templates/agentgateway/a2a-route.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: gibson-agentgateway-daemon-a2a-tls
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: gibson-gibson-workloads
+      sectionName: "8443"
+  backend:
+    tls:
+      certificateSource: SPIFFE
+      verifySubjectAltNames:
+        - "spiffe://zeroroot.ai/platform/daemon"
+
+---
 # Source: gibson/templates/agentgateway/policies.yaml
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
@@ -24896,6 +24951,37 @@ spec:
         namespaces:
           from: Same
 ---
+# Source: gibson/templates/agentgateway/a2a-route.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gibson-agentgateway-agents
+  namespace: gibson-gateway
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gibson-agentgateway
+      sectionName: agent
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: gibson-gibson-workloads
+          namespace: gibson
+          port: 8443
+---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/webhook.yaml
 apiVersion: cert-manager.io/v1
 kind: Issuer
@@ -25123,6 +25209,9 @@ spec:
     - group: agentgateway.dev
       kind: AgentgatewayPolicy
       namespace: gibson-gateway
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: gibson-gateway
   to:
     - group: ""
       kind: Secret
@@ -25133,6 +25222,11 @@ spec:
     - group: ""
       kind: Service
       name: gibson-trace-collector
+    # The A2A listener of the daemon, the backend of the agent route
+    # (a2a-route.yaml).
+    - group: ""
+      kind: Service
+      name: gibson-gibson-workloads
 
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/clusterspiffeid-scope-admission.yaml

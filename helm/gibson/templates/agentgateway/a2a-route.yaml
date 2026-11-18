@@ -1,0 +1,94 @@
+{{/*
+The Agent gateway route of the Gibson agents (gibson contract round 7,
+gibson#1400, gibson#1401).
+
+One HTTPRoute on the agent listener sends each A2A call and each Agent Card
+request to the A2A listener of the daemon, for all Gibson agents. It is
+platform-owned and static: no tenant and no ModelProvider changes it, and the
+tenant-operator renders nothing for it. The Edge route /gateway/agent/
+removes its prefix, so the gateway sees / and
+/agents/<name>/.well-known/agent-card.json.
+
+  route    path prefix /, no header match, one backend: the daemon Service,
+           port a2a (gibson.daemonA2APort). The appProtocol of that port
+           turns on the a2a policy of agentgateway.
+  TLS      spec.backend.tls on the daemon Service port: the proxy presents
+           its SPIFFE SVID, and it accepts only the SVID of the daemon.
+  headers  the agent listener removes x-capability-grant and the two Edge
+           quota headers, and keeps the trusted headers and the route claim,
+           which the daemon reads (gateway.agentStripRequestHeaders).
+
+The ext-authz policy of policies.yaml covers this listener: it runs in the
+PreRouting phase on the whole Gateway.
+*/}}
+{{- $name := include "gibson.agentgatewayName" . }}
+{{- $gwNs := include "gibson.gatewayNamespace" . }}
+{{- $daemonSvc := include "gibson.daemonAddress" . | splitList "." | first }}
+{{- $a2aPort := include "gibson.daemonA2APort" . }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $name }}-agents
+  namespace: {{ $gwNs }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ $name }}
+      sectionName: agent
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ $daemonSvc }}
+          namespace: {{ .Release.Namespace }}
+          port: {{ $a2aPort }}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $name }}-agent-strip
+  namespace: {{ $gwNs }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ $name }}
+      sectionName: agent
+  strategy:
+    inheritance: Override
+  traffic:
+    headerModifiers:
+      request:
+        remove:
+          {{- toYaml .Values.gateway.agentStripRequestHeaders | nindent 10 }}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $name }}-daemon-a2a-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: {{ $daemonSvc }}
+      sectionName: {{ $a2aPort | quote }}
+  backend:
+    tls:
+      certificateSource: SPIFFE
+      verifySubjectAltNames:
+        - {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/daemon") | quote }}

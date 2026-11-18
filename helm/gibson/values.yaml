@@ -1929,6 +1929,15 @@ gateway:
   # names only (no prefix) and 16 at most. scripts/check-agentgateway.py
   # fails when a chart file names an x-gibson-* header that is not on this
   # list, and when x-capability-grant or a route header is missing.
+  # The request headers that the Agent gateway removes before the call to the
+  # daemon A2A listener. It is the opposite of the model listener: the
+  # daemon reads the trusted headers and the route claim, and never the
+  # grant or the Edge quota headers (gibson contract round 7).
+  # scripts/check-agentgateway.py fails when a kept header is on this list.
+  agentStripRequestHeaders:
+    - x-capability-grant
+    - x-gibson-identity-tenant
+    - x-gibson-identity-subject
   stripRequestHeaders:
     # The route claim. The caller sends the two headers, each route matches
     # on them, and ext-authz refuses a claimed tenant that is not the

@@ -51,6 +51,14 @@ The check renders each shipped profile and fails when:
                 route claim, a JWT rule that lets the Capability Grant
                 through, and a cluster that verifies the component CA and
                 the proxy name on the listener port of the Gateway.
+  9. a2a        the agent listener has no HTTPRoute with path prefix / and
+                no header match to the daemon Service on its A2A port, that
+                port has no appProtocol agentgateway.dev/a2a, the daemon
+                Service has no backend TLS policy (SPIFFE, the daemon SVID)
+                on that port, the HTTPRoute has no ReferenceGrant, or the
+                agent listener removes a header that the daemon reads (the
+                trusted headers and the route claim) or keeps one it must
+                not get (the grant and the Edge quota headers).
   6. trace      no frontend policy on the Gateway sets maxBufferSize and
                 adds the six trace fields that the daemon reads, each with
                 its expression (TRACE_FIELDS), or the ext-authz policy does
@@ -147,6 +155,12 @@ def header_names(docs: list[dict]) -> set[str]:
     return names
 
 
+# The agent listener: the daemon reads these, so they pass, and it must not
+# get these, so they go (gibson contract round 7).
+A2A_KEEP = {"x-gibson-tenant", "x-gibson-subject", "x-gibson-mission", "x-gibson-task",
+            "x-gibson-route-tenant", "x-gibson-route-agent", "x-gibson-route-bank"}
+A2A_STRIP = {"x-capability-grant", "x-gibson-identity-tenant", "x-gibson-identity-subject"}
+A2A_PROTOCOL = "agentgateway.dev/a2a"
 EDGE_PREFIXES = {"model": "/gateway/model/", "agent": "/gateway/agent/"}
 TRUSTED_HEADERS = {"x-gibson-tenant", "x-gibson-subject", "x-gibson-mission", "x-gibson-task"}
 PASS_HEADERS = {"x-capability-grant", "x-gibson-route-tenant", "x-gibson-route-provider"}
@@ -215,6 +229,62 @@ def judge_edge(edge: dict, gw: dict) -> list[str]:
         if not addrs or any(a["socket_address"].get("address") != host
                             or a["socket_address"].get("port_value") != ports.get(listener) for a in addrs):
             bad.append(f"edge: cluster agentgateway_{listener} does not dial {host}:{ports.get(listener)}")
+    return bad
+
+
+def judge_a2a(docs: list[dict], gw: dict, pols: list[dict]) -> list[str]:
+    bad: list[str] = []
+    name, gw_ns = gw["metadata"]["name"], ns(gw)
+    routes = [r for r in of_kind(docs, "HTTPRoute") if ns(r) == gw_ns and any(
+        p.get("name") == name and p.get("sectionName") == "agent" for p in (r.get("spec") or {}).get("parentRefs") or [])]
+    target = None
+    for r in routes:
+        for rule in (r.get("spec") or {}).get("rules") or []:
+            for m in rule.get("matches") or []:
+                if (m.get("path") or {}).get("type") == "PathPrefix" and (m.get("path") or {}).get("value") == "/" \
+                        and not m.get("headers"):
+                    refs = rule.get("backendRefs") or []
+                    if len(refs) == 1:
+                        target = (r, refs[0])
+    if not target:
+        return ["a2a: the agent listener has no route with path prefix / and no header match to one backend"]
+    route, ref = target
+    svc = next((s for s in of_kind(docs, "Service") if s["metadata"]["name"] == ref.get("name")
+                and ns(s) == ref.get("namespace", gw_ns)), None)
+    port = next((p for p in ((svc or {}).get("spec") or {}).get("ports") or [] if p.get("port") == ref.get("port")), None)
+    if not svc or not port or (svc["metadata"].get("labels") or {}).get("app.kubernetes.io/component") != "daemon":
+        return [f"a2a: the agent route goes to {ref.get('namespace')}/{ref.get('name')}:{ref.get('port')}, "
+                "not to a port of the daemon Service"]
+    if port.get("appProtocol") != A2A_PROTOCOL:
+        bad.append(f"a2a: the daemon port {port.get('name')} has no appProtocol {A2A_PROTOCOL}")
+    if ns(svc) != gw_ns and not granted(docs, GW_GROUP, "HTTPRoute", gw_ns, "Service", svc["metadata"]["name"], ns(svc)):
+        bad.append(f"a2a: the agent route names Service {ns(svc)}/{svc['metadata']['name']} with no ReferenceGrant")
+    tls_ok = False
+    for p in pols:
+        if ns(p) != ns(svc):
+            continue
+        for t in (p.get("spec") or {}).get("targetRefs") or []:
+            if t.get("kind") == "Service" and t.get("name") == svc["metadata"]["name"] \
+                    and t.get("sectionName") in (None, str(port.get("port"))):
+                tls = ((p.get("spec") or {}).get("backend") or {}).get("tls") or {}
+                if tls.get("certificateSource") == "SPIFFE" and any(
+                        str(v).endswith("/platform/daemon") for v in tls.get("verifySubjectAltNames") or []):
+                    tls_ok = True
+    if not tls_ok:
+        bad.append("a2a: no backend TLS policy (SPIFFE, the daemon SVID) on the A2A port of the daemon Service")
+    removed = set()
+    strip_ok = False
+    for p in pols:
+        if targets(p, name, "agent") or targets(p, name, None):
+            r = ((((p.get("spec") or {}).get("traffic") or {}).get("headerModifiers") or {}).get("request") or {})
+            got = {h.lower() for h in r.get("remove") or []}
+            removed |= got
+            if targets(p, name, "agent") and got and ((p["spec"].get("strategy") or {}).get("inheritance")) == "Override":
+                strip_ok = True
+    if A2A_KEEP & removed:
+        bad.append(f"a2a: the agent listener removes {sorted(A2A_KEEP & removed)}, which the daemon reads")
+    if not strip_ok or A2A_STRIP - removed:
+        bad.append(f"a2a: the agent listener keeps {sorted(A2A_STRIP - removed)} or has no Override removal policy")
     return bad
 
 
@@ -357,6 +427,9 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     if FORMAT_PATHS - set(routes):
         bad.append(f"formats: the model listener has no format for {sorted(FORMAT_PATHS - set(routes))}")
 
+    # 9. The Agent gateway route to the daemon.
+    bad += judge_a2a(docs, gw, pols)
+
     # 8. The Edge routes of a sandbox.
     bad += judge_edge(edge_config(docs), gw)
 
@@ -456,6 +529,18 @@ def selftest() -> int:
             request_headers_to_remove=[h for h in r["request_headers_to_remove"] if h != "x-gibson-task"])),
         "an Edge gateway route that caps a stream": lambda ds: edge_mutate(ds, lambda r: r["route"].update(
             idle_timeout="300s")),
+        "an agent listener that removes a trusted header": lambda ds: pol(ds, "-agent-strip")["spec"]["traffic"][
+            "headerModifiers"]["request"]["remove"].append("x-gibson-tenant"),
+        "an agent listener that passes the grant": lambda ds: pol(ds, "-agent-strip")["spec"]["traffic"][
+            "headerModifiers"]["request"].update(remove=["x-gibson-identity-tenant", "x-gibson-identity-subject"]),
+        "an agent route with no TLS to the daemon": lambda ds: ds.remove(pol(ds, "-daemon-a2a-tls")),
+        "an agent route with a header match": lambda ds: next(d for d in ds if d.get("kind") == "HTTPRoute"
+                                                              and d["metadata"]["name"].endswith("-agents"))[
+            "spec"]["rules"][0]["matches"][0].update(headers=[{"name": "x-gibson-route-agent", "value": "a"}]),
+        "a daemon A2A port with no a2a appProtocol": lambda ds: [p.pop("appProtocol") for d in ds
+                                                                 if d.get("kind") == "Service"
+                                                                 for p in d["spec"].get("ports") or []
+                                                                 if p.get("name") == "a2a"],
         "no agent listener": lambda ds: gateway(ds)["spec"].update(
             listeners=[li for li in gateway(ds)["spec"]["listeners"] if li["name"] != "agent"]),
         "an agent listener policy that replaces ext-authz": lambda ds: ds.append({
