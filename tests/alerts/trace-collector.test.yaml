@@ -1,0 +1,57 @@
+# promtool unit test of the trace collector alerts (charts#816).
+# scripts/check-alert-rules-test.sh renders the rules to trace-collector.rules.yaml.
+rule_files:
+  - trace-collector.rules.yaml
+evaluation_interval: 1m
+tests:
+  # Failed exports for longer than 10 minutes page. A queue at one tenth of
+  # its capacity does not.
+  - interval: 1m
+    input_series:
+      - series: 'otelcol_exporter_send_failed_spans_total{exporter="otlp/daemon"}'
+        values: '0x5 1+1x30'
+      - series: 'otelcol_exporter_queue_size{exporter="otlp/daemon"}'
+        values: '2000x35'
+      - series: 'otelcol_exporter_queue_capacity{exporter="otlp/daemon"}'
+        values: '20000x35'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TraceExportFailing
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: TraceExportFailing
+        exp_alerts:
+          - exp_labels: {severity: page, component: trace-collector}
+            exp_annotations:
+              runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/trace-collector.md#traceexportfailing"
+              summary: "The trace collector cannot send spans to the daemon"
+              description: |
+                The trace collector failed to send spans to the daemon for 10
+                minutes. The persistent queue keeps them, so no model call is
+                lost yet. The record of model calls and the token counts fall
+                behind until the export works again.
+      - eval_time: 25m
+        alertname: TraceQueueFilling
+        exp_alerts: []
+  # A queue above half its capacity for 10 minutes pages.
+  - interval: 1m
+    input_series:
+      - series: 'otelcol_exporter_queue_size{exporter="otlp/daemon"}'
+        values: '1000x5 12000x30'
+      - series: 'otelcol_exporter_queue_capacity{exporter="otlp/daemon"}'
+        values: '20000x35'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TraceQueueFilling
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: TraceQueueFilling
+        exp_alerts:
+          - exp_labels: {severity: page, component: trace-collector}
+            exp_annotations:
+              runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/trace-collector.md#tracequeuefilling"
+              summary: "The trace collector queue is more than half full"
+              description: |
+                The persistent queue of the trace collector is more than half
+                full for 10 minutes. When it is full, the collector refuses new
+                spans and the gateway drops them, so model calls go unrecorded.

@@ -2333,6 +2333,55 @@ fgaInit:
 # to the ratelimit gRPC port on loopback. Same image, same SDS pattern as the
 # edge — no spiffe-helper, no restart-on-rotation.
 # -----------------------------------------------------------------------------
+# The trace collector (charts#816, gibson#1366). The agentgateway proxy sends
+# one span for each request to it, and it sends the spans on to the daemon,
+# which records each model call. A file-backed queue on a PVC keeps the spans
+# while the daemon is down. The spans hold full prompts and tool results: the
+# collector has no debug exporter and logs at warn.
+traceCollector:
+  image:
+    # The Kubernetes distribution of the OpenTelemetry Collector. It holds
+    # the OTLP receiver and exporter, the file storage extension and the
+    # memory limiter. Mirrored by zeroroot-ai/.github mirror-list.yaml.
+    repository: ghcr.io/zeroroot-ai/mirror/opentelemetry-collector-k8s
+    tag: "0.165.0@sha256:ce55d0a38923c83120e4ba613fbdf446786652d2ce9f29d1cd7879e5d869829f"
+    pullPolicy: IfNotPresent
+  ports:
+    # The mTLS port of the Envoy sidecar. The Service targets it.
+    otlp: 4317
+    # The plaintext OTLP gRPC receiver of the collector, on 127.0.0.1 only.
+    local: 14317
+    # The plaintext loopback port of the Envoy sidecar that carries the
+    # export to the daemon over SPIFFE mTLS.
+    daemon: 15051
+    # The metrics of the collector (GET /metrics only).
+    metrics: 8888
+  queue:
+    # The size of the PVC of the persistent queue.
+    size: 4Gi
+    # The most export requests that the queue holds. One request is one
+    # batch from the receiver, which is one gateway request.
+    capacity: 20000
+  # The largest OTLP message that the receiver accepts. A span holds the
+  # whole request body and response body (gateway.maxBufferSize, 16 MiB).
+  maxRecvMsgSizeMiB: 40
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  sidecar:
+    # The Envoy mTLS terminator. Reuses envoy.image.
+    resources:
+      requests:
+        cpu: 25m
+        memory: 48Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
 ratelimit:
   image:
     # Docker Hub carries commit-sha tags only. 8fe6ea42 = master 2026-08-24.

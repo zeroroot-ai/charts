@@ -11,6 +11,8 @@ proves each policy on each render.
                 inheritance Override keeps a listener policy from replacing it.
   ext-authz TLS spec.backend.tls on the ext-authz Service. The proxy presents
                 its SPIFFE SVID, and it accepts only the SVID of ext-authz.
+  trace TLS     spec.backend.tls on the trace collector Service: SPIFFE mTLS,
+                and only the collector SVID is accepted.
   trace         spec.frontend.tracing and spec.frontend.http.maxBufferSize, on
                 the Gateway. The span holds the bodies and the four trusted
                 headers under the gibson.* names that the daemon reads.
@@ -23,6 +25,7 @@ proves each policy on each render.
 {{- $name := include "gibson.agentgatewayName" . }}
 {{- $gw := .Values.gateway }}
 {{- $extAuthzPort := ((((index .Values "gibson-workloads") | default dict).extAuthz | default dict).ports | default dict).grpc | default 9001 }}
+{{- $traceCollector := (index .Values "gibson-workloads").traceCollector }}
 {{- $gatewayRef := dict "group" "gateway.networking.k8s.io" "kind" "Gateway" "name" $name }}
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
@@ -90,6 +93,28 @@ spec:
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
+  name: {{ $name }}-trace-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: {{ include "gibson.traceCollectorName" . }}
+  backend:
+    tls:
+      # The spans hold full prompts: they go over SPIFFE mTLS, and only the
+      # collector SVID is accepted (charts#816).
+      certificateSource: SPIFFE
+      sni: {{ include "gibson.traceCollectorName" . }}
+      verifySubjectAltNames:
+        - {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/otel-collector") | quote }}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
   name: {{ $name }}-trace
   namespace: {{ .Release.Namespace }}
   labels:
@@ -103,7 +128,11 @@ spec:
       # gibson#1386 measures the real bodies and sets this number.
       maxBufferSize: {{ $gw.maxBufferSize | quote }}
     tracing:
-      url: {{ $gw.trace.endpoint | quote }}
+      # A backendRef, not a url: the Service policy below (SPIFFE mTLS)
+      # applies only to a backendRef.
+      backendRef:
+        name: {{ include "gibson.traceCollectorName" . }}
+        port: {{ $traceCollector.ports.otlp }}
       protocol: GRPC
       # Each request gets a span: the trace is the record of model calls.
       randomSampling: "true"

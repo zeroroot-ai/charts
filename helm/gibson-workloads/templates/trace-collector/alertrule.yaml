@@ -1,0 +1,66 @@
+{{- /*
+The trace collector alerts (charts#816).
+
+The daemon records each model call from the gateway trace. The collector
+keeps each span in its persistent queue until the daemon takes it. Two
+failures need a page:
+
+  TraceExportFailing     the collector failed to send spans to the daemon
+                         for 10 minutes. The queue holds them, so no span is
+                         lost yet, but the record of model calls and the
+                         token counts fall behind.
+  TraceQueueFilling      the queue is more than half full for 10 minutes. At
+                         full, the receiver refuses new spans, and the
+                         gateway drops them.
+
+The thresholds are a first number. Open point 10 of gibson#1366 measures the
+real export delay and sets them.
+
+tests/alerts/trace-collector.test.yaml proves both with `promtool test
+rules` (make alert-rules-test). Renders only where prometheus-operator CRDs
+exist.
+*/}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}-trace-collector-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: trace-collector
+spec:
+  groups:
+    - name: trace-collector
+      rules:
+        - alert: TraceExportFailing
+          expr: |
+            sum(increase(otelcol_exporter_send_failed_spans_total{exporter="otlp/daemon"}[10m])) > 0
+          for: 10m
+          labels:
+            severity: page
+            component: trace-collector
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/trace-collector.md#traceexportfailing"
+            summary: "The trace collector cannot send spans to the daemon"
+            description: |
+              The trace collector failed to send spans to the daemon for 10
+              minutes. The persistent queue keeps them, so no model call is
+              lost yet. The record of model calls and the token counts fall
+              behind until the export works again.
+        - alert: TraceQueueFilling
+          expr: |
+            max(otelcol_exporter_queue_size{exporter="otlp/daemon"})
+              / max(otelcol_exporter_queue_capacity{exporter="otlp/daemon"}) > 0.5
+          for: 10m
+          labels:
+            severity: page
+            component: trace-collector
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/trace-collector.md#tracequeuefilling"
+            summary: "The trace collector queue is more than half full"
+            description: |
+              The persistent queue of the trace collector is more than half
+              full for 10 minutes. When it is full, the collector refuses new
+              spans and the gateway drops them, so model calls go unrecorded.
+{{- end }}

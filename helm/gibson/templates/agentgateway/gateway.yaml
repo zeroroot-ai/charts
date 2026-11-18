@@ -44,6 +44,8 @@ spec:
     labels:
       app.kubernetes.io/component: agentgateway-proxy
       gibson.zeroroot.ai/egress-internet: "true"
+      # The proxy is the one client of the trace collector (charts#816).
+      gibson.zeroroot.ai/client-trace: "true"
     annotations:
       # Velero fs-backup skips these: a socket, a token and a ConfigMap.
       backup.velero.io/backup-volumes-excludes: "spiffe-workload-api,xds-token,config-volume"

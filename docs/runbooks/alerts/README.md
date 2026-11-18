@@ -14,5 +14,6 @@ The commands in these pages read the cluster. They change nothing. A fix goes th
 | [audit-export.md](audit-export.md) | The audit export to the durable bucket |
 | [ratelimit.md](ratelimit.md) | The per-client quota of the edge |
 | [connector-operator.md](connector-operator.md) | Connector grants that outlive their connector |
+| [trace-collector.md](trace-collector.md) | The trace collector between the agentgateway proxy and the daemon |
 
 In the commands, `gibson` is the release namespace. Use your own namespace if it is different.

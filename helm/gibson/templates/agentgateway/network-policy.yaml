@@ -10,8 +10,12 @@ named here, and Cilium allows a flow only when both sides allow it:
        namespace reach the two listeners (model, agent).
   out  the proxy reaches ext-authz on its gRPC port and the controller on
        its xDS port. It reaches each LLM provider through the
-       egress-internet label (network-policies.yaml). The flow to the trace
-       collector comes with that collector (charts#816).
+       egress-internet label (network-policies.yaml). It reaches the trace
+       collector through the trace data store rule (network-policies.yaml,
+       the client-trace label).
+
+The trace collector (charts#816) reaches the daemon on its gRPC port, and
+the daemon accepts it there. No other pod reaches the collector.
 
 A sandbox namespace denies each flow by default (setec). The egress rule of
 a sandbox to the gateway is the business of setec, not of this chart.
@@ -23,6 +27,8 @@ a sandbox to the gateway is the business of setec, not of this chart.
 {{- $extAuthzPort := ((((index .Values "gibson-workloads") | default dict).extAuthz | default dict).ports | default dict).grpc | default 9001 }}
 {{- $xdsPort := ((((.Values.agentgateway.controller | default dict).service | default dict).ports | default dict).agwGrpc) | default 9978 }}
 {{- $listeners := list $gw.ports.model $gw.ports.agent }}
+{{- $daemonGrpc := include "gibson.daemonAddress" . | splitList ":" | last }}
+{{- $collector := dict "app.kubernetes.io/component" "trace-collector" "gibson.zeroroot.ai/datastore" "trace" }}
 {{- $proxy := dict "app.kubernetes.io/component" "agentgateway-proxy" }}
 {{- /* The namespace label that setec sets on each sandbox namespace.
        sandbox-namespace-label-admission.yaml (gibson-workloads) limits who
@@ -122,4 +128,30 @@ specs:
         toPorts:
           - ports:
               - port: {{ $xdsPort | quote }}
+                protocol: TCP
+  - description: "The trace collector reaches the daemon on its gRPC port."
+    endpointSelector:
+      matchLabels:
+        {{- toYaml $collector | nindent 8 }}
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              app.kubernetes.io/component: daemon
+              {{ $role }}: platform
+        toPorts:
+          - ports:
+              - port: {{ $daemonGrpc | quote }}
+                protocol: TCP
+  - description: "The daemon accepts the trace collector on its gRPC port."
+    endpointSelector:
+      matchLabels:
+        app.kubernetes.io/component: daemon
+        {{ $role }}: platform
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              {{- toYaml $collector | nindent 14 }}
+        toPorts:
+          - ports:
+              - port: {{ $daemonGrpc | quote }}
                 protocol: TCP

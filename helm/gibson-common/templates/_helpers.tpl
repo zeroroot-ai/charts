@@ -717,6 +717,13 @@ gibson-ext-authz
 gibson-agentgateway
 {{- end -}}
 
+{{- define "gibson.traceCollectorName" -}}
+{{- /* The trace collector (charts#816): its StatefulSet, Service and
+       ServiceAccount. gibson-workloads renders it, and the umbrella
+       agentgateway trace policy sends to its Service. */ -}}
+gibson-trace-collector
+{{- end -}}
+
 {{- define "gibson.agentgatewayTLSSecretName" -}}
 {{- /* The Secret of the TLS certificate of the two Gateway listeners
        (charts#815). gibson-workloads renders the Certificate, and the
@@ -1464,7 +1471,7 @@ the egress-fqdn label must not reach the world entity.
 */}}
 {{- define "gibson.netLabels" -}}
 {{- $roles := list "platform" "datastore" "system" -}}
-{{- $stores := list "postgres" "redis" "openbao" "neo4j" -}}
+{{- $stores := list "postgres" "redis" "openbao" "neo4j" "trace" -}}
 {{- if not (has .role $roles) -}}
 {{- fail (printf "gibson.netLabels: role %v is not one of %s" .role (join ", " $roles)) -}}
 {{- end -}}
@@ -1529,9 +1536,10 @@ this on each render.
   9402  cert-manager
   9464  the dashboard (GET /metrics only)
   9901  the probe listener of the edge (/ready and /stats/prometheus only)
+  8888  the trace collector (GET /metrics only, charts#816)
 */}}
 {{- define "gibson.metricsPorts" -}}
-8080 9003 9090 9187 9402 9464 9901
+8080 8888 9003 9090 9187 9402 9464 9901
 {{- end -}}
 
 {{/*

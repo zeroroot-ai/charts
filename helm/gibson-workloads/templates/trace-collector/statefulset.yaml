@@ -1,0 +1,172 @@
+{{- /*
+The trace collector (charts#816, gibson#1366). One replica: the persistent
+queue is a file on one PVC.
+
+Two containers:
+  collector  the OpenTelemetry Collector (configmap.yaml). Its receiver and
+             its exporter are plaintext on 127.0.0.1 only.
+  envoy      the SPIFFE mTLS terminator for both directions, the pattern of
+             the ratelimit sidecar: the collector cannot use SPIRE SDS.
+
+The PVC `queue` holds the export queue, not data of record. The daemon is the
+record. Velero skips it (backup-volumes-excludes), and the two backup guards
+name it with that reason.
+*/}}
+{{- $tc := .Values.traceCollector -}}
+{{- $p := $tc.ports -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "gibson.traceCollectorName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: trace-collector
+spec:
+  serviceName: {{ include "gibson.traceCollectorName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: trace-collector
+  template:
+    metadata:
+      labels:
+        {{- include "gibson.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: trace-collector
+        {{- include "gibson.netLabels" (dict "role" "datastore" "datastore" "trace" "metricsPort" $p.metrics) | nindent 8 }}
+      annotations:
+        # The socket, the scratch directory and the queue. The queue is not
+        # data of record (see the header).
+        backup.velero.io/backup-volumes-excludes: "queue,spire-agent-socket,tmp"
+        checksum/config: {{ include (print $.Template.BasePath "/trace-collector/configmap.yaml") . | sha256sum }}
+    spec:
+      {{- include "gibson.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "gibson.traceCollectorName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        {{- include "gibson.waitForSpireSocket" . | nindent 8 }}
+      containers:
+        - name: collector
+          image: "{{ $tc.image.repository }}:{{ $tc.image.tag }}"
+          imagePullPolicy: {{ $tc.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - "--config=/etc/otelcol/collector.yaml"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+          ports:
+            - name: metrics
+              containerPort: {{ $p.metrics }}
+              protocol: TCP
+            - name: health
+              containerPort: 13133
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml $tc.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol/collector.yaml
+              subPath: collector.yaml
+              readOnly: true
+            - name: queue
+              mountPath: /var/lib/otelcol/queue
+        - name: envoy
+          image: "{{ .Values.envoy.image.repository }}:{{ .Values.envoy.image.tag }}"
+          imagePullPolicy: {{ .Values.envoy.image.pullPolicy | default "IfNotPresent" }}
+          args:
+            - "-c"
+            - "/etc/envoy/envoy.yaml"
+            - "--service-cluster"
+            - "gibson-trace-collector"
+            - "--service-node"
+            - "gibson-trace-collector"
+            - "--log-level"
+            - "warn"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 101
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: otlp
+              containerPort: {{ $p.otlp }}
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: otlp
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 2
+          resources:
+            {{- toYaml $tc.sidecar.resources | nindent 12 }}
+          volumeMounts:
+            - name: envoy-bootstrap
+              mountPath: /etc/envoy
+              readOnly: true
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "gibson.traceCollectorName" . }}
+            items:
+              - key: collector.yaml
+                path: collector.yaml
+        - name: envoy-bootstrap
+          configMap:
+            name: {{ include "gibson.traceCollectorName" . }}
+            items:
+              - key: envoy.yaml
+                path: envoy.yaml
+        - name: spire-agent-socket
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: queue
+        labels:
+          {{- include "gibson.labels" . | nindent 10 }}
+          app.kubernetes.io/component: trace-collector
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ $tc.queue.size }}

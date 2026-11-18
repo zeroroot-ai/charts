@@ -138,6 +138,9 @@ NOTES: dict[str, dict[str, str]] = {
         "role": "Model gateway and Agent gateway proxy (the controller starts it from AgentgatewayParameters)"
     },
     "ghcr.io/zeroroot-ai/mirror/agentgateway-controller": {"role": "agentgateway controller (Gateway API)"},
+    "ghcr.io/zeroroot-ai/mirror/opentelemetry-collector-k8s": {
+        "role": "trace collector between the agentgateway proxy and the daemon (persistent queue)"
+    },
     "ghcr.io/zeroroot-ai/mirror/coraza-proxy-wasm": {"role": "Edge WAF module: Coraza + OWASP CRS as an Envoy WASM filter"},
     "ghcr.io/zeroroot-ai/mirror/alpine-k8s": {"role": "kubectl/curl/jq job + init tooling"},
     "ghcr.io/zeroroot-ai/mirror/kubectl": {"role": "kubectl for hook Jobs and helm tests"},

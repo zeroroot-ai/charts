@@ -143,6 +143,29 @@ spec:
     - "k8s:ns:{{ $ns }}"
     - "k8s:sa:{{ include "gibson.extAuthzServiceAccountName" . }}"
 ---
+# --- trace collector (charts#816) ---
+# The Envoy sidecar of the trace collector presents this SVID to the daemon
+# when it sends spans, and the agentgateway proxy accepts only it.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-trace-collector
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/otel-collector"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: trace-collector
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ include "gibson.traceCollectorName" . }}"
+---
 # --- agentgateway proxy (charts#815) ---
 # The agentgateway controller starts the proxy pods of the one Gateway, and
 # it names their ServiceAccount after the Gateway. The proxy presents this

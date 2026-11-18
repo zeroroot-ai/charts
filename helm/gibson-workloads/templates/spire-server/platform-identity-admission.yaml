@@ -192,7 +192,7 @@ lists.
        below select that namespace as well, so a pod there that wears its
        component or its ServiceAccount is fenced the same way. */ -}}
 {{- $setecNs := include "gibson.setecNamespace" . -}}
-{{- $protectedComponents := list "daemon" "ext-authz" "ratelimit" "dashboard" "tenant-operator" "connector-operator" "platform-operator" "envoy" "openbao" "frontend" "agentgateway-proxy" -}}
+{{- $protectedComponents := list "daemon" "ext-authz" "ratelimit" "dashboard" "tenant-operator" "connector-operator" "platform-operator" "envoy" "openbao" "frontend" "agentgateway-proxy" "trace-collector" -}}
 {{- $protectedSAs := list
       (printf "%s-frontend" (include "gibson.setecFullname" .))
       (include "gibson.serviceAccountName" .)
@@ -204,7 +204,8 @@ lists.
       (include "gibson.envoyServiceAccountName" .)
       (include "gibson.ratelimitServiceAccountName" .)
       (include "gibson.openbaoServiceAccountName" .)
-      (include "gibson.agentgatewayName" .) -}}
+      (include "gibson.agentgatewayName" .)
+      (include "gibson.traceCollectorName" .) -}}
 {{- /* The agentgateway controller writes the proxy Deployment of the one
        Gateway (charts#815). It may write that one identity and no other:
        the component agentgateway-proxy with the ServiceAccount of the

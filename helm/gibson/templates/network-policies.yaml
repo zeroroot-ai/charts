@@ -119,6 +119,7 @@ spec:
   (dict "name" "postgres" "ports" (list 5432 8000))
   (dict "name" "redis" "ports" (list 6379))
   (dict "name" "openbao" "ports" (list 8200))
+  (dict "name" "trace" "ports" (list (index .Values "gibson-workloads").traceCollector.ports.otlp))
 }}
 {{- range $s := $stores }}
 ---

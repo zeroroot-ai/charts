@@ -13,7 +13,9 @@ durable bucket:
     (defaultVolumesToFsBackup), and the pod template's
     backup.velero.io/backup-volumes-excludes annotation does not name the
     claim (check-velero-volume-excludes.sh keeps that list exact; this guard
-    keeps a claim OUT of it).
+    keeps a claim OUT of it). A claim that is not data of record, such as a
+    queue, is named with its reason in scripts/.backup-excluded-claims.txt.
+    A line there that no excluded claim matches fails as stale.
 
 Both charts are rendered the way every other offline guard renders them.
 
@@ -28,6 +30,17 @@ import sys
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+EXCLUDED = os.path.join(ROOT, "scripts", ".backup-excluded-claims.txt")
+
+
+def excluded_claims(path: str = EXCLUDED) -> set[str]:
+    """`<Kind>/<name>:<claim>` of each line, keyed by content."""
+    out = set()
+    for line in open(path):
+        line = line.strip()
+        if line and not line.startswith("#"):
+            out.add(line.split()[0])
+    return out
 
 
 def render(chart: str, values: list[str], ns: str) -> list[dict]:
@@ -42,7 +55,10 @@ def ns_of(d: dict, default: str) -> str:
     return (d.get("metadata") or {}).get("namespace") or default
 
 
-def judge(umbrella: list[dict], velero: list[dict], default_ns: str = "gibson") -> list[str]:
+def judge(umbrella: list[dict], velero: list[dict], default_ns: str = "gibson",
+          allowed: set[str] | None = None) -> list[str]:
+    allowed = set() if allowed is None else allowed
+    used = set()
     schedules = [d for d in velero if d.get("kind") == "Schedule"]
     scheduled_backups = {d["spec"].get("cluster", {}).get("name") for d in umbrella if d.get("kind") == "ScheduledBackup"}
     out = []
@@ -76,8 +92,12 @@ def judge(umbrella: list[dict], velero: list[dict], default_ns: str = "gibson") 
             ann = (((d["spec"].get("template") or {}).get("metadata") or {}).get("annotations") or {})
             excluded = {x.strip() for x in ann.get("backup.velero.io/backup-volumes-excludes", "").split(",") if x.strip()}
             for c in claims:
-                if c in excluded:
+                if c in excluded and f"{name}:{c}" in allowed:
+                    used.add(f"{name}:{c}")
+                elif c in excluded:
                     out.append(f"{name}: claim {c} is in backup-volumes-excludes, so Velero never backs the data up")
+    for stale in sorted(allowed - used):
+        out.append(f"{stale}: a line of .backup-excluded-claims.txt that names no excluded claim (stale)")
     return out
 
 
@@ -133,14 +153,24 @@ def selftest() -> int:
     if len(got) != 4 or not all(any(g.startswith(w) for g in got) for w in want):
         print(f"SELFTEST FAIL: want {want}, got {got}")
         return 1
+    # A listed queue claim passes, and a line that names no excluded claim fails as stale.
+    fx_u = [d for d in yaml.safe_load_all(FIXTURE_UMBRELLA) if d]
+    fx_v = [d for d in yaml.safe_load_all(FIXTURE_VELERO) if d]
+    got = judge(fx_u, fx_v, allowed={"StatefulSet/excluded:data", "StatefulSet/backed:data"})
+    if any(g.startswith("StatefulSet/excluded: claim data") for g in got) or \
+            not any(g.startswith("StatefulSet/backed:data") and "stale" in g for g in got):
+        print(f"SELFTEST FAIL: a listed claim must pass and a stale line must fail, got {got}")
+        return 1
     live = judge(
         render("gibson", ["helm/gibson/values-baseline.yaml", "helm/testdata/render-inputs/gibson.yaml"], "gibson"),
         render("gibson-velero", ["helm/testdata/render-inputs/gibson-velero.yaml"], "velero"),
+        allowed=excluded_claims(),
     )
     if live:
         print("SELFTEST FAIL: the render has an unbacked datastore:\n  " + "\n  ".join(live))
         return 1
-    print("OK: an excluded claim, an uncovered namespace and a CNPG Cluster without backup fail; every rendered datastore has a producer")
+    print("OK: an excluded claim, an uncovered namespace, a CNPG Cluster without backup and a stale claim line fail; "
+          "a listed queue claim passes; every rendered datastore has a producer")
     return 0
 
 
@@ -150,6 +180,7 @@ def main() -> int:
     got = judge(
         render("gibson", ["helm/gibson/values-baseline.yaml", "helm/testdata/render-inputs/gibson.yaml"], "gibson"),
         render("gibson-velero", ["helm/testdata/render-inputs/gibson-velero.yaml"], "velero"),
+        allowed=excluded_claims(),
     )
     if got:
         print("❌ datastores without a backup producer:\n  " + "\n  ".join(got))

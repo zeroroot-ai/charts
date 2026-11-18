@@ -12,7 +12,9 @@
 #
 # The rule: a pod template's backup.velero.io/backup-volumes-excludes
 # annotation names EXACTLY its emptyDir and CSI-ephemeral volumes, and never
-# a PersistentVolumeClaim or volumeClaimTemplate. It checks the RENDER, so
+# a PersistentVolumeClaim or volumeClaimTemplate. The one exception is a claim
+# that is not data of record, such as a queue: scripts/.backup-excluded-claims.txt
+# names it with its reason, and then the annotation must name it too. It checks the RENDER, so
 # a subchart pod is covered through its values as well as a first-party one.
 # It self-tests first: a render with one annotation removed MUST fail.
 #
@@ -25,8 +27,10 @@ RENDER="$(mktemp)"
 trap 'rm -f "$RENDER"' EXIT
 helm template gibson "$CHART_DIR" -f "$CHART_DIR/values-baseline.yaml" -f "$CHART_DIR/../testdata/render-inputs/gibson.yaml" --namespace gibson > "$RENDER"
 
-python3 - "$RENDER" <<'PY'
+python3 - "$RENDER" "$(dirname "$0")/.backup-excluded-claims.txt" <<'PY'
 import sys, yaml, copy
+
+ALLOWED = {l.split()[0] for l in open(sys.argv[2]) if l.strip() and not l.startswith("#")}
 
 ANN = "backup.velero.io/backup-volumes-excludes"
 # Hook Jobs and test pods live and die inside one sync; a Schedule never sees them.
@@ -42,14 +46,15 @@ def check(docs):
     bad = []
     for name, tpl, vcts in pod_templates(docs):
         vols = tpl.get("spec", {}).get("volumes") or []
-        ephemeral = sorted(v["name"] for v in vols if "emptyDir" in v or "csi" in v)
         claims = {v["name"] for v in vols if "persistentVolumeClaim" in v} | {t["metadata"]["name"] for t in vcts}
+        queues = {c for c in claims if f"{name}:{c}" in ALLOWED}
+        ephemeral = sorted({v["name"] for v in vols if "emptyDir" in v or "csi" in v} | queues)
         ann = (tpl.get("metadata", {}).get("annotations") or {}).get(ANN, "")
         listed = sorted(x for x in ann.split(",") if x)
         if listed != ephemeral:
             bad.append(f"{name}: annotation lists {listed or 'nothing'}, the pod's emptyDir/CSI volumes are {ephemeral or 'none'}")
         for x in listed:
-            if x in claims:
+            if x in claims and x not in queues:
                 bad.append(f"{name}: {x} is a claim, excluding it would drop DATA from the backup")
     return bad
 

@@ -48,6 +48,8 @@ PRODUCERS = (
     # The edge Envoy serves its stats on the admin probe listener (D92: the
     # signup quota alert reads envoy_cluster_ratelimit_public_signup_error).
     ("envoy_", "envoy"),
+    # The trace collector serves its own metrics on :8888 (charts#816).
+    ("otelcol_", "trace-collector"),
 )
 # Series name prefix -> why no scrape object of the release collects it.
 EXTERNAL = {

@@ -1926,14 +1926,9 @@ gateway:
   # loses its trace fields and its model name. gibson#1386 measures the real
   # bodies and sets this number. The upstream default is 2 MiB.
   maxBufferSize: 16Mi
-  # The trace of each request, as OTLP over gRPC. The record of model calls
-  # is read from it (llm_call.observed, gibson#1366 wave 2).
-  trace:
-    # The OTLP gRPC endpoint of the collector. The default names the durable
-    # collector of charts#816, which is not in the chart yet. Until it is,
-    # the proxy drops each span it cannot export, and the requests still
-    # pass. charts#816 also adds the network rule from the proxy to it.
-    endpoint: "http://gibson-trace-collector:4317"
+  # The trace of each request goes as OTLP over gRPC to the trace collector
+  # of gibson-workloads (gibson.traceCollectorName, charts#816), over SPIFFE
+  # mTLS. The record of model calls is read from it.
   # The request headers that the Model gateway removes before the provider
   # call. ext-authz and the callers use these names, and the provider must
   # never get the tenant, the subject, the mission or the task. The CRD
