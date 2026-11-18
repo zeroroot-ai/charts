@@ -14,8 +14,9 @@ named here, and Cilium allows a flow only when both sides allow it:
        collector through the trace data store rule (network-policies.yaml,
        the client-trace label).
 
-The trace collector (charts#816) reaches the daemon on its gRPC port, and
-the daemon accepts it there. No other pod reaches the collector.
+The trace collector (charts#816) reaches the trace listener of the daemon
+(gibson.daemonTracePort). The TLS layer of that listener accepts the
+collector SVID and no other peer. No other pod reaches the collector.
 
 A sandbox namespace denies each flow by default (setec). The egress rule of
 a sandbox to the gateway is the business of setec, not of this chart.
@@ -27,7 +28,7 @@ a sandbox to the gateway is the business of setec, not of this chart.
 {{- $extAuthzPort := ((((index .Values "gibson-workloads") | default dict).extAuthz | default dict).ports | default dict).grpc | default 9001 }}
 {{- $xdsPort := ((((.Values.agentgateway.controller | default dict).service | default dict).ports | default dict).agwGrpc) | default 9978 }}
 {{- $listeners := list $gw.ports.model $gw.ports.agent }}
-{{- $daemonGrpc := include "gibson.daemonAddress" . | splitList ":" | last }}
+{{- $daemonTrace := include "gibson.daemonTracePort" . }}
 {{- $collector := dict "app.kubernetes.io/component" "trace-collector" "gibson.zeroroot.ai/datastore" "trace" }}
 {{- $proxy := dict "app.kubernetes.io/component" "agentgateway-proxy" }}
 {{- /* The namespace label that setec sets on each sandbox namespace.
@@ -129,7 +130,7 @@ specs:
           - ports:
               - port: {{ $xdsPort | quote }}
                 protocol: TCP
-  - description: "The trace collector reaches the daemon on its gRPC port."
+  - description: "The trace collector reaches the trace listener of the daemon."
     endpointSelector:
       matchLabels:
         {{- toYaml $collector | nindent 8 }}
@@ -140,9 +141,9 @@ specs:
               {{ $role }}: platform
         toPorts:
           - ports:
-              - port: {{ $daemonGrpc | quote }}
+              - port: {{ $daemonTrace | quote }}
                 protocol: TCP
-  - description: "The daemon accepts the trace collector on its gRPC port."
+  - description: "The trace listener of the daemon accepts the trace collector only."
     endpointSelector:
       matchLabels:
         app.kubernetes.io/component: daemon
@@ -153,5 +154,5 @@ specs:
               {{- toYaml $collector | nindent 14 }}
         toPorts:
           - ports:
-              - port: {{ $daemonGrpc | quote }}
+              - port: {{ $daemonTrace | quote }}
                 protocol: TCP

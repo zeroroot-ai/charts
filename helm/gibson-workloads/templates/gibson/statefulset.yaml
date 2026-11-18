@@ -274,6 +274,11 @@ spec:
             - name: authz-registry
               containerPort: {{ .Values.gibson.service.authzRegistry.port | default 8086 }}
               protocol: TCP
+            # The trace listener (charts#816). Only the trace collector
+            # reaches it (GIBSON_TRACE_COLLECTOR_SVID, the network policy).
+            - name: otlp-grpc
+              containerPort: {{ include "gibson.daemonTracePort" . }}
+              protocol: TCP
           env:
             # the daemon reads FGA store_id + model_id from env
             # vars instead of calling the Kubernetes API to GET the
@@ -586,6 +591,11 @@ spec:
             # adds it to its allowed peers by itself.
             - name: GIBSON_TRACE_COLLECTOR_SVID
               value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/otel-collector") | quote }}
+            # The listen address of the trace listener. It has its own port
+            # and a message limit of 48 MiB: one span holds the whole request
+            # and response bodies.
+            - name: GIBSON_TRACE_GRPC_ADDR
+              value: {{ printf ":%s" (include "gibson.daemonTracePort" .) | quote }}
             # Comma-separated list built from the paths in .Values.spiffe.callbackPeers.
             {{- if .Values.spiffe.callbackPeers }}
             - name: GIBSON_CALLBACK_PEER_SVIDS

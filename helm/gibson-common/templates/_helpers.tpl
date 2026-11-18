@@ -724,6 +724,15 @@ gibson-ext-authz
 gibson-agentgateway
 {{- end -}}
 
+{{- define "gibson.daemonTracePort" -}}
+{{- /* The trace listener of the daemon (charts#816, gibson contract round
+       4): OTLP TraceService over gRPC, SPIFFE mTLS that accepts only the
+       trace collector, a message limit of 48 MiB. The daemon port, its
+       Service port, the export of the collector and the network rule read
+       this one number. */ -}}
+4317
+{{- end -}}
+
 {{- define "gibson.traceCollectorName" -}}
 {{- /* The trace collector (charts#816): its StatefulSet, Service and
        ServiceAccount. gibson-workloads renders it, and the umbrella

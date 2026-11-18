@@ -4352,6 +4352,8 @@ data:
         # mTLS on the way to the daemon.
         tls:
           insecure: true
+        # One span for each request, with no batch: a span can pass 16 MiB,
+        # and the trace listener of the daemon takes 48 MiB.
         sending_queue:
           enabled: true
           storage: file_storage/queue
@@ -4480,7 +4482,7 @@ data:
               - lb_endpoints:
                   - endpoint:
                       address:
-                        socket_address: { address: gibson-gibson-workloads.gibson.svc, port_value: 50051 }
+                        socket_address: { address: gibson-gibson-workloads.gibson.svc, port_value: 4317 }
 
 ---
 # Source: gibson/charts/spire/charts/spiffe-oidc-discovery-provider/templates/configmap.yaml
@@ -9703,6 +9705,12 @@ spec:
       port: 8086
       targetPort: authz-registry
       protocol: TCP
+    # The trace listener (charts#816).
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+      protocol: TCP
+      appProtocol: grpc
   selector:
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
@@ -17941,6 +17949,11 @@ spec:
             - name: authz-registry
               containerPort: 8086
               protocol: TCP
+            # The trace listener (charts#816). Only the trace collector
+            # reaches it (GIBSON_TRACE_COLLECTOR_SVID, the network policy).
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
           env:
             # the daemon reads FGA store_id + model_id from env
             # vars instead of calling the Kubernetes API to GET the
@@ -18157,6 +18170,11 @@ spec:
             # adds it to its allowed peers by itself.
             - name: GIBSON_TRACE_COLLECTOR_SVID
               value: "spiffe://zeroroot.ai/platform/otel-collector"
+            # The listen address of the trace listener. It has its own port
+            # and a message limit of 48 MiB: one span holds the whole request
+            # and response bodies.
+            - name: GIBSON_TRACE_GRPC_ADDR
+              value: ":4317"
             # Comma-separated list built from the paths in .Values.spiffe.callbackPeers.
             - name: GIBSON_CALLBACK_PEER_SVIDS
               value: "spiffe://zeroroot.ai/platform/dashboard,spiffe://zeroroot.ai/platform/envoy,spiffe://zeroroot.ai/platform/daemon"
@@ -18514,7 +18532,7 @@ spec:
         # The socket, the scratch directory and the queue. The queue is not
         # data of record (see the header).
         backup.velero.io/backup-volumes-excludes: "queue,spire-agent-socket,tmp"
-        checksum/config: 54a5346baa37f85d0644784d1a9a491cf6ec0cffb5476f4de5b43b0d29bba6a1
+        checksum/config: 74349b5197f96c9e4c349b50518d91e23c8a033d078729947d518c5233f21383
     spec:
       
       serviceAccountName: gibson-trace-collector
@@ -22329,7 +22347,7 @@ specs:
           - ports:
               - port: "9978"
                 protocol: TCP
-  - description: "The trace collector reaches the daemon on its gRPC port."
+  - description: "The trace collector reaches the trace listener of the daemon."
     endpointSelector:
       matchLabels:
         app.kubernetes.io/component: trace-collector
@@ -22341,9 +22359,9 @@ specs:
               gibson.zeroroot.ai/net-role: platform
         toPorts:
           - ports:
-              - port: "50051"
+              - port: "4317"
                 protocol: TCP
-  - description: "The daemon accepts the trace collector on its gRPC port."
+  - description: "The trace listener of the daemon accepts the trace collector only."
     endpointSelector:
       matchLabels:
         app.kubernetes.io/component: daemon
@@ -22355,7 +22373,7 @@ specs:
               gibson.zeroroot.ai/datastore: trace
         toPorts:
           - ports:
-              - port: "50051"
+              - port: "4317"
                 protocol: TCP
 
 ---

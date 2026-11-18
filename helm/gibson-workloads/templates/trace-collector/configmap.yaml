@@ -18,14 +18,16 @@ envoy.yaml — the bootstrap of the Envoy mTLS sidecar, in the shape of the
   in   SPIFFE mTLS through SPIRE SDS on the otlp port. It requires a client
        certificate and pins the client SAN to platform/agentgateway, then
        tcp_proxies to the receiver.
-  out  a plaintext listener on 127.0.0.1 that tcp_proxies to the daemon gRPC
-       port over SPIFFE mTLS. It presents the SVID platform/otel-collector
+  out  a plaintext listener on 127.0.0.1 that tcp_proxies to the trace
+       listener of the daemon (gibson.daemonTracePort) over SPIFFE mTLS. It presents the SVID platform/otel-collector
        and accepts only the SAN platform/daemon.
 */}}
 {{- $p := .Values.traceCollector.ports -}}
 {{- $q := .Values.traceCollector.queue -}}
 {{- $td := include "gibson.trustDomain" . -}}
-{{- $daemon := include "gibson.daemonAddress" . | splitList ":" -}}
+{{- /* The daemon host, and its trace listener (gibson.daemonTracePort),
+       which takes a message of 48 MiB. The main gRPC port takes 16 MiB. */ -}}
+{{- $daemon := list (include "gibson.daemonAddress" . | splitList ":" | first) (include "gibson.daemonTracePort" .) -}}
 {{- $sds := dict "resource_api_version" "V3" "api_config_source" (dict "api_type" "GRPC" "transport_api_version" "V3" "grpc_services" (list (dict "envoy_grpc" (dict "cluster_name" "spire_agent")))) -}}
 apiVersion: v1
 kind: ConfigMap
@@ -66,6 +68,8 @@ data:
         # mTLS on the way to the daemon.
         tls:
           insecure: true
+        # One span for each request, with no batch: a span can pass 16 MiB,
+        # and the trace listener of the daemon takes 48 MiB.
         sending_queue:
           enabled: true
           storage: file_storage/queue

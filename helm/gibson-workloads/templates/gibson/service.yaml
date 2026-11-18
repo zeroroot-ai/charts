@@ -60,6 +60,12 @@ spec:
       port: {{ .Values.gibson.service.authzRegistry.port | default 8086 }}
       targetPort: authz-registry
       protocol: TCP
+    # The trace listener (charts#816).
+    - name: otlp-grpc
+      port: {{ include "gibson.daemonTracePort" . }}
+      targetPort: otlp-grpc
+      protocol: TCP
+      appProtocol: grpc
   selector:
     {{- include "gibson.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: daemon
