@@ -717,6 +717,13 @@ gibson-ext-authz
 gibson-agentgateway
 {{- end -}}
 
+{{- define "gibson.agentgatewayTLSSecretName" -}}
+{{- /* The Secret of the TLS certificate of the two Gateway listeners
+       (charts#815). gibson-workloads renders the Certificate, and the
+       umbrella Gateway names the Secret. */ -}}
+gibson-agentgateway-tls
+{{- end -}}
+
 {{- define "gibson.agentgatewayControllerName" -}}
 {{- /* The name of the agentgateway controller, its Service and its
        ServiceAccount. The umbrella sets agentgateway.fullnameOverride to

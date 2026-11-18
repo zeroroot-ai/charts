@@ -7,6 +7,10 @@ the MCP and A2A routes between components in the cluster, on the listener
 `agent`. The chart renders no route. The tenant-operator renders the routes
 and the backends of each tenant (gibson#1387).
 
+Each listener serves TLS with a certificate of the component issuer, the
+issuer of the OpenFGA certificate. The daemon trusts that CA already
+(SSL_CERT_DIR /etc/ssl/fga-ca).
+
 The Gateway is cluster-internal. The AgentgatewayParameters set the proxy
 Service to ClusterIP, the Gateway names no address, and the Edge has no
 route to it. scripts/check-agentgateway.py fails the render on a public
@@ -50,8 +54,17 @@ spec:
   listeners:
     {{- range $l := list "model" "agent" }}
     - name: {{ $l }}
-      protocol: HTTP
+      # TLS on each listener: a caller token never crosses the pod network
+      # in clear text. The certificate comes from the component issuer
+      # (gibson-workloads cert-manager/component-certificates.yaml).
+      protocol: HTTPS
       port: {{ index $gw.ports $l }}
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            group: ""
+            name: {{ include "gibson.agentgatewayTLSSecretName" $ }}
       allowedRoutes:
         kinds:
           - kind: HTTPRoute

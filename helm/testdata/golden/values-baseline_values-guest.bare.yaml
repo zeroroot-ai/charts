@@ -17155,6 +17155,37 @@ spec:
     name: "selfsigned-ca"
     kind: "Issuer"
     group: "cert-manager.io"
+---
+# Source: gibson/charts/gibson-workloads/templates/cert-manager/component-certificates.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gibson-agentgateway-tls
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway-tls
+spec:
+  secretName: gibson-agentgateway-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: "gibson-agentgateway.gibson.svc"
+  dnsNames:
+    - "gibson-agentgateway"
+    - "gibson-agentgateway.gibson"
+    - "gibson-agentgateway.gibson.svc"
+    - "gibson-agentgateway.gibson.svc.cluster.local"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: "selfsigned-ca"
+    kind: "Issuer"
+    group: "cert-manager.io"
 
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/system-namespace-policy.yaml
@@ -19564,8 +19595,17 @@ spec:
       name: gibson-agentgateway
   listeners:
     - name: model
-      protocol: HTTP
+      # TLS on each listener: a caller token never crosses the pod network
+      # in clear text. The certificate comes from the component issuer
+      # (gibson-workloads cert-manager/component-certificates.yaml).
+      protocol: HTTPS
       port: 8080
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            group: ""
+            name: gibson-agentgateway-tls
       allowedRoutes:
         kinds:
           - kind: HTTPRoute
@@ -19578,8 +19618,17 @@ spec:
             matchLabels:
               gibson.zeroroot.ai/managed-by: tenant-operator
     - name: agent
-      protocol: HTTP
+      # TLS on each listener: a caller token never crosses the pod network
+      # in clear text. The certificate comes from the component issuer
+      # (gibson-workloads cert-manager/component-certificates.yaml).
+      protocol: HTTPS
       port: 8081
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            group: ""
+            name: gibson-agentgateway-tls
       allowedRoutes:
         kinds:
           - kind: HTTPRoute

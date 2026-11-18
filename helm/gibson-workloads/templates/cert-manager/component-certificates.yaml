@@ -11,6 +11,10 @@ cert lands in a Secret that one listener mounts:
   - gibson-metrics-scraper-tls  the client certificate that the scrape objects
                                 present to the mTLS metrics listeners
   - gibson-openfga-http-tls     the OpenFGA HTTP listener :8080
+  - gibson-agentgateway-tls     the two listeners of the agentgateway Gateway
+                                (charts#815). The controller reads the
+                                Secret and sends the cert to the proxy over
+                                xDS, so a renewed cert needs no restart.
 
 Rotation (ADR-0171, row component-tls): cert-manager renews each cert
 360 hours before its end. The metrics listeners of the daemon and ext-authz
@@ -168,6 +172,38 @@ spec:
     - {{ printf "%s.%s" $fgaSvc .Release.Namespace | quote }}
     - {{ printf "%s.%s.svc" $fgaSvc .Release.Namespace | quote }}
     - {{ printf "%s.%s.svc.cluster.local" $fgaSvc .Release.Namespace | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ $issuerName | quote }}
+    kind: {{ $issuerKind | quote }}
+    group: {{ ternary "awspca.cert-manager.io" "cert-manager.io" (eq $issuerKind "AWSPCAClusterIssuer") | quote }}
+
+{{- /* The agentgateway Gateway TLS (charts#815). The same issuer as the
+       OpenFGA cert above, so a caller that trusts the ca.crt of
+       gibson-openfga-http-tls trusts the gateway too. The daemon has it in
+       SSL_CERT_DIR (/etc/ssl/fga-ca). */}}
+{{- $agw := include "gibson.agentgatewayName" . }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "gibson.agentgatewayTLSSecretName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway-tls
+spec:
+  secretName: {{ include "gibson.agentgatewayTLSSecretName" . }}
+  duration: 2160h
+  renewBefore: 360h
+  commonName: {{ printf "%s.%s.svc" $agw .Release.Namespace | quote }}
+  dnsNames:
+    - {{ $agw | quote }}
+    - {{ printf "%s.%s" $agw .Release.Namespace | quote }}
+    - {{ printf "%s.%s.svc" $agw .Release.Namespace | quote }}
+    - {{ printf "%s.%s.svc.cluster.local" $agw .Release.Namespace | quote }}
   privateKey:
     algorithm: ECDSA
     size: 256

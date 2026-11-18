@@ -13,7 +13,10 @@ The check renders each shipped profile and fails when:
                 the gRPC protocol, with failureMode FailClosed and the
                 expression json(request.body).model in grpc.requestMetadata.
   2. listener   the Gateway names an address or a listener hostname, a
-                listener is not plain HTTP, the parametersRef does not name
+                listener is not HTTPS with mode Terminate and a certificate
+                Secret that a rendered cert-manager Certificate writes (a
+                caller token must not cross the pod network in clear text),
+                the parametersRef does not name
                 the rendered AgentgatewayParameters, or those parameters do
                 not set the proxy Service to ClusterIP. Any of these makes a
                 public listener.
@@ -132,15 +135,19 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     if not ok:
         bad.append(f"ext-authz: no PreRouting, Override, FailClosed gRPC extAuth policy on the whole Gateway {name} "
                    f"that calls the ext-authz Service on its grpc port and sends {MODEL_EXPR}")
-
-    # 2. No public listener.
+    # 2. No public listener, and TLS on each listener.
+    cert_secrets = {(c.get("spec") or {}).get("secretName") for c in of_kind(docs, "Certificate")}
     if spec.get("addresses"):
         bad.append(f"listener: Gateway {name} names addresses {spec['addresses']}")
     for li in spec.get("listeners") or []:
         if li.get("hostname"):
             bad.append(f"listener: {li.get('name')} names the hostname {li['hostname']}")
-        if li.get("protocol") != "HTTP":
-            bad.append(f"listener: {li.get('name')} has protocol {li.get('protocol')}, want HTTP inside the cluster")
+        tls = li.get("tls") or {}
+        refs = tls.get("certificateRefs") or []
+        if li.get("protocol") != "HTTPS" or tls.get("mode", "Terminate") != "Terminate":
+            bad.append(f"listener: {li.get('name')} has protocol {li.get('protocol')}, want HTTPS with mode Terminate")
+        elif not refs or any(r.get("kind", "Secret") != "Secret" or r.get("name") not in cert_secrets for r in refs):
+            bad.append(f"listener: {li.get('name')} names no Secret that a rendered Certificate writes")
     pref = (spec.get("infrastructure") or {}).get("parametersRef") or {}
     params = next((a for a in of_kind(docs, "AgentgatewayParameters") if a["metadata"]["name"] == pref.get("name")), None)
     if pref.get("kind") != "AgentgatewayParameters" or params is None:
@@ -231,6 +238,10 @@ def selftest() -> int:
         "a trace with no cost": lambda ds: pol(ds, "-trace")["spec"]["frontend"]["tracing"]["attributes"].update(
             add=[a for a in pol(ds, "-trace")["spec"]["frontend"]["tracing"]["attributes"]["add"]
                  if a["name"] != "llm.cost"]),
+        "a plain HTTP listener": lambda ds: gateway(ds)["spec"]["listeners"][0].update(protocol="HTTP")
+            or gateway(ds)["spec"]["listeners"][0].pop("tls"),
+        "a listener certificate no Certificate writes": lambda ds: gateway(ds)["spec"]["listeners"][1]["tls"][
+            "certificateRefs"][0].update(name="hand-made-secret"),
         "a trace with the default buffer": lambda ds: pol(ds, "-trace")["spec"]["frontend"].pop("http"),
     }
     failed = 0
@@ -260,8 +271,8 @@ def main() -> int:
     if bad:
         print("❌ the agentgateway Gateway lost a platform policy (charts#815):\n  " + "\n  ".join(bad))
         return 1
-    print("✓ agentgateway: ext-authz before routing, no public listener, a pinned mirror proxy image, "
-          "header strip, format map and trace fields on each profile")
+    print("✓ agentgateway: ext-authz before routing, TLS and no public listener, a pinned "
+          "mirror proxy image, header strip, format map and trace fields on each profile")
     return 0
 
 
