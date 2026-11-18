@@ -321,8 +321,9 @@ spec:
   # report, not a control.
   validationActions: {{ $actions | toJson }}
   matchResources:
-    # Scoped to the two namespaces the platform ClusterSPIFFEIDs select on:
-    # the release namespace and the setec namespace (the frontend identity).
+    # Scoped to the three namespaces the platform ClusterSPIFFEIDs select on:
+    # the release namespace, the setec namespace (the frontend identity) and
+    # the gateway namespace (the agentgateway proxy, charts#815).
     # Their namespaceSelector is `kubernetes.io/metadata.name: <ns>`, and
     # that label is apiserver-managed (NamespaceDefaultLabelName), not
     # settable by a namespace author — so the two scopes cannot be made to
@@ -331,7 +332,7 @@ spec:
       matchExpressions:
         - key: kubernetes.io/metadata.name
           operator: In
-          values: [{{ $ns | quote }}, {{ $setecNs | quote }}]
+          values: [{{ $ns | quote }}, {{ $setecNs | quote }}, {{ include "gibson.gatewayNamespace" . | quote }}]
 ---
 {{/*
 =============================================================================
@@ -448,4 +449,4 @@ spec:
       matchExpressions:
         - key: kubernetes.io/metadata.name
           operator: In
-          values: [{{ $ns | quote }}, {{ $setecNs | quote }}]
+          values: [{{ $ns | quote }}, {{ $setecNs | quote }}, {{ include "gibson.gatewayNamespace" . | quote }}]

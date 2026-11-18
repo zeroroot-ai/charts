@@ -31,7 +31,7 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: {{ $name }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "gibson.gatewayNamespace" . }}
   labels:
     {{- include "gibson.labels" . | nindent 4 }}
     app.kubernetes.io/component: agentgateway
@@ -44,8 +44,6 @@ spec:
     labels:
       app.kubernetes.io/component: agentgateway-proxy
       gibson.zeroroot.ai/egress-internet: "true"
-      # The proxy is the one client of the trace collector (charts#816).
-      gibson.zeroroot.ai/client-trace: "true"
     annotations:
       # Velero fs-backup skips these: a socket, a token and a ConfigMap.
       backup.velero.io/backup-volumes-excludes: "spiffe-workload-api,xds-token,config-volume"
@@ -63,10 +61,14 @@ spec:
       port: {{ index $gw.ports $l }}
       tls:
         mode: Terminate
+        # The Certificate lives in the release namespace, where its issuer
+        # is (an Issuer is namespaced). The ReferenceGrant below lets this
+        # Gateway name the Secret there.
         certificateRefs:
           - kind: Secret
             group: ""
             name: {{ include "gibson.agentgatewayTLSSecretName" $ }}
+            namespace: {{ $.Release.Namespace }}
       allowedRoutes:
         kinds:
           - kind: HTTPRoute
@@ -80,7 +82,7 @@ apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayParameters
 metadata:
   name: {{ $name }}
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "gibson.gatewayNamespace" . }}
   labels:
     {{- include "gibson.labels" . | nindent 4 }}
     app.kubernetes.io/component: agentgateway
@@ -114,3 +116,33 @@ spec:
             runAsNonRoot: true
             seccompProfile:
               type: RuntimeDefault
+---
+{{- /* The cross-namespace references of the gateway namespace into the
+       release namespace: the listener certificate Secret, and the
+       ext-authz and trace collector Services that the policies call. */}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: {{ include "gibson.gatewayNamespace" . }}
+    - group: agentgateway.dev
+      kind: AgentgatewayPolicy
+      namespace: {{ include "gibson.gatewayNamespace" . }}
+  to:
+    - group: ""
+      kind: Secret
+      name: {{ include "gibson.agentgatewayTLSSecretName" . }}
+    - group: ""
+      kind: Service
+      name: {{ include "gibson.extAuthzServiceName" . }}
+    - group: ""
+      kind: Service
+      name: {{ include "gibson.traceCollectorName" . }}

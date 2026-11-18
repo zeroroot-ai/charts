@@ -715,6 +715,16 @@ gibson-ext-authz
 {{- (((.Values.dashboard | default dict).serviceAccount) | default dict).name | default "gibson-dashboard" -}}
 {{- end }}
 
+{{- define "gibson.gatewayNamespace" -}}
+{{- /* The namespace of the agentgateway Gateway, its proxy, its parameters,
+       the policies that attach to it, and the routes, backends and provider
+       credential Secrets that the tenant-operator writes (charts#815). It is
+       apart from the release namespace, so a grant on its Secrets never
+       reaches the Secrets of the platform. The umbrella renders it, like the
+       SPIRE and sandbox namespaces. */ -}}
+{{- printf "%s-gateway" .Release.Namespace -}}
+{{- end -}}
+
 {{- define "gibson.agentgatewayName" -}}
 {{- /* The name of the one agentgateway Gateway (charts#815). The controller
        names the proxy Deployment, Service and ServiceAccount after the

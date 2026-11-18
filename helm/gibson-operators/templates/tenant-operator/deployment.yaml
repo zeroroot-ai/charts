@@ -259,12 +259,14 @@ spec:
             # fixed path platform/daemon.
             - name: GIBSON_DAEMON_SPIFFE_ID
               value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/daemon") | quote }}
-            # The Model gateway (gibson#1366). The operator writes the backend and
-            # the route of each ModelProvider in the gateway namespace, attaches
-            # the route to the one agentgateway Gateway, and gives each backend
-            # an ext-authz policy on this Service and port. The operator of the
-            # epic does not start without them.
+            # The Model gateway (gibson#1366). The operator writes the backend,
+            # the route and the credential Secret of each ModelProvider in the
+            # gateway namespace (gibson.gatewayNamespace) and attaches the route
+            # to the one agentgateway Gateway. ext-authz is in the release
+            # namespace. The operator of the epic does not start without them.
             - name: GIBSON_MODEL_GATEWAY_NAMESPACE
+              value: {{ include "gibson.gatewayNamespace" . | quote }}
+            - name: GIBSON_MODEL_GATEWAY_EXTAUTHZ_NAMESPACE
               value: {{ .Release.Namespace | quote }}
             - name: GIBSON_MODEL_GATEWAY_NAME
               value: {{ include "gibson.agentgatewayName" . | quote }}

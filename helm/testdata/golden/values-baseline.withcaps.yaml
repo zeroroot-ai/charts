@@ -114,6 +114,21 @@ metadata:
     pod-security.kubernetes.io/enforce-version: latest
     pod-security.kubernetes.io/warn: privileged
 ---
+# Source: gibson/templates/agentgateway/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gibson-gateway
+  labels:
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: agentgateway
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+
+---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/sandbox-namespace-baseline-netpol.yaml
 # Namespace-wide default-deny for setec-sandboxes.
 #
@@ -11935,12 +11950,14 @@ spec:
             # fixed path platform/daemon.
             - name: GIBSON_DAEMON_SPIFFE_ID
               value: "spiffe://zeroroot.ai/platform/daemon"
-            # The Model gateway (gibson#1366). The operator writes the backend and
-            # the route of each ModelProvider in the gateway namespace, attaches
-            # the route to the one agentgateway Gateway, and gives each backend
-            # an ext-authz policy on this Service and port. The operator of the
-            # epic does not start without them.
+            # The Model gateway (gibson#1366). The operator writes the backend,
+            # the route and the credential Secret of each ModelProvider in the
+            # gateway namespace (gibson.gatewayNamespace) and attaches the route
+            # to the one agentgateway Gateway. ext-authz is in the release
+            # namespace. The operator of the epic does not start without them.
             - name: GIBSON_MODEL_GATEWAY_NAMESPACE
+              value: "gibson-gateway"
+            - name: GIBSON_MODEL_GATEWAY_EXTAUTHZ_NAMESPACE
               value: "gibson"
             - name: GIBSON_MODEL_GATEWAY_NAME
               value: "gibson-agentgateway"
@@ -21314,7 +21331,7 @@ apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayParameters
 metadata:
   name: gibson-agentgateway
-  namespace: gibson
+  namespace: gibson-gateway
   labels:
     helm.sh/chart: gibson-0.1.0
     app.kubernetes.io/name: gibson
@@ -21360,14 +21377,13 @@ spec:
             runAsNonRoot: true
             seccompProfile:
               type: RuntimeDefault
-
 ---
 # Source: gibson/templates/agentgateway/policies.yaml
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
   name: gibson-agentgateway-ext-authz
-  namespace: gibson
+  namespace: gibson-gateway
   labels:
     helm.sh/chart: gibson-0.1.0
     app.kubernetes.io/name: gibson
@@ -21387,6 +21403,7 @@ spec:
     extAuth:
       backendRef:
         name: gibson-ext-authz
+        namespace: gibson
         port: 9001
       # The gateway refuses each request when ext-authz is down or errs.
       failureMode: FailClosed
@@ -21476,7 +21493,7 @@ apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
   name: gibson-agentgateway-trace
-  namespace: gibson
+  namespace: gibson-gateway
   labels:
     helm.sh/chart: gibson-0.1.0
     app.kubernetes.io/name: gibson
@@ -21498,6 +21515,7 @@ spec:
       # applies only to a backendRef.
       backendRef:
         name: gibson-trace-collector
+        namespace: gibson
         port: 4317
       protocol: GRPC
       # Each request gets a span: the trace is the record of model calls.
@@ -21531,7 +21549,7 @@ apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
   name: gibson-agentgateway-model-strip
-  namespace: gibson
+  namespace: gibson-gateway
   labels:
     helm.sh/chart: gibson-0.1.0
     app.kubernetes.io/name: gibson
@@ -21570,7 +21588,7 @@ apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
   name: gibson-agentgateway-model-formats
-  namespace: gibson
+  namespace: gibson-gateway
   labels:
     helm.sh/chart: gibson-0.1.0
     app.kubernetes.io/name: gibson
@@ -21944,12 +21962,11 @@ spec:
   secretName: gibson-agentgateway-tls
   duration: 2160h
   renewBefore: 360h
-  commonName: "gibson-agentgateway.gibson.svc"
+  commonName: "gibson-agentgateway.gibson-gateway.svc"
   dnsNames:
-    - "gibson-agentgateway"
-    - "gibson-agentgateway.gibson"
-    - "gibson-agentgateway.gibson.svc"
-    - "gibson-agentgateway.gibson.svc.cluster.local"
+    - "gibson-agentgateway.gibson-gateway"
+    - "gibson-agentgateway.gibson-gateway.svc"
+    - "gibson-agentgateway.gibson-gateway.svc.cluster.local"
   privateKey:
     algorithm: ECDSA
     size: 256
@@ -22061,6 +22078,52 @@ spec:
   endpointSelector:
     matchLabels:
       k8s:io.kubernetes.pod.namespace: spire-system
+  enableDefaultDeny:
+    ingress: true
+    egress: true
+  ingress:
+    - {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: '*.cluster.local'
+              - matchPattern: '*.*.cluster.local'
+              - matchPattern: '*.*.*.cluster.local'
+              - matchPattern: '*.*.*.*.cluster.local'
+              - matchPattern: '*.*.*.*.*.cluster.local'
+              - matchPattern: '*.*.*.*.*.*.cluster.local'
+              - matchName: localhost.zeroroot.ai
+              - matchPattern: '*.localhost.zeroroot.ai'
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: gibson-gibson-gateway-default-deny
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-default-deny
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Each pod of the namespace gibson-gateway denies all traffic, except DNS (ADR-0165 rule 4)."
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: gibson-gateway
   enableDefaultDeny:
     ingress: true
     egress: true
@@ -22251,6 +22314,92 @@ apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
   name: gibson-agentgateway
+  namespace: gibson-gateway
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-agentgateway
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "The daemon, the dashboard backend and the sandboxes reach the listeners of the agentgateway proxy. The proxy reaches ext-authz, its controller, the trace collector and the LLM providers."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: agentgateway-proxy
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gibson
+            app.kubernetes.io/component: daemon
+            gibson.zeroroot.ai/net-role: platform
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gibson
+            app.kubernetes.io/component: dashboard
+            gibson.zeroroot.ai/net-role: platform
+        - matchLabels:
+            k8s:io.cilium.k8s.namespace.labels.setec.zeroroot.ai/sandbox-namespace: "true"
+          matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+            - port: "8081"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gibson
+            app.kubernetes.io/component: ext-authz
+            gibson.zeroroot.ai/net-role: platform
+      toPorts:
+        - ports:
+            - port: "9001"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gibson
+            app.kubernetes.io/component: agentgateway-controller
+            gibson.zeroroot.ai/net-role: platform
+      toPorts:
+        - ports:
+            - port: "9978"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gibson
+            app.kubernetes.io/component: trace-collector
+            gibson.zeroroot.ai/datastore: trace
+      toPorts:
+        - ports:
+            - port: "4317"
+              protocol: TCP
+    # The LLM providers, outside the cluster.
+    - toEntities:
+        - world
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: '*'
+---
+# Source: gibson/templates/agentgateway/network-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-agentgateway
   namespace: gibson
   labels:
     helm.sh/chart: gibson-0.1.0
@@ -22262,46 +22411,6 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 specs:
-  - description: "The daemon, the dashboard backend and the sandboxes reach the listeners of the agentgateway proxy. The proxy reaches ext-authz, its controller and the trace collector."
-    endpointSelector:
-      matchLabels:
-        app.kubernetes.io/component: agentgateway-proxy
-    ingress:
-      - fromEndpoints:
-          - matchLabels:
-              app.kubernetes.io/component: daemon
-              gibson.zeroroot.ai/net-role: platform
-          - matchLabels:
-              app.kubernetes.io/component: dashboard
-              gibson.zeroroot.ai/net-role: platform
-          - matchLabels:
-              k8s:io.cilium.k8s.namespace.labels.setec.zeroroot.ai/sandbox-namespace: "true"
-            matchExpressions:
-              - key: k8s:io.kubernetes.pod.namespace
-                operator: Exists
-        toPorts:
-          - ports:
-              - port: "8080"
-                protocol: TCP
-              - port: "8081"
-                protocol: TCP
-    egress:
-      - toEndpoints:
-          - matchLabels:
-              app.kubernetes.io/component: ext-authz
-              gibson.zeroroot.ai/net-role: platform
-        toPorts:
-          - ports:
-              - port: "9001"
-                protocol: TCP
-      - toEndpoints:
-          - matchLabels:
-              app.kubernetes.io/component: agentgateway-controller
-              gibson.zeroroot.ai/net-role: platform
-        toPorts:
-          - ports:
-              - port: "9978"
-                protocol: TCP
   - description: "The daemon and the dashboard backend reach the listeners of the agentgateway proxy."
     endpointSelector:
       matchExpressions:
@@ -22315,6 +22424,7 @@ specs:
       - toEndpoints:
           - matchLabels:
               app.kubernetes.io/component: agentgateway-proxy
+              k8s:io.kubernetes.pod.namespace: gibson-gateway
         toPorts:
           - ports:
               - port: "8080"
@@ -22330,6 +22440,7 @@ specs:
       - fromEndpoints:
           - matchLabels:
               app.kubernetes.io/component: agentgateway-proxy
+              k8s:io.kubernetes.pod.namespace: gibson-gateway
         toPorts:
           - ports:
               - port: "9001"
@@ -22343,15 +22454,25 @@ specs:
       - fromEndpoints:
           - matchLabels:
               app.kubernetes.io/component: agentgateway-proxy
+              k8s:io.kubernetes.pod.namespace: gibson-gateway
         toPorts:
           - ports:
               - port: "9978"
                 protocol: TCP
-  - description: "The trace collector reaches the trace listener of the daemon."
+  - description: "The trace collector accepts the agentgateway proxy on its OTLP port, and reaches the trace listener of the daemon."
     endpointSelector:
       matchLabels:
         app.kubernetes.io/component: trace-collector
         gibson.zeroroot.ai/datastore: trace
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              app.kubernetes.io/component: agentgateway-proxy
+              k8s:io.kubernetes.pod.namespace: gibson-gateway
+        toPorts:
+          - ports:
+              - port: "4317"
+                protocol: TCP
     egress:
       - toEndpoints:
           - matchLabels:
@@ -22361,7 +22482,7 @@ specs:
           - ports:
               - port: "4317"
                 protocol: TCP
-  - description: "The trace listener of the daemon accepts the trace collector only."
+  - description: "The trace listener of the daemon accepts the trace collector."
     endpointSelector:
       matchLabels:
         app.kubernetes.io/component: daemon
@@ -22582,47 +22703,6 @@ specs:
         toPorts:
           - ports:
               - port: "8200"
-                protocol: TCP
----
-# Source: gibson/templates/network-policies.yaml
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: gibson-datastore-trace
-  namespace: gibson
-  labels:
-    helm.sh/chart: gibson-0.1.0
-    app.kubernetes.io/name: gibson
-    app.kubernetes.io/instance: gibson
-    app.kubernetes.io/version: "0.154.0"
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: network-datastore
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"
-specs:
-  - description: "The trace data store admits only its clients."
-    endpointSelector:
-      matchLabels:
-        gibson.zeroroot.ai/datastore: trace
-    ingress:
-      - fromEndpoints:
-          - matchLabels:
-              gibson.zeroroot.ai/client-trace: "true"
-        toPorts:
-          - ports:
-              - port: "4317"
-                protocol: TCP
-  - description: "The clients of the trace data store reach it."
-    endpointSelector:
-      matchLabels:
-        gibson.zeroroot.ai/client-trace: "true"
-    egress:
-      - toEndpoints:
-          - matchLabels:
-              gibson.zeroroot.ai/datastore: trace
-        toPorts:
-          - ports:
-              - port: "4317"
                 protocol: TCP
 ---
 # Source: gibson/templates/network-policies.yaml
@@ -23364,11 +23444,12 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/component: agentgateway-proxy
+  # The proxy runs in the gateway namespace (gibson.gatewayNamespace).
   namespaceSelector:
     matchLabels:
-      kubernetes.io/metadata.name: gibson
+      kubernetes.io/metadata.name: gibson-gateway
   workloadSelectorTemplates:
-    - "k8s:ns:gibson"
+    - "k8s:ns:gibson-gateway"
     - "k8s:sa:gibson-agentgateway"
 ---
 # Source: gibson/charts/gibson-workloads/templates/spire-server/clusterspiffeids.yaml
@@ -24434,7 +24515,7 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: gibson-agentgateway
-  namespace: gibson
+  namespace: gibson-gateway
   labels:
     helm.sh/chart: gibson-0.1.0
     app.kubernetes.io/name: gibson
@@ -24451,8 +24532,6 @@ spec:
     labels:
       app.kubernetes.io/component: agentgateway-proxy
       gibson.zeroroot.ai/egress-internet: "true"
-      # The proxy is the one client of the trace collector (charts#816).
-      gibson.zeroroot.ai/client-trace: "true"
     annotations:
       # Velero fs-backup skips these: a socket, a token and a ConfigMap.
       backup.velero.io/backup-volumes-excludes: "spiffe-workload-api,xds-token,config-volume"
@@ -24469,10 +24548,14 @@ spec:
       port: 8080
       tls:
         mode: Terminate
+        # The Certificate lives in the release namespace, where its issuer
+        # is (an Issuer is namespaced). The ReferenceGrant below lets this
+        # Gateway name the Secret there.
         certificateRefs:
           - kind: Secret
             group: ""
             name: gibson-agentgateway-tls
+            namespace: gibson
       allowedRoutes:
         kinds:
           - kind: HTTPRoute
@@ -24488,10 +24571,14 @@ spec:
       port: 8081
       tls:
         mode: Terminate
+        # The Certificate lives in the release namespace, where its issuer
+        # is (an Issuer is namespaced). The ReferenceGrant below lets this
+        # Gateway name the Secret there.
         certificateRefs:
           - kind: Secret
             group: ""
             name: gibson-agentgateway-tls
+            namespace: gibson
       allowedRoutes:
         kinds:
           - kind: HTTPRoute
@@ -25314,6 +25401,39 @@ spec:
               The persistent queue of the trace collector is more than half
               full for 10 minutes. When it is full, the collector refuses new
               spans and the gateway drops them, so model calls go unrecorded.
+
+---
+# Source: gibson/templates/agentgateway/gateway.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata:
+  name: gibson-agentgateway
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: gibson-gateway
+    - group: agentgateway.dev
+      kind: AgentgatewayPolicy
+      namespace: gibson-gateway
+  to:
+    - group: ""
+      kind: Secret
+      name: gibson-agentgateway-tls
+    - group: ""
+      kind: Service
+      name: gibson-ext-authz
+    - group: ""
+      kind: Service
+      name: gibson-trace-collector
 
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
@@ -26411,8 +26531,9 @@ spec:
   # report, not a control.
   validationActions: ["Deny"]
   matchResources:
-    # Scoped to the two namespaces the platform ClusterSPIFFEIDs select on:
-    # the release namespace and the setec namespace (the frontend identity).
+    # Scoped to the three namespaces the platform ClusterSPIFFEIDs select on:
+    # the release namespace, the setec namespace (the frontend identity) and
+    # the gateway namespace (the agentgateway proxy, charts#815).
     # Their namespaceSelector is `kubernetes.io/metadata.name: <ns>`, and
     # that label is apiserver-managed (NamespaceDefaultLabelName), not
     # settable by a namespace author — so the two scopes cannot be made to
@@ -26421,7 +26542,7 @@ spec:
       matchExpressions:
         - key: kubernetes.io/metadata.name
           operator: In
-          values: ["gibson", "setec-system"]
+          values: ["gibson", "setec-system", "gibson-gateway"]
 ---
 # Source: gibson/charts/gibson-workloads/templates/spire-server/platform-identity-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -26443,7 +26564,7 @@ spec:
       matchExpressions:
         - key: kubernetes.io/metadata.name
           operator: In
-          values: ["gibson", "setec-system"]
+          values: ["gibson", "setec-system", "gibson-gateway"]
 
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/postgres-logins.yaml

@@ -183,11 +183,12 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/component: agentgateway-proxy
+  # The proxy runs in the gateway namespace (gibson.gatewayNamespace).
   namespaceSelector:
     matchLabels:
-      kubernetes.io/metadata.name: {{ $ns }}
+      kubernetes.io/metadata.name: {{ include "gibson.gatewayNamespace" . }}
   workloadSelectorTemplates:
-    - "k8s:ns:{{ $ns }}"
+    - "k8s:ns:{{ include "gibson.gatewayNamespace" . }}"
     - "k8s:sa:{{ include "gibson.agentgatewayName" . }}"
 ---
 # --- ratelimit (deploy#1657) ---

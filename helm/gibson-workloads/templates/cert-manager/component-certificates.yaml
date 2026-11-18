@@ -184,7 +184,12 @@ spec:
        OpenFGA cert above, so a caller that trusts the ca.crt of
        gibson-openfga-http-tls trusts the gateway too. The daemon has it in
        SSL_CERT_DIR (/etc/ssl/fga-ca). */}}
+{{- /* The Certificate stays in the release namespace, where the namespaced
+       issuer is. Its names are those of the proxy Service in the gateway
+       namespace (gibson.gatewayNamespace), and a ReferenceGrant lets the
+       Gateway there name this Secret. */}}
 {{- $agw := include "gibson.agentgatewayName" . }}
+{{- $agwNs := include "gibson.gatewayNamespace" . }}
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -198,12 +203,11 @@ spec:
   secretName: {{ include "gibson.agentgatewayTLSSecretName" . }}
   duration: 2160h
   renewBefore: 360h
-  commonName: {{ printf "%s.%s.svc" $agw .Release.Namespace | quote }}
+  commonName: {{ printf "%s.%s.svc" $agw $agwNs | quote }}
   dnsNames:
-    - {{ $agw | quote }}
-    - {{ printf "%s.%s" $agw .Release.Namespace | quote }}
-    - {{ printf "%s.%s.svc" $agw .Release.Namespace | quote }}
-    - {{ printf "%s.%s.svc.cluster.local" $agw .Release.Namespace | quote }}
+    - {{ printf "%s.%s" $agw $agwNs | quote }}
+    - {{ printf "%s.%s.svc" $agw $agwNs | quote }}
+    - {{ printf "%s.%s.svc.cluster.local" $agw $agwNs | quote }}
   privateKey:
     algorithm: ECDSA
     size: 256

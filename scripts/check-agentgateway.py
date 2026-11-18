@@ -32,6 +32,15 @@ The check renders each shipped profile and fails when:
   5. formats    no backend.ai.routes on the listener `model` names the four
                 paths /v1/messages, /v1/responses, /v1/embeddings and
                 /v1/models.
+  7. namespace  the Gateway is in the release namespace, or in a namespace
+                that the render does not create, or a policy on the Gateway
+                is in another namespace (a targetRef names an object of the
+                namespace of the policy, so it would attach to nothing), or a
+                reference across namespaces (a listener certificate, the
+                ext-authz or the trace collector Service) has no
+                ReferenceGrant in the namespace of its target. The gateway
+                namespace keeps the provider credential Secrets apart from
+                the Secrets of the platform.
   6. trace      no frontend policy on the Gateway sets maxBufferSize and
                 adds the six trace fields that the daemon reads, each with
                 its expression (TRACE_FIELDS), or the ext-authz policy does
@@ -98,6 +107,25 @@ def targets(pol: dict, gw: str, section: str | None) -> bool:
                and r.get("sectionName") == section for r in refs)
 
 
+def ns(d: dict) -> str:
+    return (d.get("metadata") or {}).get("namespace") or ""
+
+
+def granted(docs: list[dict], from_group: str, from_kind: str, from_ns: str,
+            to_kind: str, to_name: str, to_ns: str) -> bool:
+    """A ReferenceGrant in to_ns lets from_kind objects of from_ns name this object."""
+    for g in of_kind(docs, "ReferenceGrant"):
+        if ns(g) != to_ns:
+            continue
+        spec = g.get("spec") or {}
+        f_ok = any(f.get("group") == from_group and f.get("kind") == from_kind and f.get("namespace") == from_ns
+                   for f in spec.get("from") or [])
+        t_ok = any(t.get("kind") == to_kind and t.get("name", to_name) == to_name for t in spec.get("to") or [])
+        if f_ok and t_ok:
+            return True
+    return False
+
+
 def header_names(docs: list[dict]) -> set[str]:
     """Each x-gibson-* header that a rendered object names, outside the strip policy."""
     names = set()
@@ -132,6 +160,32 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     spec = gw.get("spec") or {}
     pols = of_kind(docs, "AgentgatewayPolicy")
 
+    # 7. The gateway namespace, and each reference out of it.
+    gw_ns = ns(gw)
+    release_ns = ns(next((s for s in of_kind(docs, "Service")
+                          if (s["metadata"].get("labels") or {}).get("app.kubernetes.io/component") == "ext-authz"), gw))
+    if gw_ns == release_ns:
+        bad.append(f"namespace: Gateway {name} is in the release namespace {gw_ns}, not in a gateway namespace")
+    if gw_ns not in {d["metadata"]["name"] for d in of_kind(docs, "Namespace")}:
+        bad.append(f"namespace: the render creates no Namespace {gw_ns} for Gateway {name}")
+    for p in pols:
+        refs = (p.get("spec") or {}).get("targetRefs") or []
+        if any(r.get("kind") == "Gateway" and r.get("name") == name for r in refs) and ns(p) != gw_ns:
+            bad.append(f"namespace: the policy {p['metadata']['name']} targets Gateway {name} from namespace {ns(p)}")
+        sp = p.get("spec") or {}
+        for ref in (((sp.get("traffic") or {}).get("extAuth") or {}).get("backendRef"),
+                    ((sp.get("frontend") or {}).get("tracing") or {}).get("backendRef")):
+            if ref and ref.get("namespace", ns(p)) != ns(p) and not granted(
+                    docs, "agentgateway.dev", "AgentgatewayPolicy", ns(p), "Service", ref.get("name"), ref["namespace"]):
+                bad.append(f"namespace: the policy {p['metadata']['name']} names Service {ref['namespace']}/"
+                           f"{ref.get('name')} with no ReferenceGrant there")
+    for li in spec.get("listeners") or []:
+        for r in ((li.get("tls") or {}).get("certificateRefs") or []):
+            if r.get("namespace", gw_ns) != gw_ns and not granted(
+                    docs, GW_GROUP, "Gateway", gw_ns, "Secret", r.get("name"), r["namespace"]):
+                bad.append(f"namespace: listener {li.get('name')} names Secret {r['namespace']}/{r.get('name')} "
+                           f"with no ReferenceGrant there")
+
     # 1. ext-authz on the whole Gateway, before routing, fail closed.
     svc = next((s for s in of_kind(docs, "Service")
                 if (s["metadata"].get("labels") or {}).get("app.kubernetes.io/component") == "ext-authz"), None)
@@ -144,6 +198,7 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
         if (targets(p, name, None) and t.get("phase") == "PreRouting"
                 and ((p["spec"].get("strategy") or {}).get("inheritance")) == "Override"
                 and svc and ref.get("name") == svc["metadata"]["name"] and ref.get("port") == grpc_port
+                and ref.get("namespace", ns(p)) == ns(svc)
                 and ref.get("kind", "Service") == "Service"
                 and "grpc" in ea and ea.get("failureMode") == "FailClosed"
                 and any(MODEL_EXPR in str(v) for v in ((ea.get("grpc") or {}).get("requestMetadata") or {}).values())):
@@ -289,6 +344,13 @@ def selftest() -> int:
             or gateway(ds)["spec"]["listeners"][0].pop("tls"),
         "a listener certificate no Certificate writes": lambda ds: gateway(ds)["spec"]["listeners"][1]["tls"][
             "certificateRefs"][0].update(name="hand-made-secret"),
+        "a Gateway in the release namespace": lambda ds: [d["metadata"].update(namespace="gibson") for d in ds
+                                                       if d.get("kind") in ("Gateway", "AgentgatewayPolicy")
+                                                       and d["metadata"].get("namespace") == "gibson-gateway"],
+        "a Gateway policy in another namespace": lambda ds: pol(ds, "-model-strip")["metadata"].update(
+            namespace="gibson"),
+        "no ReferenceGrant for the cross-namespace references": lambda ds: [
+            ds.remove(d) for d in [d for d in ds if d.get("kind") == "ReferenceGrant"]],
         "no agent listener": lambda ds: gateway(ds)["spec"].update(
             listeners=[li for li in gateway(ds)["spec"]["listeners"] if li["name"] != "agent"]),
         "an agent listener policy that replaces ext-authz": lambda ds: ds.append({

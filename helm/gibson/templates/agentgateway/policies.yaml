@@ -26,12 +26,16 @@ proves each policy on each render.
 {{- $gw := .Values.gateway }}
 {{- $extAuthzPort := ((((index .Values "gibson-workloads") | default dict).extAuthz | default dict).ports | default dict).grpc | default 9001 }}
 {{- $traceCollector := (index .Values "gibson-workloads").traceCollector }}
+{{- /* The policies on the Gateway live in its namespace
+       (gibson.gatewayNamespace). The two TLS policies on a Service live in the
+       release namespace with their Service: a targetRef names an object of
+       the namespace of the policy. */}}
 {{- $gatewayRef := dict "group" "gateway.networking.k8s.io" "kind" "Gateway" "name" $name }}
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
   name: {{ $name }}-ext-authz
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "gibson.gatewayNamespace" . }}
   labels:
     {{- include "gibson.labels" . | nindent 4 }}
     app.kubernetes.io/component: agentgateway
@@ -45,6 +49,7 @@ spec:
     extAuth:
       backendRef:
         name: {{ include "gibson.extAuthzServiceName" . }}
+        namespace: {{ .Release.Namespace }}
         port: {{ $extAuthzPort }}
       # The gateway refuses each request when ext-authz is down or errs.
       failureMode: FailClosed
@@ -122,7 +127,7 @@ apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
   name: {{ $name }}-trace
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "gibson.gatewayNamespace" . }}
   labels:
     {{- include "gibson.labels" . | nindent 4 }}
     app.kubernetes.io/component: agentgateway
@@ -138,6 +143,7 @@ spec:
       # applies only to a backendRef.
       backendRef:
         name: {{ include "gibson.traceCollectorName" . }}
+        namespace: {{ .Release.Namespace }}
         port: {{ $traceCollector.ports.otlp }}
       protocol: GRPC
       # Each request gets a span: the trace is the record of model calls.
@@ -166,7 +172,7 @@ apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
   name: {{ $name }}-model-strip
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "gibson.gatewayNamespace" . }}
   labels:
     {{- include "gibson.labels" . | nindent 4 }}
     app.kubernetes.io/component: agentgateway
@@ -185,7 +191,7 @@ apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
   name: {{ $name }}-model-formats
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "gibson.gatewayNamespace" . }}
   labels:
     {{- include "gibson.labels" . | nindent 4 }}
     app.kubernetes.io/component: agentgateway
