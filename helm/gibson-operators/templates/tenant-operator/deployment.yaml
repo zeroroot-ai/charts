@@ -262,18 +262,13 @@ spec:
             # The Model gateway (gibson#1366). The operator writes the backend,
             # the route and the credential Secret of each ModelProvider in the
             # gateway namespace (gibson.gatewayNamespace) and attaches the route
-            # to the one agentgateway Gateway. ext-authz is in the release
-            # namespace. The operator of the epic does not start without them.
+            # to the one agentgateway Gateway. It renders no ext-authz: the
+            # chart attaches ext-authz to the Gateway. The operator of the epic
+            # does not start without them.
             - name: GIBSON_MODEL_GATEWAY_NAMESPACE
               value: {{ include "gibson.gatewayNamespace" . | quote }}
-            - name: GIBSON_MODEL_GATEWAY_EXTAUTHZ_NAMESPACE
-              value: {{ .Release.Namespace | quote }}
             - name: GIBSON_MODEL_GATEWAY_NAME
               value: {{ include "gibson.agentgatewayName" . | quote }}
-            - name: GIBSON_MODEL_GATEWAY_EXTAUTHZ_SERVICE
-              value: {{ include "gibson.extAuthzServiceName" . | quote }}
-            - name: GIBSON_MODEL_GATEWAY_EXTAUTHZ_PORT
-              value: {{ include "gibson.extAuthzGrpcPort" . | quote }}
             # The image of the belief trainer CronJob of each tenant
             # (gibson#616). The operator exits at start when it is empty.
             - name: BELIEF_TRAINER_IMAGE

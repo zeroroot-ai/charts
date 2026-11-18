@@ -8232,7 +8232,7 @@ metadata:
     app.kubernetes.io/part-of: gibson
 rules:
   - apiGroups: ["agentgateway.dev"]
-    resources: ["agentgatewaybackends", "agentgatewaypolicies"]
+    resources: ["agentgatewaybackends"]
     verbs: ["get", "list", "create", "update", "patch", "delete"]
   - apiGroups: ["gateway.networking.k8s.io"]
     resources: ["httproutes"]
@@ -12147,18 +12147,13 @@ spec:
             # The Model gateway (gibson#1366). The operator writes the backend,
             # the route and the credential Secret of each ModelProvider in the
             # gateway namespace (gibson.gatewayNamespace) and attaches the route
-            # to the one agentgateway Gateway. ext-authz is in the release
-            # namespace. The operator of the epic does not start without them.
+            # to the one agentgateway Gateway. It renders no ext-authz: the
+            # chart attaches ext-authz to the Gateway. The operator of the epic
+            # does not start without them.
             - name: GIBSON_MODEL_GATEWAY_NAMESPACE
               value: "gibson-gateway"
-            - name: GIBSON_MODEL_GATEWAY_EXTAUTHZ_NAMESPACE
-              value: "gibson"
             - name: GIBSON_MODEL_GATEWAY_NAME
               value: "gibson-agentgateway"
-            - name: GIBSON_MODEL_GATEWAY_EXTAUTHZ_SERVICE
-              value: "gibson-ext-authz"
-            - name: GIBSON_MODEL_GATEWAY_EXTAUTHZ_PORT
-              value: "9001"
             # The image of the belief trainer CronJob of each tenant
             # (gibson#616). The operator exits at start when it is empty.
             - name: BELIEF_TRAINER_IMAGE
@@ -18429,11 +18424,12 @@ spec:
             # Peer SPIFFE IDs for the harness callback listener allowlist.
             # REQUIRED when SPIFFE is configured — the daemon fails to start
             # otherwise (fail-closed per critical-tls-no-fallbacks Req 1.5).
-            # The Model gateway (charts#815). The daemon sends its own model
-            # calls there, and it gives each sandbox the URL and the CA in the
-            # ResolveModel reply. The listener certificate comes from the
+            # The Model gateway (charts#815), for the model client of the
+            # daemon: the in-cluster URL and the CA that the daemon trusts for
+            # it and for nothing else. The listener certificate comes from the
             # component issuer, the issuer of the OpenFGA certificate, so the
-            # CA is the ca.crt that /etc/ssl/fga-ca holds.
+            # CA is the ca.crt that /etc/ssl/fga-ca holds. A sandbox gets the
+            # public pair below in the ResolveModel reply, never this one.
             - name: GIBSON_MODEL_GATEWAY_URL
               value: "https://gibson-agentgateway.gibson-gateway.svc:8080"
             - name: GIBSON_MODEL_GATEWAY_CA_FILE
