@@ -396,6 +396,12 @@ gibson:
     logging:
       level: info
 
+    # The Shared Agent Skills that the operator offers to each tenant (epic
+    # gibson#1364). Each entry is {name, reference}. The name equals the
+    # name in SKILL.md, and the reference is <registry>/<repository>@sha256:<hex>:
+    # the render fails on a tag. The daemon pulls each one at start.
+    sharedAgentSkills: []
+
     # Secrets / KEK provider — required (one-code-path) and
     # (daemon-no-K8s-API). The previous `type: kubernetes` was
     # removed by gibson#212 / S10: the daemon now reads the master KEK
