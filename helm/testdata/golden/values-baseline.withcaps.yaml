@@ -18447,6 +18447,21 @@ spec:
               value: "https://gibson-agentgateway.gibson-gateway.svc:8080"
             - name: GIBSON_MODEL_GATEWAY_CA_FILE
               value: "/etc/ssl/fga-ca/ca.crt"
+            # The gateway for an agent in a sandbox (charts#815). A sandbox
+            # reaches the cluster only through the Edge, so these are the
+            # Edge forward routes, on the public API endpoint that the daemon
+            # already gives an agent as its callback address
+            # (gibson.apiEndpoint, callback.advertise_address).
+            - name: GIBSON_MODEL_GATEWAY_PUBLIC_URL
+              value: "https://api.localhost.zeroroot.ai:443/gateway/model"
+            - name: GIBSON_AGENT_GATEWAY_PUBLIC_URL
+              value: "https://api.localhost.zeroroot.ai:443/gateway/agent"
+            # The CA of the Edge certificate when the Edge issuer is private
+            # (selfsigned-ca, openbao-issuer). It is unset when the Edge has
+            # a certificate of a public CA. The daemon mounts it at
+            # /etc/ssl/envoy-ca already.
+            - name: GIBSON_GATEWAY_PUBLIC_CA_FILE
+              value: "/etc/ssl/envoy-ca/ca.crt"
             # The trace collector (charts#816). The daemon accepts this SVID on
             # its gRPC port for the OTLP TraceService Export method only, and
             # adds it to its allowed peers by itself.
