@@ -1930,13 +1930,20 @@ gateway:
   # of gibson-workloads (gibson.traceCollectorName, charts#816), over SPIFFE
   # mTLS. The record of model calls is read from it.
   # The request headers that the Model gateway removes before the provider
-  # call. ext-authz and the callers use these names, and the provider must
-  # never get the tenant, the subject, the mission or the task. The CRD
-  # takes exact names only (no prefix) and 16 at most.
-  # scripts/check-agentgateway.py fails when a chart file names an
-  # x-gibson-* header that is not on this list.
+  # call. The provider must never get the tenant, the subject, the mission,
+  # the task, the route claim or the Capability Grant. The CRD takes exact
+  # names only (no prefix) and 16 at most. scripts/check-agentgateway.py
+  # fails when a chart file names an x-gibson-* header that is not on this
+  # list, and when x-capability-grant or a route header is missing.
   stripRequestHeaders:
+    # The route claim. The caller sends the two headers, each route matches
+    # on them, and ext-authz refuses a claimed tenant that is not the
+    # tenant of the Capability Grant (gibson aaif-chart-contract.md, round 4).
     - x-gibson-tenant
+    - x-gibson-provider
+    # The Capability Grant of the caller. ext-authz reads it.
+    - x-capability-grant
+    # The trusted headers that ext-authz sets.
     - x-gibson-subject
     - x-gibson-mission
     - x-gibson-task
@@ -1947,8 +1954,6 @@ gateway:
     - x-gibson-identity-issued-at
     - x-gibson-identity-credential-type
     - x-gibson-identity-component-scope
-    - x-gibson-identity-mission
-    - x-gibson-identity-task
 
 cert-manager:
   # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).

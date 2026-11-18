@@ -26,8 +26,9 @@ The check renders each shipped profile and fails when:
                 ghcr.io/zeroroot-ai/mirror/, has no sha256 digest, or is not
                 on airgap/images.txt.
   4. strip      no policy on the listener `model` removes each x-gibson-*
-                header that a rendered object names, with inheritance
-                Override.
+                header that a rendered object names and each header of
+                MUST_STRIP (the route claim and the Capability Grant), with
+                inheritance Override.
   5. formats    no backend.ai.routes on the listener `model` names the four
                 paths /v1/messages, /v1/responses, /v1/embeddings and
                 /v1/models.
@@ -71,6 +72,10 @@ MODEL_EXPR = "json(request.body).model"
 # A whole header name. A name that ends in "-" is a prefix match of the Edge,
 # not a header, and is skipped.
 HEADER = re.compile(r"\bx-gibson-[a-z0-9-]+")
+# The headers that ext-authz reads and the provider must never get: the
+# route claim that each route matches on, and the Capability Grant
+# (gibson aaif-chart-contract.md, round 4).
+MUST_STRIP = {"x-gibson-tenant", "x-gibson-provider", "x-capability-grant"}
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -197,7 +202,7 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
             bad.append(f"image: the proxy image {ref} is not on airgap/images.txt")
 
     # 4. The x-gibson-* headers leave the model listener.
-    want = header_names(docs)
+    want = header_names(docs) | MUST_STRIP
     strip = [p for p in pols if targets(p, name, "model")
              and ((p["spec"].get("strategy") or {}).get("inheritance")) == "Override"
              and (((p["spec"].get("traffic") or {}).get("headerModifiers") or {}).get("request") or {}).get("remove")]
@@ -263,6 +268,12 @@ def selftest() -> int:
         "a proxy image with no digest": lambda ds: params(ds)["spec"]["image"].pop("digest"),
         "a header the strip list misses": lambda ds: pol(ds, "-model-strip")["spec"]["traffic"]["headerModifiers"][
             "request"].update(remove=["x-gibson-tenant"]),
+        "a strip list that keeps the Capability Grant": lambda ds: pol(ds, "-model-strip")["spec"]["traffic"][
+            "headerModifiers"]["request"].update(remove=[h for h in pol(ds, "-model-strip")["spec"]["traffic"][
+                "headerModifiers"]["request"]["remove"] if h != "x-capability-grant"]),
+        "a strip list that keeps the route provider": lambda ds: pol(ds, "-model-strip")["spec"]["traffic"][
+            "headerModifiers"]["request"].update(remove=[h for h in pol(ds, "-model-strip")["spec"]["traffic"][
+                "headerModifiers"]["request"]["remove"] if h != "x-gibson-provider"]),
         "a strip policy a route can replace": lambda ds: pol(ds, "-model-strip")["spec"].pop("strategy"),
         "a format map with no /v1/models": lambda ds: pol(ds, "-model-formats")["spec"]["backend"]["ai"][
             "routes"].pop("/v1/models"),

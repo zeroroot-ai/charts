@@ -17168,6 +17168,12 @@ spec:
       # The gateway refuses each request when ext-authz is down or errs.
       failureMode: FailClosed
       # The Envoy gRPC Authorization/Check protocol, the same as the Edge.
+      # The gRPC check carries the path, the method and every request
+      # header, so ext-authz gets the route claim (x-gibson-tenant,
+      # x-gibson-provider) and x-capability-grant. ext-authz knows a gateway
+      # call from the SPIFFE ID of the proxy, and it refuses a claimed
+      # tenant that is not the tenant of the Capability Grant, so a caller
+      # of tenant A cannot match a route of tenant B.
       grpc:
         # metadata_context.filter_metadata["gibson"].model holds the exact
         # model name of the call. A filter_metadata value must be a map, so
@@ -17323,6 +17329,8 @@ spec:
       request:
         remove:
           - x-gibson-tenant
+          - x-gibson-provider
+          - x-capability-grant
           - x-gibson-subject
           - x-gibson-mission
           - x-gibson-task
@@ -17333,8 +17341,6 @@ spec:
           - x-gibson-identity-issued-at
           - x-gibson-identity-credential-type
           - x-gibson-identity-component-scope
-          - x-gibson-identity-mission
-          - x-gibson-identity-task
 ---
 # Source: gibson/templates/agentgateway/policies.yaml
 apiVersion: agentgateway.dev/v1alpha1
