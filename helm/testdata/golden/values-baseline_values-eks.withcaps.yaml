@@ -12175,6 +12175,12 @@ spec:
               value: "gibson-gateway"
             - name: GIBSON_MODEL_GATEWAY_NAME
               value: "gibson-agentgateway"
+            # The Gateway that the route of each outside agent attaches to
+            # (gibson#1403). One Gateway holds the model listener and the
+            # agent listener, so the value is the same helper as above. The
+            # operator does not start without it.
+            - name: GIBSON_AGENT_GATEWAY_NAME
+              value: "gibson-agentgateway"
             # The image of the belief trainer CronJob of each tenant
             # (gibson#616). The operator exits at start when it is empty.
             - name: BELIEF_TRAINER_IMAGE
