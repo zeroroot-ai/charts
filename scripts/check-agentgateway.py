@@ -494,6 +494,10 @@ def judge_ingress(docs: list[dict], gw: dict) -> list[str]:
     return bad
 
 
+# The share of the proxy memory limit that its in-memory span queue may hold.
+SPAN_QUEUE_SHARE = 0.5
+
+
 def mib(q: str) -> float:
     m = re.fullmatch(r"(\d+)(Mi|Gi)", str(q))
     return float(m.group(1)) * (1024 if m.group(2) == "Gi" else 1) if m else 0.0
@@ -532,6 +536,12 @@ def judge_collector(docs: list[dict], gw: dict) -> list[str]:
     if env.get("OTEL_BSP_MAX_EXPORT_BATCH_SIZE") != "1":
         bad.append("collector: the proxy may send more than one span in one export "
                    "(OTEL_BSP_MAX_EXPORT_BATCH_SIZE is not 1)")
+    # The in-memory span queue of the proxy: each span holds up to two buffers.
+    limit = mib((((params.get("spec") or {}).get("resources") or {}).get("limits") or {}).get("memory"))
+    queue = int(env.get("OTEL_BSP_MAX_QUEUE_SIZE") or 2048)
+    if not limit or queue * 2 * buf > SPAN_QUEUE_SHARE * limit:
+        bad.append(f"collector: the span queue of the proxy holds {queue} spans of up to {2 * buf:.0f} MiB, more "
+                   f"than {SPAN_QUEUE_SHARE:.0%} of its memory limit of {limit:.0f} MiB")
     return bad
 
 
@@ -915,6 +925,8 @@ def selftest() -> int:
             c["data"].update({"collector.yaml": re.sub(r"queue_size: \d+", "queue_size: 3221225472",
                                                         c["data"]["collector.yaml"])})
             for c in ds if c.get("kind") == "ConfigMap" and c["metadata"]["name"] == "gibson-trace-collector"],
+        "a proxy span queue that passes half of its memory": lambda ds: [
+            e.update(value="64") for e in params(ds)["spec"]["env"] if e["name"] == "OTEL_BSP_MAX_QUEUE_SIZE"],
         "a proxy that batches spans": lambda ds: params(ds)["spec"].update(
             env=[e for e in params(ds)["spec"]["env"] if e["name"] != "OTEL_BSP_MAX_EXPORT_BATCH_SIZE"]),
         "a deployer role bound in each namespace": lambda ds: next(

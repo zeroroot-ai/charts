@@ -1930,10 +1930,13 @@ gateway:
       digest: "sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b"
     replicas: 2
     # The most finished spans that the proxy keeps in memory before it sends
-    # them to the trace collector (OTEL_BSP_MAX_QUEUE_SIZE). The proxy drops
-    # a span when this queue is full. A span can hold 32 MiB, so the queue
-    # stays small against the memory limit below.
-    spanQueueSize: 64
+    # them to the trace collector (OTEL_BSP_MAX_QUEUE_SIZE, read by the batch
+    # span processor of opentelemetry_sdk 0.33.1 that agentgateway v1.7.0
+    # uses). The proxy drops a span when this queue is full. A span can hold
+    # two buffers (maxBufferSize x 2, 32 MiB), so 16 spans hold at most 512
+    # MiB, half of the memory limit below. check-agentgateway.py fails when
+    # the queue can hold more than half of the limit.
+    spanQueueSize: 16
     # The startup budget of the proxy, in seconds. The proxy is not Ready
     # and serves no listener until the controller sends its first xDS
     # config. A cluster start can keep the controller away for minutes, and
