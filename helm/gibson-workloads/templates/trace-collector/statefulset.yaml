@@ -123,12 +123,21 @@ spec:
             - name: otlp
               containerPort: {{ $p.otlp }}
               protocol: TCP
+            # The plaintext probe listener. It serves GET /ready only.
+            - name: probe
+              containerPort: {{ $p.probe }}
+              protocol: TCP
+          # The otlp port is SPIFFE mTLS. A tcpSocket probe there opens the
+          # port with no handshake, so the probe asks Envoy /ready through
+          # the probe listener. Envoy answers 200 when its listeners and
+          # clusters are ready.
           readinessProbe:
-            tcpSocket:
-              port: otlp
+            httpGet:
+              path: /ready
+              port: probe
             initialDelaySeconds: 3
             periodSeconds: 5
-            timeoutSeconds: 2
+            timeoutSeconds: 3
           resources:
             {{- toYaml $tc.sidecar.resources | nindent 12 }}
           volumeMounts:

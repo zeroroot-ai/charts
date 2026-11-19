@@ -21,6 +21,10 @@ envoy.yaml — the bootstrap of the Envoy mTLS sidecar, in the shape of the
   out  a plaintext listener on 127.0.0.1 that tcp_proxies to the trace
        listener of the daemon (gibson.daemonTracePort) over SPIFFE mTLS. It presents the SVID platform/otel-collector
        and accepts only the SAN platform/daemon.
+  probe a plaintext listener on the probe port that forwards GET /ready to
+       the loopback admin and answers 404 to each other path. The kubelet
+       probes it. A probe of the otlp port opens a TLS port with no
+       handshake, and Envoy logs each one as a failed handshake.
 */}}
 {{- $p := .Values.traceCollector.ports -}}
 {{- $q := .Values.traceCollector.queue -}}
@@ -104,6 +108,28 @@ data:
         socket_address: { address: 127.0.0.1, port_value: 9902 }
     static_resources:
       listeners:
+        - name: admin_probe
+          address:
+            socket_address: { address: 0.0.0.0, port_value: {{ $p.probe }} }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: admin_probe
+                    codec_type: AUTO
+                    route_config:
+                      name: admin_probe
+                      virtual_hosts:
+                        - name: admin_probe
+                          domains: ["*"]
+                          routes:
+                            - match: { path: "/ready" }
+                              route: { cluster: envoy_admin_loopback }
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
         - name: otlp_mtls_ingress
           address:
             socket_address: { address: 0.0.0.0, port_value: {{ $p.otlp }} }
@@ -145,6 +171,16 @@ data:
                     stat_prefix: daemon_mtls
                     cluster: daemon_mtls
       clusters:
+        - name: envoy_admin_loopback
+          type: STATIC
+          connect_timeout: 0.25s
+          load_assignment:
+            cluster_name: envoy_admin_loopback
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: 127.0.0.1, port_value: 9902 }
         - name: spire_agent
           type: STATIC
           connect_timeout: 0.25s

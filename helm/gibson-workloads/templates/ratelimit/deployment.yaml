@@ -185,14 +185,20 @@ spec:
             - name: grpc
               containerPort: {{ $ports.grpc | default 8081 }}
               protocol: TCP
-          # A tcpSocket probe needs the kernel to accept, nothing more, so 2
-          # is generous. It is declared because the default is 1 (charts#306).
+            # The plaintext probe listener. It serves GET /ready only.
+            - name: probe
+              containerPort: {{ $ports.probe }}
+              protocol: TCP
+          # The grpc port is SPIFFE mTLS. A tcpSocket probe there opens the
+          # port with no handshake, so the probe asks Envoy /ready through
+          # the probe listener. Envoy answers from memory, so 3 seconds.
           readinessProbe:
-            tcpSocket:
-              port: grpc
+            httpGet:
+              path: /ready
+              port: probe
             initialDelaySeconds: 3
             periodSeconds: 5
-            timeoutSeconds: 2
+            timeoutSeconds: 3
           resources:
             {{- toYaml .Values.ratelimit.sidecar.resources | nindent 12 }}
           volumeMounts:
