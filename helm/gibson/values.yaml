@@ -1854,15 +1854,16 @@ agentgateway:
     # The controller signs the xDS connection of each proxy with TLS.
     xds:
       mode: tls
-  # The default proxy image of a Gateway that names no parameters. The env
-  # vars of the controller hold no digest. The one Gateway of this chart
-  # names its parameters, which pin the proxy image by digest
-  # (gateway.proxy.image below).
+  # The default proxy image of a Gateway that names no parameters. The
+  # controller gets it as AGW_PROXY_IMAGE_TAG and uses the tag as it is, so
+  # the tag carries the digest. The one Gateway of this chart names its
+  # parameters, which pin the same image by digest (gateway.proxy.image
+  # below). check-agentgateway.py fails when the two differ.
   proxy:
     image:
       registry: "ghcr.io/zeroroot-ai"
       repository: "mirror/agentgateway"
-      tag: "v1.7.0"
+      tag: "v1.7.0@sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b"
   # The deployer writes (Deployments, Services, ServiceAccounts, Secrets,
   # ConfigMaps and the rest of the proxy) only in the gateway namespace, by a
   # RoleBinding there (upstream narrow mode). The list must be exactly

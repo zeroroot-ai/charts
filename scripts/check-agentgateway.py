@@ -76,6 +76,9 @@ The check renders each shipped profile and fails when:
                 DENY_V6 (gibson contract round 8: the proxy resolves a
                 tenant URL again at each call, and the CNI is the only
                 control at connect time).
+ 17. default    the default proxy image of the controller
+                (AGW_PROXY_IMAGE_*) is not the proxy image of the
+                parameters, pinned by the same digest.
  16. limits     the controller container has no CPU or memory limit. The
                 controller derives GOMAXPROCS and GOMEMLIMIT from them.
  15. grants     a ReferenceGrant into the release namespace lets a kind of
@@ -712,6 +715,18 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     # 15. The ReferenceGrants of the gateway namespace.
     bad += judge_grants(docs, gw)
 
+    # 17. The default proxy image of the controller.
+    if ctrl_env := {e["name"]: e.get("value") for e in ((next((d for d in of_kind(docs, "Deployment")
+                    if d["metadata"]["name"] == "agentgateway"), {}).get("spec") or {}).get("template", {})
+                    .get("spec", {}).get("containers") or [{}])[0].get("env") or []}:
+        default = (f"{ctrl_env.get('AGW_PROXY_IMAGE_REGISTRY')}/{ctrl_env.get('AGW_PROXY_IMAGE_REPOSITORY')}:"
+                   f"{ctrl_env.get('AGW_PROXY_IMAGE_TAG')}")
+        pref = ((gw.get("spec") or {}).get("infrastructure") or {}).get("parametersRef") or {}
+        prm = next((a for a in of_kind(docs, "AgentgatewayParameters") if a["metadata"]["name"] == pref.get("name")), {})
+        if not prm or default != proxy_image(prm):
+            bad.append(f"default: the default proxy image {default} is not the pinned proxy image "
+                       f"{proxy_image(prm) if prm else None}")
+
     # 16. The limits of the controller.
     ctrl = next((d for d in of_kind(docs, "Deployment") if d["metadata"]["name"] == "agentgateway"), None)
     lim = {} if not ctrl else (((ctrl["spec"]["template"]["spec"]["containers"] or [{}])[0].get("resources") or {})
@@ -880,6 +895,10 @@ def selftest() -> int:
         "a deny rule on the trace port that refuses the collector": lambda ds: next(
             d for d in ds if d.get("kind") == "CiliumNetworkPolicy" and d["metadata"]["name"] == "gibson-daemon-trace")[
             "spec"]["ingressDeny"][0].update(fromEndpoints=[{}]),
+        "a default proxy image with no digest": lambda ds: [
+            e.update(value="v1.7.0") for e in next(
+                d for d in ds if d.get("kind") == "Deployment" and d["metadata"]["name"] == "agentgateway"
+            )["spec"]["template"]["spec"]["containers"][0]["env"] if e["name"] == "AGW_PROXY_IMAGE_TAG"],
         "a controller with no memory limit": lambda ds: next(
             d for d in ds if d.get("kind") == "Deployment" and d["metadata"]["name"] == "agentgateway"
         )["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"].pop("memory"),
