@@ -437,8 +437,17 @@ static_resources:
                             - x-gibson-mission
                             - x-gibson-task
                           typed_per_filter_config:
-                            # Its own bucket (envoy.rateLimit.gatewayForward), before
-                            # ext_authz, like the pre-auth routes.
+                            # Its own limiter (envoy.rateLimit.gatewayForward), the
+                            # first filter of the chain, so it refuses before
+                            # ext_authz. One bucket for each client address, a
+                            # large bucket for each trusted egress address, and
+                            # no route fuse: a flood from many addresses must not
+                            # take the share of the sandboxes. The bucket of each
+                            # address, the connection limit of the chain and the
+                            # negative cache of the daemon for an unknown key ID
+                            # bound such a flood. token_bucket is required here,
+                            # and with always_consume_default_token_bucket false
+                            # it takes no token while a descriptor matches.
                             envoy.filters.http.local_ratelimit:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
                               stat_prefix: api_gateway_model
@@ -452,6 +461,37 @@ static_resources:
                                 default_value: { numerator: 100, denominator: HUNDRED }
                               filter_enforced:
                                 default_value: { numerator: 100, denominator: HUNDRED }
+                              # The key of each request: its client address
+                              # (the socket peer, use_remote_address: true).
+                              rate_limits:
+                                - actions:
+                                    - masked_remote_address:
+                                        v4_prefix_mask_len: 32
+                                        v6_prefix_mask_len: 64
+                              # Envoy looks up an exact entry first and the
+                              # entry with no value (one bucket for each
+                              # address, kept in an LRU cache) after it. A
+                              # descriptor that refuses returns before the
+                              # route bucket takes a token.
+                              descriptors:
+                                {{- range $a := .rateLimit.gatewayForward.trustedSourceAddresses }}
+                                # A trusted egress address: the large bucket.
+                                - entries:
+                                    - key: masked_remote_address
+                                      value: {{ $a | quote }}
+                                  token_bucket:
+                                    max_tokens: {{ $.rateLimit.gatewayForward.maxTokens }}
+                                    tokens_per_fill: {{ $.rateLimit.gatewayForward.tokensPerFill }}
+                                    fill_interval: {{ $.rateLimit.gatewayForward.fillIntervalSeconds }}s
+                                {{- end }}
+                                - entries:
+                                    - key: masked_remote_address
+                                  token_bucket:
+                                    max_tokens: {{ .rateLimit.gatewayForward.perAddress.maxTokens }}
+                                    tokens_per_fill: {{ .rateLimit.gatewayForward.perAddress.tokensPerFill }}
+                                    fill_interval: {{ .rateLimit.gatewayForward.perAddress.fillIntervalSeconds }}s
+                              max_dynamic_descriptors: {{ .rateLimit.gatewayForward.maxDynamicDescriptors }}
+                              always_consume_default_token_bucket: false
                               response_headers_to_add:
                                 - append_action: OVERWRITE_IF_EXISTS_OR_ADD
                                   header: { key: retry-after, value: "{{ .rateLimit.gatewayForward.fillIntervalSeconds }}" }
@@ -494,8 +534,17 @@ static_resources:
                             - x-gibson-mission
                             - x-gibson-task
                           typed_per_filter_config:
-                            # Its own bucket (envoy.rateLimit.gatewayForward), before
-                            # ext_authz, like the pre-auth routes.
+                            # Its own limiter (envoy.rateLimit.gatewayForward), the
+                            # first filter of the chain, so it refuses before
+                            # ext_authz. One bucket for each client address, a
+                            # large bucket for each trusted egress address, and
+                            # no route fuse: a flood from many addresses must not
+                            # take the share of the sandboxes. The bucket of each
+                            # address, the connection limit of the chain and the
+                            # negative cache of the daemon for an unknown key ID
+                            # bound such a flood. token_bucket is required here,
+                            # and with always_consume_default_token_bucket false
+                            # it takes no token while a descriptor matches.
                             envoy.filters.http.local_ratelimit:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
                               stat_prefix: api_gateway_agent
@@ -509,6 +558,37 @@ static_resources:
                                 default_value: { numerator: 100, denominator: HUNDRED }
                               filter_enforced:
                                 default_value: { numerator: 100, denominator: HUNDRED }
+                              # The key of each request: its client address
+                              # (the socket peer, use_remote_address: true).
+                              rate_limits:
+                                - actions:
+                                    - masked_remote_address:
+                                        v4_prefix_mask_len: 32
+                                        v6_prefix_mask_len: 64
+                              # Envoy looks up an exact entry first and the
+                              # entry with no value (one bucket for each
+                              # address, kept in an LRU cache) after it. A
+                              # descriptor that refuses returns before the
+                              # route bucket takes a token.
+                              descriptors:
+                                {{- range $a := .rateLimit.gatewayForward.trustedSourceAddresses }}
+                                # A trusted egress address: the large bucket.
+                                - entries:
+                                    - key: masked_remote_address
+                                      value: {{ $a | quote }}
+                                  token_bucket:
+                                    max_tokens: {{ $.rateLimit.gatewayForward.maxTokens }}
+                                    tokens_per_fill: {{ $.rateLimit.gatewayForward.tokensPerFill }}
+                                    fill_interval: {{ $.rateLimit.gatewayForward.fillIntervalSeconds }}s
+                                {{- end }}
+                                - entries:
+                                    - key: masked_remote_address
+                                  token_bucket:
+                                    max_tokens: {{ .rateLimit.gatewayForward.perAddress.maxTokens }}
+                                    tokens_per_fill: {{ .rateLimit.gatewayForward.perAddress.tokensPerFill }}
+                                    fill_interval: {{ .rateLimit.gatewayForward.perAddress.fillIntervalSeconds }}s
+                              max_dynamic_descriptors: {{ .rateLimit.gatewayForward.maxDynamicDescriptors }}
+                              always_consume_default_token_bucket: false
                               response_headers_to_add:
                                 - append_action: OVERWRITE_IF_EXISTS_OR_ADD
                                   header: { key: retry-after, value: "{{ .rateLimit.gatewayForward.fillIntervalSeconds }}" }
@@ -573,10 +653,12 @@ static_resources:
                             - x-gibson-mission
                             - x-gibson-task
                           typed_per_filter_config:
-                            # Its own bucket (envoy.rateLimit.a2aInbound). The limiter is the first
+                            # Its own limiter (envoy.rateLimit.a2aInbound), the first
                             # filter of the chain, so it refuses a flood before
-                            # ext_authz and the daemon pay for it, and a flood
-                            # here drains this bucket, not the api baseline.
+                            # ext_authz and the daemon pay for it. One bucket for
+                            # each client address, and the route fuse in
+                            # token_bucket, which takes a token on each request
+                            # too (always_consume_default_token_bucket).
                             envoy.filters.http.local_ratelimit:
                               "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
                               stat_prefix: api_a2a_inbound
@@ -590,6 +672,27 @@ static_resources:
                                 default_value: { numerator: 100, denominator: HUNDRED }
                               filter_enforced:
                                 default_value: { numerator: 100, denominator: HUNDRED }
+                              # The key of each request: its client address
+                              # (the socket peer, use_remote_address: true).
+                              rate_limits:
+                                - actions:
+                                    - masked_remote_address:
+                                        v4_prefix_mask_len: 32
+                                        v6_prefix_mask_len: 64
+                              # Envoy looks up an exact entry first and the
+                              # entry with no value (one bucket for each
+                              # address, kept in an LRU cache) after it. A
+                              # descriptor that refuses returns before the
+                              # route bucket takes a token.
+                              descriptors:
+                                - entries:
+                                    - key: masked_remote_address
+                                  token_bucket:
+                                    max_tokens: {{ .rateLimit.a2aInbound.perAddress.maxTokens }}
+                                    tokens_per_fill: {{ .rateLimit.a2aInbound.perAddress.tokensPerFill }}
+                                    fill_interval: {{ .rateLimit.a2aInbound.perAddress.fillIntervalSeconds }}s
+                              max_dynamic_descriptors: {{ .rateLimit.a2aInbound.maxDynamicDescriptors }}
+                              always_consume_default_token_bucket: true
                               response_headers_to_add:
                                 - append_action: OVERWRITE_IF_EXISTS_OR_ADD
                                   header: { key: retry-after, value: "{{ .rateLimit.a2aInbound.fillIntervalSeconds }}" }
