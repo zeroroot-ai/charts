@@ -783,6 +783,18 @@ model: 8080
 agent: 8081
 {{- end -}}
 
+{{- define "gibson.gatewayListeners" -}}
+{{- /* The listener names of the agentgateway Gateway (charts#815), as a YAML
+       map by role: model (the Model gateway) and agent (the Agent gateway).
+       The Gateway listeners, the sectionName of each policy and route of the
+       chart, and GIBSON_MODEL_GATEWAY_LISTENER and
+       GIBSON_AGENT_GATEWAY_LISTENER of the tenant-operator (the sectionName
+       of each tenant route) read this one map. The roles are the keys of
+       gibson.gatewayPorts. */ -}}
+model: model
+agent: agent
+{{- end -}}
+
 {{- define "gibson.modelGatewayURL" -}}
 {{- /* The URL of the Model gateway listener, HTTPS, with the in-cluster name
        that the listener certificate holds (gibson-agentgateway-tls). */ -}}

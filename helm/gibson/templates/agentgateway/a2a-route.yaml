@@ -38,7 +38,7 @@ spec:
     - group: gateway.networking.k8s.io
       kind: Gateway
       name: {{ $name }}
-      sectionName: agent
+      sectionName: {{ get (include "gibson.gatewayListeners" . | fromYaml) "agent" }}
   rules:
     - matches:
         - path:
@@ -64,7 +64,7 @@ spec:
     - group: gateway.networking.k8s.io
       kind: Gateway
       name: {{ $name }}
-      sectionName: agent
+      sectionName: {{ get (include "gibson.gatewayListeners" . | fromYaml) "agent" }}
   strategy:
     inheritance: Override
   traffic:

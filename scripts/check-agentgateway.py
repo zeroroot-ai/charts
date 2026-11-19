@@ -76,6 +76,11 @@ The check renders each shipped profile and fails when:
                 DENY_V6 (gibson contract round 8: the proxy resolves a
                 tenant URL again at each call, and the CNI is the only
                 control at connect time).
+ 18. listeners  GIBSON_MODEL_GATEWAY_LISTENER or GIBSON_AGENT_GATEWAY_LISTENER
+                of the tenant-operator (the sectionName of each tenant
+                route) does not name the Gateway listener that the chart
+                uses for that role: the listener of the model strip policy,
+                and the listener of the agent route to the daemon.
  17. default    the default proxy image of the controller
                 (AGW_PROXY_IMAGE_*) is not the proxy image of the
                 parameters, pinned by the same digest.
@@ -725,6 +730,24 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     # 15. The ReferenceGrants of the gateway namespace.
     bad += judge_grants(docs, gw)
 
+    # 18. The listener names that the tenant-operator gives each route.
+    op = next((d for d in of_kind(docs, "Deployment")
+               if ((d.get("metadata") or {}).get("labels") or {}).get("app.kubernetes.io/name") == "gibson-tenant-operator"),
+              None)
+    op_env = {}
+    for c in ((((op or {}).get("spec") or {}).get("template") or {}).get("spec") or {}).get("containers") or []:
+        op_env.update({e["name"]: e.get("value") for e in c.get("env") or [] if "value" in e})
+    names = {li.get("name") for li in (gw.get("spec") or {}).get("listeners") or []}
+    model_ls = {r.get("sectionName") for p in pols if p["metadata"]["name"].endswith("-model-strip")
+                for r in (p.get("spec") or {}).get("targetRefs") or []}
+    agent_ls = {pr.get("sectionName") for r in of_kind(docs, "HTTPRoute") if ns(r) == ns(gw)
+                for pr in (r.get("spec") or {}).get("parentRefs") or [] if pr.get("name") == name}
+    for var, want in (("GIBSON_MODEL_GATEWAY_LISTENER", model_ls), ("GIBSON_AGENT_GATEWAY_LISTENER", agent_ls)):
+        got = op_env.get(var)
+        if not got or got not in names or {got} != want:
+            bad.append(f"listeners: the tenant-operator sets {var}={got!r}; the chart uses the listener "
+                       f"{sorted(x for x in want if x)} of {sorted(names)}")
+
     # 17. The default proxy image of the controller.
     if ctrl_env := {e["name"]: e.get("value") for e in ((next((d for d in of_kind(docs, "Deployment")
                     if d["metadata"]["name"] == "agentgateway"), {}).get("spec") or {}).get("template", {})
@@ -905,6 +928,11 @@ def selftest() -> int:
         "a deny rule on the trace port that refuses the collector": lambda ds: next(
             d for d in ds if d.get("kind") == "CiliumNetworkPolicy" and d["metadata"]["name"] == "gibson-daemon-trace")[
             "spec"]["ingressDeny"][0].update(fromEndpoints=[{}]),
+        "a tenant route listener that the Gateway does not name": lambda ds: [
+            e.update(value="models") for d in ds if d.get("kind") == "Deployment"
+            and d["metadata"].get("labels", {}).get("app.kubernetes.io/name") == "gibson-tenant-operator"
+            for c in d["spec"]["template"]["spec"]["containers"] for e in c.get("env") or []
+            if e["name"] == "GIBSON_MODEL_GATEWAY_LISTENER"],
         "a default proxy image with no digest": lambda ds: [
             e.update(value="v1.7.0") for e in next(
                 d for d in ds if d.get("kind") == "Deployment" and d["metadata"]["name"] == "agentgateway"
