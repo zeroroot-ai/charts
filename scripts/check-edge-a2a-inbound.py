@@ -401,7 +401,8 @@ FIXTURES = {
     "a cluster on the wrong port": lambda ds: edge_mutate(ds, wrong_port),
     "no GIBSON_A2A_INBOUND_ADDR": lambda ds: set_env(ds, "GIBSON_A2A_INBOUND_ADDR", None),
     "an Edge SVID that is not the Edge": lambda ds: set_env(ds, "GIBSON_A2A_INBOUND_EDGE_SVID",
-                                                            "spiffe://zeroroot.ai/platform/agentgateway"),
+                                                            container_env(daemon(ds, "StatefulSet"), "gibson")
+                                                            ["GIBSON_A2A_GATEWAY_SVID"]),
     "a public URL with a literal domain": lambda ds: set_env(ds, "GIBSON_A2A_INBOUND_PUBLIC_URL",
                                                              "https://api.example.com/a2a/inbound"),
     "no deny rule on the inbound port": drop_deny,
