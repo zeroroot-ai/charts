@@ -13,9 +13,10 @@ The check renders each shipped profile and fails when:
   1. route      the api virtual host has no route for /a2a/inbound/, the
                 route is not the first one that matches an inbound path, it
                 does not go to the cluster gibson_daemon_a2a_inbound, it
-                rewrites the path, or it caps a streamed reply (timeout and
-                idle_timeout must be 0s, the same as the gateway forward
-                routes).
+                rewrites the path, or it caps a streamed reply (timeout must
+                be 0s), or it never reaps a dead HTTP/1.1 peer (idle_timeout
+                must be finite and at least InboundWriteMax of the daemon,
+                600s).
   2. ext_authz  the route or its virtual host changes ext_authz, or the
                 connection manager of the route has no ext_authz filter that
                 fails closed.
@@ -83,6 +84,17 @@ WRITTEN = {"x-gibson-tenant", "x-gibson-subject"}
 EXT_AUTHZ = "envoy.filters.http.ext_authz"
 JWT = "envoy.filters.http.jwt_authn"
 REWRITES = ("prefix_rewrite", "regex_rewrite", "path_rewrite_policy")
+# InboundWriteMax of the daemon (gibson a2aserver/inbound.go): the longest wait
+# for one write to the caller. The route idle timeout must not be shorter.
+MIN_IDLE_SECONDS = 600
+
+
+def seconds(v) -> float | None:
+    """An Envoy duration as seconds. None for 0s (no timeout) or a bad value."""
+    m = re.fullmatch(r"([0-9.]+)s", str(v or ""))
+    return float(m.group(1)) or None if m else None
+
+
 ENV = ("GIBSON_A2A_INBOUND_ADDR", "GIBSON_A2A_INBOUND_EDGE_SVID", "GIBSON_A2A_INBOUND_PUBLIC_URL")
 
 
@@ -176,9 +188,12 @@ def judge_edge(edge: dict, svc: str, port, daemon_san: str) -> list[str]:
         for k in REWRITES:
             if k in rt:
                 bad.append(f"route: {PREFIX} rewrites the path ({k}); the daemon reads the agent from the path as sent")
-        if rt.get("timeout") != "0s" or rt.get("idle_timeout") != "0s":
-            bad.append(f"route: {PREFIX} caps a streamed reply (timeout {rt.get('timeout')}, idle_timeout "
-                       f"{rt.get('idle_timeout')}), want 0s and 0s")
+        idle = seconds(rt.get("idle_timeout"))
+        if rt.get("timeout") != "0s" or idle is None or idle < MIN_IDLE_SECONDS:
+            bad.append(f"route: {PREFIX} has timeout {rt.get('timeout')} and idle_timeout "
+                       f"{rt.get('idle_timeout')}; want timeout 0s (no cap on a stream) and a finite "
+                       f"idle_timeout of at least {MIN_IDLE_SECONDS}s (InboundWriteMax of the daemon), "
+                       f"so a dead HTTP/1.1 peer is reaped")
 
         # 2. ext_authz.
         for scope, node in (("route", r), ("virtual host", vh)):

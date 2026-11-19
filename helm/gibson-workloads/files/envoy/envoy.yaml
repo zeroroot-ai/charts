@@ -538,9 +538,13 @@ static_resources:
                         # ext_authz never writes for this class are removed
                         # here as a second layer.
                         #
-                        # A2A can stream a reply (SSE), so timeout 0s and
-                        # idle_timeout 0s, the same as the gateway forward
-                        # routes. The quota is the api_authenticated class of
+                        # A2A can stream a reply (SSE), so timeout 0s: no
+                        # cap on the whole stream. idle_timeout is 15m, not 0s:
+                        # most A2A clients speak HTTP/1.1, which has no PING,
+                        # so the route timer is what reaps a dead peer. 15m is
+                        # above InboundWriteMax of the daemon (10m, gibson
+                        # a2aserver/inbound.go), the longest wait for a write.
+                        # The quota is the api_authenticated class of
                         # the daemon agent routes. It keys on the two headers
                         # that ext_authz writes for this class, because this
                         # class writes no x-gibson-identity-* header. The Edge
@@ -551,7 +555,7 @@ static_resources:
                           route:
                             cluster: gibson_daemon_a2a_inbound
                             timeout: 0s
-                            idle_timeout: 0s
+                            idle_timeout: 900s
                             rate_limits:
                               - actions:
                                   - generic_key:
