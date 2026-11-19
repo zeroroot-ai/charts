@@ -1330,6 +1330,10 @@ extAuthz:
   ports:
     grpc: 9001
     http: 9002
+    # The plaintext probe listener (EXT_AUTHZ_PROBE_ADDR): GET /healthz and
+    # GET /readyz only, for the kubelet. No Service port names it, and no
+    # network policy admits a peer to it.
+    probe: 9004
   service:
     type: ClusterIP
   resources:

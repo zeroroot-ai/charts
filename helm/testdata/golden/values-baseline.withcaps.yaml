@@ -14364,6 +14364,10 @@ spec:
             - name: metrics
               containerPort: 9003
               protocol: TCP
+            # The plaintext probe listener, for the kubelet only.
+            - name: probe
+              containerPort: 9004
+              protocol: TCP
           env:
             - name: EXT_AUTHZ_LOG_LEVEL
               value: "info"
@@ -14373,6 +14377,8 @@ spec:
               value: ":9002"
             - name: EXT_AUTHZ_METRICS_ADDR
               value: ":9003"
+            - name: EXT_AUTHZ_PROBE_ADDR
+              value: ":9004"
             - name: EXT_AUTHZ_FGA_ADDR
               value: "https://gibson-openfga:8080"
             # Redis is required (ADR-0045, charts#397). ext-authz does not start
@@ -14572,46 +14578,43 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
-          # The /healthz endpoint is served over HTTPS with mandatory client
-          # mTLS (RequireAndVerifyClientCert) — the kubelet has no SVID to
-          # present, so httpGet probes fail at the TLS handshake. tcpSocket
-          # checks the port is bound, which is sufficient given the binary
-          # exits on any startup error.
+          # The kubelet probes the plaintext probe listener
+          # (EXT_AUTHZ_PROBE_ADDR, gibson cmd/ext-authz/probe_listener.go). The
+          # health listener on 9002 and the metrics listener on 9003 demand a
+          # client certificate, which the kubelet does not have, and a
+          # tcpSocket probe there opens a TLS port with no handshake. The probe
+          # listener serves GET /healthz (liveness) and GET /readyz (the same
+          # readiness aggregator as the health listener, with the FGA check).
           #
-          # startupProbe disables liveness/readiness until the container has
-          # had time to: (1) wait for SPIRE Agent to register and issue an
-          # SVID, (2) fetch the authz registry from the daemon over mTLS
-          # (deploy#852; retries while the daemon comes up), (3) bind port
-          # 9002. On a cold kind
-          # node or after a host reboot, the SPIFFE CSI mount can take 30-60s
-          # to attach because the CSI driver registers only after
-          # gibson-spire-agent is Ready. Without the startupProbe, the 5s
-          # initialDelaySeconds + 3×10s failureThreshold gave only ~35s total
-          # grace — too tight, causing 2-3 restarts per cluster bringup. See
-          # deploy#142: `Liveness probe failed: dial tcp ...:9002: connect:
-          # connection refused`. With 30×5s=150s of startup budget, kubelet
-          # holds off liveness/readiness until the port is bound, then the
-          # tighter steady-state probes take over.
+          # startupProbe holds off liveness and readiness until the container
+          # had time to wait for the SPIRE SVID, fetch the authz registry from
+          # the daemon (deploy#852) and bind its listeners. On a cold kind
+          # node the SPIFFE CSI mount can take 30-60s (deploy#142). 30 x 5s
+          # gives 150s.
           startupProbe:
-            tcpSocket:
-              port: http
+            httpGet:
+              path: /healthz
+              port: probe
             initialDelaySeconds: 5
             periodSeconds: 5
-            timeoutSeconds: 2
+            timeoutSeconds: 3
             failureThreshold: 30
           livenessProbe:
-            tcpSocket:
-              port: http
+            httpGet:
+              path: /healthz
+              port: probe
             initialDelaySeconds: 5
             periodSeconds: 10
-            timeoutSeconds: 2
+            timeoutSeconds: 3
             failureThreshold: 3
+          # /readyz waits on the FGA check, so 5 seconds (charts#306).
           readinessProbe:
-            tcpSocket:
-              port: http
+            httpGet:
+              path: /readyz
+              port: probe
             initialDelaySeconds: 2
             periodSeconds: 5
-            timeoutSeconds: 2
+            timeoutSeconds: 5
             failureThreshold: 3
           resources:
             limits:
