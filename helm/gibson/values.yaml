@@ -1970,8 +1970,18 @@ gateway:
   # scripts/check-agentgateway.py fails when a kept header is on this list.
   agentStripRequestHeaders:
     - x-capability-grant
+    # The identity headers of the Edge. The daemon A2A listener reads none
+    # of them (gibson v0.164.0 internal/server/a2aserver).
     - x-gibson-identity-tenant
     - x-gibson-identity-subject
+    - x-gibson-identity-issuer
+    - x-gibson-identity-issued-at
+    - x-gibson-identity-credential-type
+  # Exactly the list of gibson gatewayheaders.Removed() (gibson v0.164.0
+  # internal/server/extauthz/gatewayheaders), so the chart and the routes
+  # of the tenant-operator remove the same headers.
+  # scripts/check-agentgateway.py holds the same list and fails on a
+  # difference.
   stripRequestHeaders:
     # The route claim. The caller sends the two headers, each route matches
     # on them, and ext-authz refuses a claimed tenant that is not the
@@ -1979,6 +1989,10 @@ gateway:
     # modelcall/modelcall.go, HeaderRouteTenant and HeaderRouteProvider).
     - x-gibson-route-tenant
     - x-gibson-route-provider
+    # The route claim of an agent call (gibson agentcall.HeaderRouteAgent
+    # and HeaderRouteBank). A model provider never needs it.
+    - x-gibson-route-agent
+    - x-gibson-route-bank
     # The Capability Grant of the caller. ext-authz reads it.
     - x-capability-grant
     # The trusted headers that ext-authz sets. ext-authz overwrites a caller
@@ -1987,15 +2001,14 @@ gateway:
     - x-gibson-subject
     - x-gibson-mission
     - x-gibson-task
-    - x-gibson-component-scope
-    # The Edge quota headers. The gateway forward class of ext-authz sets
-    # them on the Edge, and the gateway forwards them (gibson#1388).
+    # The identity headers of the Edge. The gateway forward class of
+    # ext-authz sets two of them on the Edge, and the gateway forwards them
+    # (gibson#1388).
     - x-gibson-identity-tenant
     - x-gibson-identity-subject
     - x-gibson-identity-issuer
     - x-gibson-identity-issued-at
     - x-gibson-identity-credential-type
-    - x-gibson-identity-component-scope
 
 cert-manager:
   # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).

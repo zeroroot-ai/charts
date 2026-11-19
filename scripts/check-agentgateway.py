@@ -220,7 +220,16 @@ def header_names(docs: list[dict]) -> set[str]:
 # get these, so they go (gibson contract round 7).
 A2A_KEEP = {"x-gibson-tenant", "x-gibson-subject", "x-gibson-mission", "x-gibson-task",
             "x-gibson-route-tenant", "x-gibson-route-agent", "x-gibson-route-bank"}
-A2A_STRIP = {"x-capability-grant", "x-gibson-identity-tenant", "x-gibson-identity-subject"}
+A2A_STRIP = {"x-capability-grant", "x-gibson-identity-tenant", "x-gibson-identity-subject",
+             "x-gibson-identity-issuer", "x-gibson-identity-issued-at", "x-gibson-identity-credential-type"}
+# gibson gatewayheaders.Removed() at the pinned release (v0.164.0): the model
+# listener removes exactly these. A copy apart from values.yaml, so a header
+# dropped there fails here.
+GATEWAY_REMOVED = {"x-gibson-tenant", "x-gibson-subject", "x-gibson-mission", "x-gibson-task",
+                   "x-gibson-identity-subject", "x-gibson-identity-issuer", "x-gibson-identity-credential-type",
+                   "x-gibson-identity-tenant", "x-gibson-identity-issued-at",
+                   "x-gibson-route-tenant", "x-gibson-route-provider", "x-gibson-route-agent", "x-gibson-route-bank",
+                   "x-capability-grant"}
 A2A_PROTOCOL = "agentgateway.dev/a2a"
 EDGE_PREFIXES = {"model": "/gateway/model/", "agent": "/gateway/agent/"}
 TRUSTED_HEADERS = {"x-gibson-tenant", "x-gibson-subject", "x-gibson-mission", "x-gibson-task"}
@@ -637,6 +646,9 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
         bad.append("strip: no Override policy on the listener model removes request headers")
     elif want - removed:
         bad.append(f"strip: the model listener keeps {sorted(want - removed)}; add them to gateway.stripRequestHeaders")
+    if strip and removed != GATEWAY_REMOVED:
+        bad.append(f"strip: the model listener removes {sorted(removed)}, not gibson gatewayheaders.Removed(): "
+                   f"missing {sorted(GATEWAY_REMOVED - removed)}, extra {sorted(removed - GATEWAY_REMOVED)}")
 
     # 5. The format map.
     routes: dict = {}
@@ -732,6 +744,9 @@ def selftest() -> int:
         "a proxy image with no digest": lambda ds: params(ds)["spec"]["image"].pop("digest"),
         "a header the strip list misses": lambda ds: pol(ds, "-model-strip")["spec"]["traffic"]["headerModifiers"][
             "request"].update(remove=["x-gibson-tenant"]),
+        "a strip list that keeps the agent route claim": lambda ds: pol(ds, "-model-strip")["spec"]["traffic"][
+            "headerModifiers"]["request"].update(remove=[h for h in pol(ds, "-model-strip")["spec"]["traffic"][
+                "headerModifiers"]["request"]["remove"] if h != "x-gibson-route-agent"]),
         "a strip list that keeps the Capability Grant": lambda ds: pol(ds, "-model-strip")["spec"]["traffic"][
             "headerModifiers"]["request"].update(remove=[h for h in pol(ds, "-model-strip")["spec"]["traffic"][
                 "headerModifiers"]["request"]["remove"] if h != "x-capability-grant"]),
