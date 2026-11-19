@@ -76,6 +76,8 @@ The check renders each shipped profile and fails when:
                 DENY_V6 (gibson contract round 8: the proxy resolves a
                 tenant URL again at each call, and the CNI is the only
                 control at connect time).
+ 16. limits     the controller container has no CPU or memory limit. The
+                controller derives GOMAXPROCS and GOMEMLIMIT from them.
  15. grants     a ReferenceGrant into the release namespace lets a kind of
                 the gateway namespace name an object that it does not use:
                 the Gateway names only the listener certificate Secret, an
@@ -710,6 +712,14 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     # 15. The ReferenceGrants of the gateway namespace.
     bad += judge_grants(docs, gw)
 
+    # 16. The limits of the controller.
+    ctrl = next((d for d in of_kind(docs, "Deployment") if d["metadata"]["name"] == "agentgateway"), None)
+    lim = {} if not ctrl else (((ctrl["spec"]["template"]["spec"]["containers"] or [{}])[0].get("resources") or {})
+                               .get("limits") or {})
+    if not lim.get("cpu") or not lim.get("memory"):
+        bad.append(f"limits: the agentgateway controller has limits {lim}; it needs cpu and memory "
+                   f"(GOMAXPROCS and GOMEMLIMIT come from them)")
+
     # 6. The trace policy.
     ok = False
     for p in pols:
@@ -870,6 +880,9 @@ def selftest() -> int:
         "a deny rule on the trace port that refuses the collector": lambda ds: next(
             d for d in ds if d.get("kind") == "CiliumNetworkPolicy" and d["metadata"]["name"] == "gibson-daemon-trace")[
             "spec"]["ingressDeny"][0].update(fromEndpoints=[{}]),
+        "a controller with no memory limit": lambda ds: next(
+            d for d in ds if d.get("kind") == "Deployment" and d["metadata"]["name"] == "agentgateway"
+        )["spec"]["template"]["spec"]["containers"][0]["resources"]["limits"].pop("memory"),
         "a route that may name the ext-authz Service": lambda ds: next(
             d for d in ds if d.get("kind") == "ReferenceGrant" and d["metadata"]["name"].endswith("-route")
         )["spec"]["to"].append({"group": "", "kind": "Service", "name": "gibson-ext-authz"}),

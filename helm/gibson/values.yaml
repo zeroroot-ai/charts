@@ -1880,6 +1880,16 @@ agentgateway:
   rbac:
     gatewayNamespaces:
       - gibson-gateway
+  # The controller sets GOMEMLIMIT from limits.memory and GOMAXPROCS from
+  # limits.cpu (the upstream deployment.yaml, resourceFieldRef). With no
+  # limit, the Go runtime takes the memory and the CPU count of the node.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "2"
+      memory: 512Mi
   # The cluster has no Istio. The upstream default grants RBAC on Istio kinds.
   istio:
     enabled: false
