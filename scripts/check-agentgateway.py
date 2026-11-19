@@ -32,6 +32,11 @@ The check renders each shipped profile and fails when:
   5. formats    no backend.ai.routes on the listener `model` names the four
                 paths /v1/messages, /v1/responses, /v1/embeddings and
                 /v1/models.
+  6. trace      no frontend policy on the Gateway sets maxBufferSize and
+                adds the trace fields that the daemon reads, each with
+                its expression (TRACE_FIELDS), or the ext-authz policy does
+                not copy the trusted headers and the route agent into the
+                request metadata that those fields read.
   7. namespace  the Gateway is in the release namespace, or in a namespace
                 that the render does not create, or a policy on the Gateway
                 is in another namespace (a targetRef names an object of the
@@ -59,11 +64,6 @@ The check renders each shipped profile and fails when:
                 agent listener removes a header that the daemon reads (the
                 trusted headers and the route claim) or keeps one it must
                 not get (the grant and the Edge quota headers).
-  6. trace      no frontend policy on the Gateway sets maxBufferSize and
-                adds the trace fields that the daemon reads, each with
-                its expression (TRACE_FIELDS), or the ext-authz policy does
-                not copy the trusted headers and the route agent into the
-                request metadata that those fields read.
  10. egress     a Cilium rule that selects the proxy pods lets them reach
                 an address of DENY_V4 or DENY_V6 (each range that the
                 netguard of the daemon blocks, the cloud metadata address
@@ -76,38 +76,6 @@ The check renders each shipped profile and fails when:
                 DENY_V6 (gibson contract round 8: the proxy resolves a
                 tenant URL again at each call, and the CNI is the only
                 control at connect time).
- 18. listeners  GIBSON_MODEL_GATEWAY_LISTENER or GIBSON_AGENT_GATEWAY_LISTENER
-                of the tenant-operator (the sectionName of each tenant
-                route) does not name the Gateway listener that the chart
-                uses for that role: the listener of the model strip policy,
-                and the listener of the agent route to the daemon.
- 17. default    the default proxy image of the controller
-                (AGW_PROXY_IMAGE_*) is not the proxy image of the
-                parameters, pinned by the same digest.
- 16. limits     the controller container has no CPU or memory limit. The
-                controller derives GOMAXPROCS and GOMEMLIMIT from them.
- 15. grants     a ReferenceGrant into the release namespace lets a kind of
-                the gateway namespace name an object that it does not use:
-                the Gateway names only the listener certificate Secret, an
-                AgentgatewayPolicy only the ext-authz and trace collector
-                Services, an HTTPRoute only the daemon Service.
- 14. ingress    a pod of a sandbox namespace reaches a gateway listener
-                directly, or the daemon, the dashboard backend or the Edge
-                does not. A sandbox reaches the gateway only through the
-                Edge (gibson daemon/model_gateway.go).
- 13. collector  the trace collector queue is not limited in bytes, or its
-                byte limit x 2 + 512 MiB passes its PVC (a compaction writes
-                a second copy), or the receiver takes less than two buffers
-                (a request body and a response body, maxBufferSize each), or
-                the proxy may send more than one span in one OTLP export
-                (OTEL_BSP_MAX_EXPORT_BATCH_SIZE is not 1 in the
-                AgentgatewayParameters): a batch of large spans passes the
-                receive limit and the collector refuses all of it.
- 12. rbac       a binding gives the controller its deployer role (the writes
-                of Deployments, Services, ServiceAccounts, Secrets and the
-                rest of the proxy) outside the gateway namespace: a
-                ClusterRoleBinding, or a RoleBinding in another namespace,
-                or no RoleBinding in the gateway namespace.
  11. ports      a pod of the release namespace other than the one peer
                 reaches the A2A port of the daemon (peer: the proxy, from
                 the gateway namespace) or its trace port (peer: the trace
@@ -116,6 +84,38 @@ The check renders each shipped profile and fails when:
                 an ingressDeny rule (gibson.daemonPortDeny) closes the port.
                 A probe pod (the dashboard backend) stands for each other
                 pod.
+ 12. rbac       a binding gives the controller its deployer role (the writes
+                of Deployments, Services, ServiceAccounts, Secrets and the
+                rest of the proxy) outside the gateway namespace: a
+                ClusterRoleBinding, or a RoleBinding in another namespace,
+                or no RoleBinding in the gateway namespace.
+ 13. collector  the trace collector queue is not limited in bytes, or its
+                byte limit x 2 + 512 MiB passes its PVC (a compaction writes
+                a second copy), or the receiver takes less than two buffers
+                (a request body and a response body, maxBufferSize each), or
+                the proxy may send more than one span in one OTLP export
+                (OTEL_BSP_MAX_EXPORT_BATCH_SIZE is not 1 in the
+                AgentgatewayParameters): a batch of large spans passes the
+                receive limit and the collector refuses all of it.
+ 14. ingress    a pod of a sandbox namespace reaches a gateway listener
+                directly, or the daemon, the dashboard backend or the Edge
+                does not. A sandbox reaches the gateway only through the
+                Edge (gibson daemon/model_gateway.go).
+ 15. grants     a ReferenceGrant into the release namespace lets a kind of
+                the gateway namespace name an object that it does not use:
+                the Gateway names only the listener certificate Secret, an
+                AgentgatewayPolicy only the ext-authz and trace collector
+                Services, an HTTPRoute only the daemon Service.
+ 16. limits     the controller container has no CPU or memory limit. The
+                controller derives GOMAXPROCS and GOMEMLIMIT from them.
+ 17. default    the default proxy image of the controller
+                (AGW_PROXY_IMAGE_*) is not the proxy image of the
+                parameters, pinned by the same digest.
+ 18. listeners  GIBSON_MODEL_GATEWAY_LISTENER or GIBSON_AGENT_GATEWAY_LISTENER
+                of the tenant-operator (the sectionName of each tenant
+                route) does not name the Gateway listener that the chart
+                uses for that role: the listener of the model strip policy,
+                and the listener of the agent route to the daemon.
 
   check-agentgateway.py             exit 1 on a finding, 0 when clean
   check-agentgateway.py --selftest  prove each rule fails on a broken fixture
@@ -237,7 +237,7 @@ A2A_KEEP = {"x-gibson-tenant", "x-gibson-subject", "x-gibson-mission", "x-gibson
             "x-gibson-route-tenant", "x-gibson-route-agent", "x-gibson-route-bank"}
 A2A_STRIP = {"x-capability-grant", "x-gibson-identity-tenant", "x-gibson-identity-subject",
              "x-gibson-identity-issuer", "x-gibson-identity-issued-at", "x-gibson-identity-credential-type"}
-# gibson gatewayheaders.Removed() at the pinned release (v0.164.0): the model
+# gibson gatewayheaders.Removed() at the pinned release (v0.165.0): the model
 # listener removes exactly these. A copy apart from values.yaml, so a header
 # dropped there fails here.
 GATEWAY_REMOVED = {"x-gibson-tenant", "x-gibson-subject", "x-gibson-mission", "x-gibson-task",
