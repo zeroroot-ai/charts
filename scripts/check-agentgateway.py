@@ -76,6 +76,14 @@ The check renders each shipped profile and fails when:
                 DENY_V6 (gibson contract round 8: the proxy resolves a
                 tenant URL again at each call, and the CNI is the only
                 control at connect time).
+ 11. ports      a pod of the release namespace other than the one peer
+                reaches the A2A port of the daemon (peer: the proxy, from
+                the gateway namespace) or its trace port (peer: the trace
+                collector), or the peer does not reach it. The platform
+                rule lets each platform pod reach each daemon port, so only
+                an ingressDeny rule (gibson.daemonPortDeny) closes the port.
+                A probe pod (the dashboard backend) stands for each other
+                pod.
 
   check-agentgateway.py             exit 1 on a finding, 0 when clean
   check-agentgateway.py --selftest  prove each rule fails on a broken fixture
@@ -371,6 +379,41 @@ def judge_egress(docs: list[dict], gw: dict) -> list[str]:
     return bad
 
 
+def pod_labels(docs: list[dict], component: str) -> tuple[str, dict]:
+    """(namespace, pod labels) of the rendered workload of a component."""
+    for d in docs:
+        if d.get("kind") in ("Deployment", "StatefulSet") and \
+                ((d.get("metadata") or {}).get("labels") or {}).get("app.kubernetes.io/component") == component:
+            return ns(d), (((d.get("spec") or {}).get("template") or {}).get("metadata") or {}).get("labels") or {}
+    return "", {}
+
+
+def judge_daemon_ports(docs: list[dict], gw: dict) -> list[str]:
+    bad: list[str] = []
+    daemon_ns, daemon_labels = pod_labels(docs, "daemon")
+    svc = next((d for d in of_kind(docs, "Service")
+                if ((d.get("metadata") or {}).get("labels") or {}).get("app.kubernetes.io/component") == "daemon"), {})
+    ports = {p.get("name"): p.get("port") for p in (svc.get("spec") or {}).get("ports") or []}
+    proxy = cp.endpoint(ns(gw), ((gw.get("spec") or {}).get("infrastructure") or {}).get("labels") or {})
+    collector = cp.endpoint(*pod_labels(docs, "trace-collector"))
+    other = cp.endpoint(*pod_labels(docs, "dashboard"))
+    dst = cp.endpoint(daemon_ns, daemon_labels)
+    rules = cp.rules(docs, daemon_ns)
+    for name, peer, label in (("a2a", proxy, "the agentgateway proxy"), ("otlp-grpc", collector, "the trace collector")):
+        port = ports.get(name)
+        if port is None:
+            bad.append(f"ports: the daemon Service has no port {name}")
+            continue
+        if not cp.reaches(rules, peer, dst, port):
+            bad.append(f"ports: {label} does not reach the daemon port {name} ({port})")
+        if not cp.denied(rules, other, dst, port):
+            bad.append(f"ports: a pod of the release namespace other than {label} reaches the daemon port "
+                       f"{name} ({port}); add a gibson.daemonPortDeny rule")
+        if cp.denied(rules, peer, dst, port):
+            bad.append(f"ports: a deny rule refuses {label} on the daemon port {name} ({port})")
+    return bad
+
+
 def proxy_image(params: dict) -> str:
     img = (params.get("spec") or {}).get("image") or {}
     ref = "/".join(p for p in (img.get("registry"), img.get("repository")) if p)
@@ -518,6 +561,9 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
 
     # 8. The Edge routes of a sandbox.
     bad += judge_edge(edge_config(docs), gw)
+
+    # 11. The daemon ports that accept one peer.
+    bad += judge_daemon_ports(docs, gw)
 
     # 6. The trace policy.
     ok = False
@@ -669,6 +715,13 @@ def selftest() -> int:
             {"toFQDNs": [{"matchPattern": "*"}]}),
         "a proxy policy with no deny rule for the metadata address": lambda ds: proxy_rule(ds)["egressDeny"][1].update(
             toCIDRSet=[c for c in proxy_rule(ds)["egressDeny"][1]["toCIDRSet"] if c["cidr"] != "169.254.0.0/16"]),
+        "no deny rule on the daemon A2A port": lambda ds: ds.remove(next(
+            d for d in ds if d.get("kind") == "CiliumNetworkPolicy" and d["metadata"]["name"] == "gibson-daemon-a2a")),
+        "no deny rule on the daemon trace port": lambda ds: ds.remove(next(
+            d for d in ds if d.get("kind") == "CiliumNetworkPolicy" and d["metadata"]["name"] == "gibson-daemon-trace")),
+        "a deny rule on the trace port that refuses the collector": lambda ds: next(
+            d for d in ds if d.get("kind") == "CiliumNetworkPolicy" and d["metadata"]["name"] == "gibson-daemon-trace")[
+            "spec"]["ingressDeny"][0].update(fromEndpoints=[{}]),
         "a proxy policy that allows the NAT64 prefix": lambda ds: [c["except"].remove("64:ff9b::/96")
                                                                  for c in proxy_egress(ds, "toCIDRSet")
                                                                  if c["cidr"] == "::/0"],

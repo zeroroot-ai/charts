@@ -7,8 +7,11 @@ namespace. Cilium allows a flow only when an egress rule of the source and an
 ingress rule of the destination both allow it.
 
 Limits: the module reads endpoint selectors, entities, CIDRs, host names and
-ports. It does not read L7 rules, deny rules or service selectors. The chart
-renders none of these.
+ports, and the endpoint selectors of an ingressDeny rule (a deny wins over
+each allow). It does not read L7 rules, egressDeny rules or service
+selectors. reaches() ignores egressDeny: the one rule that has it (the
+agentgateway proxy) denies CIDRs and entities, not pods, and
+check-agentgateway.py judges it.
 """
 
 NS_KEY = "io.kubernetes.pod.namespace"
@@ -123,8 +126,25 @@ def egress_internet(rule: dict) -> bool:
     return egress_world(rule) or egress_fqdn(rule)
 
 
+def ingress_denies(rule: dict, ns: str | None, src: dict, port: int | None = None) -> bool:
+    """An ingressDeny item of the rule matches src on port."""
+    for i in rule.get("ingressDeny") or []:
+        if not port_ok(i, port):
+            continue
+        if POD_ENTITIES & set(i.get("fromEntities") or []):
+            return True
+        if any(peer_selects(s, ns, src) for s in i.get("fromEndpoints") or []):
+            return True
+    return False
+
+
+def denied(all_rules: list, src: dict, dst: dict, port: int | None = None) -> bool:
+    """A rule that selects dst denies the flow from src on port."""
+    return any(rule_selects(r, ns, dst) and ingress_denies(r, ns, src, port) for _, r, ns in all_rules)
+
+
 def reaches(all_rules: list, src: dict, dst: dict, port: int | None = None) -> bool:
-    """Both sides allow the flow from src to dst on port."""
+    """Both sides allow the flow from src to dst on port, and no rule denies it."""
     out = any(rule_selects(r, ns, src) and egress_reaches(r, ns, dst, port) for _, r, ns in all_rules)
     inn = any(rule_selects(r, ns, dst) and ingress_admits(r, ns, src, port) for _, r, ns in all_rules)
-    return out and inn
+    return out and inn and not denied(all_rules, src, dst, port)

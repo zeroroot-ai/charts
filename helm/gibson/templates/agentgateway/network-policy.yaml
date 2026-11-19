@@ -17,12 +17,16 @@ each flow has an egress rule and an ingress rule:
               in-cluster providers of gateway.inClusterProviders, and it
               resolves each name. See "call-time address control" below.
   a2a         the proxy reaches the A2A listener of the daemon
-              (gibson.daemonA2APort), and no other pod reaches that port. Its
-              TLS layer accepts the proxy SVID and no other peer.
+              (gibson.daemonA2APort). The platform rule lets each platform
+              pod reach each daemon port, so a deny rule
+              (gibson.daemonPortDeny) refuses that port to each pod of the
+              release namespace. Its TLS layer accepts the proxy SVID and no
+              other peer.
   collector   the trace collector reaches the trace listener of the daemon
-              (gibson.daemonTracePort). The TLS layer of that listener
-              accepts the collector SVID and no other peer. Only the proxy
-              reaches the collector.
+              (gibson.daemonTracePort). A deny rule (gibson.daemonPortDeny)
+              refuses that port to each other pod of the release namespace.
+              The TLS layer of that listener accepts the collector SVID and
+              no other peer. Only the proxy reaches the collector.
 
 A sandbox namespace denies each flow by default (setec). The egress rule of
 a sandbox to the gateway is the business of setec, not of this chart.
@@ -318,3 +322,9 @@ specs:
           - ports:
               - port: {{ $daemonA2A | quote }}
                 protocol: TCP
+---
+{{ include "gibson.daemonPortDeny" (dict "ctx" . "name" "daemon-a2a" "port" $daemonA2A "peers" (list)
+     "description" "No pod of the release namespace reaches the A2A port of the daemon. The agentgateway proxy reaches it from its own namespace.") }}
+---
+{{ include "gibson.daemonPortDeny" (dict "ctx" . "name" "daemon-trace" "port" $daemonTrace "peers" (list "trace-collector")
+     "description" "Only the trace collector reaches the trace port of the daemon.") }}

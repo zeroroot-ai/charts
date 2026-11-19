@@ -23057,6 +23057,68 @@ specs:
           - ports:
               - port: "8443"
                 protocol: TCP
+---
+# Source: gibson/templates/agentgateway/network-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-daemon-a2a
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-daemon-a2a
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "No pod of the release namespace reaches the A2A port of the daemon. The agentgateway proxy reaches it from its own namespace."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: daemon
+      gibson.zeroroot.ai/net-role: platform
+  ingressDeny:
+    - fromEndpoints:
+        - {}
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+---
+# Source: gibson/templates/agentgateway/network-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-daemon-trace
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-daemon-trace
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Only the trace collector reaches the trace port of the daemon."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: daemon
+      gibson.zeroroot.ai/net-role: platform
+  ingressDeny:
+    - fromEndpoints:
+        - matchExpressions:
+            - key: app.kubernetes.io/component
+              operator: NotIn
+              values:
+                - trace-collector
+      toPorts:
+        - ports:
+            - port: "4317"
+              protocol: TCP
 
 ---
 # Source: gibson/templates/network-policies.yaml
