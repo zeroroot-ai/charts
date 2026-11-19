@@ -417,6 +417,12 @@ gibson:
           # The chart mounts the gibson-master-key Secret as a volume
           # at /etc/gibson-kek/master-key (templates/gibson/statefulset.yaml).
           path: /etc/gibson-kek/master-key
+      # The daemon checks the base_url of a tenant model provider when a
+      # tenant saves it. The check refuses a host that resolves to a private,
+      # loopback, link-local or metadata address, and a host that does not
+      # resolve. True turns the check off. Set it true only for an install
+      # that serves models from inside the cluster or a private network.
+      allow_private_llm_endpoints: false
 
     # Prometheus metrics listener (Spec security-hardening R20 + week-2 task 18).
     #
