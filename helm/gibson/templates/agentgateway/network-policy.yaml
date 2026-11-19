@@ -79,7 +79,7 @@ covers it. The registration check of the daemon is the control there.
 {{- end }}
 {{- range $i, $p := $providers }}
 {{- if or (not $p.namespace) (has $p.namespace $closed) }}
-{{- fail (printf "gateway.inClusterProviders[%d]: namespace %q must name the namespace of a model provider, not one of %s" $i ($p.namespace | default "") (join ", " $closed)) }}
+{{- fail (printf "gateway.inClusterProviders[%d]: namespace %v must name the namespace of a model provider, not one of %s" $i $p.namespace (join ", " $closed)) }}
 {{- end }}
 {{- if not $p.podLabels }}
 {{- fail (printf "gateway.inClusterProviders[%d]: podLabels is empty. The proxy must not reach a whole namespace" $i) }}
