@@ -284,6 +284,11 @@ spec:
             - name: a2a
               containerPort: {{ include "gibson.daemonA2APort" . }}
               protocol: TCP
+            # The inbound A2A listener (epic gibson#1367). Only the Edge
+            # reaches it (GIBSON_A2A_INBOUND_EDGE_SVID, the network policy).
+            - name: a2a-inbound
+              containerPort: {{ include "gibson.daemonA2AInboundPort" . }}
+              protocol: TCP
           env:
             # the daemon reads FGA store_id + model_id from env
             # vars instead of calling the Kubernetes API to GET the
@@ -631,6 +636,20 @@ spec:
               value: {{ printf ":%s" (include "gibson.daemonA2APort" .) | quote }}
             - name: GIBSON_A2A_GATEWAY_SVID
               value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/agentgateway") | quote }}
+            # The inbound A2A listener (epic gibson#1367): an outside A2A
+            # client calls a published Gibson agent through the Edge route
+            # /a2a/inbound/, and the call does not cross the agentgateway. Its
+            # TLS layer accepts the one identity of the Edge, the same value as
+            # GIBSON_SPIFFE_ENVOY_ID above and EXT_AUTHZ_ENVOY_SVID of
+            # ext-authz. The public URL is the api origin plus the route
+            # prefix. The daemon writes <URL>/<agent> into the Agent Card of a
+            # published agent and dials nothing with it.
+            - name: GIBSON_A2A_INBOUND_ADDR
+              value: {{ printf ":%s" (include "gibson.daemonA2AInboundPort" .) | quote }}
+            - name: GIBSON_A2A_INBOUND_EDGE_SVID
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/envoy") | quote }}
+            - name: GIBSON_A2A_INBOUND_PUBLIC_URL
+              value: {{ printf "%s%s" (include "gibson.apiOrigin" .) (include "gibson.a2aInboundPrefix" .) | quote }}
             # The listen address of the trace listener. It has its own port
             # and a message limit of 48 MiB: one span holds the whole request
             # and response bodies.

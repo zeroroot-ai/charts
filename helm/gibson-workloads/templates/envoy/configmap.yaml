@@ -221,6 +221,9 @@ unconditionally — there is no `envoy.enabled` opt-out.
     "gibsonService"    (include "gibson.fullname" .)
     "gibsonGrpcPort"   (include "gibson.grpc.port" .)
     "gibsonCallbackPort" $gibsonCallbackPort
+    "a2aInbound"       (dict
+                          "prefix" (printf "%s/" (include "gibson.a2aInboundPrefix" .))
+                          "port"   (include "gibson.daemonA2AInboundPort" .))
     "dashboardPort"    (.Values.dashboard.service.port | default 3000)
     "extAuthzGrpcPort" (.Values.extAuthz.ports.grpc    | default 9001)
     "zitadelDashboardClientId" "${DASHBOARD_CLIENT_ID}"

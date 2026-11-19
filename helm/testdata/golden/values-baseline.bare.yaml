@@ -2095,6 +2095,62 @@ data:
                                 - x-gibson-subject
                                 - x-gibson-mission
                                 - x-gibson-task
+                            # The inbound A2A route (epic gibson#1367). An outside
+                            # A2A client calls a published Gibson agent: its A2A
+                            # JSON-RPC endpoint at /a2a/inbound/<agent> and its
+                            # Agent Card at
+                            # /a2a/inbound/<agent>/.well-known/agent-card.json. The
+                            # path is client, Edge, daemon. The call does not cross
+                            # the agentgateway. The Edge forwards the path as it
+                            # is, with no rewrite, to the inbound listener of the
+                            # daemon over SPIFFE mTLS. The daemon reads the agent
+                            # from the path.
+                            #
+                            # ext_authz stays on. Its inbound class accepts only
+                            # the Capability Grant JWT of an enrolled agent
+                            # identity in x-capability-grant, and only from the
+                            # Edge peer. On allow it sets x-gibson-tenant and
+                            # x-gibson-subject with OVERWRITE_IF_EXISTS_OR_ADD and
+                            # removes x-gibson-mission and x-gibson-task, so a
+                            # copy that the caller sent never reaches the daemon.
+                            # This route must NOT list x-gibson-tenant or
+                            # x-gibson-subject in request_headers_to_remove: the
+                            # router applies that list after ext_authz, so it
+                            # would remove the values that ext_authz wrote (see
+                            # the NOTE on api_routes). The two headers that
+                            # ext_authz never writes for this class are removed
+                            # here as a second layer.
+                            #
+                            # A2A can stream a reply (SSE), so timeout 0s and
+                            # idle_timeout 0s, the same as the gateway forward
+                            # routes. The quota is the api_authenticated class of
+                            # the daemon agent routes. It keys on the two headers
+                            # that ext_authz writes for this class, because this
+                            # class writes no x-gibson-identity-* header. The Edge
+                            # has no body limit on any route. The daemon limits
+                            # the body to 1 MiB (a2aserver.MaxInboundRequestBytes).
+                            # scripts/check-edge-a2a-inbound.py keeps this shape.
+                            - match: { prefix: "/a2a/inbound/" }
+                              route:
+                                cluster: gibson_daemon_a2a_inbound
+                                timeout: 0s
+                                idle_timeout: 0s
+                                rate_limits:
+                                  - actions:
+                                      - generic_key:
+                                          descriptor_key: route
+                                          descriptor_value: api_authenticated
+                                      - request_headers:
+                                          header_name: x-gibson-tenant
+                                          descriptor_key: tenant
+                                          skip_if_absent: false
+                                      - request_headers:
+                                          header_name: x-gibson-subject
+                                          descriptor_key: subject
+                                          skip_if_absent: false
+                              request_headers_to_remove:
+                                - x-gibson-mission
+                                - x-gibson-task
                             - match: { prefix: "/.well-known/openid-configuration" }
                               route:
                                 cluster: zitadel_upstream
@@ -2719,6 +2775,14 @@ data:
                               requires:
                                 allow_missing_or_failed: {}
                             - match: { prefix: "/gateway/agent/" }
+                              requires:
+                                allow_missing_or_failed: {}
+                            # The inbound A2A route (epic gibson#1367): an outside
+                            # A2A client sends the Capability Grant JWT of its
+                            # agent identity and no Zitadel JWT. ext_authz verifies
+                            # the grant, and refuses a call with a Zitadel JWT and
+                            # no grant.
+                            - match: { prefix: "/a2a/inbound/" }
                               requires:
                                 allow_missing_or_failed: {}
                             # A dispatched component renews its own task grant with
@@ -3649,6 +3713,74 @@ data:
                           # Service, not the daemon's).
                           address: "gibson-gibson-workloads"
                           port_value: 50001
+    
+        # -------------------------------------------------------------------------
+        # gibson_daemon_a2a_inbound — the inbound A2A listener of the daemon
+        # (gibson.daemonA2AInboundPort, epic gibson#1367). Same pod, same Service
+        # and same SPIFFE identity as gibson_daemon_grpc. Only the port differs.
+        # The listener accepts the Edge SVID (GIBSON_A2A_INBOUND_EDGE_SVID) and no
+        # other peer. It serves A2A JSON-RPC and the Agent Cards over HTTP/1.1,
+        # so this cluster speaks HTTP/1.1. An SSE reply streams on it.
+        # -------------------------------------------------------------------------
+        - name: gibson_daemon_a2a_inbound
+          type: STRICT_DNS
+          connect_timeout: 5s
+          # Matches gibson_daemon_grpc: re-resolve quickly so a rolled daemon pod's
+          # new endpoint is picked up (deploy#864).
+          dns_refresh_rate: 5s
+          respect_dns_ttl: false
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              common_http_protocol_options:
+                idle_timeout: 30s
+              explicit_http_config:
+                http_protocol_options: {}
+          # Envoy → daemon mTLS via SPIRE SDS, identical to gibson_daemon_grpc:
+          # Envoy presents spiffe://<td>/platform/envoy and pins the daemon's SVID.
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+              sni: "gibson-gibson-workloads"
+              common_tls_context:
+                tls_certificate_sds_secret_configs:
+                  - name: "default"
+                    sds_config:
+                      resource_api_version: V3
+                      api_config_source:
+                        api_type: GRPC
+                        transport_api_version: V3
+                        grpc_services:
+                          - envoy_grpc:
+                              cluster_name: spire_agent
+                combined_validation_context:
+                  default_validation_context:
+                    match_typed_subject_alt_names:
+                      - san_type: URI
+                        matcher:
+                          exact: "spiffe://zeroroot.ai/platform/daemon"
+                  validation_context_sds_secret_config:
+                    name: "ROOTCA"
+                    sds_config:
+                      resource_api_version: V3
+                      api_config_source:
+                        api_type: GRPC
+                        transport_api_version: V3
+                        grpc_services:
+                          - envoy_grpc:
+                              cluster_name: spire_agent
+          load_assignment:
+            cluster_name: gibson_daemon_a2a_inbound
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          # Same Service as gibson_daemon_grpc (see the naming note
+                          # there).
+                          address: "gibson-gibson-workloads"
+                          port_value: 8444
     
         # The model listener of the agentgateway Gateway (charts#815). TLS that
         # verifies the component CA and the name of the proxy Service. The
@@ -9963,6 +10095,13 @@ spec:
       targetPort: a2a
       protocol: TCP
       appProtocol: agentgateway.dev/a2a
+    # The inbound A2A listener (epic gibson#1367). The Edge cluster
+    # gibson_daemon_a2a_inbound dials it. It has no appProtocol, because no
+    # agentgateway policy applies to it.
+    - name: a2a-inbound
+      port: 8444
+      targetPort: a2a-inbound
+      protocol: TCP
     # The trace listener (charts#816).
     - name: otlp-grpc
       port: 4317
@@ -13807,7 +13946,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 1d9e8e1564c709017e7dbf6468f1d6ff4f4e26c70dacabb110b9c845f494c22a
+        checksum/config: a7ba75be16fb6865b956f2e326bf9be4e624855b774ee8b59f0c5d1543d9833b
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -18301,6 +18440,11 @@ spec:
             - name: a2a
               containerPort: 8443
               protocol: TCP
+            # The inbound A2A listener (epic gibson#1367). Only the Edge
+            # reaches it (GIBSON_A2A_INBOUND_EDGE_SVID, the network policy).
+            - name: a2a-inbound
+              containerPort: 8444
+              protocol: TCP
           env:
             # the daemon reads FGA store_id + model_id from env
             # vars instead of calling the Kubernetes API to GET the
@@ -18550,6 +18694,20 @@ spec:
               value: ":8443"
             - name: GIBSON_A2A_GATEWAY_SVID
               value: "spiffe://zeroroot.ai/platform/agentgateway"
+            # The inbound A2A listener (epic gibson#1367): an outside A2A
+            # client calls a published Gibson agent through the Edge route
+            # /a2a/inbound/, and the call does not cross the agentgateway. Its
+            # TLS layer accepts the one identity of the Edge, the same value as
+            # GIBSON_SPIFFE_ENVOY_ID above and EXT_AUTHZ_ENVOY_SVID of
+            # ext-authz. The public URL is the api origin plus the route
+            # prefix. The daemon writes <URL>/<agent> into the Agent Card of a
+            # published agent and dials nothing with it.
+            - name: GIBSON_A2A_INBOUND_ADDR
+              value: ":8444"
+            - name: GIBSON_A2A_INBOUND_EDGE_SVID
+              value: "spiffe://zeroroot.ai/platform/envoy"
+            - name: GIBSON_A2A_INBOUND_PUBLIC_URL
+              value: "https://api.localhost.zeroroot.ai/a2a/inbound"
             # The listen address of the trace listener. It has its own port
             # and a message limit of 48 MiB: one span holds the whole request
             # and response bodies.
@@ -23548,6 +23706,39 @@ spec:
       toPorts:
         - ports:
             - port: "50051"
+              protocol: TCP
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-daemon-a2a-inbound
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-daemon-a2a-inbound
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Only the Edge reaches the inbound A2A port of the daemon."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: daemon
+      gibson.zeroroot.ai/net-role: platform
+  ingressDeny:
+    - fromEndpoints:
+        - matchExpressions:
+            - key: app.kubernetes.io/component
+              operator: NotIn
+              values:
+                - envoy
+      toPorts:
+        - ports:
+            - port: "8444"
               protocol: TCP
 ---
 # Source: gibson/templates/network-policies.yaml

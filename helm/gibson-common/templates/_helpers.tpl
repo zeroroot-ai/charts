@@ -744,6 +744,23 @@ gibson-agentgateway
 8443
 {{- end -}}
 
+{{- define "gibson.daemonA2AInboundPort" -}}
+{{- /* The inbound A2A listener of the daemon (epic gibson#1367): an outside
+       A2A client calls a Gibson agent through the Edge, and the call does not
+       cross the agentgateway. HTTPS with SPIFFE mTLS that accepts only the
+       Edge. The daemon port, its Service port, the Edge cluster
+       gibson_daemon_a2a_inbound and the network rule read this one number. */ -}}
+8444
+{{- end -}}
+
+{{- define "gibson.a2aInboundPrefix" -}}
+{{- /* The path prefix of the inbound A2A route on the api host (epic
+       gibson#1367, gibson agentcall.InboundPrefix), without the trailing
+       slash. The Edge route matches "<prefix>/", and the daemon gets
+       "<api origin><prefix>" as GIBSON_A2A_INBOUND_PUBLIC_URL. */ -}}
+/a2a/inbound
+{{- end -}}
+
 {{- define "gibson.traceCollectorName" -}}
 {{- /* The trace collector (charts#816): its StatefulSet, Service and
        ServiceAccount. gibson-workloads renders it, and the umbrella
