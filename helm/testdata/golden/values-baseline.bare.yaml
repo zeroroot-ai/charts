@@ -2219,12 +2219,14 @@ data:
                             # ext_authz never writes for this class are removed
                             # here as a second layer.
                             #
-                            # A2A can stream a reply (SSE), so timeout 0s: no
-                            # cap on the whole stream. idle_timeout is 15m, not 0s:
-                            # most A2A clients speak HTTP/1.1, which has no PING,
-                            # so the route timer is what reaps a dead peer. 15m is
-                            # above InboundWriteMax of the daemon (10m, gibson
-                            # a2aserver/inbound.go), the longest wait for a write.
+                            # The inbound listener serves SendMessage, GetTask and
+                            # CancelTask, and no streaming method (gibson
+                            # a2aserver/inbound.go, inboundRPC). The daemon may take
+                            # up to InboundWriteMax (10m) to write one response, so
+                            # the route sets no cap on a whole call (timeout 0s),
+                            # and its idle timer is 15m, above that. Most A2A
+                            # clients speak HTTP/1.1, which has no PING, so this
+                            # timer is what reaps a dead peer.
                             # The quota is the api_authenticated class of
                             # the daemon agent routes. It keys on the two headers
                             # that ext_authz writes for this class, because this
@@ -14099,7 +14101,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 3d6c6c193cd89675dc1b0e9056b2cd43db53750111117cf0267c686ea2e5dba2
+        checksum/config: f5832fcb21b32f493ba745137a90736649a8e37903491320d2e5359c655cd931
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
