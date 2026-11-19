@@ -21,8 +21,7 @@
                     the release namespace that may reach the port (a list,
                     may be empty)
 
-     scripts/check-agentgateway.py and scripts/check-edge-a2a-inbound.py read
-     the rendered rules. */}}
+     scripts/check-agentgateway.py reads the rendered rules. */}}
 {{- define "gibson.daemonPortDeny" -}}
 {{- $ctx := .ctx -}}
 apiVersion: cilium.io/v2
