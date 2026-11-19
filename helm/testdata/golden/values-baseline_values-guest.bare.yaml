@@ -21275,7 +21275,7 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: ReferenceGrant
 metadata:
-  name: gibson-agentgateway
+  name: gibson-agentgateway-gateway
   namespace: gibson
   labels:
     helm.sh/chart: gibson-0.1.0
@@ -21289,24 +21289,56 @@ spec:
     - group: gateway.networking.k8s.io
       kind: Gateway
       namespace: gibson-gateway
-    - group: agentgateway.dev
-      kind: AgentgatewayPolicy
-      namespace: gibson-gateway
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      namespace: gibson-gateway
   to:
     - group: ""
       kind: Secret
       name: gibson-agentgateway-tls
+---
+# Source: gibson/templates/agentgateway/gateway.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata:
+  name: gibson-agentgateway-policy
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  from:
+    - group: agentgateway.dev
+      kind: AgentgatewayPolicy
+      namespace: gibson-gateway
+  to:
     - group: ""
       kind: Service
       name: gibson-ext-authz
     - group: ""
       kind: Service
       name: gibson-trace-collector
-    # The A2A listener of the daemon, the backend of the agent route
-    # (a2a-route.yaml).
+---
+# Source: gibson/templates/agentgateway/gateway.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata:
+  name: gibson-agentgateway-route
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: gibson-gateway
+  to:
     - group: ""
       kind: Service
       name: gibson-gibson-workloads

@@ -76,6 +76,11 @@ The check renders each shipped profile and fails when:
                 DENY_V6 (gibson contract round 8: the proxy resolves a
                 tenant URL again at each call, and the CNI is the only
                 control at connect time).
+ 15. grants     a ReferenceGrant into the release namespace lets a kind of
+                the gateway namespace name an object that it does not use:
+                the Gateway names only the listener certificate Secret, an
+                AgentgatewayPolicy only the ext-authz and trace collector
+                Services, an HTTPRoute only the daemon Service.
  14. ingress    a pod of a sandbox namespace reaches a gateway listener
                 directly, or the daemon, the dashboard backend or the Edge
                 does not. A sandbox reaches the gateway only through the
@@ -440,6 +445,29 @@ def judge_daemon_ports(docs: list[dict], gw: dict) -> list[str]:
     return bad
 
 
+# What each kind of the gateway namespace may name in the release namespace.
+GRANT_TARGETS = {
+    "Gateway": {("Secret", "gibson-agentgateway-tls")},
+    "AgentgatewayPolicy": {("Service", "gibson-ext-authz"), ("Service", "gibson-trace-collector")},
+    "HTTPRoute": {("Service", "gibson-gibson-workloads")},
+}
+
+
+def judge_grants(docs: list[dict], gw: dict) -> list[str]:
+    bad: list[str] = []
+    for g in of_kind(docs, "ReferenceGrant"):
+        spec = g.get("spec") or {}
+        for f in spec.get("from") or []:
+            if f.get("namespace") != ns(gw):
+                continue
+            allowed = GRANT_TARGETS.get(f.get("kind"), set())
+            for t in spec.get("to") or []:
+                if (t.get("kind"), t.get("name")) not in allowed:
+                    bad.append(f"grants: ReferenceGrant/{g['metadata']['name']} lets {f.get('kind')} name "
+                               f"{t.get('kind')}/{t.get('name') or '*'}, which it does not use")
+    return bad
+
+
 SANDBOX_NS_LABEL = "io.cilium.k8s.namespace.labels.setec.zeroroot.ai/sandbox-namespace"
 
 
@@ -679,6 +707,9 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     # 14. Who reaches the listeners.
     bad += judge_ingress(docs, gw)
 
+    # 15. The ReferenceGrants of the gateway namespace.
+    bad += judge_grants(docs, gw)
+
     # 6. The trace policy.
     ok = False
     for p in pols:
@@ -839,6 +870,9 @@ def selftest() -> int:
         "a deny rule on the trace port that refuses the collector": lambda ds: next(
             d for d in ds if d.get("kind") == "CiliumNetworkPolicy" and d["metadata"]["name"] == "gibson-daemon-trace")[
             "spec"]["ingressDeny"][0].update(fromEndpoints=[{}]),
+        "a route that may name the ext-authz Service": lambda ds: next(
+            d for d in ds if d.get("kind") == "ReferenceGrant" and d["metadata"]["name"].endswith("-route")
+        )["spec"]["to"].append({"group": "", "kind": "Service", "name": "gibson-ext-authz"}),
         "a sandbox namespace admitted to the listeners": lambda ds: proxy_rule(ds)["ingress"][0]["fromEndpoints"].append(
             {"matchLabels": {"k8s:" + SANDBOX_NS_LABEL: "true"},
              "matchExpressions": [{"key": "k8s:io.kubernetes.pod.namespace", "operator": "Exists"}]}),
