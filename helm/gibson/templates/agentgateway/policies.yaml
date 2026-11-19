@@ -186,7 +186,7 @@ metadata:
     app.kubernetes.io/component: agentgateway
 spec:
   targetRefs:
-    - {{ toYaml (merge (dict "sectionName" "model") $gatewayRef) | nindent 6 | trim }}
+    - {{ toYaml (merge (dict "sectionName" (get (include "gibson.gatewayListeners" . | fromYaml) "model")) $gatewayRef) | nindent 6 | trim }}
   strategy:
     inheritance: Override
   traffic:
@@ -205,7 +205,7 @@ metadata:
     app.kubernetes.io/component: agentgateway
 spec:
   targetRefs:
-    - {{ toYaml (merge (dict "sectionName" "model") $gatewayRef) | nindent 6 | trim }}
+    - {{ toYaml (merge (dict "sectionName" (get (include "gibson.gatewayListeners" . | fromYaml) "model")) $gatewayRef) | nindent 6 | trim }}
   backend:
     ai:
       routes:

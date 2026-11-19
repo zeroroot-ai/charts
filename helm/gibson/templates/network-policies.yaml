@@ -14,7 +14,12 @@ a new policy, and no policy lists each internal peer.
                       with NXDOMAIN (the substrate sets
                       dnsRejectResponseCode: nameError), so the resolver tries
                       its next search domain.
-  2. platform         Platform pods reach each other.
+  2. platform         Platform pods reach each other. Three daemon ports
+                      accept one peer each, and an ingressDeny rule
+                      (gibson.daemonPortDeny) refuses each other pod of the
+                      namespace there: the inbound A2A port (the Edge, epic
+                      gibson#1367, below), and the A2A port and the trace
+                      port (agentgateway/network-policy.yaml).
   3. data stores      Postgres, Redis and OpenBao each admit only the
                       pods with their client label.
   4. kube-api         Pods with the kube-api label reach the API server.
@@ -414,6 +419,14 @@ spec:
         - ports:
             - port: {{ $daemonGrpc | quote }}
               protocol: TCP
+---
+{{- /* The inbound A2A listener of the daemon (epic gibson#1367). An outside
+       A2A client reaches it only through the Edge route /a2a/inbound/, where
+       ext_authz checks the caller. Only the Edge reaches the port
+       (gibson.daemonPortDeny). The TLS layer of the listener accepts the
+       Edge SVID and no other peer (GIBSON_A2A_INBOUND_EDGE_SVID). */}}
+{{ include "gibson.daemonPortDeny" (dict "ctx" . "name" "daemon-a2a-inbound" "port" (include "gibson.daemonA2AInboundPort" .) "peers" (list "envoy")
+     "description" "Only the Edge reaches the inbound A2A port of the daemon.") }}
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

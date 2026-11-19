@@ -1366,6 +1366,52 @@ data:
                                 - x-gibson-subject
                                 - x-gibson-mission
                                 - x-gibson-task
+                              typed_per_filter_config:
+                                # Its own limiter (envoy.rateLimit.gatewayForward), the
+                                # first filter of the chain, so it refuses before
+                                # ext_authz. One bucket for each client address, sized
+                                # for the sandboxes of a whole cluster behind one
+                                # address, and the route fuse in token_bucket, which
+                                # takes a token on each request too
+                                # (always_consume_default_token_bucket). values.yaml
+                                # states the trade.
+                                envoy.filters.http.local_ratelimit:
+                                  "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                                  stat_prefix: api_gateway_model
+                                  token_bucket:
+                                    max_tokens: 8000
+                                    tokens_per_fill: 4000
+                                    fill_interval: 1s
+                                  # Both REQUIRED: each defaults to 0% when omitted,
+                                  # which renders a limiter that enforces nothing.
+                                  filter_enabled:
+                                    default_value: { numerator: 100, denominator: HUNDRED }
+                                  filter_enforced:
+                                    default_value: { numerator: 100, denominator: HUNDRED }
+                                  # The key of each request: its client address
+                                  # (the socket peer, use_remote_address: true).
+                                  rate_limits:
+                                    - actions:
+                                        - masked_remote_address:
+                                            v4_prefix_mask_len: 32
+                                            v6_prefix_mask_len: 64
+                                  # Envoy looks up an exact entry first and the
+                                  # entry with no value (one bucket for each
+                                  # address, kept in an LRU cache) after it. A
+                                  # descriptor that refuses returns before the
+                                  # route bucket takes a token.
+                                  descriptors:
+                                    - entries:
+                                        - key: masked_remote_address
+                                      token_bucket:
+                                        max_tokens: 2000
+                                        tokens_per_fill: 1000
+                                        fill_interval: 1s
+                                  max_dynamic_descriptors: 10000
+                                  always_consume_default_token_bucket: true
+                                  response_headers_to_add:
+                                    - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                                      header: { key: retry-after, value: "1" }
                             # The Agent gateway for a sandbox (charts#815). A sandbox reaches
                             # the cluster only through the Edge, so the Edge forwards
                             # /gateway/agent/ to the agent listener of the
@@ -1404,6 +1450,158 @@ data:
                                 - x-gibson-subject
                                 - x-gibson-mission
                                 - x-gibson-task
+                              typed_per_filter_config:
+                                # Its own limiter (envoy.rateLimit.gatewayForward), the
+                                # first filter of the chain, so it refuses before
+                                # ext_authz. One bucket for each client address, sized
+                                # for the sandboxes of a whole cluster behind one
+                                # address, and the route fuse in token_bucket, which
+                                # takes a token on each request too
+                                # (always_consume_default_token_bucket). values.yaml
+                                # states the trade.
+                                envoy.filters.http.local_ratelimit:
+                                  "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                                  stat_prefix: api_gateway_agent
+                                  token_bucket:
+                                    max_tokens: 8000
+                                    tokens_per_fill: 4000
+                                    fill_interval: 1s
+                                  # Both REQUIRED: each defaults to 0% when omitted,
+                                  # which renders a limiter that enforces nothing.
+                                  filter_enabled:
+                                    default_value: { numerator: 100, denominator: HUNDRED }
+                                  filter_enforced:
+                                    default_value: { numerator: 100, denominator: HUNDRED }
+                                  # The key of each request: its client address
+                                  # (the socket peer, use_remote_address: true).
+                                  rate_limits:
+                                    - actions:
+                                        - masked_remote_address:
+                                            v4_prefix_mask_len: 32
+                                            v6_prefix_mask_len: 64
+                                  # Envoy looks up an exact entry first and the
+                                  # entry with no value (one bucket for each
+                                  # address, kept in an LRU cache) after it. A
+                                  # descriptor that refuses returns before the
+                                  # route bucket takes a token.
+                                  descriptors:
+                                    - entries:
+                                        - key: masked_remote_address
+                                      token_bucket:
+                                        max_tokens: 2000
+                                        tokens_per_fill: 1000
+                                        fill_interval: 1s
+                                  max_dynamic_descriptors: 10000
+                                  always_consume_default_token_bucket: true
+                                  response_headers_to_add:
+                                    - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                                      header: { key: retry-after, value: "1" }
+                            # The inbound A2A route (epic gibson#1367). An outside
+                            # A2A client calls a published Gibson agent: its A2A
+                            # JSON-RPC endpoint at /a2a/inbound/<agent> and its
+                            # Agent Card at
+                            # /a2a/inbound/<agent>/.well-known/agent-card.json. The
+                            # path is client, Edge, daemon. The call does not cross
+                            # the agentgateway. The Edge forwards the path as it
+                            # is, with no rewrite, to the inbound listener of the
+                            # daemon over SPIFFE mTLS. The daemon reads the agent
+                            # from the path.
+                            #
+                            # ext_authz stays on. Its inbound class accepts only
+                            # the Capability Grant JWT of an enrolled agent
+                            # identity in x-capability-grant, and only from the
+                            # Edge peer. On allow it sets x-gibson-tenant and
+                            # x-gibson-subject with OVERWRITE_IF_EXISTS_OR_ADD and
+                            # removes x-gibson-mission and x-gibson-task, so a
+                            # copy that the caller sent never reaches the daemon.
+                            # This route must NOT list x-gibson-tenant or
+                            # x-gibson-subject in request_headers_to_remove: the
+                            # router applies that list after ext_authz, so it
+                            # would remove the values that ext_authz wrote (see
+                            # the NOTE on api_routes). The two headers that
+                            # ext_authz never writes for this class are removed
+                            # here as a second layer.
+                            #
+                            # The inbound listener serves SendMessage, GetTask and
+                            # CancelTask, and no streaming method (gibson
+                            # a2aserver/inbound.go, inboundRPC). The daemon may take
+                            # up to InboundWriteMax (10m) to write one response, so
+                            # the route sets no cap on a whole call (timeout 0s),
+                            # and its idle timer is 15m, above that. Most A2A
+                            # clients speak HTTP/1.1, which has no PING, so this
+                            # timer is what reaps a dead peer.
+                            # The quota is the api_authenticated class of
+                            # the daemon agent routes. It keys on the two headers
+                            # that ext_authz writes for this class, because this
+                            # class writes no x-gibson-identity-* header. The Edge
+                            # has no body limit on any route. The daemon limits
+                            # the body to 1 MiB (a2aserver.MaxInboundRequestBytes).
+                            # scripts/check-edge-a2a-inbound.py keeps this shape.
+                            - match: { prefix: "/a2a/inbound/" }
+                              route:
+                                cluster: gibson_daemon_a2a_inbound
+                                timeout: 0s
+                                idle_timeout: 900s
+                                rate_limits:
+                                  - actions:
+                                      - generic_key:
+                                          descriptor_key: route
+                                          descriptor_value: api_authenticated
+                                      - request_headers:
+                                          header_name: x-gibson-tenant
+                                          descriptor_key: tenant
+                                          skip_if_absent: false
+                                      - request_headers:
+                                          header_name: x-gibson-subject
+                                          descriptor_key: subject
+                                          skip_if_absent: false
+                              request_headers_to_remove:
+                                - x-gibson-mission
+                                - x-gibson-task
+                              typed_per_filter_config:
+                                # Its own limiter (envoy.rateLimit.a2aInbound), the first
+                                # filter of the chain, so it refuses a flood before
+                                # ext_authz and the daemon pay for it. One bucket for
+                                # each client address, and the route fuse in
+                                # token_bucket, which takes a token on each request
+                                # too (always_consume_default_token_bucket).
+                                envoy.filters.http.local_ratelimit:
+                                  "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                                  stat_prefix: api_a2a_inbound
+                                  token_bucket:
+                                    max_tokens: 200
+                                    tokens_per_fill: 100
+                                    fill_interval: 1s
+                                  # Both REQUIRED: each defaults to 0% when omitted,
+                                  # which renders a limiter that enforces nothing.
+                                  filter_enabled:
+                                    default_value: { numerator: 100, denominator: HUNDRED }
+                                  filter_enforced:
+                                    default_value: { numerator: 100, denominator: HUNDRED }
+                                  # The key of each request: its client address
+                                  # (the socket peer, use_remote_address: true).
+                                  rate_limits:
+                                    - actions:
+                                        - masked_remote_address:
+                                            v4_prefix_mask_len: 32
+                                            v6_prefix_mask_len: 64
+                                  # Envoy looks up an exact entry first and the
+                                  # entry with no value (one bucket for each
+                                  # address, kept in an LRU cache) after it. A
+                                  # descriptor that refuses returns before the
+                                  # route bucket takes a token.
+                                  descriptors:
+                                    - entries:
+                                        - key: masked_remote_address
+                                      token_bucket:
+                                        max_tokens: 40
+                                        tokens_per_fill: 20
+                                        fill_interval: 1s
+                                  max_dynamic_descriptors: 10000
+                                  always_consume_default_token_bucket: true
+                                  response_headers_to_add:
+                                    - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                                      header: { key: retry-after, value: "1" }
                             - match: { prefix: "/.well-known/openid-configuration" }
                               route:
                                 cluster: zitadel_upstream
@@ -2028,6 +2226,14 @@ data:
                               requires:
                                 allow_missing_or_failed: {}
                             - match: { prefix: "/gateway/agent/" }
+                              requires:
+                                allow_missing_or_failed: {}
+                            # The inbound A2A route (epic gibson#1367): an outside
+                            # A2A client sends the Capability Grant JWT of its
+                            # agent identity and no Zitadel JWT. ext_authz verifies
+                            # the grant, and refuses a call with a Zitadel JWT and
+                            # no grant.
+                            - match: { prefix: "/a2a/inbound/" }
                               requires:
                                 allow_missing_or_failed: {}
                             # A dispatched component renews its own task grant with
@@ -2958,6 +3164,74 @@ data:
                           # Service, not the daemon's).
                           address: "gibson-gibson-workloads"
                           port_value: 50001
+    
+        # -------------------------------------------------------------------------
+        # gibson_daemon_a2a_inbound — the inbound A2A listener of the daemon
+        # (gibson.daemonA2AInboundPort, epic gibson#1367). Same pod, same Service
+        # and same SPIFFE identity as gibson_daemon_grpc. Only the port differs.
+        # The listener accepts the Edge SVID (GIBSON_A2A_INBOUND_EDGE_SVID) and no
+        # other peer. It serves A2A JSON-RPC and the Agent Cards over HTTP/1.1,
+        # so this cluster speaks HTTP/1.1. An SSE reply streams on it.
+        # -------------------------------------------------------------------------
+        - name: gibson_daemon_a2a_inbound
+          type: STRICT_DNS
+          connect_timeout: 5s
+          # Matches gibson_daemon_grpc: re-resolve quickly so a rolled daemon pod's
+          # new endpoint is picked up (deploy#864).
+          dns_refresh_rate: 5s
+          respect_dns_ttl: false
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              common_http_protocol_options:
+                idle_timeout: 30s
+              explicit_http_config:
+                http_protocol_options: {}
+          # Envoy → daemon mTLS via SPIRE SDS, identical to gibson_daemon_grpc:
+          # Envoy presents spiffe://<td>/platform/envoy and pins the daemon's SVID.
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+              sni: "gibson-gibson-workloads"
+              common_tls_context:
+                tls_certificate_sds_secret_configs:
+                  - name: "default"
+                    sds_config:
+                      resource_api_version: V3
+                      api_config_source:
+                        api_type: GRPC
+                        transport_api_version: V3
+                        grpc_services:
+                          - envoy_grpc:
+                              cluster_name: spire_agent
+                combined_validation_context:
+                  default_validation_context:
+                    match_typed_subject_alt_names:
+                      - san_type: URI
+                        matcher:
+                          exact: "spiffe://zeroroot.ai/platform/daemon"
+                  validation_context_sds_secret_config:
+                    name: "ROOTCA"
+                    sds_config:
+                      resource_api_version: V3
+                      api_config_source:
+                        api_type: GRPC
+                        transport_api_version: V3
+                        grpc_services:
+                          - envoy_grpc:
+                              cluster_name: spire_agent
+          load_assignment:
+            cluster_name: gibson_daemon_a2a_inbound
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          # Same Service as gibson_daemon_grpc (see the naming note
+                          # there).
+                          address: "gibson-gibson-workloads"
+                          port_value: 8444
     
         # The model listener of the agentgateway Gateway (charts#815). TLS that
         # verifies the component CA and the name of the proxy Service. The
@@ -7048,6 +7322,13 @@ spec:
       targetPort: a2a
       protocol: TCP
       appProtocol: agentgateway.dev/a2a
+    # The inbound A2A listener (epic gibson#1367). The Edge cluster
+    # gibson_daemon_a2a_inbound dials it. It has no appProtocol, because no
+    # agentgateway policy applies to it.
+    - name: a2a-inbound
+      port: 8444
+      targetPort: a2a-inbound
+      protocol: TCP
     # The trace listener (charts#816).
     - name: otlp-grpc
       port: 4317
@@ -7820,7 +8101,7 @@ spec:
               readOnly: true
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/connector-operator:v0.164.0@sha256:2c766311720b8ead53c9cbe46f65bee76e3aa0839d049235c0e1f593c9c4b980"
+          image: "ghcr.io/zeroroot-ai/connector-operator:v0.165.0@sha256:4ef156daa31426bc54675cfd6a55d0ba7bd827e49d09db0b698a7891cfce6e52"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -7952,7 +8233,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/platform-operator:v0.164.0@sha256:14ed750dd5eba2f92934296631c7a38986b3ec5c5b19fc8063a9efae3ee5aeb5"
+          image: "ghcr.io/zeroroot-ai/platform-operator:v0.165.0@sha256:b9c07a1add4acf519d856842db1a01d4ae363465b2ee184b68fa647041593247"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -8443,7 +8724,7 @@ spec:
               memory: 64Mi
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.164.0@sha256:2ee42ef5cf338c114500e158214c0b9e4f25fabc51b7a8824fb856a09548e70f"
+          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.165.0@sha256:a9cb40f1d9bdeafdd448b007c6e99e4f2db4f5aa16d6b52fce98004e61b7dc2c"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -8587,10 +8868,17 @@ spec:
             # operator does not start without it.
             - name: GIBSON_AGENT_GATEWAY_NAME
               value: "gibson-agentgateway"
+            # The listener names of that Gateway: the sectionName of each
+            # tenant route (gibson.gatewayListeners, the names of the
+            # Gateway listeners).
+            - name: GIBSON_MODEL_GATEWAY_LISTENER
+              value: "model"
+            - name: GIBSON_AGENT_GATEWAY_LISTENER
+              value: "agent"
             # The image of the belief trainer CronJob of each tenant
             # (gibson#616). The operator exits at start when it is empty.
             - name: BELIEF_TRAINER_IMAGE
-              value: "ghcr.io/zeroroot-ai/gibson:v0.164.0@sha256:d0815f46c4006f4bca1dfb7e6f8a915100a9978664fe4d68dbc8df307a4dd7d6"
+              value: "ghcr.io/zeroroot-ai/gibson:v0.165.0@sha256:2449f923d2e1b2433ddc0b007d221d4a2751c55b4062058e2ce3ea2264fc3878"
             # The Neo4j image of each tenant data plane (gibson#1061). The
             # operator exits at start when it is empty or has no digest.
             - name: TENANT_NEO4J_IMAGE
@@ -9561,7 +9849,7 @@ spec:
               mountPath: /shared
       containers:
         - name: dashboard
-          image: "ghcr.io/zeroroot-ai/dashboard:v0.136.0@sha256:0bd73758a96cf8f1dece17e3e75fe61ea73bef1f7a727fba8fcddab08a70656b"
+          image: "ghcr.io/zeroroot-ai/dashboard:v0.137.0@sha256:1dfbf82f24695ed2d3b293080628cfa9ddb83e905596e4ffa9cdcd96ca51f42a"
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -10182,7 +10470,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 1d9e8e1564c709017e7dbf6468f1d6ff4f4e26c70dacabb110b9c845f494c22a
+        checksum/config: 93255d3c5213ba94e95641d5a806236cb8e09e55f0b87dad5206f4e9a9b917d7
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -10570,7 +10858,7 @@ spec:
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,tmp"
         checksum/registry: c1c29512582a893a867405ae14499183f952c17ed756544d689ca1b5877c2c5c
-        checksum/daemon-registry: 870719a31fd6e57bb621986ae22f91e6cc980558a0f887e8cad0049fe92af8d4
+        checksum/daemon-registry: c32f7013ff2b9f0d732dc70fc581106790f2d74b383fb89442f68e3c9829305a
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
         secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc,gibson-ext-authz-health-tls"
     spec:
@@ -10705,7 +10993,7 @@ spec:
               memory: 32Mi
       containers:
         - name: ext-authz
-          image: "ghcr.io/zeroroot-ai/ext-authz:v0.164.0@sha256:0540a54a8eada59880c2e13bc06a08184ec64845f8e59b491ceb68c584f81ed0"
+          image: "ghcr.io/zeroroot-ai/ext-authz:v0.165.0@sha256:5b2534a9af9a5600af9d03681a832ff867ae0ad863956723803aaeb80c9d7ede"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -14638,7 +14926,7 @@ spec:
               memory: 32Mi
       containers:
         - name: gibson
-          image: "ghcr.io/zeroroot-ai/gibson:v0.164.0@sha256:d0815f46c4006f4bca1dfb7e6f8a915100a9978664fe4d68dbc8df307a4dd7d6"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.165.0@sha256:2449f923d2e1b2433ddc0b007d221d4a2751c55b4062058e2ce3ea2264fc3878"
           imagePullPolicy: Always
           ports:
             - name: callback
@@ -14675,6 +14963,11 @@ spec:
             # reaches it (GIBSON_A2A_GATEWAY_SVID, the network policy).
             - name: a2a
               containerPort: 8443
+              protocol: TCP
+            # The inbound A2A listener (epic gibson#1367). Only the Edge
+            # reaches it (GIBSON_A2A_INBOUND_EDGE_SVID, the network policy).
+            - name: a2a-inbound
+              containerPort: 8444
               protocol: TCP
           env:
             # the daemon reads FGA store_id + model_id from env
@@ -14925,6 +15218,20 @@ spec:
               value: ":8443"
             - name: GIBSON_A2A_GATEWAY_SVID
               value: "spiffe://zeroroot.ai/platform/agentgateway"
+            # The inbound A2A listener (epic gibson#1367): an outside A2A
+            # client calls a published Gibson agent through the Edge route
+            # /a2a/inbound/, and the call does not cross the agentgateway. Its
+            # TLS layer accepts the one identity of the Edge, the same value as
+            # GIBSON_SPIFFE_ENVOY_ID above and EXT_AUTHZ_ENVOY_SVID of
+            # ext-authz. The public URL is the api origin plus the route
+            # prefix. The daemon writes <URL>/<agent> into the Agent Card of a
+            # published agent and dials nothing with it.
+            - name: GIBSON_A2A_INBOUND_ADDR
+              value: ":8444"
+            - name: GIBSON_A2A_INBOUND_EDGE_SVID
+              value: "spiffe://zeroroot.ai/platform/envoy"
+            - name: GIBSON_A2A_INBOUND_PUBLIC_URL
+              value: "https://api.localhost.zeroroot.ai/a2a/inbound"
             # The listen address of the trace listener. It has its own port
             # and a message limit of 48 MiB: one span holds the whole request
             # and response bodies.
@@ -15949,7 +16256,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-fga-init-870719a3
+  name: gibson-gibson-workloads-fga-init-c32f7013
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -16016,7 +16323,7 @@ spec:
         # The entrypoint is the gibson binary, so command overrides it to get a
         # shell for the redirect. The runtime image is alpine-based and has one.
         - name: dump-model
-          image: "ghcr.io/zeroroot-ai/gibson:v0.164.0@sha256:d0815f46c4006f4bca1dfb7e6f8a915100a9978664fe4d68dbc8df307a4dd7d6"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.165.0@sha256:2449f923d2e1b2433ddc0b007d221d4a2751c55b4062058e2ce3ea2264fc3878"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -19401,6 +19708,39 @@ spec:
       toPorts:
         - ports:
             - port: "50051"
+              protocol: TCP
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-daemon-a2a-inbound
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-daemon-a2a-inbound
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Only the Edge reaches the inbound A2A port of the daemon."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: daemon
+      gibson.zeroroot.ai/net-role: platform
+  ingressDeny:
+    - fromEndpoints:
+        - matchExpressions:
+            - key: app.kubernetes.io/component
+              operator: NotIn
+              values:
+                - envoy
+      toPorts:
+        - ports:
+            - port: "8444"
               protocol: TCP
 ---
 # Source: gibson/templates/network-policies.yaml
@@ -24790,7 +25130,7 @@ spec:
       # The daemon image itself — same repo@digest the StatefulSet runs — so
       # `gibson --version` reports the toolchain the DEPLOYED binary was built
       # with, not some proxy. The runtime image is alpine-based (has /bin/sh).
-      image: "ghcr.io/zeroroot-ai/gibson:v0.164.0@sha256:d0815f46c4006f4bca1dfb7e6f8a915100a9978664fe4d68dbc8df307a4dd7d6"
+      image: "ghcr.io/zeroroot-ai/gibson:v0.165.0@sha256:2449f923d2e1b2433ddc0b007d221d4a2751c55b4062058e2ce3ea2264fc3878"
       imagePullPolicy: Always
       command: ["/bin/sh", "-c"]
       args:
@@ -25961,7 +26301,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: first-admin
-          image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-fa05448@sha256:2413c573371a1220ce4519c1f65d1d05ff7c1bda8616109ba50ba552eaf65bfe"
+          image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-023f568@sha256:5b27213d652d58f64642393a9ce8c90ceb6e522429e2432e8d51a88100c3bb90"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

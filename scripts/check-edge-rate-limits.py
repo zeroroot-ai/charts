@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """check-edge-rate-limits.py — a limiter that renders fine and enforces nothing.
 
-THREE WAYS THE EDGE'S RATE LIMITING IS WRONG WITHOUT LOOKING WRONG
+FOUR WAYS THE EDGE'S RATE LIMITING IS WRONG WITHOUT LOOKING WRONG
 
 1. `filter_enabled` and `filter_enforced` BOTH DEFAULT TO 0% WHEN OMITTED.
    A `local_ratelimit` that omits them renders as a fully configured filter,
@@ -22,12 +22,24 @@ THREE WAYS THE EDGE'S RATE LIMITING IS WRONG WITHOUT LOOKING WRONG
    the number anybody reasons about. A quota above the fuse is a number in a
    config file that no request ever reaches.
 
-All three hold today. None of them was asserted: the chart's own comments
+4. A ROUTE WITH NO ZITADEL JWT AND NO BUCKET OF ITS OWN, OR A BUCKET WITH NO
+   KEY, LETS ONE CLIENT DENY THE ROUTE TO EVERYONE. The routes in OWN_BUCKET carry no Zitadel JWT, so jwt_authn
+   refuses nothing there, and each request costs an ext-authz call (and for
+   /a2a/inbound/ a read of the daemon database) before it can be refused.
+   The per-client quota runs after ext_authz. So each of these routes must
+   carry its own local_ratelimit, which runs first, or a flood of forged
+   grants drains the baseline bucket of the whole api host. The bucket must
+   also be keyed on the client address (a masked_remote_address action and
+   a descriptor entry with that key and no value): one bucket for the whole
+   route lets one client with no credential deny the route to every caller.
+
+All four hold today. None of them was asserted: the chart's own comments
 claimed a bats suite that has never existed in this repository (charts#322).
 
-  check-edge-rate-limits.py             exit 1 on any of the three
+  check-edge-rate-limits.py             exit 1 on any of the four
   check-edge-rate-limits.py --selftest  prove each one fails on a fixture
 """
+import copy
 import os
 import re
 import subprocess
@@ -164,6 +176,10 @@ def quota_rates(quota: dict) -> dict[str, float]:
     return out
 
 
+# The credential-less routes that need a bucket of their own (rule 4).
+OWN_BUCKET = ("/a2a/inbound/", "/gateway/model/", "/gateway/agent/")
+
+
 def judge(envoy: dict, quota: dict) -> list[str]:
     bad: list[str] = []
     if envoy is None:
@@ -201,6 +217,26 @@ def judge(envoy: dict, quota: dict) -> list[str]:
                            f"descriptors while use_remote_address is unset, so the address "
                            f"comes from a client-supplied x-forwarded-for and every client "
                            f"shares one bucket")
+
+    # 4. each credential-less route carries its own bucket
+    for prefix in OWN_BUCKET:
+        found = [n for _, n in walk(envoy) if isinstance(n, dict)
+                 and (n.get("match") or {}).get("prefix") == prefix and "route" in n]
+        for r in found:
+            own = ((r.get("typed_per_filter_config") or {}).get("envoy.filters.http.local_ratelimit") or {})
+            if not is_local_rl(own) or not rate_per_second(own.get("token_bucket") or {}):
+                bad.append(f"rule 4: route {prefix!r} carries no local_ratelimit of its own, so a flood of "
+                           f"forged grants drains the api baseline before ext_authz refuses it")
+                continue
+            keyed = any("masked_remote_address" in a for rl in own.get("rate_limits") or []
+                        for a in rl.get("actions") or [])
+            wildcard = [d for d in own.get("descriptors") or []
+                        if [(e.get("key"), e.get("value", "")) for e in d.get("entries") or []]
+                        == [("masked_remote_address", "")] and rate_per_second(d.get("token_bucket") or {})]
+            if not keyed or not wildcard or int(own.get("max_dynamic_descriptors") or 0) < 1:
+                bad.append(f"rule 4: route {prefix!r} has one bucket for all clients (no masked_remote_address "
+                           f"key, no descriptor with that key and no value, or no max_dynamic_descriptors), "
+                           f"so one client denies the route to every caller")
 
     # 3. no quota above the fuse that trips first
     rates = quota_rates(quota)
@@ -295,13 +331,32 @@ def selftest() -> int:
         if len(got) != want:
             print(f"SELFTEST FAIL: {name} must yield {want} finding(s), got {len(got)}: {got}")
             return 1
-    live = judge(*configs(render()))
+    envoy, quota = configs(render())
+    live = judge(envoy, quota)
     if live:
         print("SELFTEST FAIL: the live render is not clean:\n  " + "\n  ".join(live))
         return 1
+    for prefix in OWN_BUCKET:
+        broken = copy.deepcopy(envoy)
+        for _, n in walk(broken):
+            if isinstance(n, dict) and (n.get("match") or {}).get("prefix") == prefix and "route" in n:
+                (n.get("typed_per_filter_config") or {}).pop("envoy.filters.http.local_ratelimit", None)
+        if not any(b.startswith("rule 4:") for b in judge(broken, quota)):
+            print(f"SELFTEST FAIL: the route {prefix} with no bucket of its own passed rule 4")
+            return 1
+        keyless = copy.deepcopy(envoy)
+        for _, n in walk(keyless):
+            if isinstance(n, dict) and (n.get("match") or {}).get("prefix") == prefix and "route" in n:
+                own = (n.get("typed_per_filter_config") or {}).get("envoy.filters.http.local_ratelimit") or {}
+                own.pop("rate_limits", None)
+                own.pop("descriptors", None)
+        if not any(b.startswith("rule 4:") for b in judge(keyless, quota)):
+            print(f"SELFTEST FAIL: the route {prefix} with a bucket that has no address key passed rule 4")
+            return 1
     print("OK: an omitted filter_enabled, a 0% filter_enforced, a descriptor under an "
           "untrusted peer, a quota at or above its fuse, a route fuse tighter than the quota "
-          "and a bucketless connection fuse all fail; a clean edge, a minute-to-second "
+          "a bucketless connection fuse, and a credential-less route with no bucket of its own or "
+          "with a bucket that has no address key all fail; a clean edge, a minute-to-second "
           "conversion and a connection-level filter all pass")
     return 0
 

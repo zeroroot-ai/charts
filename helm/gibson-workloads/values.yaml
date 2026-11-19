@@ -341,7 +341,7 @@ gibson:
     # on the SPIRE socket — so the fga-init Job hangs in dump-model until
     # its deadline and the whole install wedges. Verified on this digest:
     # `gibson dump-fga-model` exits 0 in under a second with the model.
-    tag: "v0.164.0@sha256:d0815f46c4006f4bca1dfb7e6f8a915100a9978664fe4d68dbc8df307a4dd7d6"
+    tag: "v0.165.0@sha256:2449f923d2e1b2433ddc0b007d221d4a2751c55b4062058e2ce3ea2264fc3878"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     # Empty by default: first-party pins are hand-committed in the combined
@@ -803,7 +803,7 @@ dashboard:
     # kind keeps a moving :main tag (values-kind.yaml), exempt on purpose.
     # Bump: scripts/bump-image-digest.py --image dashboard --ref v<x.y.z> \
     #         --digest "$(HEAD /v2/zeroroot-ai/dashboard/manifests/v<x.y.z>)"
-    tag: "v0.136.0@sha256:0bd73758a96cf8f1dece17e3e75fe61ea73bef1f7a727fba8fcddab08a70656b"
+    tag: "v0.137.0@sha256:1dfbf82f24695ed2d3b293080628cfa9ddb83e905596e4ffa9cdcd96ca51f42a"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -1322,7 +1322,7 @@ extAuthz:
     # EXT_AUTHZ_CGJWT_KEYS_URL. It moves in lockstep with the daemon pin above
     # and with the https/:8086 value in ext-authz/deployment.yaml (deploy#1386)
     # — the three are one change, in both directions.
-    tag: "v0.164.0@sha256:0540a54a8eada59880c2e13bc06a08184ec64845f8e59b491ceb68c584f81ed0"
+    tag: "v0.165.0@sha256:5b2534a9af9a5600af9d03681a832ff867ae0ad863956723803aaeb80c9d7ede"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -1582,6 +1582,82 @@ envoy:
       maxTokens: 60
       tokensPerFill: 30
       fillIntervalSeconds: 1
+    # The three routes that carry no Zitadel JWT: /a2a/inbound/ (epic
+    # gibson#1367), /gateway/model/ and /gateway/agent/ (charts#815).
+    # jwt_authn refuses nothing there, and each request costs an ext-authz
+    # call (on /a2a/inbound/ also a read of the key descriptor in the daemon
+    # database and an FGA check) before it can be refused. The per-client
+    # quota of the ratelimit service runs after ext_authz. So each route has
+    # its own local_ratelimit, which is the first filter of the chain and
+    # refuses before ext_authz. That limiter keys each request on its client
+    # address (masked_remote_address, IPv4 /32, IPv6 /64), so one client that
+    # floods a route empties only its own bucket (perAddress).
+    #
+    # The client address that the Edge sees. Every HCM sets
+    # use_remote_address: true and xff_num_trusted_hops: 0, so the address
+    # is the socket peer, never an x-forwarded-for header:
+    #   - An internet client: its own address. The Service has
+    #     externalTrafficPolicy: Local (kind, k3d, k3s, a plain cluster), and
+    #     the NLB on EKS keeps the client address (preserve_client_ip).
+    #   - A sandbox: a sandbox uses the resolvers of setec, not CoreDNS, so
+    #     it resolves the public api host and leaves the cluster first. It
+    #     comes back with the address of its egress: the NAT gateway on EKS
+    #     (one address for each NAT gateway, so every sandbox of the
+    #     cluster), the node address on a single k3s node, and the address
+    #     of the docker network gateway or the node on kind. Measure it once
+    #     on the estate: the access log of the Edge prints the peer.
+    #
+    # Each Edge replica keeps its own buckets, so the real limit for one
+    # address, and the real fuse, is the value times the replica count (3 to
+    # 10). The connection limit of the api chain (apiConnections) bounds new
+    # connections each second, not requests, so it does not bound a flood of
+    # requests on open connections.
+    #
+    # /a2a/inbound/: perAddress for each client address, and the route fuse
+    # (maxTokens, tokensPerFill) for all of them together. The fuse also
+    # consumes a token on each request (always_consume_default_token_bucket),
+    # so a flood from many addresses stops at the fuse. Each message starts a
+    # mission, the daemon runs at most 50 at once (harness
+    # DefaultSpawnLimits), and a caller adds an Agent Card read and a task
+    # poll about once each second for each. Route: 100 rps sustained, 200
+    # burst. One address: 20 rps sustained, 40 burst.
+    a2aInbound:
+      maxTokens: 200
+      tokensPerFill: 100
+      fillIntervalSeconds: 1
+      perAddress:
+        maxTokens: 40
+        tokensPerFill: 20
+        fillIntervalSeconds: 1
+      # The most client addresses that the limiter keeps a bucket for (an
+      # LRU cache). An address that drops out gets a full bucket again.
+      maxDynamicDescriptors: 10000
+    # /gateway/model/ and /gateway/agent/, one limiter for each route.
+    # perAddress: at most 50 missions with up to 10 agents each
+    # (MaxChildMissions), and an agent waits for each model call, so about
+    # one call each second for each agent: 500 rps for the whole cluster.
+    # The sandboxes of a cluster can all leave through one address (a NAT
+    # gateway, a node), so one address gets twice that: 1000 rps sustained,
+    # 2000 burst. The route fuse (maxTokens, tokensPerFill: 4000 rps
+    # sustained, 8000 burst, the level of the api baseline, now for each
+    # route) also takes a token on each request, so the total load on
+    # ext-authz has a bound. The trade:
+    #   - One address cannot deny the route to the others below the fuse.
+    #   - A flood from several addresses at full rate can reach the fuse.
+    #     The route then answers 429 to every caller. That is the exposure
+    #     that the api host had before, now limited to this route.
+    #   - An attacker that rotates more addresses than
+    #     maxDynamicDescriptors gets a full bucket for each new address, and
+    #     only the fuse bounds it.
+    gatewayForward:
+      maxTokens: 8000
+      tokensPerFill: 4000
+      fillIntervalSeconds: 1
+      perAddress:
+        maxTokens: 2000
+        tokensPerFill: 1000
+        fillIntervalSeconds: 1
+      maxDynamicDescriptors: 10000
     # Chain-wide ceiling for the merged public chain (app + www + apex + docs,
     # deploy#1242). Before it existed that chain's http_filters was JUST the
     # router — no limiter of any kind, while it carries every dashboard page
@@ -3388,9 +3464,10 @@ bootstrap:
     # gibson#224 it dials Zitadel by Service name and claims the host by
     # header (ADR-0092), and it needs ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN.
     # From gibson#1091 (v0.160.1) the owner bootstrap sends the OpenFGA
-    # preshared key (GIBSON_FGA_KEY_DIR, charts#637). sha-fa05448 is the
-    # v0.164.0 release commit, which also cut gibson-bootstrap 2.0.0.
-    tag: "sha-fa05448@sha256:2413c573371a1220ce4519c1f65d1d05ff7c1bda8616109ba50ba552eaf65bfe"
+    # preshared key (GIBSON_FGA_KEY_DIR, charts#637). sha-023f568 is the
+    # v0.165.0 release commit. gibson-bootstrap 2.0.0 is unchanged since
+    # v0.164.0.
+    tag: "sha-023f568@sha256:5b27213d652d58f64642393a9ce8c90ceb6e522429e2432e8d51a88100c3bb90"
     pullPolicy: IfNotPresent
 
   # activeDeadlineSeconds caps the Job runtime. 10 min covers a fresh

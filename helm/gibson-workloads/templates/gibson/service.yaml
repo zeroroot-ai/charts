@@ -68,6 +68,13 @@ spec:
       targetPort: a2a
       protocol: TCP
       appProtocol: agentgateway.dev/a2a
+    # The inbound A2A listener (epic gibson#1367). The Edge cluster
+    # gibson_daemon_a2a_inbound dials it. It has no appProtocol, because no
+    # agentgateway policy applies to it.
+    - name: a2a-inbound
+      port: {{ include "gibson.daemonA2AInboundPort" . }}
+      targetPort: a2a-inbound
+      protocol: TCP
     # The trace listener (charts#816).
     - name: otlp-grpc
       port: {{ include "gibson.daemonTracePort" . }}

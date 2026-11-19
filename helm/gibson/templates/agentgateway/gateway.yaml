@@ -56,8 +56,9 @@ spec:
       kind: AgentgatewayParameters
       name: {{ $name }}
   listeners:
+    {{- $listeners := include "gibson.gatewayListeners" $ | fromYaml }}
     {{- range $l := list "model" "agent" }}
-    - name: {{ $l }}
+    - name: {{ get $listeners $l }}
       # TLS on each listener: a caller token never crosses the pod network
       # in clear text. The certificate comes from the component issuer
       # (gibson-workloads cert-manager/component-certificates.yaml).
