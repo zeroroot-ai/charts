@@ -4557,12 +4557,14 @@ data:
         tls:
           insecure: true
         # One span for each request, with no batch: a span can pass 16 MiB,
-        # and the trace listener of the daemon takes 48 MiB.
+        # and the trace listener of the daemon takes 48 MiB. The proxy sends
+        # one span in each export (OTEL_BSP_MAX_EXPORT_BATCH_SIZE=1 in the
+        # AgentgatewayParameters), so a request holds one span.
         sending_queue:
           enabled: true
           storage: file_storage/queue
-          sizer: requests
-          queue_size: 20000
+          sizer: bytes
+          queue_size: 1610612736
         retry_on_failure:
           enabled: true
           initial_interval: 1s
@@ -4574,7 +4576,7 @@ data:
         logs:
           level: warn
         metrics:
-          level: normal
+          level: detailed
           readers:
             - pull:
                 exporter:
@@ -18914,7 +18916,7 @@ spec:
         # The socket, the scratch directory and the queue. The queue is not
         # data of record (see the header).
         backup.velero.io/backup-volumes-excludes: "queue,spire-agent-socket,tmp"
-        checksum/config: 38ba1951ee09295788d3733715ced8537bd8420cf3396adb0fe2cea2d1b4c957
+        checksum/config: f4520cf04a0cac75507837076543d9a06a110bad7c0bab7c5f50fe822d8a208f
     spec:
       
       serviceAccountName: gibson-trace-collector
@@ -21728,6 +21730,18 @@ spec:
       memory: 256Mi
   logging:
     format: json
+  # The OpenTelemetry batch span processor of the proxy (agentgateway
+  # v1.7.0 crates/agentgateway/src/telemetry/trc.rs, new_trace_processor)
+  # sends up to 512 spans in one OTLP export by default. A span holds the
+  # whole request and response body, so a batch can pass the 40 MiB that the
+  # trace collector accepts, and the collector refuses the whole batch. One
+  # span in each export keeps each message below that limit. The in-memory
+  # span queue of the proxy is small, because each span can hold 32 MiB.
+  env:
+    - name: OTEL_BSP_MAX_EXPORT_BATCH_SIZE
+      value: "1"
+    - name: OTEL_BSP_MAX_QUEUE_SIZE
+      value: "64"
   # The proxy gets its X.509-SVID from the SPIRE agent through the CSI
   # driver, the same socket as the other platform pods. It presents the
   # SVID to ext-authz (policies.yaml, the backend TLS policy).
@@ -26258,9 +26272,29 @@ spec:
             runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/trace-collector.md#tracequeuefilling"
             summary: "The trace collector queue is more than half full"
             description: |
-              The persistent queue of the trace collector is more than half
-              full for 10 minutes. When it is full, the collector refuses new
-              spans and the gateway drops them, so model calls go unrecorded.
+              The persistent queue of the trace collector holds more than half
+              of its bytes for 10 minutes. When it is full, the collector
+              refuses new spans and the gateway drops them, so model calls go
+              unrecorded.
+        - alert: TraceExportDelayed
+          expr: |
+            max(otelcol_exporter_queue_size{exporter="otlp/daemon"})
+              / clamp_min(
+                  sum(rate(otelcol_exporter_enqueue_size_bytes_sum{exporter="otlp/daemon"}[10m]))
+                    - deriv(max(otelcol_exporter_queue_size{exporter="otlp/daemon"})[10m:1m]),
+                  1)
+              > 900
+          for: 10m
+          labels:
+            severity: page
+            component: trace-collector
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/trace-collector.md#traceexportdelayed"
+            summary: "Spans wait more than 15 minutes in the trace collector"
+            description: |
+              A span waits more than 15 minutes in the queue of the trace
+              collector before the daemon gets it, for 10 minutes. The record
+              of model calls and the token counts are that late.
 
 ---
 # Source: gibson/templates/agentgateway/gateway.yaml

@@ -13,8 +13,16 @@ The collector failed to send spans to the daemon for 10 minutes. The queue keeps
 
 ## TraceQueueFilling
 
-The persistent queue of the collector is more than half full for 10 minutes. When it is full, the collector refuses new spans and the gateway drops them, so model calls go unrecorded.
+The persistent queue of the collector holds more than half of its bytes for 10 minutes. When it is full, the collector refuses new spans and the gateway drops them, so model calls go unrecorded.
 
 1. Do the steps of [TraceExportFailing](#traceexportfailing). A queue fills when the export fails or is slower than the gateway traffic.
-2. Read `otelcol_exporter_queue_size` and `otelcol_exporter_queue_capacity` of the exporter `otlp/daemon`.
-3. If the export works and the queue still grows, raise `traceCollector.queue.capacity` and `traceCollector.queue.size` together.
+2. Read `otelcol_exporter_queue_size` and `otelcol_exporter_queue_capacity` of the exporter `otlp/daemon`. Both are in bytes.
+3. If the export works and the queue still grows, raise `traceCollector.queue.capacityMiB` and `traceCollector.queue.size` together. The render fails when `capacityMiB` x 2 + 512 passes the PVC size.
+
+## TraceExportDelayed
+
+A span waits more than 15 minutes in the queue before the daemon gets it, for 10 minutes. The rule estimates the wait: the bytes in the queue divided by the bytes that leave the queue each second. The record of model calls and the token counts are that late.
+
+1. If TraceExportFailing also fires, do its steps first. The export is down, not slow.
+2. Read the CPU and memory of the daemon pods. A slow trace listener drains the queue slowly.
+3. Read `otelcol_exporter_queue_size` (bytes) and `rate(otelcol_exporter_enqueue_size_bytes_sum[10m])` (bytes in each second) of the exporter `otlp/daemon`. If the traffic in is higher than the daemon can take for a long time, scale the daemon.

@@ -76,6 +76,14 @@ The check renders each shipped profile and fails when:
                 DENY_V6 (gibson contract round 8: the proxy resolves a
                 tenant URL again at each call, and the CNI is the only
                 control at connect time).
+ 13. collector  the trace collector queue is not limited in bytes, or its
+                byte limit x 2 + 512 MiB passes its PVC (a compaction writes
+                a second copy), or the receiver takes less than two buffers
+                (a request body and a response body, maxBufferSize each), or
+                the proxy may send more than one span in one OTLP export
+                (OTEL_BSP_MAX_EXPORT_BATCH_SIZE is not 1 in the
+                AgentgatewayParameters): a batch of large spans passes the
+                receive limit and the collector refuses all of it.
  12. rbac       a binding gives the controller its deployer role (the writes
                 of Deployments, Services, ServiceAccounts, Secrets and the
                 rest of the proxy) outside the gateway namespace: a
@@ -419,6 +427,47 @@ def judge_daemon_ports(docs: list[dict], gw: dict) -> list[str]:
     return bad
 
 
+def mib(q: str) -> float:
+    m = re.fullmatch(r"(\d+)(Mi|Gi)", str(q))
+    return float(m.group(1)) * (1024 if m.group(2) == "Gi" else 1) if m else 0.0
+
+
+def judge_collector(docs: list[dict], gw: dict) -> list[str]:
+    bad: list[str] = []
+    cm = next((d for d in of_kind(docs, "ConfigMap")
+               if ((d.get("metadata") or {}).get("labels") or {}).get("app.kubernetes.io/component") == "trace-collector"),
+              None)
+    sts = next((d for d in of_kind(docs, "StatefulSet")
+                if ((d.get("metadata") or {}).get("labels") or {}).get("app.kubernetes.io/component") == "trace-collector"),
+               None)
+    if not cm or not sts:
+        return ["collector: the render has no trace collector ConfigMap and StatefulSet"]
+    col = yaml.safe_load(cm["data"]["collector.yaml"])
+    q = (((col.get("exporters") or {}).get("otlp/daemon") or {}).get("sending_queue") or {})
+    pvc = next((mib(((v.get("spec") or {}).get("resources") or {}).get("requests", {}).get("storage"))
+                for v in (sts.get("spec") or {}).get("volumeClaimTemplates") or []
+                if (v.get("metadata") or {}).get("name") == "queue"), 0.0)
+    if q.get("sizer") != "bytes":
+        bad.append(f"collector: the queue sizer is {q.get('sizer')!r}; one span can hold 32 MiB, so it must be bytes")
+    elif int(q.get("queue_size") or 0) / 1048576 * 2 + 512 > pvc:
+        bad.append(f"collector: a queue of {int(q.get('queue_size') or 0) / 1048576:.0f} MiB and its compaction copy "
+                   f"do not fit the PVC of {pvc:.0f} MiB")
+    pol = next((p for p in of_kind(docs, "AgentgatewayPolicy")
+                if (((p.get("spec") or {}).get("frontend") or {}).get("http") or {}).get("maxBufferSize")), {})
+    buf = mib(pol["spec"]["frontend"]["http"]["maxBufferSize"]) if pol else 0.0
+    recv = float((((col.get("receivers") or {}).get("otlp") or {}).get("protocols") or {}).get("grpc", {})
+                 .get("max_recv_msg_size_mib") or 0)
+    if not buf or recv < 2 * buf:
+        bad.append(f"collector: the receiver takes {recv} MiB, less than two buffers of {buf} MiB")
+    pref = ((gw.get("spec") or {}).get("infrastructure") or {}).get("parametersRef") or {}
+    params = next((a for a in of_kind(docs, "AgentgatewayParameters") if a["metadata"]["name"] == pref.get("name")), {})
+    env = {e.get("name"): e.get("value") for e in (params.get("spec") or {}).get("env") or []}
+    if env.get("OTEL_BSP_MAX_EXPORT_BATCH_SIZE") != "1":
+        bad.append("collector: the proxy may send more than one span in one export "
+                   "(OTEL_BSP_MAX_EXPORT_BATCH_SIZE is not 1)")
+    return bad
+
+
 def judge_rbac(docs: list[dict], gw: dict) -> list[str]:
     bad: list[str] = []
     deployer = [b for b in docs if b.get("kind") in ("ClusterRoleBinding", "RoleBinding")
@@ -587,6 +636,9 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     # 12. The deployer role of the controller.
     bad += judge_rbac(docs, gw)
 
+    # 13. The trace collector and the span export of the proxy.
+    bad += judge_collector(docs, gw)
+
     # 6. The trace policy.
     ok = False
     for p in pols:
@@ -744,6 +796,15 @@ def selftest() -> int:
         "a deny rule on the trace port that refuses the collector": lambda ds: next(
             d for d in ds if d.get("kind") == "CiliumNetworkPolicy" and d["metadata"]["name"] == "gibson-daemon-trace")[
             "spec"]["ingressDeny"][0].update(fromEndpoints=[{}]),
+        "a collector queue limited by count": lambda ds: [
+            c["data"].update({"collector.yaml": c["data"]["collector.yaml"].replace("sizer: bytes", "sizer: requests")})
+            for c in ds if c.get("kind") == "ConfigMap" and c["metadata"]["name"] == "gibson-trace-collector"],
+        "a collector queue too large for its PVC": lambda ds: [
+            c["data"].update({"collector.yaml": re.sub(r"queue_size: \d+", "queue_size: 3221225472",
+                                                        c["data"]["collector.yaml"])})
+            for c in ds if c.get("kind") == "ConfigMap" and c["metadata"]["name"] == "gibson-trace-collector"],
+        "a proxy that batches spans": lambda ds: params(ds)["spec"].update(
+            env=[e for e in params(ds)["spec"]["env"] if e["name"] != "OTEL_BSP_MAX_EXPORT_BATCH_SIZE"]),
         "a deployer role bound in each namespace": lambda ds: next(
             d for d in ds if d.get("kind") == "RoleBinding" and d["metadata"]["name"] == "agentgateway-write-role-gibson"
         ).update(kind="ClusterRoleBinding"),

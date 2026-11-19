@@ -7,7 +7,12 @@ collector.yaml — the OpenTelemetry Collector.
   queue      the exporter keeps each request in a persistent queue
              (file_storage, the PVC `queue`), so a daemon restart or an
              outage loses no span. It retries without an end: the daemon
-             deduplicates on the call ID, so a retry is safe.
+             deduplicates on the call ID, so a retry is safe. The queue is
+             limited in bytes (traceCollector.queue.capacityMiB), because
+             one span can hold about 32 MiB.
+  telemetry  metrics at level detailed, so the collector reports
+             otelcol_exporter_enqueue_size_bytes. The delay alert
+             (alertrule.yaml) reads it.
   exporter   OTLP gRPC to the daemon, through the loopback port of the Envoy
              sidecar, which adds SPIFFE mTLS.
   No debug exporter, and logs at warn: a span holds full prompts and tool
@@ -28,6 +33,13 @@ envoy.yaml — the bootstrap of the Envoy mTLS sidecar, in the shape of the
 */}}
 {{- $p := .Values.traceCollector.ports -}}
 {{- $q := .Values.traceCollector.queue -}}
+{{- if not (regexMatch "^[0-9]+Gi$" (toString $q.size)) }}
+{{- fail (printf "traceCollector.queue.size must be a whole number of Gi, got %v" $q.size) }}
+{{- end }}
+{{- $pvcMiB := mul (trimSuffix "Gi" (toString $q.size) | int) 1024 -}}
+{{- if gt (add (mul (int $q.capacityMiB) 2) 512) $pvcMiB }}
+{{- fail (printf "traceCollector.queue.capacityMiB %v does not fit the PVC of %v: a compaction writes a second copy of the queue, so capacityMiB x 2 + 512 must not pass %d MiB" $q.capacityMiB $q.size $pvcMiB) }}
+{{- end }}
 {{- $td := include "gibson.trustDomain" . -}}
 {{- /* The daemon host, and its trace listener (gibson.daemonTracePort),
        which takes a message of 48 MiB. The main gRPC port takes 16 MiB. */ -}}
@@ -73,12 +85,14 @@ data:
         tls:
           insecure: true
         # One span for each request, with no batch: a span can pass 16 MiB,
-        # and the trace listener of the daemon takes 48 MiB.
+        # and the trace listener of the daemon takes 48 MiB. The proxy sends
+        # one span in each export (OTEL_BSP_MAX_EXPORT_BATCH_SIZE=1 in the
+        # AgentgatewayParameters), so a request holds one span.
         sending_queue:
           enabled: true
           storage: file_storage/queue
-          sizer: requests
-          queue_size: {{ $q.capacity }}
+          sizer: bytes
+          queue_size: {{ mul (int $q.capacityMiB) 1048576 }}
         retry_on_failure:
           enabled: true
           initial_interval: 1s
@@ -90,7 +104,7 @@ data:
         logs:
           level: warn
         metrics:
-          level: normal
+          level: detailed
           readers:
             - pull:
                 exporter:

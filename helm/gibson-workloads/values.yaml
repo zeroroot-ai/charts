@@ -2375,11 +2375,16 @@ traceCollector:
     # The plaintext probe listener of the Envoy sidecar (GET /ready only).
     probe: 9901
   queue:
-    # The size of the PVC of the persistent queue.
+    # The size of the PVC of the persistent queue, in Gi.
     size: 4Gi
-    # The most export requests that the queue holds. One request is one
-    # batch from the receiver, which is one gateway request.
-    capacity: 20000
+    # The most bytes that the queue holds, in MiB (sizer: bytes). One span
+    # can hold about 32 MiB (the request body and the response body), so a
+    # count limit cannot stop a full disk. The queue keeps its data in one
+    # bbolt file, and a compaction writes a second copy of the live data
+    # beside it. The limit leaves room for that copy and 512 MiB more:
+    # capacityMiB x 2 + 512 must not pass the PVC size, and the render fails
+    # when it does (trace-collector/configmap.yaml).
+    capacityMiB: 1536
   # The largest OTLP message that the receiver accepts. A span holds the
   # whole request body and response body (gateway.maxBufferSize, 16 MiB).
   maxRecvMsgSizeMiB: 40

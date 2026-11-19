@@ -97,6 +97,18 @@ spec:
     {{- toYaml $gw.proxy.resources | nindent 4 }}
   logging:
     format: json
+  # The OpenTelemetry batch span processor of the proxy (agentgateway
+  # v1.7.0 crates/agentgateway/src/telemetry/trc.rs, new_trace_processor)
+  # sends up to 512 spans in one OTLP export by default. A span holds the
+  # whole request and response body, so a batch can pass the 40 MiB that the
+  # trace collector accepts, and the collector refuses the whole batch. One
+  # span in each export keeps each message below that limit. The in-memory
+  # span queue of the proxy is small, because each span can hold 32 MiB.
+  env:
+    - name: OTEL_BSP_MAX_EXPORT_BATCH_SIZE
+      value: "1"
+    - name: OTEL_BSP_MAX_QUEUE_SIZE
+      value: {{ $gw.proxy.spanQueueSize | quote }}
   # The proxy gets its X.509-SVID from the SPIRE agent through the CSI
   # driver, the same socket as the other platform pods. It presents the
   # SVID to ext-authz (policies.yaml, the backend TLS policy).

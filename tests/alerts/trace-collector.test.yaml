@@ -5,15 +5,15 @@ rule_files:
 evaluation_interval: 1m
 tests:
   # Failed exports for longer than 10 minutes page. A queue at one tenth of
-  # its capacity does not.
+  # its capacity does not. The queue size and capacity are in bytes.
   - interval: 1m
     input_series:
       - series: 'otelcol_exporter_send_failed_spans_total{exporter="otlp/daemon"}'
         values: '0x5 1+1x30'
       - series: 'otelcol_exporter_queue_size{exporter="otlp/daemon"}'
-        values: '2000x35'
+        values: '161061273x35'
       - series: 'otelcol_exporter_queue_capacity{exporter="otlp/daemon"}'
-        values: '20000x35'
+        values: '1610612736x35'
     alert_rule_test:
       - eval_time: 10m
         alertname: TraceExportFailing
@@ -37,9 +37,9 @@ tests:
   - interval: 1m
     input_series:
       - series: 'otelcol_exporter_queue_size{exporter="otlp/daemon"}'
-        values: '1000x5 12000x30'
+        values: '80530636x5 966367641x30'
       - series: 'otelcol_exporter_queue_capacity{exporter="otlp/daemon"}'
-        values: '20000x35'
+        values: '1610612736x35'
     alert_rule_test:
       - eval_time: 10m
         alertname: TraceQueueFilling
@@ -52,6 +52,61 @@ tests:
               runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/trace-collector.md#tracequeuefilling"
               summary: "The trace collector queue is more than half full"
               description: |
-                The persistent queue of the trace collector is more than half
-                full for 10 minutes. When it is full, the collector refuses new
-                spans and the gateway drops them, so model calls go unrecorded.
+                The persistent queue of the trace collector holds more than half
+                of its bytes for 10 minutes. When it is full, the collector
+                refuses new spans and the gateway drops them, so model calls go
+                unrecorded.
+  # A queue that drains fast does not page: 10 MiB in the queue, 1 MiB in
+  # each second, and no growth is a wait of 10 seconds.
+  - interval: 1m
+    input_series:
+      - series: 'otelcol_exporter_queue_size{exporter="otlp/daemon"}'
+        values: '10485760x40'
+      - series: 'otelcol_exporter_enqueue_size_bytes_sum{exporter="otlp/daemon"}'
+        values: '0+62914560x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: TraceExportDelayed
+        exp_alerts: []
+  # A slow export pages: from minute 10, 2 GiB in the queue and 1 MiB in and
+  # out each second is a wait of 2048 seconds, above the 900 of the rule.
+  - interval: 1m
+    input_series:
+      - series: 'otelcol_exporter_queue_size{exporter="otlp/daemon"}'
+        values: '10485760x10 2147483648x30'
+      - series: 'otelcol_exporter_enqueue_size_bytes_sum{exporter="otlp/daemon"}'
+        values: '0+62914560x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: TraceExportDelayed
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: TraceExportDelayed
+        exp_alerts:
+          - exp_labels: {severity: page, component: trace-collector}
+            exp_annotations:
+              runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/trace-collector.md#traceexportdelayed"
+              summary: "Spans wait more than 15 minutes in the trace collector"
+              description: |
+                A span waits more than 15 minutes in the queue of the trace
+                collector before the daemon gets it, for 10 minutes. The record
+                of model calls and the token counts are that late.
+  # A queue that grows as fast as spans come in drains nothing, so it pages.
+  - interval: 1m
+    input_series:
+      - series: 'otelcol_exporter_queue_size{exporter="otlp/daemon"}'
+        values: '104857600+62914560x40'
+      - series: 'otelcol_exporter_enqueue_size_bytes_sum{exporter="otlp/daemon"}'
+        values: '0+62914560x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: TraceExportDelayed
+        exp_alerts:
+          - exp_labels: {severity: page, component: trace-collector}
+            exp_annotations:
+              runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/trace-collector.md#traceexportdelayed"
+              summary: "Spans wait more than 15 minutes in the trace collector"
+              description: |
+                A span waits more than 15 minutes in the queue of the trace
+                collector before the daemon gets it, for 10 minutes. The record
+                of model calls and the token counts are that late.

@@ -9,9 +9,19 @@ failures need a page:
                          for 10 minutes. The queue holds them, so no span is
                          lost yet, but the record of model calls and the
                          token counts fall behind.
-  TraceQueueFilling      the queue is more than half full for 10 minutes. At
-                         full, the receiver refuses new spans, and the
-                         gateway drops them.
+  TraceQueueFilling      the queue holds more than half of its bytes for 10
+                         minutes. At full, the receiver refuses new spans,
+                         and the gateway drops them.
+  TraceExportDelayed     a span waits more than 15 minutes in the queue, for
+                         10 minutes. The collector has no metric for the age
+                         of the oldest span, so the rule estimates the wait
+                         by Little's law: the bytes in the queue divided by
+                         the bytes that leave it each second. The bytes that
+                         leave are the bytes that enter
+                         (otelcol_exporter_enqueue_size_bytes, level
+                         detailed) less the growth of the queue. A queue
+                         that does not drain gives a very long wait, so the
+                         rule fires then too.
 
 The thresholds are a first number. Open point 10 of gibson#1366 measures the
 real export delay and sets them.
@@ -60,7 +70,27 @@ spec:
             runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/trace-collector.md#tracequeuefilling"
             summary: "The trace collector queue is more than half full"
             description: |
-              The persistent queue of the trace collector is more than half
-              full for 10 minutes. When it is full, the collector refuses new
-              spans and the gateway drops them, so model calls go unrecorded.
+              The persistent queue of the trace collector holds more than half
+              of its bytes for 10 minutes. When it is full, the collector
+              refuses new spans and the gateway drops them, so model calls go
+              unrecorded.
+        - alert: TraceExportDelayed
+          expr: |
+            max(otelcol_exporter_queue_size{exporter="otlp/daemon"})
+              / clamp_min(
+                  sum(rate(otelcol_exporter_enqueue_size_bytes_sum{exporter="otlp/daemon"}[10m]))
+                    - deriv(max(otelcol_exporter_queue_size{exporter="otlp/daemon"})[10m:1m]),
+                  1)
+              > 900
+          for: 10m
+          labels:
+            severity: page
+            component: trace-collector
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/trace-collector.md#traceexportdelayed"
+            summary: "Spans wait more than 15 minutes in the trace collector"
+            description: |
+              A span waits more than 15 minutes in the queue of the trace
+              collector before the daemon gets it, for 10 minutes. The record
+              of model calls and the token counts are that late.
 {{- end }}

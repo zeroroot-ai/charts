@@ -1918,6 +1918,11 @@ gateway:
       tag: "v1.7.0"
       digest: "sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b"
     replicas: 2
+    # The most finished spans that the proxy keeps in memory before it sends
+    # them to the trace collector (OTEL_BSP_MAX_QUEUE_SIZE). The proxy drops
+    # a span when this queue is full. A span can hold 32 MiB, so the queue
+    # stays small against the memory limit below.
+    spanQueueSize: 64
     # The startup budget of the proxy, in seconds. The proxy is not Ready
     # and serves no listener until the controller sends its first xDS
     # config. A cluster start can keep the controller away for minutes, and
