@@ -76,6 +76,10 @@ The check renders each shipped profile and fails when:
                 DENY_V6 (gibson contract round 8: the proxy resolves a
                 tenant URL again at each call, and the CNI is the only
                 control at connect time).
+ 14. ingress    a pod of a sandbox namespace reaches a gateway listener
+                directly, or the daemon, the dashboard backend or the Edge
+                does not. A sandbox reaches the gateway only through the
+                Edge (gibson daemon/model_gateway.go).
  13. collector  the trace collector queue is not limited in bytes, or its
                 byte limit x 2 + 512 MiB passes its PVC (a compaction writes
                 a second copy), or the receiver takes less than two buffers
@@ -427,6 +431,27 @@ def judge_daemon_ports(docs: list[dict], gw: dict) -> list[str]:
     return bad
 
 
+SANDBOX_NS_LABEL = "io.cilium.k8s.namespace.labels.setec.zeroroot.ai/sandbox-namespace"
+
+
+def judge_ingress(docs: list[dict], gw: dict) -> list[str]:
+    bad: list[str] = []
+    ports = [li.get("port") for li in (gw.get("spec") or {}).get("listeners") or []]
+    proxy = cp.endpoint(ns(gw), ((gw.get("spec") or {}).get("infrastructure") or {}).get("labels") or {})
+    rules = cp.rules(docs, ns(gw))
+    sandbox = {**cp.endpoint("sandbox-example", {"app": "tool"}), SANDBOX_NS_LABEL: "true"}
+    for port in ports:
+        # setec writes the egress side of a sandbox, so only the ingress side
+        # of the proxy is in the render. It must admit no sandbox pod.
+        if any(cp.rule_selects(r, rns, proxy) and cp.ingress_admits(r, rns, sandbox, port) for _, r, rns in rules):
+            bad.append(f"ingress: a sandbox pod reaches the gateway listener {port}; it must go through the Edge")
+        for comp in ("daemon", "dashboard", "envoy"):
+            src = cp.endpoint(*pod_labels(docs, comp))
+            if not cp.reaches(rules, src, proxy, port):
+                bad.append(f"ingress: the {comp} pods do not reach the gateway listener {port}")
+    return bad
+
+
 def mib(q: str) -> float:
     m = re.fullmatch(r"(\d+)(Mi|Gi)", str(q))
     return float(m.group(1)) * (1024 if m.group(2) == "Gi" else 1) if m else 0.0
@@ -639,6 +664,9 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     # 13. The trace collector and the span export of the proxy.
     bad += judge_collector(docs, gw)
 
+    # 14. Who reaches the listeners.
+    bad += judge_ingress(docs, gw)
+
     # 6. The trace policy.
     ok = False
     for p in pols:
@@ -796,6 +824,9 @@ def selftest() -> int:
         "a deny rule on the trace port that refuses the collector": lambda ds: next(
             d for d in ds if d.get("kind") == "CiliumNetworkPolicy" and d["metadata"]["name"] == "gibson-daemon-trace")[
             "spec"]["ingressDeny"][0].update(fromEndpoints=[{}]),
+        "a sandbox namespace admitted to the listeners": lambda ds: proxy_rule(ds)["ingress"][0]["fromEndpoints"].append(
+            {"matchLabels": {"k8s:" + SANDBOX_NS_LABEL: "true"},
+             "matchExpressions": [{"key": "k8s:io.kubernetes.pod.namespace", "operator": "Exists"}]}),
         "a collector queue limited by count": lambda ds: [
             c["data"].update({"collector.yaml": c["data"]["collector.yaml"].replace("sizer: bytes", "sizer: requests")})
             for c in ds if c.get("kind") == "ConfigMap" and c["metadata"]["name"] == "gibson-trace-collector"],

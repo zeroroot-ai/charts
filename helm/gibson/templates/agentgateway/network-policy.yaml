@@ -8,9 +8,13 @@ its own default deny. Every flow below crosses that namespace, so each peer
 names its namespace. Cilium allows a flow only when both sides allow it, so
 each flow has an egress rule and an ingress rule:
 
-  proxy in    the daemon, the dashboard backend, the Edge (the gateway
-              forward routes for a sandbox, charts#815) and the pods of each
-              sandbox namespace reach the two listeners (model, agent).
+  proxy in    the daemon, the dashboard backend and the Edge (the gateway
+              forward routes for a sandbox, charts#815) reach the two
+              listeners (model, agent). A sandbox pod does not: it reaches
+              the gateway only through the Edge, at the public URLs that the
+              daemon gives it (gibson daemon/model_gateway.go,
+              GIBSON_MODEL_GATEWAY_PUBLIC_URL and
+              GIBSON_AGENT_GATEWAY_PUBLIC_URL).
   proxy out   the proxy reaches ext-authz on its gRPC port, the controller
               on its xDS port and the trace collector on its OTLP port, all
               in the release namespace. It reaches public addresses, the
@@ -28,8 +32,7 @@ each flow has an egress rule and an ingress rule:
               The TLS layer of that listener accepts the collector SVID and
               no other peer. Only the proxy reaches the collector.
 
-A sandbox namespace denies each flow by default (setec). The egress rule of
-a sandbox to the gateway is the business of setec, not of this chart.
+A sandbox namespace denies each flow by default (setec).
 
 Call-time address control (gibson contract round 8). A tenant gives the URL
 of an outside agent and of a model provider. The daemon checks the address at
@@ -100,10 +103,6 @@ covers it. The registration check of the daemon is the control there.
 {{- fail (printf "gateway.inClusterProviders[%d]: ports is empty. Name the container port of the provider" $i) }}
 {{- end }}
 {{- end }}
-{{- /* The namespace label that setec sets on each sandbox namespace.
-       sandbox-namespace-label-admission.yaml (gibson-workloads) limits who
-       may set it. */}}
-{{- $sandboxNs := printf "k8s:io.cilium.k8s.namespace.labels.%s" "setec.zeroroot.ai/sandbox-namespace" }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -115,7 +114,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "The daemon, the dashboard backend, the Edge and the sandboxes reach the listeners of the agentgateway proxy. The proxy reaches ext-authz, its controller, the trace collector, the daemon A2A port, the listed in-cluster providers and public addresses only."
+  description: "The daemon, the dashboard backend and the Edge reach the listeners of the agentgateway proxy. The proxy reaches ext-authz, its controller, the trace collector, the daemon A2A port, the listed in-cluster providers and public addresses only."
   endpointSelector:
     matchLabels:
       app.kubernetes.io/component: agentgateway-proxy
@@ -127,11 +126,6 @@ spec:
             app.kubernetes.io/component: {{ $c }}
             {{ $role }}: platform
         {{- end }}
-        - matchLabels:
-            {{ $sandboxNs }}: "true"
-          matchExpressions:
-            - key: {{ $podNs }}
-              operator: Exists
       toPorts:
         - ports:
             {{- range $p := $listeners }}

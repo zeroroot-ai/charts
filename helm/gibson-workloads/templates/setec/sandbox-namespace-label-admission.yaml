@@ -2,14 +2,15 @@
 Who may set the sandbox label on a Namespace (charts#815, in the style of
 charts#527).
 
-The agentgateway network policy of the umbrella admits the pods of each
-sandbox namespace to the listeners of the gateway. That rule selects the
-namespace by the label setec.zeroroot.ai/sandbox-namespace=true. Two
-principals write the label: the setec frontend, when it makes the namespace
-of a client and tenant pair, and the principal that applies this chart, for
-the namespaces of setec.sandboxNamespaces (sandbox-namespace.yaml). Any
-other principal that sets the label on a namespace of its own gets the
-gateway rule for each pod there.
+The setec host guard binds to each sandbox namespace by the label
+setec.zeroroot.ai/sandbox-namespace=true (setec chart README). It refuses a
+host namespace, a hostPath volume and a privileged container there. A
+principal that removes the label from a sandbox namespace removes that
+guard. Two principals write the label: the setec frontend, when it makes
+the namespace of a client and tenant pair, and the principal that applies
+this chart, for the namespaces of setec.sandboxNamespaces
+(sandbox-namespace.yaml). No network rule of this chart selects the label:
+a sandbox reaches the gateway only through the Edge.
 
 This policy refuses a CREATE or UPDATE of a Namespace that adds, changes or
 removes the label, from any other principal. An UPDATE that keeps the label

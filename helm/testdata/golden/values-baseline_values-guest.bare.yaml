@@ -18610,7 +18610,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "The daemon, the dashboard backend, the Edge and the sandboxes reach the listeners of the agentgateway proxy. The proxy reaches ext-authz, its controller, the trace collector, the daemon A2A port, the listed in-cluster providers and public addresses only."
+  description: "The daemon, the dashboard backend and the Edge reach the listeners of the agentgateway proxy. The proxy reaches ext-authz, its controller, the trace collector, the daemon A2A port, the listed in-cluster providers and public addresses only."
   endpointSelector:
     matchLabels:
       app.kubernetes.io/component: agentgateway-proxy
@@ -18628,11 +18628,6 @@ spec:
             k8s:io.kubernetes.pod.namespace: gibson
             app.kubernetes.io/component: envoy
             gibson.zeroroot.ai/net-role: platform
-        - matchLabels:
-            k8s:io.cilium.k8s.namespace.labels.setec.zeroroot.ai/sandbox-namespace: "true"
-          matchExpressions:
-            - key: k8s:io.kubernetes.pod.namespace
-              operator: Exists
       toPorts:
         - ports:
             - port: "8080"
