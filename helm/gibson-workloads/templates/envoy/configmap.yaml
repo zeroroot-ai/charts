@@ -101,7 +101,7 @@ unconditionally — there is no `envoy.enabled` opt-out.
 {{- if not (kindIs "map" $rl) -}}
 {{- fail "envoy.rateLimit is missing. The Envoy edge rate limiter is structural (deploy#1189) — restore the block from the chart's values.yaml. Removing it leaves the five pre-auth routes, including /capabilitygrant/v1/register (which reaches Postgres before signature verification), with no throttle at all." -}}
 {{- end -}}
-{{- range $bucketName := list "apiBaseline" "preAuthDiscovery" "preAuthRegister" "apiConnections" "publicBaseline" "appSignupSubmit" -}}
+{{- range $bucketName := list "apiBaseline" "preAuthDiscovery" "preAuthRegister" "a2aInbound" "gatewayForward" "apiConnections" "publicBaseline" "appSignupSubmit" -}}
 {{- include "gibson.envoy.validateRateLimitBucket" (dict "name" $bucketName "bucket" (index $rl $bucketName)) -}}
 {{- end -}}
 {{- include "gibson.envoy.validateHttp2MaxConcurrentStreams" $rl.http2MaxConcurrentStreams -}}

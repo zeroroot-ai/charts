@@ -1582,6 +1582,35 @@ envoy:
       maxTokens: 60
       tokensPerFill: 30
       fillIntervalSeconds: 1
+    # The inbound A2A route /a2a/inbound/ (epic gibson#1367). The caller
+    # holds no Zitadel JWT, so jwt_authn refuses nothing there, and each
+    # request costs one ext-authz call, one read of the key descriptor in
+    # the daemon database and one FGA check before it can be refused. This
+    # bucket sits in front of all of that, like the pre-auth routes, and a
+    # flood on this route drains only this bucket. Legitimate use: each
+    # message starts a mission, and the daemon runs at most 50 missions at
+    # once (harness DefaultSpawnLimits); a caller adds an Agent Card read
+    # and a task poll about once each second for each of them. 100 rps
+    # sustained, 200 burst, above that and below the 300 of the discovery
+    # routes.
+    a2aInbound:
+      maxTokens: 200
+      tokensPerFill: 100
+      fillIntervalSeconds: 1
+    # The gateway forward routes /gateway/model/ and /gateway/agent/
+    # (charts#815): an agent in a sandbox calls the Model gateway and the
+    # Agent gateway through the Edge. Each route gets its own bucket with
+    # these numbers. Each request costs an ext-authz call before a refusal
+    # can happen. Legitimate use: at most 50 missions at once, up to 10
+    # agents for each (MaxChildMissions), and an agent waits for each model
+    # call before the next, so about one call each second for each agent:
+    # 500 rps at the most. 1000 rps sustained, 2000 burst, twice that. The
+    # bucket is for the route, not for each client address, so the shared
+    # NAT address of the sandboxes on a node does not matter here.
+    gatewayForward:
+      maxTokens: 2000
+      tokensPerFill: 1000
+      fillIntervalSeconds: 1
     # Chain-wide ceiling for the merged public chain (app + www + apex + docs,
     # deploy#1242). Before it existed that chain's http_filters was JUST the
     # router — no limiter of any kind, while it carries every dashboard page

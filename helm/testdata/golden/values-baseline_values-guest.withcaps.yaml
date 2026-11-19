@@ -1366,6 +1366,25 @@ data:
                                 - x-gibson-subject
                                 - x-gibson-mission
                                 - x-gibson-task
+                              typed_per_filter_config:
+                                # Its own bucket (envoy.rateLimit.gatewayForward), before
+                                # ext_authz, like the pre-auth routes.
+                                envoy.filters.http.local_ratelimit:
+                                  "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                                  stat_prefix: api_gateway_model
+                                  token_bucket:
+                                    max_tokens: 2000
+                                    tokens_per_fill: 1000
+                                    fill_interval: 1s
+                                  # Both REQUIRED: each defaults to 0% when omitted,
+                                  # which renders a limiter that enforces nothing.
+                                  filter_enabled:
+                                    default_value: { numerator: 100, denominator: HUNDRED }
+                                  filter_enforced:
+                                    default_value: { numerator: 100, denominator: HUNDRED }
+                                  response_headers_to_add:
+                                    - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                                      header: { key: retry-after, value: "1" }
                             # The Agent gateway for a sandbox (charts#815). A sandbox reaches
                             # the cluster only through the Edge, so the Edge forwards
                             # /gateway/agent/ to the agent listener of the
@@ -1404,6 +1423,25 @@ data:
                                 - x-gibson-subject
                                 - x-gibson-mission
                                 - x-gibson-task
+                              typed_per_filter_config:
+                                # Its own bucket (envoy.rateLimit.gatewayForward), before
+                                # ext_authz, like the pre-auth routes.
+                                envoy.filters.http.local_ratelimit:
+                                  "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                                  stat_prefix: api_gateway_agent
+                                  token_bucket:
+                                    max_tokens: 2000
+                                    tokens_per_fill: 1000
+                                    fill_interval: 1s
+                                  # Both REQUIRED: each defaults to 0% when omitted,
+                                  # which renders a limiter that enforces nothing.
+                                  filter_enabled:
+                                    default_value: { numerator: 100, denominator: HUNDRED }
+                                  filter_enforced:
+                                    default_value: { numerator: 100, denominator: HUNDRED }
+                                  response_headers_to_add:
+                                    - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                                      header: { key: retry-after, value: "1" }
                             # The inbound A2A route (epic gibson#1367). An outside
                             # A2A client calls a published Gibson agent: its A2A
                             # JSON-RPC endpoint at /a2a/inbound/<agent> and its
@@ -1460,6 +1498,27 @@ data:
                               request_headers_to_remove:
                                 - x-gibson-mission
                                 - x-gibson-task
+                              typed_per_filter_config:
+                                # Its own bucket (envoy.rateLimit.a2aInbound). The limiter is the first
+                                # filter of the chain, so it refuses a flood before
+                                # ext_authz and the daemon pay for it, and a flood
+                                # here drains this bucket, not the api baseline.
+                                envoy.filters.http.local_ratelimit:
+                                  "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                                  stat_prefix: api_a2a_inbound
+                                  token_bucket:
+                                    max_tokens: 200
+                                    tokens_per_fill: 100
+                                    fill_interval: 1s
+                                  # Both REQUIRED: each defaults to 0% when omitted,
+                                  # which renders a limiter that enforces nothing.
+                                  filter_enabled:
+                                    default_value: { numerator: 100, denominator: HUNDRED }
+                                  filter_enforced:
+                                    default_value: { numerator: 100, denominator: HUNDRED }
+                                  response_headers_to_add:
+                                    - append_action: OVERWRITE_IF_EXISTS_OR_ADD
+                                      header: { key: retry-after, value: "1" }
                             - match: { prefix: "/.well-known/openid-configuration" }
                               route:
                                 cluster: zitadel_upstream
@@ -10328,7 +10387,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: a7ba75be16fb6865b956f2e326bf9be4e624855b774ee8b59f0c5d1543d9833b
+        checksum/config: 064ed296a4201d78adcca0b33a4b51f4b87d8e40315267ca759b7b2c62422d1e
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
