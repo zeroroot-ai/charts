@@ -60,10 +60,22 @@ The check renders each shipped profile and fails when:
                 trusted headers and the route claim) or keeps one it must
                 not get (the grant and the Edge quota headers).
   6. trace      no frontend policy on the Gateway sets maxBufferSize and
-                adds the six trace fields that the daemon reads, each with
+                adds the trace fields that the daemon reads, each with
                 its expression (TRACE_FIELDS), or the ext-authz policy does
-                not copy the four trusted headers into the request metadata
-                that those fields read.
+                not copy the trusted headers and the route agent into the
+                request metadata that those fields read.
+ 10. egress     a Cilium rule that selects the proxy pods lets them reach
+                an address of DENY_V4 or DENY_V6 (a private, loopback,
+                link-local, CGNAT or unique local range, or the cloud
+                metadata address), uses an entity or a host name in an
+                allow rule (the world entity includes the metadata address,
+                and a name can resolve to a private address), or names a
+                pod with no namespace, no pod label or no port. No rule
+                that selects the proxy denies the host, remote-node and
+                kube-apiserver entities and each range of DENY_V4 and
+                DENY_V6 (gibson contract round 8: the proxy resolves a
+                tenant URL again at each call, and the CNI is the only
+                control at connect time).
 
   check-agentgateway.py             exit 1 on a finding, 0 when clean
   check-agentgateway.py --selftest  prove each rule fails on a broken fixture
@@ -71,6 +83,7 @@ The check renders each shipped profile and fails when:
 from __future__ import annotations
 
 import copy
+import ipaddress
 import os
 import re
 import subprocess
@@ -79,6 +92,9 @@ import sys
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "scripts", "lib"))
+import cilium_policy as cp  # noqa: E402
+
 LIST = os.path.join(ROOT, "airgap", "images.txt")
 PROFILES = (
     ("values-baseline.yaml",),
@@ -89,12 +105,24 @@ GW_GROUP = "gateway.networking.k8s.io"
 FORMAT_PATHS = {"/v1/messages", "/v1/responses", "/v1/embeddings", "/v1/models"}
 LISTENERS = {"model", "agent"}
 TRUSTED = ("tenant", "subject", "mission", "task")
+# The request metadata that the ext-authz policy copies after the check, with
+# the header that it reads. The trusted headers that ext-authz set, and the
+# route agent of an A2A call (gibson contract round 8). The route of an
+# outside agent removes x-gibson-route-agent before the trace snapshot, so
+# the trace reads the copy.
+META_COPY = {**{f: f'request.headers["x-gibson-{f}"]' for f in TRUSTED}}
 # The trace attributes that the daemon reads, by name, with their expression.
 TRACE_FIELDS = {
     "gibson.request_body": "string(request.body)",
     "gibson.response_body": "string(response.body)",
-    **{f"gibson.{f}": f"metadata.{f}" for f in TRUSTED},
+    **{f"gibson.{f}": f"metadata.{f}" for f in META_COPY},
 }
+# The addresses that the proxy must never reach (gibson contract round 8).
+# The cloud metadata address 169.254.169.254 is in 169.254.0.0/16.
+DENY_V4 = ("0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+           "172.16.0.0/12", "192.168.0.0/16")
+DENY_V6 = ("::1/128", "::ffff:0:0/96", "64:ff9b:1::/48", "fc00::/7", "fe80::/10")
+DENY_ENTITIES = {"host", "remote-node", "kube-apiserver"}
 MODEL_EXPR = "json(request.body).model"
 # A whole header name. A name that ends in "-" is a prefix match of the Edge,
 # not a header, and is skipped.
@@ -291,6 +319,53 @@ def judge_a2a(docs: list[dict], gw: dict, pols: list[dict]) -> list[str]:
     return bad
 
 
+def cidrs_of(peer: dict) -> list[tuple[str, list[str]]]:
+    """(cidr, except) for each CIDR of an egress or egressDeny item."""
+    out = [(c, []) for c in peer.get("toCIDR") or []]
+    out += [(c.get("cidr"), list(c.get("except") or [])) for c in peer.get("toCIDRSet") or []]
+    return out
+
+
+def judge_egress(docs: list[dict], gw: dict) -> list[str]:
+    bad: list[str] = []
+    labels = ((gw.get("spec") or {}).get("infrastructure") or {}).get("labels") or {}
+    proxy = cp.endpoint(ns(gw), labels)
+    mine = [(p, r, rns) for p, r, rns in cp.rules(docs, ns(gw)) if cp.rule_selects(r, rns, proxy)]
+    if not mine:
+        return ["egress: no Cilium rule selects the proxy pods"]
+    deny_nets = [ipaddress.ip_network(c) for c in DENY_V4 + DENY_V6]
+    denied_entities: set[str] = set()
+    denied_nets: list = []
+    for p, r, _ in mine:
+        pname = f"{p['kind']}/{p['metadata']['name']}"
+        for e in r.get("egress") or []:
+            if e.get("toEntities"):
+                bad.append(f"egress: {pname} lets the proxy reach the entities {e['toEntities']}")
+            if e.get("toFQDNs"):
+                bad.append(f"egress: {pname} lets the proxy reach host names, which can resolve to a private address")
+            for sel in e.get("toEndpoints") or []:
+                ml = {cp.norm(k): v for k, v in (sel.get("matchLabels") or {}).items()}
+                if (sel.get("matchExpressions") or cp.NS_KEY not in ml or len(ml) < 2 or not e.get("toPorts")):
+                    bad.append(f"egress: {pname} lets the proxy reach pods by {sel} with ports "
+                               f"{e.get('toPorts')}; name a namespace, a pod label and a port")
+            for c, exc in cidrs_of(e):
+                net = ipaddress.ip_network(c, strict=False)
+                excs = [ipaddress.ip_network(x, strict=False) for x in exc]
+                for d in deny_nets:
+                    if d.version == net.version and d.overlaps(net) and not any(
+                            x.version == d.version and d.subnet_of(x) for x in excs):
+                        bad.append(f"egress: {pname} lets the proxy reach {d} through {c}")
+        for e in r.get("egressDeny") or []:
+            denied_entities |= set(e.get("toEntities") or [])
+            denied_nets += [ipaddress.ip_network(c, strict=False) for c, _ in cidrs_of(e)]
+    if DENY_ENTITIES - denied_entities:
+        bad.append(f"egress: no rule of the proxy denies the entities {sorted(DENY_ENTITIES - denied_entities)}")
+    for d in deny_nets:
+        if not any(x.version == d.version and d.subnet_of(x) for x in denied_nets):
+            bad.append(f"egress: no rule of the proxy denies {d}")
+    return bad
+
+
 def proxy_image(params: dict) -> str:
     img = (params.get("spec") or {}).get("image") or {}
     ref = "/".join(p for p in (img.get("registry"), img.get("repository")) if p)
@@ -375,9 +450,9 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
         t = (p.get("spec") or {}).get("traffic") or {}
         if targets(p, name, None) and t.get("phase") == "PreRouting" and "extAuth" in t:
             meta = ((t.get("transformation") or {}).get("request") or {}).get("metadata") or {}
-    for f in TRUSTED:
-        if meta.get(f) != f'request.headers["x-gibson-{f}"]':
-            bad.append(f"trace: the ext-authz policy does not copy x-gibson-{f} into the request metadata {f}")
+    for f, expr in META_COPY.items():
+        if meta.get(f) != expr:
+            bad.append(f"trace: the ext-authz policy does not copy {expr} into the request metadata {f}")
 
     # 2. No public listener, and TLS on each listener.
     cert_secrets = {(c.get("spec") or {}).get("secretName") for c in of_kind(docs, "Certificate")}
@@ -433,6 +508,9 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
     # 9. The Agent gateway route to the daemon.
     bad += judge_a2a(docs, gw, pols)
 
+    # 10. The egress of the proxy pods.
+    bad += judge_egress(docs, gw)
+
     # 8. The Edge routes of a sandbox.
     bad += judge_edge(edge_config(docs), gw)
 
@@ -475,6 +553,13 @@ def selftest() -> int:
 
     def params(ds):
         return next(d for d in ds if d.get("kind") == "AgentgatewayParameters")
+
+    def proxy_rule(ds):
+        return next(d for d in ds if d.get("kind") == "CiliumNetworkPolicy"
+                    and d["metadata"].get("namespace") == "gibson-gateway")["spec"]
+
+    def proxy_egress(ds, key):
+        return [c for e in proxy_rule(ds)["egress"] for c in e.get(key) or []]
 
     fixtures = {
         "ext-authz on a route rule, not the Gateway": lambda ds: pol(ds, "-ext-authz")["spec"].update(
@@ -557,6 +642,22 @@ def selftest() -> int:
                      "traffic": {"extAuth": {"backendRef": {"name": "other", "port": 1}, "grpc": {},
                                              "failureMode": "FailOpen"}}}}),
         "a trace with the default buffer": lambda ds: pol(ds, "-trace")["spec"]["frontend"].pop("http"),
+        "a proxy policy that allows a private range": lambda ds: [c["except"].remove("10.0.0.0/8")
+                                                               for c in proxy_egress(ds, "toCIDRSet")
+                                                               if c["cidr"] == "0.0.0.0/0"],
+        "a proxy policy that allows the world entity": lambda ds: proxy_rule(ds)["egress"].append(
+            {"toEntities": ["world"]}),
+        "a proxy policy that allows the whole cluster": lambda ds: proxy_rule(ds)["egress"].append(
+            {"toEntities": ["cluster"]}),
+        "a proxy policy that allows each pod of a namespace": lambda ds: proxy_rule(ds)["egress"].append(
+            {"toEndpoints": [{"matchLabels": {"k8s:io.kubernetes.pod.namespace": "models"}}],
+             "toPorts": [{"ports": [{"port": "443", "protocol": "TCP"}]}]}),
+        "a proxy policy that allows a host name": lambda ds: proxy_rule(ds)["egress"].append(
+            {"toFQDNs": [{"matchPattern": "*"}]}),
+        "a proxy policy with no deny rule for the metadata address": lambda ds: proxy_rule(ds)["egressDeny"][1].update(
+            toCIDRSet=[c for c in proxy_rule(ds)["egressDeny"][1]["toCIDRSet"] if c["cidr"] != "169.254.0.0/16"]),
+        "a proxy policy with no deny rule for the node": lambda ds: proxy_rule(ds)["egressDeny"][0].update(
+            toEntities=["remote-node", "kube-apiserver"]),
     }
     failed = 0
     for desc, mutate in fixtures.items():
@@ -586,7 +687,8 @@ def main() -> int:
         print("❌ the agentgateway Gateway lost a platform policy (charts#815):\n  " + "\n  ".join(bad))
         return 1
     print("✓ agentgateway: ext-authz before routing on both listeners, TLS and no public listener, a pinned "
-          "mirror proxy image, header strip, format map, trace fields and the Edge routes of a sandbox on each profile")
+          "mirror proxy image, header strip, format map, trace fields, the Edge routes of a sandbox and the "
+          "proxy egress (public addresses only) on each profile")
     return 0
 
 

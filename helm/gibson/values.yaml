@@ -1915,6 +1915,20 @@ gateway:
       limits:
         cpu: "2"
         memory: 1Gi
+  # The model providers in the cluster that the proxy may reach, for example
+  # a model server that a tenant runs in its own namespace, or the mock
+  # provider of an exit test. The proxy reaches no other pod, and no private
+  # address (templates/agentgateway/network-policy.yaml). Each entry names a
+  # namespace, the labels of the provider pods and their container ports (the
+  # port of the pod, not of the Service). Empty by default. Example:
+  #   - namespace: models
+  #     podLabels: {app: model-server}
+  #     ports: [8443]
+  inClusterProviders: []
+  # The TCP ports that the proxy may dial on a public address: the port of
+  # each LLM provider and of each outside agent. An outside agent on another
+  # port needs its port here.
+  publicPorts: [443]
   # The largest request or response body that the proxy buffers. The trace
   # policy and the ext-authz model name read the whole body, so a larger body
   # loses its trace fields and its model name. gibson#1386 measures the real

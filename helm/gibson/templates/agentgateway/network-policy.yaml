@@ -13,8 +13,9 @@ each flow has an egress rule and an ingress rule:
               sandbox namespace reach the two listeners (model, agent).
   proxy out   the proxy reaches ext-authz on its gRPC port, the controller
               on its xDS port and the trace collector on its OTLP port, all
-              in the release namespace. It reaches each LLM provider outside
-              the cluster, and it resolves each name.
+              in the release namespace. It reaches public addresses, the
+              in-cluster providers of gateway.inClusterProviders, and it
+              resolves each name. See "call-time address control" below.
   a2a         the proxy reaches the A2A listener of the daemon
               (gibson.daemonA2APort), and no other pod reaches that port. Its
               TLS layer accepts the proxy SVID and no other peer.
@@ -25,6 +26,33 @@ each flow has an egress rule and an ingress rule:
 
 A sandbox namespace denies each flow by default (setec). The egress rule of
 a sandbox to the gateway is the business of setec, not of this chart.
+
+Call-time address control (gibson contract round 8). A tenant gives the URL
+of an outside agent and of a model provider. The daemon checks the address at
+registration, but the proxy resolves the name again at each call, and
+agentgateway v1.7.0 has no setting that refuses a private address. The CNI
+sees the address at connect time, so this policy is the control:
+
+  1. The Cilium world entity is not enough. The Cilium policy language
+     defines world as "all endpoints outside of the cluster" and says that
+     an allow to world "is identical to allowing to CIDR 0.0.0.0/0". That
+     includes 169.254.169.254, the private addresses of the cloud network
+     and 100.64.0.0/10.
+  2. The proxy gets toCIDRSet 0.0.0.0/0 and ::/0, with each private,
+     loopback, link-local, CGNAT and unique local range in except. Cilium
+     says that CIDR rules "do not apply to traffic where both sides of the
+     connection are either managed by Cilium or use an IP belonging to a
+     node in the cluster", so this rule opens no pod and no node.
+  3. egressDeny refuses the host, remote-node and kube-apiserver entities
+     and the same ranges. Cilium applies a deny before each allow ("deny
+     policies take precedence over allow policies"), so no later allow rule
+     and no CIDR match mode (policy-cidr-match-mode nodes) reopens them.
+  4. A pod in the cluster is reachable only by selector: the four platform
+     targets above and the entries of gateway.inClusterProviders (an
+     operator-set list of namespace, pod labels and ports, empty by default).
+
+The loopback of the proxy pod never reaches the CNI, so no network policy
+covers it. The registration check of the daemon is the control there.
 */}}
 {{- $ns := .Release.Namespace }}
 {{- $gwNs := include "gibson.gatewayNamespace" . }}
@@ -40,6 +68,26 @@ a sandbox to the gateway is the business of setec, not of this chart.
 {{- $daemonA2A := include "gibson.daemonA2APort" . }}
 {{- $collector := dict "app.kubernetes.io/component" "trace-collector" "gibson.zeroroot.ai/datastore" "trace" }}
 {{- $proxy := dict "app.kubernetes.io/component" "agentgateway-proxy" $podNs $gwNs }}
+{{- /* The ranges that the proxy never reaches, by address (gibson contract
+       round 8). scripts/check-agentgateway.py holds the same list. */}}
+{{- $denyV4 := list "0.0.0.0/8" "10.0.0.0/8" "100.64.0.0/10" "127.0.0.0/8" "169.254.0.0/16" "172.16.0.0/12" "192.168.0.0/16" }}
+{{- $denyV6 := list "::1/128" "::ffff:0:0/96" "64:ff9b:1::/48" "fc00::/7" "fe80::/10" }}
+{{- $providers := .Values.gateway.inClusterProviders | default list }}
+{{- $closed := list $ns $gwNs "kube-system" .Values.global.spire.namespaces.system.name }}
+{{- if not .Values.gateway.publicPorts }}
+{{- fail "gateway.publicPorts is empty. The proxy needs at least port 443 to reach a provider" }}
+{{- end }}
+{{- range $i, $p := $providers }}
+{{- if or (not $p.namespace) (has $p.namespace $closed) }}
+{{- fail (printf "gateway.inClusterProviders[%d]: namespace %q must name the namespace of a model provider, not one of %s" $i ($p.namespace | default "") (join ", " $closed)) }}
+{{- end }}
+{{- if not $p.podLabels }}
+{{- fail (printf "gateway.inClusterProviders[%d]: podLabels is empty. The proxy must not reach a whole namespace" $i) }}
+{{- end }}
+{{- if not $p.ports }}
+{{- fail (printf "gateway.inClusterProviders[%d]: ports is empty. Name the container port of the provider" $i) }}
+{{- end }}
+{{- end }}
 {{- /* The namespace label that setec sets on each sandbox namespace.
        sandbox-namespace-label-admission.yaml (gibson-workloads) limits who
        may set it. */}}
@@ -55,7 +103,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "The daemon, the dashboard backend, the Edge and the sandboxes reach the listeners of the agentgateway proxy. The proxy reaches ext-authz, its controller, the trace collector and the LLM providers."
+  description: "The daemon, the dashboard backend, the Edge and the sandboxes reach the listeners of the agentgateway proxy. The proxy reaches ext-authz, its controller, the trace collector, the daemon A2A port, the listed in-cluster providers and public addresses only."
   endpointSelector:
     matchLabels:
       app.kubernetes.io/component: agentgateway-proxy
@@ -115,10 +163,49 @@ spec:
         - ports:
             - port: {{ $daemonA2A | quote }}
               protocol: TCP
-    # The LLM providers, outside the cluster.
-    - toEntities:
-        - world
+    # The in-cluster model providers that the operator names
+    # (gateway.inClusterProviders). Each entry names its namespace, its pod
+    # labels and its container ports.
+    {{- range $p := $providers }}
+    - toEndpoints:
+        - matchLabels:
+            {{ $podNs }}: {{ $p.namespace }}
+            {{- toYaml $p.podLabels | nindent 12 }}
+      toPorts:
+        - ports:
+            {{- range $port := $p.ports }}
+            - port: {{ $port | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- end }}
+    # The LLM providers and the outside agents: public addresses only, on
+    # the ports of gateway.publicPorts. A CIDR rule selects no pod and no
+    # node of the cluster.
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except:
+            {{- toYaml $denyV4 | nindent 12 }}
+        - cidr: ::/0
+          except:
+            {{- toYaml $denyV6 | nindent 12 }}
+      toPorts:
+        - ports:
+            {{- range $port := $.Values.gateway.publicPorts }}
+            - port: {{ $port | quote }}
+              protocol: TCP
+            {{- end }}
     {{- include "gibson.dnsRule" (list (dict "matchPattern" "*")) | nindent 4 }}
+  # A deny wins over each allow. The node, the other nodes, the API server
+  # and the private ranges stay closed whatever allow rule is added later.
+  egressDeny:
+    - toEntities:
+        - host
+        - remote-node
+        - kube-apiserver
+    - toCIDRSet:
+        {{- range $c := concat $denyV4 $denyV6 }}
+        - cidr: {{ $c }}
+        {{- end }}
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy

@@ -22663,7 +22663,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "-20"
 spec:
-  description: "The daemon, the dashboard backend, the Edge and the sandboxes reach the listeners of the agentgateway proxy. The proxy reaches ext-authz, its controller, the trace collector and the LLM providers."
+  description: "The daemon, the dashboard backend, the Edge and the sandboxes reach the listeners of the agentgateway proxy. The proxy reaches ext-authz, its controller, the trace collector, the daemon A2A port, the listed in-cluster providers and public addresses only."
   endpointSelector:
     matchLabels:
       app.kubernetes.io/component: agentgateway-proxy
@@ -22730,9 +22730,33 @@ spec:
         - ports:
             - port: "8443"
               protocol: TCP
-    # The LLM providers, outside the cluster.
-    - toEntities:
-        - world
+    # The in-cluster model providers that the operator names
+    # (gateway.inClusterProviders). Each entry names its namespace, its pod
+    # labels and its container ports.
+    # The LLM providers and the outside agents: public addresses only, on
+    # the ports of gateway.publicPorts. A CIDR rule selects no pod and no
+    # node of the cluster.
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except:
+            - 0.0.0.0/8
+            - 10.0.0.0/8
+            - 100.64.0.0/10
+            - 127.0.0.0/8
+            - 169.254.0.0/16
+            - 172.16.0.0/12
+            - 192.168.0.0/16
+        - cidr: ::/0
+          except:
+            - ::1/128
+            - ::ffff:0:0/96
+            - 64:ff9b:1::/48
+            - fc00::/7
+            - fe80::/10
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: kube-system
@@ -22746,6 +22770,26 @@ spec:
           rules:
             dns:
               - matchPattern: '*'
+  # A deny wins over each allow. The node, the other nodes, the API server
+  # and the private ranges stay closed whatever allow rule is added later.
+  egressDeny:
+    - toEntities:
+        - host
+        - remote-node
+        - kube-apiserver
+    - toCIDRSet:
+        - cidr: 0.0.0.0/8
+        - cidr: 10.0.0.0/8
+        - cidr: 100.64.0.0/10
+        - cidr: 127.0.0.0/8
+        - cidr: 169.254.0.0/16
+        - cidr: 172.16.0.0/12
+        - cidr: 192.168.0.0/16
+        - cidr: ::1/128
+        - cidr: ::ffff:0:0/96
+        - cidr: 64:ff9b:1::/48
+        - cidr: fc00::/7
+        - cidr: fe80::/10
 ---
 # Source: gibson/templates/agentgateway/network-policy.yaml
 apiVersion: cilium.io/v2
