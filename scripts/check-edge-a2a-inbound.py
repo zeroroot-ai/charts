@@ -226,6 +226,8 @@ def judge_edge(edge: dict, svc: str, port, daemon_san: str) -> list[str]:
     authz = next((f for f in hcm.get("http_filters") or [] if f.get("name") == EXT_AUTHZ), None)
     if authz is None or names.index(EXT_AUTHZ) > names.index("envoy.filters.http.router"):
         bad.append("ext_authz: the api connection manager has no ext_authz filter before the router")
+    elif authz.get("disabled"):
+        bad.append("ext_authz: the api ext_authz filter entry is disabled")
     elif (authz.get("typed_config") or {}).get("failure_mode_allow") is not False:
         bad.append("ext_authz: the api ext_authz filter does not fail closed")
 
@@ -237,6 +239,14 @@ def judge_edge(edge: dict, svc: str, port, daemon_san: str) -> list[str]:
         if rule is None or not any(isinstance(n, dict) and "allow_missing_or_failed" in n
                                    for n in walk(rule.get("requires") or {})):
             bad.append(f"jwt: the first jwt_authn rule for {path} requires a Zitadel JWT; the caller has none")
+
+    for ru in rules:
+        pfx = (ru.get("match") or {}).get("prefix")
+        loose = any(isinstance(n, dict) and ("allow_missing_or_failed" in n or "allow_missing" in n)
+                    for n in walk(ru.get("requires") or {}))
+        if loose and pfx is not None and pfx != PREFIX and PREFIX.startswith(pfx):
+            bad.append(f"jwt: the jwt_authn rule for {pfx!r} lets a request with no Zitadel JWT through, and it "
+                       f"covers more than {PREFIX}")
 
     # 6. No other route reaches the inbound path or cluster.
     for m in managers(edge):
@@ -394,6 +404,12 @@ def drop_jwt_rule(e: dict) -> None:
                                     if (r.get("match") or {}).get("prefix") != PREFIX]
 
 
+def loose_rule(e: dict) -> None:
+    jwt = next(f for f in api(e)[0]["http_filters"] if f["name"] == JWT)
+    jwt["typed_config"]["rules"].insert(0, {"match": {"prefix": "/a2a/"},
+                                            "requires": {"allow_missing_or_failed": {}}})
+
+
 def wrong_port(e: dict) -> None:
     c = next(c for c in e["static_resources"]["clusters"] if c["name"] == CLUSTER)
     next(n for n in walk(c) if isinstance(n, dict) and "socket_address" in n)["socket_address"]["port_value"] = 8443
@@ -432,6 +448,33 @@ FIXTURES = {
                                                              "https://api.example.com/a2a/inbound"),
     "no deny rule on the inbound port": drop_deny,
     "a deny rule that refuses the Edge too": deny_edge,
+    "a jwt_authn rule that loosens all of /a2a/": lambda ds: edge_mutate(ds, loose_rule),
+    "an ext_authz filter entry that is disabled": lambda ds: edge_mutate(ds, lambda e: next(
+        f for f in api(e)[0]["http_filters"] if f["name"] == EXT_AUTHZ).update(disabled=True)),
+}
+
+# The rule that each fixture must hit: the tag that starts its finding.
+FIXTURE_RULE = {
+    "no inbound route": "route",
+    "an inbound route with ext_authz off": "ext_authz",
+    "an api virtual host with ext_authz off": "ext_authz",
+    "an inbound route that strips x-gibson-tenant": "headers",
+    "a route config that strips x-gibson-subject": "headers",
+    "an inbound route that sets x-gibson-tenant": "headers",
+    "an inbound route that rewrites the path": "route",
+    "an inbound route that caps a stream": "route",
+    "an inbound quota keyed on the identity headers": "quota",
+    "an earlier route that shadows the inbound route": "route",
+    "no jwt_authn rule for the inbound route": "jwt",
+    "another route that rewrites to the inbound path": "rewrite",
+    "a cluster on the wrong port": "cluster",
+    "no GIBSON_A2A_INBOUND_ADDR": "daemon",
+    "an Edge SVID that is not the Edge": "daemon",
+    "a public URL with a literal domain": "daemon",
+    "no deny rule on the inbound port": "network",
+    "a deny rule that refuses the Edge too": "network",
+    "a jwt_authn rule that loosens all of /a2a/": "jwt",
+    "an ext_authz filter entry that is disabled": "ext_authz",
 }
 
 
@@ -442,15 +485,19 @@ def selftest() -> int:
         print("❌ selftest: the baseline render has findings:\n  " + "\n  ".join(base))
         return 1
     failed = []
+    if set(FIXTURES) != set(FIXTURE_RULE):
+        print(f"❌ selftest: fixtures with no rule tag: {sorted(set(FIXTURES) ^ set(FIXTURE_RULE))}")
+        return 1
     for name, mutate in FIXTURES.items():
         ds = copy.deepcopy(docs)
         mutate(ds)
-        if not judge(ds):
-            failed.append(name)
+        got = judge(ds)
+        if not any(b.startswith(FIXTURE_RULE[name] + ":") for b in got):
+            failed.append(f"{name} (want a {FIXTURE_RULE[name]} finding, got {got})")
     if failed:
         print("❌ selftest: these fixtures pass the guard:\n  " + "\n  ".join(failed))
         return 1
-    print(f"✓ selftest: each of {len(FIXTURES)} broken fixtures fails the A2A inbound guard")
+    print(f"✓ selftest: each of {len(FIXTURES)} broken fixtures fails the A2A inbound guard on its own rule")
     return 0
 
 
