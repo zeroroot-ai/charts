@@ -42,8 +42,10 @@ The check renders each shipped profile and fails when:
                 GIBSON_A2A_INBOUND_EDGE_SVID is the Edge SVID that ext-authz
                 pins (EXT_AUTHZ_ENVOY_SVID), and GIBSON_A2A_INBOUND_PUBLIC_URL
                 is the api origin of gibson-domains plus /a2a/inbound.
-  9. network    no Cilium rule denies the inbound port of the daemon to each
-                pod of the namespace except the Edge.
+  9. network    the Edge does not reach the inbound port of the daemon, or
+                another pod of the namespace does (no gibson.daemonPortDeny
+                rule). A probe pod, the dashboard backend, stands for each
+                other pod.
 
   check-edge-a2a-inbound.py             exit 1 on a finding, 0 when clean
   check-edge-a2a-inbound.py --selftest  prove each rule fails on a broken fixture
@@ -62,6 +64,9 @@ import sys
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "scripts", "lib"))
+import cilium_policy as cp  # noqa: E402
+
 PROFILES = (
     ("values-baseline.yaml",),
     ("values-baseline.yaml", "values-eks.yaml"),
@@ -297,27 +302,28 @@ def judge(docs: list[dict]) -> list[str]:
     edge = edge_config(docs)
     bad += judge_edge(edge, (svc.get("metadata") or {}).get("name"), port, daemon_san(edge))
 
-    # 9. The network rule.
-    ok = False
-    for d in docs:
-        if d.get("kind") != "CiliumNetworkPolicy":
-            continue
-        for r in ([d["spec"]] if "spec" in d else d.get("specs") or []):
-            sel = ((r.get("endpointSelector") or {}).get("matchLabels") or {})
-            if sel.get("app.kubernetes.io/component") != "daemon":
-                continue
-            for rule in r.get("ingressDeny") or []:
-                ports = {str(p.get("port")) for tp in rule.get("toPorts") or [] for p in tp.get("ports") or []}
-                peers = rule.get("fromEndpoints") or []
-                spares_edge = peers and all(
-                    any(e.get("key") == "app.kubernetes.io/component" and e.get("operator") == "NotIn"
-                        and "envoy" in (e.get("values") or []) for e in p.get("matchExpressions") or [])
-                    and not p.get("matchLabels") for p in peers)
-                if str(port) in ports and spares_edge:
-                    ok = True
-    if not ok:
-        bad.append(f"network: no Cilium rule denies the daemon port {port} to each pod of the namespace but the Edge")
+    # 9. The network rule. The Edge reaches the port, and a probe pod (the
+    # dashboard backend) stands for each other pod of the namespace.
+    dst = cp.endpoint(*pod_labels(docs, "daemon"))
+    rules = cp.rules(docs, dst[cp.NS_KEY])
+    edge_pod = cp.endpoint(*pod_labels(docs, "envoy"))
+    other = cp.endpoint(*pod_labels(docs, "dashboard"))
+    if not cp.reaches(rules, edge_pod, dst, port):
+        bad.append(f"network: the Edge does not reach the daemon port {port}")
+    if not cp.denied(rules, other, dst, port):
+        bad.append(f"network: a pod of the namespace other than the Edge reaches the daemon port {port}; "
+                   f"add a gibson.daemonPortDeny rule")
     return bad
+
+
+def pod_labels(docs: list[dict], component: str) -> tuple[str, dict]:
+    """(namespace, pod labels) of the rendered workload of a component."""
+    for d in docs:
+        if d.get("kind") in ("Deployment", "StatefulSet") and \
+                ((d.get("metadata") or {}).get("labels") or {}).get("app.kubernetes.io/component") == component:
+            return ((d.get("metadata") or {}).get("namespace") or "",
+                    (((d.get("spec") or {}).get("template") or {}).get("metadata") or {}).get("labels") or {})
+    return "", {}
 
 
 def edge_mutate(docs: list[dict], change) -> None:
@@ -348,9 +354,13 @@ def set_env(ds: list[dict], name: str, value) -> None:
 
 
 def drop_deny(ds: list[dict]) -> None:
-    for d in ds:
-        if d.get("kind") == "CiliumNetworkPolicy" and "spec" in d:
-            d["spec"].pop("ingressDeny", None)
+    ds.remove(next(d for d in ds if d.get("kind") == "CiliumNetworkPolicy"
+                   and d["metadata"]["name"] == "gibson-daemon-a2a-inbound"))
+
+
+def deny_edge(ds: list[dict]) -> None:
+    next(d for d in ds if d.get("kind") == "CiliumNetworkPolicy"
+         and d["metadata"]["name"] == "gibson-daemon-a2a-inbound")["spec"]["ingressDeny"][0].update(fromEndpoints=[{}])
 
 
 def other_rewrite(e: dict) -> None:
@@ -406,6 +416,7 @@ FIXTURES = {
     "a public URL with a literal domain": lambda ds: set_env(ds, "GIBSON_A2A_INBOUND_PUBLIC_URL",
                                                              "https://api.example.com/a2a/inbound"),
     "no deny rule on the inbound port": drop_deny,
+    "a deny rule that refuses the Edge too": deny_edge,
 }
 
 

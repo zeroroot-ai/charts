@@ -14,10 +14,12 @@ a new policy, and no policy lists each internal peer.
                       with NXDOMAIN (the substrate sets
                       dnsRejectResponseCode: nameError), so the resolver tries
                       its next search domain.
-  2. platform         Platform pods reach each other. One exception: only the
-                      Edge reaches the inbound A2A port of the daemon
-                      (gibson.daemonA2AInboundPort, epic gibson#1367). An
-                      ingressDeny rule refuses each other pod on that port.
+  2. platform         Platform pods reach each other. Three daemon ports
+                      accept one peer each, and an ingressDeny rule
+                      (gibson.daemonPortDeny) refuses each other pod of the
+                      namespace there: the inbound A2A port (the Edge, epic
+                      gibson#1367, below), and the A2A port and the trace
+                      port (agentgateway/network-policy.yaml).
   3. data stores      Postgres, Redis and OpenBao each admit only the
                       pods with their client label.
   4. kube-api         Pods with the kube-api label reach the API server.
@@ -420,39 +422,11 @@ spec:
 ---
 {{- /* The inbound A2A listener of the daemon (epic gibson#1367). An outside
        A2A client reaches it only through the Edge route /a2a/inbound/, where
-       ext_authz checks the caller. The platform rule above lets each platform
-       pod reach each port of the daemon, so an allow rule cannot narrow it.
-       A Cilium deny rule wins over each allow rule, so this rule refuses each
-       pod of the namespace except the Edge on that one port. The TLS layer
-       of the listener accepts the Edge SVID and no other peer
-       (GIBSON_A2A_INBOUND_EDGE_SVID). */}}
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: {{ $rel }}-daemon-a2a-inbound
-  namespace: {{ $ns }}
-  labels:
-    {{- include "gibson.labels" . | nindent 4 }}
-    app.kubernetes.io/component: network-daemon-a2a-inbound
-  annotations:
-    argocd.argoproj.io/sync-wave: "-20"
-spec:
-  description: "Only the Edge reaches the inbound A2A port of the daemon."
-  endpointSelector:
-    matchLabels:
-      app.kubernetes.io/component: daemon
-      {{ $role }}: platform
-  ingressDeny:
-    - fromEndpoints:
-        - matchExpressions:
-            - key: app.kubernetes.io/component
-              operator: NotIn
-              values:
-                - envoy
-      toPorts:
-        - ports:
-            - port: {{ include "gibson.daemonA2AInboundPort" . | quote }}
-              protocol: TCP
+       ext_authz checks the caller. Only the Edge reaches the port
+       (gibson.daemonPortDeny). The TLS layer of the listener accepts the
+       Edge SVID and no other peer (GIBSON_A2A_INBOUND_EDGE_SVID). */}}
+{{ include "gibson.daemonPortDeny" (dict "ctx" . "name" "daemon-a2a-inbound" "port" (include "gibson.daemonA2AInboundPort" .) "peers" (list "envoy")
+     "description" "Only the Edge reaches the inbound A2A port of the daemon.") }}
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
