@@ -341,7 +341,7 @@ gibson:
     # on the SPIRE socket — so the fga-init Job hangs in dump-model until
     # its deadline and the whole install wedges. Verified on this digest:
     # `gibson dump-fga-model` exits 0 in under a second with the model.
-    tag: "v0.164.0@sha256:d0815f46c4006f4bca1dfb7e6f8a915100a9978664fe4d68dbc8df307a4dd7d6"
+    tag: "v0.165.0@sha256:2449f923d2e1b2433ddc0b007d221d4a2751c55b4062058e2ce3ea2264fc3878"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     # Empty by default: first-party pins are hand-committed in the combined
@@ -1322,7 +1322,7 @@ extAuthz:
     # EXT_AUTHZ_CGJWT_KEYS_URL. It moves in lockstep with the daemon pin above
     # and with the https/:8086 value in ext-authz/deployment.yaml (deploy#1386)
     # — the three are one change, in both directions.
-    tag: "v0.164.0@sha256:0540a54a8eada59880c2e13bc06a08184ec64845f8e59b491ceb68c584f81ed0"
+    tag: "v0.165.0@sha256:5b2534a9af9a5600af9d03681a832ff867ae0ad863956723803aaeb80c9d7ede"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -3388,9 +3388,10 @@ bootstrap:
     # gibson#224 it dials Zitadel by Service name and claims the host by
     # header (ADR-0092), and it needs ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN.
     # From gibson#1091 (v0.160.1) the owner bootstrap sends the OpenFGA
-    # preshared key (GIBSON_FGA_KEY_DIR, charts#637). sha-fa05448 is the
-    # v0.164.0 release commit, which also cut gibson-bootstrap 2.0.0.
-    tag: "sha-fa05448@sha256:2413c573371a1220ce4519c1f65d1d05ff7c1bda8616109ba50ba552eaf65bfe"
+    # preshared key (GIBSON_FGA_KEY_DIR, charts#637). sha-023f568 is the
+    # v0.165.0 release commit. gibson-bootstrap 2.0.0 is unchanged since
+    # v0.164.0.
+    tag: "sha-023f568@sha256:5b27213d652d58f64642393a9ce8c90ceb6e522429e2432e8d51a88100c3bb90"
     pullPolicy: IfNotPresent
 
   # activeDeadlineSeconds caps the Job runtime. 10 min covers a fresh
