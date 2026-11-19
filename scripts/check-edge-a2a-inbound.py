@@ -77,6 +77,8 @@ PREFIX = "/a2a/inbound/"
 CLUSTER = "gibson_daemon_a2a_inbound"
 PORT_NAME = "a2a-inbound"
 # The two inbound paths of one agent (gibson agentcall.InboundPathAgent).
+# Paths outside the inbound prefix: a loose JWT rule must match none of them.
+OUTSIDE = ("/a2a", "/a2a/", "/a2a/other", "/a2a/inboundx", "/gibson.daemon.v1.DaemonService/GetMission", "/")
 SAMPLES = ("/a2a/inbound/recon", "/a2a/inbound/recon/.well-known/agent-card.json")
 # The headers that the inbound class of ext-authz writes on allow, with
 # OVERWRITE_IF_EXISTS_OR_ADD (gibson extauthz/server/inbound_a2a.go).
@@ -228,6 +230,9 @@ def judge_edge(edge: dict, svc: str, port, daemon_san: str) -> list[str]:
         bad.append("ext_authz: the api connection manager has no ext_authz filter before the router")
     elif authz.get("disabled"):
         bad.append("ext_authz: the api ext_authz filter entry is disabled")
+    elif (((authz.get("typed_config") or {}).get("filter_enabled") or {}).get("default_value") or {}
+          ).get("numerator", 100) == 0:
+        bad.append("ext_authz: the api ext_authz filter is enabled for 0 percent of requests")
     elif (authz.get("typed_config") or {}).get("failure_mode_allow") is not False:
         bad.append("ext_authz: the api ext_authz filter does not fail closed")
 
@@ -241,11 +246,16 @@ def judge_edge(edge: dict, svc: str, port, daemon_san: str) -> list[str]:
             bad.append(f"jwt: the first jwt_authn rule for {path} requires a Zitadel JWT; the caller has none")
 
     for ru in rules:
-        pfx = (ru.get("match") or {}).get("prefix")
+        m = ru.get("match") or {}
+        if m == {"prefix": PREFIX}:
+            continue
         loose = any(isinstance(n, dict) and ("allow_missing_or_failed" in n or "allow_missing" in n)
                     for n in walk(ru.get("requires") or {}))
-        if loose and pfx is not None and pfx != PREFIX and PREFIX.startswith(pfx):
-            bad.append(f"jwt: the jwt_authn rule for {pfx!r} lets a request with no Zitadel JWT through, and it "
+        # A loose rule of any match kind (prefix, path_separated_prefix,
+        # safe_regex) that matches an inbound path and also a path outside the
+        # inbound prefix loosens more than the inbound route.
+        if loose and any(matches(m, p) for p in SAMPLES) and any(matches(m, p) for p in OUTSIDE):
+            bad.append(f"jwt: the jwt_authn rule for {m} lets a request with no Zitadel JWT through, and it "
                        f"covers more than {PREFIX}")
 
     # 6. No other route reaches the inbound path or cluster.
@@ -410,6 +420,11 @@ def loose_rule(e: dict) -> None:
                                             "requires": {"allow_missing_or_failed": {}}})
 
 
+def loose_match(e: dict, match: dict) -> None:
+    jwt = next(f for f in api(e)[0]["http_filters"] if f["name"] == JWT)
+    jwt["typed_config"]["rules"].insert(0, {"match": match, "requires": {"allow_missing_or_failed": {}}})
+
+
 def wrong_port(e: dict) -> None:
     c = next(c for c in e["static_resources"]["clusters"] if c["name"] == CLUSTER)
     next(n for n in walk(c) if isinstance(n, dict) and "socket_address" in n)["socket_address"]["port_value"] = 8443
@@ -449,6 +464,13 @@ FIXTURES = {
     "no deny rule on the inbound port": drop_deny,
     "a deny rule that refuses the Edge too": deny_edge,
     "a jwt_authn rule that loosens all of /a2a/": lambda ds: edge_mutate(ds, loose_rule),
+    "a jwt_authn regex rule that loosens all of /a2a/": lambda ds: edge_mutate(ds, lambda e: loose_match(
+        e, {"safe_regex": {"regex": "/a2a/.*"}})),
+    "a jwt_authn separated prefix rule for /a2a": lambda ds: edge_mutate(ds, lambda e: loose_match(
+        e, {"path_separated_prefix": "/a2a"})),
+    "an ext_authz filter enabled for 0 percent": lambda ds: edge_mutate(ds, lambda e: next(
+        f for f in api(e)[0]["http_filters"] if f["name"] == EXT_AUTHZ)["typed_config"].update(
+        filter_enabled={"default_value": {"numerator": 0, "denominator": "HUNDRED"}})),
     "an ext_authz filter entry that is disabled": lambda ds: edge_mutate(ds, lambda e: next(
         f for f in api(e)[0]["http_filters"] if f["name"] == EXT_AUTHZ).update(disabled=True)),
 }
@@ -474,6 +496,9 @@ FIXTURE_RULE = {
     "no deny rule on the inbound port": "network",
     "a deny rule that refuses the Edge too": "network",
     "a jwt_authn rule that loosens all of /a2a/": "jwt",
+    "a jwt_authn regex rule that loosens all of /a2a/": "jwt",
+    "a jwt_authn separated prefix rule for /a2a": "jwt",
+    "an ext_authz filter enabled for 0 percent": "ext_authz",
     "an ext_authz filter entry that is disabled": "ext_authz",
 }
 
