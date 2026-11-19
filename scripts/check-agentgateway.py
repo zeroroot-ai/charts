@@ -65,9 +65,9 @@ The check renders each shipped profile and fails when:
                 not copy the trusted headers and the route agent into the
                 request metadata that those fields read.
  10. egress     a Cilium rule that selects the proxy pods lets them reach
-                an address of DENY_V4 or DENY_V6 (a private, loopback,
-                link-local, CGNAT or unique local range, or the cloud
-                metadata address), uses an entity or a host name in an
+                an address of DENY_V4 or DENY_V6 (each range that the
+                netguard of the daemon blocks, the cloud metadata address
+                and both NAT64 prefixes among them), uses an entity or a host name in an
                 allow rule (the world entity includes the metadata address,
                 and a name can resolve to a private address), or names a
                 pod with no namespace, no pod label or no port. No rule
@@ -118,11 +118,15 @@ TRACE_FIELDS = {
     "gibson.response_body": "string(response.body)",
     **{f"gibson.{f}": f"metadata.{f}" for f in META_COPY},
 }
-# The addresses that the proxy must never reach (gibson contract round 8).
-# The cloud metadata address 169.254.169.254 is in 169.254.0.0/16.
+# The addresses that the proxy must never reach (gibson contract round 8):
+# each range that the netguard of the daemon blocks (gibson
+# internal/infra/netguard/netguard.go), with the whole of both NAT64 prefixes.
+# The cloud metadata address 169.254.169.254 is in 169.254.0.0/16. This copy
+# is apart from the template on purpose, so a range removed there fails here.
 DENY_V4 = ("0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
-           "172.16.0.0/12", "192.168.0.0/16")
-DENY_V6 = ("::1/128", "::ffff:0:0/96", "64:ff9b:1::/48", "fc00::/7", "fe80::/10")
+           "172.16.0.0/12", "192.0.0.0/24", "192.168.0.0/16", "198.18.0.0/15", "224.0.0.0/4", "240.0.0.0/4")
+DENY_V6 = ("::/128", "::1/128", "::ffff:0:0/96", "64:ff9b::/96", "64:ff9b:1::/48", "fc00::/7", "fe80::/10",
+           "ff00::/8")
 DENY_ENTITIES = {"host", "remote-node", "kube-apiserver"}
 MODEL_EXPR = "json(request.body).model"
 # A whole header name. A name that ends in "-" is a prefix match of the Edge,
@@ -665,6 +669,11 @@ def selftest() -> int:
             {"toFQDNs": [{"matchPattern": "*"}]}),
         "a proxy policy with no deny rule for the metadata address": lambda ds: proxy_rule(ds)["egressDeny"][1].update(
             toCIDRSet=[c for c in proxy_rule(ds)["egressDeny"][1]["toCIDRSet"] if c["cidr"] != "169.254.0.0/16"]),
+        "a proxy policy that allows the NAT64 prefix": lambda ds: [c["except"].remove("64:ff9b::/96")
+                                                                 for c in proxy_egress(ds, "toCIDRSet")
+                                                                 if c["cidr"] == "::/0"],
+        "a proxy policy with no deny rule for the NAT64 prefix": lambda ds: proxy_rule(ds)["egressDeny"][1].update(
+            toCIDRSet=[c for c in proxy_rule(ds)["egressDeny"][1]["toCIDRSet"] if c["cidr"] != "64:ff9b::/96"]),
         "a proxy policy with no deny rule for the node": lambda ds: proxy_rule(ds)["egressDeny"][0].update(
             toEntities=["remote-node", "kube-apiserver"]),
     }

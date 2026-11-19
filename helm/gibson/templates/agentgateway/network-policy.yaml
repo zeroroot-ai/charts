@@ -38,8 +38,8 @@ sees the address at connect time, so this policy is the control:
      an allow to world "is identical to allowing to CIDR 0.0.0.0/0". That
      includes 169.254.169.254, the private addresses of the cloud network
      and 100.64.0.0/10.
-  2. The proxy gets toCIDRSet 0.0.0.0/0 and ::/0, with each private,
-     loopback, link-local, CGNAT and unique local range in except. Cilium
+  2. The proxy gets toCIDRSet 0.0.0.0/0 and ::/0, with each range that the
+     netguard of the daemon blocks in except ($denyV4, $denyV6). Cilium
      says that CIDR rules "do not apply to traffic where both sides of the
      connection are either managed by Cilium or use an IP belonging to a
      node in the cluster", so this rule opens no pod and no node.
@@ -69,9 +69,17 @@ covers it. The registration check of the daemon is the control there.
 {{- $collector := dict "app.kubernetes.io/component" "trace-collector" "gibson.zeroroot.ai/datastore" "trace" }}
 {{- $proxy := dict "app.kubernetes.io/component" "agentgateway-proxy" $podNs $gwNs }}
 {{- /* The ranges that the proxy never reaches, by address (gibson contract
-       round 8). scripts/check-agentgateway.py holds the same list. */}}
-{{- $denyV4 := list "0.0.0.0/8" "10.0.0.0/8" "100.64.0.0/10" "127.0.0.0/8" "169.254.0.0/16" "172.16.0.0/12" "192.168.0.0/16" }}
-{{- $denyV6 := list "::1/128" "::ffff:0:0/96" "64:ff9b:1::/48" "fc00::/7" "fe80::/10" }}
+       round 8). The list covers each range that the netguard of the daemon
+       blocks (gibson internal/infra/netguard/netguard.go): this network,
+       private, CGNAT, loopback, link-local, the IETF protocol assignments,
+       benchmarking, multicast, the reserved range and broadcast, the
+       unspecified address, unique local, and both NAT64 prefixes. netguard
+       blocks a NAT64 address only when it embeds a blocked IPv4 address. A
+       CIDR rule cannot read the embedded address, so the whole prefix is
+       closed. scripts/check-agentgateway.py holds its own copy of the list,
+       so a range removed here fails the guard. */}}
+{{- $denyV4 := list "0.0.0.0/8" "10.0.0.0/8" "100.64.0.0/10" "127.0.0.0/8" "169.254.0.0/16" "172.16.0.0/12" "192.0.0.0/24" "192.168.0.0/16" "198.18.0.0/15" "224.0.0.0/4" "240.0.0.0/4" }}
+{{- $denyV6 := list "::/128" "::1/128" "::ffff:0:0/96" "64:ff9b::/96" "64:ff9b:1::/48" "fc00::/7" "fe80::/10" "ff00::/8" }}
 {{- $providers := .Values.gateway.inClusterProviders | default list }}
 {{- $closed := list $ns $gwNs "kube-system" .Values.global.spire.namespaces.system.name }}
 {{- if not .Values.gateway.publicPorts }}

@@ -22867,14 +22867,21 @@ spec:
             - 127.0.0.0/8
             - 169.254.0.0/16
             - 172.16.0.0/12
+            - 192.0.0.0/24
             - 192.168.0.0/16
+            - 198.18.0.0/15
+            - 224.0.0.0/4
+            - 240.0.0.0/4
         - cidr: ::/0
           except:
+            - ::/128
             - ::1/128
             - ::ffff:0:0/96
+            - 64:ff9b::/96
             - 64:ff9b:1::/48
             - fc00::/7
             - fe80::/10
+            - ff00::/8
       toPorts:
         - ports:
             - port: "443"
@@ -22906,12 +22913,19 @@ spec:
         - cidr: 127.0.0.0/8
         - cidr: 169.254.0.0/16
         - cidr: 172.16.0.0/12
+        - cidr: 192.0.0.0/24
         - cidr: 192.168.0.0/16
+        - cidr: 198.18.0.0/15
+        - cidr: 224.0.0.0/4
+        - cidr: 240.0.0.0/4
+        - cidr: ::/128
         - cidr: ::1/128
         - cidr: ::ffff:0:0/96
+        - cidr: 64:ff9b::/96
         - cidr: 64:ff9b:1::/48
         - cidr: fc00::/7
         - cidr: fe80::/10
+        - cidr: ff00::/8
 ---
 # Source: gibson/templates/agentgateway/network-policy.yaml
 apiVersion: cilium.io/v2
