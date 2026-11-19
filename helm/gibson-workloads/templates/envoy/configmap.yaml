@@ -111,11 +111,6 @@ unconditionally — there is no `envoy.enabled` opt-out.
 {{- fail (printf "envoy.rateLimit.%s.maxDynamicDescriptors must be >= 1: it is the number of client addresses that keep a bucket" $bucketName) -}}
 {{- end -}}
 {{- end -}}
-{{- range $a := ($rl.gatewayForward.trustedSourceAddresses | default list) -}}
-{{- if not (regexMatch `^([0-9]{1,3}\.){3}[0-9]{1,3}/32$|^[0-9a-fA-F:]+/64$` $a) -}}
-{{- fail (printf "envoy.rateLimit.gatewayForward.trustedSourceAddresses: %q is not an IPv4 address with /32 or an IPv6 network with /64. The Edge compares the masked client address (masked_remote_address) as a string in that form" $a) -}}
-{{- end -}}
-{{- end -}}
 {{- include "gibson.envoy.validateHttp2MaxConcurrentStreams" $rl.http2MaxConcurrentStreams -}}
 {{- /*
   streamKeepalive. Same fail-loud posture as the rate-limit buckets

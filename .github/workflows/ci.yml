@@ -123,10 +123,14 @@ jobs:
       # packages are public, but an unauthenticated pull is rate-limited by IP
       # and shared runners exhaust that quota. Logging in costs nothing and
       # removes a class of flake that looks like a chart error.
+      # docker too: the edge-route-limits-envoy gate of make check runs the
+      # pinned Envoy mirror image (charts#820).
       - name: Log in to ghcr.io
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" \
             | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       # golden + attribution + cloud-free. Any drift in a rendered profile fails
       # here as a snapshot diff, which is also what carries the randAlphaNum ban

@@ -1607,6 +1607,12 @@ envoy:
     #     of the docker network gateway or the node on kind. Measure it once
     #     on the estate: the access log of the Edge prints the peer.
     #
+    # Each Edge replica keeps its own buckets, so the real limit for one
+    # address, and the real fuse, is the value times the replica count (3 to
+    # 10). The connection limit of the api chain (apiConnections) bounds new
+    # connections each second, not requests, so it does not bound a flood of
+    # requests on open connections.
+    #
     # /a2a/inbound/: perAddress for each client address, and the route fuse
     # (maxTokens, tokensPerFill) for all of them together. The fuse also
     # consumes a token on each request (always_consume_default_token_bucket),
@@ -1626,34 +1632,32 @@ envoy:
       # The most client addresses that the limiter keeps a bucket for (an
       # LRU cache). An address that drops out gets a full bucket again.
       maxDynamicDescriptors: 10000
-    # /gateway/model/ and /gateway/agent/, one limiter for each route. No
-    # route fuse (always_consume_default_token_bucket: false): a flood from
-    # many addresses must not take the share of the sandboxes. A flood from
-    # many addresses is bounded by the bucket of each address, by the
-    # connection limit of the api chain (apiConnections), and by the
-    # negative cache of the daemon for an unknown key ID.
+    # /gateway/model/ and /gateway/agent/, one limiter for each route.
     # perAddress: at most 50 missions with up to 10 agents each
-    # (MaxChildMissions). An agent waits for each model call, so about one
-    # call each second for each agent. 200 rps sustained, 400 burst, covers
-    # the sandboxes of one node behind one address at that peak (a node
-    # holds a fraction of the 500 agents).
-    # trustedSourceAddresses: the egress addresses through which every
-    # sandbox of the estate leaves, for example the NAT gateways of the VPC.
-    # Each entry gets the large bucket (maxTokens, tokensPerFill: 1000 rps
-    # sustained, 2000 burst, twice the peak of 500 rps of the whole cluster).
-    # Write each entry as the Edge prints it: an IPv4 address with /32, or
-    # an IPv6 /64 network with /64. The render fails on another form.
-    # Default empty.
+    # (MaxChildMissions), and an agent waits for each model call, so about
+    # one call each second for each agent: 500 rps for the whole cluster.
+    # The sandboxes of a cluster can all leave through one address (a NAT
+    # gateway, a node), so one address gets twice that: 1000 rps sustained,
+    # 2000 burst. The route fuse (maxTokens, tokensPerFill: 4000 rps
+    # sustained, 8000 burst, the level of the api baseline, now for each
+    # route) also takes a token on each request, so the total load on
+    # ext-authz has a bound. The trade:
+    #   - One address cannot deny the route to the others below the fuse.
+    #   - A flood from several addresses at full rate can reach the fuse.
+    #     The route then answers 429 to every caller. That is the exposure
+    #     that the api host had before, now limited to this route.
+    #   - An attacker that rotates more addresses than
+    #     maxDynamicDescriptors gets a full bucket for each new address, and
+    #     only the fuse bounds it.
     gatewayForward:
-      maxTokens: 2000
-      tokensPerFill: 1000
+      maxTokens: 8000
+      tokensPerFill: 4000
       fillIntervalSeconds: 1
       perAddress:
-        maxTokens: 400
-        tokensPerFill: 200
+        maxTokens: 2000
+        tokensPerFill: 1000
         fillIntervalSeconds: 1
       maxDynamicDescriptors: 10000
-      trustedSourceAddresses: []
     # Chain-wide ceiling for the merged public chain (app + www + apex + docs,
     # deploy#1242). Before it existed that chain's http_filters was JUST the
     # router — no limiter of any kind, while it carries every dashboard page
