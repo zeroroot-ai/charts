@@ -76,6 +76,11 @@ The check renders each shipped profile and fails when:
                 DENY_V6 (gibson contract round 8: the proxy resolves a
                 tenant URL again at each call, and the CNI is the only
                 control at connect time).
+ 12. rbac       a binding gives the controller its deployer role (the writes
+                of Deployments, Services, ServiceAccounts, Secrets and the
+                rest of the proxy) outside the gateway namespace: a
+                ClusterRoleBinding, or a RoleBinding in another namespace,
+                or no RoleBinding in the gateway namespace.
  11. ports      a pod of the release namespace other than the one peer
                 reaches the A2A port of the daemon (peer: the proxy, from
                 the gateway namespace) or its trace port (peer: the trace
@@ -414,6 +419,20 @@ def judge_daemon_ports(docs: list[dict], gw: dict) -> list[str]:
     return bad
 
 
+def judge_rbac(docs: list[dict], gw: dict) -> list[str]:
+    bad: list[str] = []
+    deployer = [b for b in docs if b.get("kind") in ("ClusterRoleBinding", "RoleBinding")
+                and str(((b.get("roleRef") or {}).get("name") or "")).endswith("-deployer")
+                and any(s.get("name") == "agentgateway" for s in b.get("subjects") or [])]
+    if not any(b["kind"] == "RoleBinding" and ns(b) == ns(gw) for b in deployer):
+        bad.append(f"rbac: no RoleBinding gives the controller its deployer role in {ns(gw)}")
+    for b in deployer:
+        if b["kind"] == "ClusterRoleBinding" or ns(b) != ns(gw):
+            where = "in each namespace" if b["kind"] == "ClusterRoleBinding" else f"in {ns(b)}"
+            bad.append(f"rbac: {b['kind']}/{b['metadata']['name']} gives the controller its deployer role {where}")
+    return bad
+
+
 def proxy_image(params: dict) -> str:
     img = (params.get("spec") or {}).get("image") or {}
     ref = "/".join(p for p in (img.get("registry"), img.get("repository")) if p)
@@ -564,6 +583,9 @@ def judge(docs: list[dict], on_list: set[str]) -> list[str]:
 
     # 11. The daemon ports that accept one peer.
     bad += judge_daemon_ports(docs, gw)
+
+    # 12. The deployer role of the controller.
+    bad += judge_rbac(docs, gw)
 
     # 6. The trace policy.
     ok = False
@@ -722,6 +744,12 @@ def selftest() -> int:
         "a deny rule on the trace port that refuses the collector": lambda ds: next(
             d for d in ds if d.get("kind") == "CiliumNetworkPolicy" and d["metadata"]["name"] == "gibson-daemon-trace")[
             "spec"]["ingressDeny"][0].update(fromEndpoints=[{}]),
+        "a deployer role bound in each namespace": lambda ds: next(
+            d for d in ds if d.get("kind") == "RoleBinding" and d["metadata"]["name"] == "agentgateway-write-role-gibson"
+        ).update(kind="ClusterRoleBinding"),
+        "a deployer role bound in the release namespace": lambda ds: next(
+            d for d in ds if d.get("kind") == "RoleBinding" and d["metadata"]["name"] == "agentgateway-write-role-gibson"
+        )["metadata"].update(namespace="gibson"),
         "a proxy policy that allows the NAT64 prefix": lambda ds: [c["except"].remove("64:ff9b::/96")
                                                                  for c in proxy_egress(ds, "toCIDRSet")
                                                                  if c["cidr"] == "::/0"],

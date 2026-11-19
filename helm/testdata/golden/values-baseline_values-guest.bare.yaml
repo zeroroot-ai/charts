@@ -5491,21 +5491,6 @@ roleRef:
   name: agentgateway-gibson
   apiGroup: rbac.authorization.k8s.io
 ---
-# Source: gibson/charts/agentgateway/templates/serviceaccount.yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: agentgateway-write-role-gibson
-subjects:
-- kind: ServiceAccount
-  name: agentgateway
-  namespace: gibson
-roleRef:
-  kind: ClusterRole
-  name: agentgateway-gibson-deployer
-  apiGroup: rbac.authorization.k8s.io
-
----
 # Source: gibson/charts/gibson-operators/templates/connector-operator/cluster-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -6220,6 +6205,22 @@ roleRef:
   kind: Role
   name: agentgateway-gibson-local
   apiGroup: rbac.authorization.k8s.io
+---
+# Source: gibson/charts/agentgateway/templates/serviceaccount.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agentgateway-write-role-gibson
+  namespace: gibson-gateway
+subjects:
+- kind: ServiceAccount
+  name: agentgateway
+  namespace: gibson
+roleRef:
+  kind: ClusterRole
+  name: agentgateway-gibson-deployer
+  apiGroup: rbac.authorization.k8s.io
+
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1

@@ -1863,13 +1863,23 @@ agentgateway:
       registry: "ghcr.io/zeroroot-ai"
       repository: "mirror/agentgateway"
       tag: "v1.7.0"
-  # An empty list keeps the upstream cluster-wide write grant. A values file
-  # cannot name the release namespace, so an install that wants the narrow
-  # grant sets its namespace here. The controller reads Gateway API objects
-  # in each namespace, so a tenant route can attach to the Gateway
-  # (gibson#1387).
+  # The deployer writes (Deployments, Services, ServiceAccounts, Secrets,
+  # ConfigMaps and the rest of the proxy) only in the gateway namespace, by a
+  # RoleBinding there (upstream narrow mode). The list must be exactly
+  # gibson.gatewayNamespace, "<release namespace>-gateway", and
+  # templates/agentgateway/gateway.yaml fails the render when it is not. A
+  # values file cannot name the release namespace, so an install in a
+  # namespace other than "gibson" sets this list.
+  #
+  # The cluster-wide ClusterRole of the upstream chart stays. It reads
+  # Gateway API objects and the agentgateway kinds in each namespace, so a
+  # tenant route can attach to the Gateway (gibson#1387), and it patches only
+  # the status subresources of those kinds. Its Secret read stays
+  # cluster-wide: v1.7.0 has no value to narrow it
+  # (owner-credential-readers.yaml).
   rbac:
-    gatewayNamespaces: []
+    gatewayNamespaces:
+      - gibson-gateway
   # The cluster has no Istio. The upstream default grants RBAC on Istio kinds.
   istio:
     enabled: false

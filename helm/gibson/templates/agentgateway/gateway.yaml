@@ -26,6 +26,10 @@ spec.infrastructure.labels.
 {{- if ne .Values.agentgateway.fullnameOverride $ctrl }}
 {{- fail (printf "agentgateway.fullnameOverride must be %q, the name gibson.agentgatewayControllerName gives the admission policy and the network policy" $ctrl) }}
 {{- end }}
+{{- $gwNs := include "gibson.gatewayNamespace" . }}
+{{- if ne (toJson .Values.agentgateway.rbac.gatewayNamespaces) (toJson (list $gwNs)) }}
+{{- fail (printf "agentgateway.rbac.gatewayNamespaces must be [%q], the gateway namespace (gibson.gatewayNamespace). Any other list gives the controller a write grant outside it, or none where the proxy lives" $gwNs) }}
+{{- end }}
 {{- $gw := .Values.gateway }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway

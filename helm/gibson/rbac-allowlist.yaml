@@ -15,9 +15,10 @@ grants:
   # (controller/pkg/agentgateway/plugins/collection.go), so a Role cannot
   # replace it at v1.7.0. owner-credential-readers.yaml holds the reason in
   # full. The deployer ClusterRole writes the proxy Deployment, Service,
-  # ServiceAccount and ConfigMap of each Gateway.
+  # ServiceAccount and ConfigMap of the Gateway, through a RoleBinding in
+  # the gateway namespace only (agentgateway.rbac.gatewayNamespaces).
   'gibson/agentgateway -> ClusterRole/agentgateway-gibson cluster-wide': 56559cf062ef36d7
-  'gibson/agentgateway -> ClusterRole/agentgateway-gibson-deployer cluster-wide': ec8e23a4441da83e
+  'gibson/agentgateway -> ClusterRole/agentgateway-gibson-deployer in gibson-gateway': ec8e23a4441da83e
   'gibson/agentgateway -> Role/agentgateway-gibson-local in gibson': 422b5fee14a9af39
   'gibson/cert-manager -> ClusterRole/cert-manager-controller-approve:cert-manager-io cluster-wide': 34b304a4eda0f18b
   'gibson/cert-manager -> ClusterRole/cert-manager-controller-certificates cluster-wide': 0d6cedaf06d76407
