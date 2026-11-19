@@ -1,0 +1,30 @@
+{{- /*
+The namespace of the agentgateway Gateway (charts#815, gibson.gatewayNamespace).
+
+It holds the proxy, the Gateway, its parameters and policies, and the routes,
+backends and provider credential Secrets of each tenant. They are apart from
+the release namespace, so the Secret grant of the tenant-operator here and
+the credential Secrets never meet the Secrets of the platform. The chart
+renders it like the SPIRE node namespace and the sandbox namespace.
+
+The proxy pod meets the restricted level: the controller gives it a safe
+sysctl (net.ipv4.ip_unprivileged_port_start) and the parameters give it
+runAsNonRoot and RuntimeDefault seccomp. The default deny of
+network-policies.yaml covers it.
+
+Its sync wave is the lowest wave of each object that lives in it (the
+network policy of the proxy, wave -20), so a sync by wave never applies an
+object before its namespace. scripts/check-namespace-wave.py keeps this.
+*/ -}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "gibson.gatewayNamespace" . }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: agentgateway
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"

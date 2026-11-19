@@ -227,6 +227,10 @@ unconditionally — there is no `envoy.enabled` opt-out.
     "zitadelNativeLoginClientId" "${NATIVE_LOGIN_CLIENT_ID}"
     "rateLimit"        $rl
     "streamKeepalive"  $ka
+    "gateway"          (dict
+                          "host" (printf "%s.%s.svc" (include "gibson.agentgatewayName" .) (include "gibson.gatewayNamespace" .))
+                          "modelPort" (get (include "gibson.gatewayPorts" . | fromYaml) "model")
+                          "agentPort" (get (include "gibson.gatewayPorts" . | fromYaml) "agent"))
 -}}
 {{- /* The browser chain (files/envoy/public-chain.yaml) is rendered once here
        and injected into envoy.yaml as `.publicChain`. It is templated with the

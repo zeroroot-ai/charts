@@ -134,6 +134,13 @@ NOTES: dict[str, dict[str, str]] = {
     },
     "ghcr.io/zeroroot-ai/mirror/envoy": {"role": "edge proxy (auth chain)"},
     "ghcr.io/zeroroot-ai/mirror/ratelimit": {"role": "shared per-client edge quota service"},
+    "ghcr.io/zeroroot-ai/mirror/agentgateway": {
+        "role": "Model gateway and Agent gateway proxy (the controller starts it from AgentgatewayParameters)"
+    },
+    "ghcr.io/zeroroot-ai/mirror/agentgateway-controller": {"role": "agentgateway controller (Gateway API)"},
+    "ghcr.io/zeroroot-ai/mirror/opentelemetry-collector-k8s": {
+        "role": "trace collector between the agentgateway proxy and the daemon (persistent queue)"
+    },
     "ghcr.io/zeroroot-ai/mirror/coraza-proxy-wasm": {"role": "Edge WAF module: Coraza + OWASP CRS as an Envoy WASM filter"},
     "ghcr.io/zeroroot-ai/mirror/alpine-k8s": {"role": "kubectl/curl/jq job + init tooling"},
     "ghcr.io/zeroroot-ai/mirror/kubectl": {"role": "kubectl for hook Jobs and helm tests"},
@@ -299,14 +306,22 @@ IMAGE_REF_RX = re.compile(r"^ghcr\.io/[^\s:@]+(?::[^\s@]+)?(?:@sha256:[0-9a-f]{6
 
 
 def env_images(rendered: str) -> set[str]:
-    """Each image reference in an env var named *_IMAGE, or in a flag
-    --<name>-image=<ref>, of a container."""
+    """Each image reference in an env var named *_IMAGE, in a flag
+    --<name>-image=<ref> of a container, or in the image object of an
+    AgentgatewayParameters."""
     import yaml  # noqa: PLC0415  (only this pass reads the render as YAML)
 
     refs: set[str] = set()
     for doc in yaml.safe_load_all(rendered):
         if not isinstance(doc, dict):
             continue
+        # The agentgateway controller starts the proxy from the image object
+        # of an AgentgatewayParameters (charts#815): registry, repository,
+        # tag and digest as separate fields, never an image: line.
+        if doc.get("kind") == "AgentgatewayParameters":
+            ref = agentgateway_image(doc)
+            if ref and IMAGE_REF_RX.match(ref):
+                refs.add(ref)
         stack = [doc]
         while stack:
             node = stack.pop()
@@ -324,6 +339,20 @@ def env_images(rendered: str) -> set[str]:
                             refs.add(m.group(1))
                 stack.extend(node)
     return refs
+
+
+def agentgateway_image(doc: dict) -> str:
+    """The proxy image of an AgentgatewayParameters, composed the way the
+    controller composes it: <registry>/<repository>:<tag>@<digest>."""
+    img = (doc.get("spec") or {}).get("image") or {}
+    if not img.get("repository"):
+        return ""
+    ref = "/".join(p for p in (img.get("registry"), img.get("repository")) if p)
+    if img.get("tag"):
+        ref += f":{img['tag']}"
+    if img.get("digest"):
+        ref += f"@{img['digest']}"
+    return ref
 
 
 def github_get(path: str) -> bytes:

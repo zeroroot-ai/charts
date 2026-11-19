@@ -259,6 +259,22 @@ spec:
             # fixed path platform/daemon.
             - name: GIBSON_DAEMON_SPIFFE_ID
               value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/daemon") | quote }}
+            # The Model gateway (gibson#1366). The operator writes the backend,
+            # the route and the credential Secret of each ModelProvider in the
+            # gateway namespace (gibson.gatewayNamespace) and attaches the route
+            # to the one agentgateway Gateway. It renders no ext-authz: the
+            # chart attaches ext-authz to the Gateway. The operator of the epic
+            # does not start without them.
+            - name: GIBSON_MODEL_GATEWAY_NAMESPACE
+              value: {{ include "gibson.gatewayNamespace" . | quote }}
+            - name: GIBSON_MODEL_GATEWAY_NAME
+              value: {{ include "gibson.agentgatewayName" . | quote }}
+            # The Gateway that the route of each outside agent attaches to
+            # (gibson#1403). One Gateway holds the model listener and the
+            # agent listener, so the value is the same helper as above. The
+            # operator does not start without it.
+            - name: GIBSON_AGENT_GATEWAY_NAME
+              value: {{ include "gibson.agentgatewayName" . | quote }}
             # The image of the belief trainer CronJob of each tenant
             # (gibson#616). The operator exits at start when it is empty.
             - name: BELIEF_TRAINER_IMAGE

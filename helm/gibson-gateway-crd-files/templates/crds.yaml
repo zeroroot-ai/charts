@@ -1,0 +1,19 @@
+{{- /*
+Every vendored CRD, verbatim. See Chart.yaml for why these are files under
+files/crds/ and why this is a subchart of gibson-crds (the 1 MiB
+release-record cap). Each CRD already carries
+helm.sh/resource-policy: keep, stamped by scripts/vendor-gateway-crds.py.
+
+gatewayApi.enabled is an operator-substitution seam. It selects WHOSE
+Gateway API CRDs the cluster runs, never WHETHER it runs them. A cluster that
+already owns them (OpenShift, GKE, a Cilium or Istio install) sets it false
+and keeps its own copy. The agentgateway CRDs have no seam: no other product
+owns them.
+*/}}
+{{- range $path, $_ := .Files.Glob "files/crds/*.yaml" }}
+{{- if or $.Values.gatewayApi.enabled (ne (base $path) "gateway-api.yaml") }}
+---
+# Source file: {{ $path }}
+{{ $.Files.Get $path }}
+{{- end }}
+{{- end }}

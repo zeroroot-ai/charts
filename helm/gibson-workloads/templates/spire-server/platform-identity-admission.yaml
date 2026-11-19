@@ -192,7 +192,7 @@ lists.
        below select that namespace as well, so a pod there that wears its
        component or its ServiceAccount is fenced the same way. */ -}}
 {{- $setecNs := include "gibson.setecNamespace" . -}}
-{{- $protectedComponents := list "daemon" "ext-authz" "ratelimit" "dashboard" "tenant-operator" "connector-operator" "platform-operator" "envoy" "openbao" "frontend" -}}
+{{- $protectedComponents := list "daemon" "ext-authz" "ratelimit" "dashboard" "tenant-operator" "connector-operator" "platform-operator" "envoy" "openbao" "frontend" "agentgateway-proxy" "trace-collector" -}}
 {{- $protectedSAs := list
       (printf "%s-frontend" (include "gibson.setecFullname" .))
       (include "gibson.serviceAccountName" .)
@@ -203,7 +203,17 @@ lists.
       (include "gibson.platformOperatorServiceAccountName" .)
       (include "gibson.envoyServiceAccountName" .)
       (include "gibson.ratelimitServiceAccountName" .)
-      (include "gibson.openbaoServiceAccountName" .) -}}
+      (include "gibson.openbaoServiceAccountName" .)
+      (include "gibson.agentgatewayName" .)
+      (include "gibson.traceCollectorName" .) -}}
+{{- /* The agentgateway controller writes the proxy Deployment of the one
+       Gateway (charts#815). It may write that one identity and no other:
+       the component agentgateway-proxy with the ServiceAccount of the
+       Gateway. It is not a workloadCreator, so a pod template that it
+       writes with any other platform component or ServiceAccount is
+       refused. */ -}}
+{{- $agwCreator := printf "system:serviceaccount:%s:%s" $ns (include "gibson.agentgatewayControllerName" .) -}}
+{{- $agwSA := include "gibson.agentgatewayName" . -}}
 {{- /* Built-in workload controllers. A pod created by any of these was
        produced from a Deployment/StatefulSet/DaemonSet/Job/CronJob that
        the SECOND policy in this file checked as its own object — which is
@@ -311,8 +321,9 @@ spec:
   # report, not a control.
   validationActions: {{ $actions | toJson }}
   matchResources:
-    # Scoped to the two namespaces the platform ClusterSPIFFEIDs select on:
-    # the release namespace and the setec namespace (the frontend identity).
+    # Scoped to the three namespaces the platform ClusterSPIFFEIDs select on:
+    # the release namespace, the setec namespace (the frontend identity) and
+    # the gateway namespace (the agentgateway proxy, charts#815).
     # Their namespaceSelector is `kubernetes.io/metadata.name: <ns>`, and
     # that label is apiserver-managed (NamespaceDefaultLabelName), not
     # settable by a namespace author — so the two scopes cannot be made to
@@ -321,7 +332,7 @@ spec:
       matchExpressions:
         - key: kubernetes.io/metadata.name
           operator: In
-          values: [{{ $ns | quote }}, {{ $setecNs | quote }}]
+          values: [{{ $ns | quote }}, {{ $setecNs | quote }}, {{ include "gibson.gatewayNamespace" . | quote }}]
 ---
 {{/*
 =============================================================================
@@ -391,6 +402,13 @@ spec:
     # A restart-only UPDATE by Reloader: the pod template's spec and labels are
     # unchanged, only template annotations moved. Nothing new claims an
     # identity, so the admitted creator's template is simply re-issued.
+    # The agentgateway controller writes the proxy Deployment of the one
+    # Gateway, with exactly that component and that ServiceAccount.
+    - name: agentgatewayProxy
+      expression: >-
+        request.userInfo.username == {{ $agwCreator | toJson }}
+          && variables.component == 'agentgateway-proxy'
+          && variables.sa == {{ $agwSA | toJson }}
     - name: restartOnly
       expression: >-
         request.operation == 'UPDATE'
@@ -404,6 +422,7 @@ spec:
     - expression: >-
         !variables.claimsPlatformIdentity
           || request.userInfo.username in {{ $workloadCreators | toJson }}
+          || variables.agentgatewayProxy
           || variables.restartOnly
       reason: Forbidden
       messageExpression: >-
@@ -430,4 +449,4 @@ spec:
       matchExpressions:
         - key: kubernetes.io/metadata.name
           operator: In
-          values: [{{ $ns | quote }}, {{ $setecNs | quote }}]
+          values: [{{ $ns | quote }}, {{ $setecNs | quote }}, {{ include "gibson.gatewayNamespace" . | quote }}]

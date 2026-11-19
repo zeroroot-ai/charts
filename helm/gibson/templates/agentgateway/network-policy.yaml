@@ -1,0 +1,324 @@
+{{/*
+The network policy of the agentgateway proxy, its controller and the trace
+collector (charts#815, charts#816), in the style of
+templates/network-policies.yaml (ADR-0165 rule 4, D76).
+
+The proxy runs in the gateway namespace (gibson.gatewayNamespace), which has
+its own default deny. Every flow below crosses that namespace, so each peer
+names its namespace. Cilium allows a flow only when both sides allow it, so
+each flow has an egress rule and an ingress rule:
+
+  proxy in    the daemon, the dashboard backend and the Edge (the gateway
+              forward routes for a sandbox, charts#815) reach the two
+              listeners (model, agent). A sandbox pod does not: it reaches
+              the gateway only through the Edge, at the public URLs that the
+              daemon gives it (gibson daemon/model_gateway.go,
+              GIBSON_MODEL_GATEWAY_PUBLIC_URL and
+              GIBSON_AGENT_GATEWAY_PUBLIC_URL).
+  proxy out   the proxy reaches ext-authz on its gRPC port, the controller
+              on its xDS port and the trace collector on its OTLP port, all
+              in the release namespace. It reaches public addresses, the
+              in-cluster providers of gateway.inClusterProviders, and it
+              resolves each name. See "call-time address control" below.
+  a2a         the proxy reaches the A2A listener of the daemon
+              (gibson.daemonA2APort). The platform rule lets each platform
+              pod reach each daemon port, so a deny rule
+              (gibson.daemonPortDeny) refuses that port to each pod of the
+              release namespace. Its TLS layer accepts the proxy SVID and no
+              other peer.
+  collector   the trace collector reaches the trace listener of the daemon
+              (gibson.daemonTracePort). A deny rule (gibson.daemonPortDeny)
+              refuses that port to each other pod of the release namespace.
+              The TLS layer of that listener accepts the collector SVID and
+              no other peer. Only the proxy reaches the collector.
+
+A sandbox namespace denies each flow by default (setec).
+
+Call-time address control (gibson contract round 8). A tenant gives the URL
+of an outside agent and of a model provider. The daemon checks the address at
+registration, but the proxy resolves the name again at each call, and
+agentgateway v1.7.0 has no setting that refuses a private address. The CNI
+sees the address at connect time, so this policy is the control:
+
+  1. The Cilium world entity is not enough. The Cilium policy language
+     defines world as "all endpoints outside of the cluster" and says that
+     an allow to world "is identical to allowing to CIDR 0.0.0.0/0". That
+     includes 169.254.169.254, the private addresses of the cloud network
+     and 100.64.0.0/10.
+  2. The proxy gets toCIDRSet 0.0.0.0/0 and ::/0, with each range that the
+     netguard of the daemon blocks in except ($denyV4, $denyV6). Cilium
+     says that CIDR rules "do not apply to traffic where both sides of the
+     connection are either managed by Cilium or use an IP belonging to a
+     node in the cluster", so this rule opens no pod and no node.
+  3. egressDeny refuses the host, remote-node and kube-apiserver entities
+     and the same ranges. Cilium applies a deny before each allow ("deny
+     policies take precedence over allow policies"), so no later allow rule
+     and no CIDR match mode (policy-cidr-match-mode nodes) reopens them.
+  4. A pod in the cluster is reachable only by selector: the four platform
+     targets above and the entries of gateway.inClusterProviders (an
+     operator-set list of namespace, pod labels and ports, empty by default).
+
+The loopback of the proxy pod never reaches the CNI, so no network policy
+covers it. The registration check of the daemon is the control there.
+*/}}
+{{- $ns := .Release.Namespace }}
+{{- $gwNs := include "gibson.gatewayNamespace" . }}
+{{- $rel := .Release.Name }}
+{{- $role := "gibson.zeroroot.ai/net-role" }}
+{{- $podNs := "k8s:io.kubernetes.pod.namespace" }}
+{{- $extAuthzPort := ((((index .Values "gibson-workloads") | default dict).extAuthz | default dict).ports | default dict).grpc | default 9001 }}
+{{- $xdsPort := ((((.Values.agentgateway.controller | default dict).service | default dict).ports | default dict).agwGrpc) | default 9978 }}
+{{- $otlpPort := (index .Values "gibson-workloads").traceCollector.ports.otlp }}
+{{- $ports := include "gibson.gatewayPorts" . | fromYaml }}
+{{- $listeners := list $ports.model $ports.agent }}
+{{- $daemonTrace := include "gibson.daemonTracePort" . }}
+{{- $daemonA2A := include "gibson.daemonA2APort" . }}
+{{- $collector := dict "app.kubernetes.io/component" "trace-collector" "gibson.zeroroot.ai/datastore" "trace" }}
+{{- $proxy := dict "app.kubernetes.io/component" "agentgateway-proxy" $podNs $gwNs }}
+{{- /* The ranges that the proxy never reaches, by address (gibson contract
+       round 8). The list covers each range that the netguard of the daemon
+       blocks (gibson internal/infra/netguard/netguard.go): this network,
+       private, CGNAT, loopback, link-local, the IETF protocol assignments,
+       benchmarking, multicast, the reserved range and broadcast, the
+       unspecified address, unique local, and both NAT64 prefixes. netguard
+       blocks a NAT64 address only when it embeds a blocked IPv4 address. A
+       CIDR rule cannot read the embedded address, so the whole prefix is
+       closed. scripts/check-agentgateway.py holds its own copy of the list,
+       so a range removed here fails the guard. */}}
+{{- $denyV4 := list "0.0.0.0/8" "10.0.0.0/8" "100.64.0.0/10" "127.0.0.0/8" "169.254.0.0/16" "172.16.0.0/12" "192.0.0.0/24" "192.168.0.0/16" "198.18.0.0/15" "224.0.0.0/4" "240.0.0.0/4" }}
+{{- $denyV6 := list "::/128" "::1/128" "::ffff:0:0/96" "64:ff9b::/96" "64:ff9b:1::/48" "fc00::/7" "fe80::/10" "ff00::/8" }}
+{{- $providers := .Values.gateway.inClusterProviders | default list }}
+{{- $closed := list $ns $gwNs "kube-system" .Values.global.spire.namespaces.system.name }}
+{{- if not .Values.gateway.publicPorts }}
+{{- fail "gateway.publicPorts is empty. The proxy needs at least port 443 to reach a provider" }}
+{{- end }}
+{{- range $i, $p := $providers }}
+{{- if or (not $p.namespace) (has $p.namespace $closed) }}
+{{- fail (printf "gateway.inClusterProviders[%d]: namespace %v must name the namespace of a model provider, not one of %s" $i $p.namespace (join ", " $closed)) }}
+{{- end }}
+{{- if not $p.podLabels }}
+{{- fail (printf "gateway.inClusterProviders[%d]: podLabels is empty. The proxy must not reach a whole namespace" $i) }}
+{{- end }}
+{{- if not $p.ports }}
+{{- fail (printf "gateway.inClusterProviders[%d]: ports is empty. Name the container port of the provider" $i) }}
+{{- end }}
+{{- end }}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $rel }}-agentgateway
+  namespace: {{ $gwNs }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-agentgateway
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "The daemon, the dashboard backend and the Edge reach the listeners of the agentgateway proxy. The proxy reaches ext-authz, its controller, the trace collector, the daemon A2A port, the listed in-cluster providers and public addresses only."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: agentgateway-proxy
+  ingress:
+    - fromEndpoints:
+        {{- range $c := list "daemon" "dashboard" "envoy" }}
+        - matchLabels:
+            {{ $podNs }}: {{ $ns }}
+            app.kubernetes.io/component: {{ $c }}
+            {{ $role }}: platform
+        {{- end }}
+      toPorts:
+        - ports:
+            {{- range $p := $listeners }}
+            - port: {{ $p | quote }}
+              protocol: TCP
+            {{- end }}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            {{ $podNs }}: {{ $ns }}
+            app.kubernetes.io/component: ext-authz
+            {{ $role }}: platform
+      toPorts:
+        - ports:
+            - port: {{ $extAuthzPort | quote }}
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            {{ $podNs }}: {{ $ns }}
+            app.kubernetes.io/component: agentgateway-controller
+            {{ $role }}: platform
+      toPorts:
+        - ports:
+            - port: {{ $xdsPort | quote }}
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            {{ $podNs }}: {{ $ns }}
+            {{- toYaml $collector | nindent 12 }}
+      toPorts:
+        - ports:
+            - port: {{ $otlpPort | quote }}
+              protocol: TCP
+    # The A2A listener of the daemon (gibson#1400).
+    - toEndpoints:
+        - matchLabels:
+            {{ $podNs }}: {{ $ns }}
+            app.kubernetes.io/component: daemon
+            {{ $role }}: platform
+      toPorts:
+        - ports:
+            - port: {{ $daemonA2A | quote }}
+              protocol: TCP
+    # The in-cluster model providers that the operator names
+    # (gateway.inClusterProviders). Each entry names its namespace, its pod
+    # labels and its container ports.
+    {{- range $p := $providers }}
+    - toEndpoints:
+        - matchLabels:
+            {{ $podNs }}: {{ $p.namespace }}
+            {{- toYaml $p.podLabels | nindent 12 }}
+      toPorts:
+        - ports:
+            {{- range $port := $p.ports }}
+            - port: {{ $port | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- end }}
+    # The LLM providers and the outside agents: public addresses only, on
+    # the ports of gateway.publicPorts. A CIDR rule selects no pod and no
+    # node of the cluster.
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except:
+            {{- toYaml $denyV4 | nindent 12 }}
+        - cidr: ::/0
+          except:
+            {{- toYaml $denyV6 | nindent 12 }}
+      toPorts:
+        - ports:
+            {{- range $port := $.Values.gateway.publicPorts }}
+            - port: {{ $port | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- include "gibson.dnsRule" (list (dict "matchPattern" "*")) | nindent 4 }}
+  # A deny wins over each allow. The node, the other nodes, the API server
+  # and the private ranges stay closed whatever allow rule is added later.
+  egressDeny:
+    - toEntities:
+        - host
+        - remote-node
+        - kube-apiserver
+    - toCIDRSet:
+        {{- range $c := concat $denyV4 $denyV6 }}
+        - cidr: {{ $c }}
+        {{- end }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $rel }}-agentgateway
+  namespace: {{ $ns }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-agentgateway
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+specs:
+  - description: "The daemon, the dashboard backend and the Edge reach the listeners of the agentgateway proxy."
+    endpointSelector:
+      matchExpressions:
+        - key: app.kubernetes.io/component
+          operator: In
+          values: [daemon, dashboard, envoy]
+        - key: {{ $role }}
+          operator: In
+          values: [platform]
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              {{- toYaml $proxy | nindent 14 }}
+        toPorts:
+          - ports:
+              {{- range $p := $listeners }}
+              - port: {{ $p | quote }}
+                protocol: TCP
+              {{- end }}
+  - description: "ext-authz accepts the agentgateway proxy on its gRPC port."
+    endpointSelector:
+      matchLabels:
+        app.kubernetes.io/component: ext-authz
+        {{ $role }}: platform
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              {{- toYaml $proxy | nindent 14 }}
+        toPorts:
+          - ports:
+              - port: {{ $extAuthzPort | quote }}
+                protocol: TCP
+  - description: "The agentgateway controller serves xDS to the proxy."
+    endpointSelector:
+      matchLabels:
+        app.kubernetes.io/component: agentgateway-controller
+        {{ $role }}: platform
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              {{- toYaml $proxy | nindent 14 }}
+        toPorts:
+          - ports:
+              - port: {{ $xdsPort | quote }}
+                protocol: TCP
+  - description: "The trace collector accepts the agentgateway proxy on its OTLP port, and reaches the trace listener of the daemon."
+    endpointSelector:
+      matchLabels:
+        {{- toYaml $collector | nindent 8 }}
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              {{- toYaml $proxy | nindent 14 }}
+        toPorts:
+          - ports:
+              - port: {{ $otlpPort | quote }}
+                protocol: TCP
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              app.kubernetes.io/component: daemon
+              {{ $role }}: platform
+        toPorts:
+          - ports:
+              - port: {{ $daemonTrace | quote }}
+                protocol: TCP
+  - description: "The trace listener of the daemon accepts the trace collector."
+    endpointSelector:
+      matchLabels:
+        app.kubernetes.io/component: daemon
+        {{ $role }}: platform
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              {{- toYaml $collector | nindent 14 }}
+        toPorts:
+          - ports:
+              - port: {{ $daemonTrace | quote }}
+                protocol: TCP
+  - description: "The A2A listener of the daemon accepts the agentgateway proxy."
+    endpointSelector:
+      matchLabels:
+        app.kubernetes.io/component: daemon
+        {{ $role }}: platform
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              {{- toYaml $proxy | nindent 14 }}
+        toPorts:
+          - ports:
+              - port: {{ $daemonA2A | quote }}
+                protocol: TCP
+---
+{{ include "gibson.daemonPortDeny" (dict "ctx" . "name" "daemon-a2a" "port" $daemonA2A "peers" (list)
+     "description" "No pod of the release namespace reaches the A2A port of the daemon. The agentgateway proxy reaches it from its own namespace.") }}
+---
+{{ include "gibson.daemonPortDeny" (dict "ctx" . "name" "daemon-trace" "port" $daemonTrace "peers" (list "trace-collector")
+     "description" "Only the trace collector reaches the trace port of the daemon.") }}

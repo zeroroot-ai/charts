@@ -274,6 +274,16 @@ spec:
             - name: authz-registry
               containerPort: {{ .Values.gibson.service.authzRegistry.port | default 8086 }}
               protocol: TCP
+            # The trace listener (charts#816). Only the trace collector
+            # reaches it (GIBSON_TRACE_COLLECTOR_SVID, the network policy).
+            - name: otlp-grpc
+              containerPort: {{ include "gibson.daemonTracePort" . }}
+              protocol: TCP
+            # The A2A listener (gibson#1400). Only the agentgateway proxy
+            # reaches it (GIBSON_A2A_GATEWAY_SVID, the network policy).
+            - name: a2a
+              containerPort: {{ include "gibson.daemonA2APort" . }}
+              protocol: TCP
           env:
             # the daemon reads FGA store_id + model_id from env
             # vars instead of calling the Kubernetes API to GET the
@@ -581,6 +591,51 @@ spec:
             # Peer SPIFFE IDs for the harness callback listener allowlist.
             # REQUIRED when SPIFFE is configured — the daemon fails to start
             # otherwise (fail-closed per critical-tls-no-fallbacks Req 1.5).
+            # The Model gateway (charts#815), for the model client of the
+            # daemon: the in-cluster URL and the CA that the daemon trusts for
+            # it and for nothing else. The listener certificate comes from the
+            # component issuer, the issuer of the OpenFGA certificate, so the
+            # CA is the ca.crt that /etc/ssl/fga-ca holds. A sandbox gets the
+            # public pair below in the ResolveModel reply, never this one.
+            - name: GIBSON_MODEL_GATEWAY_URL
+              value: {{ include "gibson.modelGatewayURL" . | quote }}
+            - name: GIBSON_MODEL_GATEWAY_CA_FILE
+              value: "/etc/ssl/fga-ca/ca.crt"
+            # The gateway for an agent in a sandbox (charts#815). A sandbox
+            # reaches the cluster only through the Edge, so these are the
+            # Edge forward routes, on the public API endpoint that the daemon
+            # already gives an agent as its callback address
+            # (gibson.apiEndpoint, callback.advertise_address).
+            - name: GIBSON_MODEL_GATEWAY_PUBLIC_URL
+              value: {{ printf "https://%s/gateway/model" (include "gibson.apiEndpoint" .) | quote }}
+            - name: GIBSON_AGENT_GATEWAY_PUBLIC_URL
+              value: {{ printf "https://%s/gateway/agent" (include "gibson.apiEndpoint" .) | quote }}
+            {{- if eq (include "gibson.envoyEdge.caRequired" .) "true" }}
+            # The CA of the Edge certificate when the Edge issuer is private
+            # (selfsigned-ca, openbao-issuer). It is unset when the Edge has
+            # a certificate of a public CA. The daemon mounts it at
+            # /etc/ssl/envoy-ca already.
+            - name: GIBSON_GATEWAY_PUBLIC_CA_FILE
+              value: "/etc/ssl/envoy-ca/ca.crt"
+            {{- end }}
+            # The trace collector (charts#816). The daemon accepts this SVID on
+            # its gRPC port for the OTLP TraceService Export method only, and
+            # adds it to its allowed peers by itself.
+            - name: GIBSON_TRACE_COLLECTOR_SVID
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/otel-collector") | quote }}
+            # The A2A listener (gibson#1400): A2A JSON-RPC and the Agent Cards of
+            # the Gibson agents, behind the agent listener of the gateway. Its
+            # TLS layer accepts the one identity of the agentgateway proxy, the
+            # same value as EXT_AUTHZ_GATEWAY_SVID of ext-authz.
+            - name: GIBSON_A2A_ADDR
+              value: {{ printf ":%s" (include "gibson.daemonA2APort" .) | quote }}
+            - name: GIBSON_A2A_GATEWAY_SVID
+              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/agentgateway") | quote }}
+            # The listen address of the trace listener. It has its own port
+            # and a message limit of 48 MiB: one span holds the whole request
+            # and response bodies.
+            - name: GIBSON_TRACE_GRPC_ADDR
+              value: {{ printf ":%s" (include "gibson.daemonTracePort" .) | quote }}
             # Comma-separated list built from the paths in .Values.spiffe.callbackPeers.
             {{- if .Values.spiffe.callbackPeers }}
             - name: GIBSON_CALLBACK_PEER_SVIDS

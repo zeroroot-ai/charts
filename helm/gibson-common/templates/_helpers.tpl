@@ -690,6 +690,12 @@ The daemon's own SA is `gibson.serviceAccountName` above — release-derived
 {{- (((.Values.envoy | default dict).serviceAccount) | default dict).name | default "gibson-envoy" -}}
 {{- end }}
 
+{{- define "gibson.extAuthzServiceName" -}}
+{{- /* The Service of ext-authz. gibson-workloads renders it, and the
+       agentgateway ext-authz policy of the umbrella calls it (charts#815). */ -}}
+gibson-ext-authz
+{{- end -}}
+
 {{- define "gibson.extAuthzServiceAccountName" -}}
 {{- (((.Values.extAuthz | default dict).serviceAccount) | default dict).name | default "gibson-ext-authz" -}}
 {{- end }}
@@ -701,6 +707,78 @@ The daemon's own SA is `gibson.serviceAccountName` above — release-derived
 {{- define "gibson.dashboardServiceAccountName" -}}
 {{- (((.Values.dashboard | default dict).serviceAccount) | default dict).name | default "gibson-dashboard" -}}
 {{- end }}
+
+{{- define "gibson.gatewayNamespace" -}}
+{{- /* The namespace of the agentgateway Gateway, its proxy, its parameters,
+       the policies that attach to it, and the routes, backends and provider
+       credential Secrets that the tenant-operator writes (charts#815). It is
+       apart from the release namespace, so a grant on its Secrets never
+       reaches the Secrets of the platform. The umbrella renders it, like the
+       SPIRE and sandbox namespaces. */ -}}
+{{- printf "%s-gateway" .Release.Namespace -}}
+{{- end -}}
+
+{{- define "gibson.agentgatewayName" -}}
+{{- /* The name of the one agentgateway Gateway (charts#815). The controller
+       names the proxy Deployment, Service and ServiceAccount after the
+       Gateway, so this is also the ServiceAccount of the proxy pods. The
+       umbrella renders the Gateway, and gibson-workloads renders its
+       ClusterSPIFFEID and its admission rule. */ -}}
+gibson-agentgateway
+{{- end -}}
+
+{{- define "gibson.daemonTracePort" -}}
+{{- /* The trace listener of the daemon (charts#816, gibson contract round
+       4): OTLP TraceService over gRPC, SPIFFE mTLS that accepts only the
+       trace collector, a message limit of 48 MiB. The daemon port, its
+       Service port, the export of the collector and the network rule read
+       this one number. */ -}}
+4317
+{{- end -}}
+
+{{- define "gibson.daemonA2APort" -}}
+{{- /* The A2A listener of the daemon (gibson contract round 7, gibson#1400):
+       HTTPS with SPIFFE mTLS that accepts only the agentgateway proxy. The
+       daemon port, its Service port, the HTTPRoute of the agent listener,
+       its backend TLS policy and the network rule read this one number. */ -}}
+8443
+{{- end -}}
+
+{{- define "gibson.traceCollectorName" -}}
+{{- /* The trace collector (charts#816): its StatefulSet, Service and
+       ServiceAccount. gibson-workloads renders it, and the umbrella
+       agentgateway trace policy sends to its Service. */ -}}
+gibson-trace-collector
+{{- end -}}
+
+{{- define "gibson.agentgatewayTLSSecretName" -}}
+{{- /* The Secret of the TLS certificate of the two Gateway listeners
+       (charts#815). gibson-workloads renders the Certificate, and the
+       umbrella Gateway names the Secret. */ -}}
+gibson-agentgateway-tls
+{{- end -}}
+
+{{- define "gibson.gatewayPorts" -}}
+{{- /* The two listener ports of the agentgateway Gateway (charts#815), as a
+       YAML map: model (the Model gateway) and agent (the Agent gateway). The
+       umbrella Gateway and network policy and the daemon URL read them. */ -}}
+model: 8080
+agent: 8081
+{{- end -}}
+
+{{- define "gibson.modelGatewayURL" -}}
+{{- /* The URL of the Model gateway listener, HTTPS, with the in-cluster name
+       that the listener certificate holds (gibson-agentgateway-tls). */ -}}
+{{- printf "https://%s.%s.svc:%v" (include "gibson.agentgatewayName" .) (include "gibson.gatewayNamespace" .) (get (include "gibson.gatewayPorts" . | fromYaml) "model") -}}
+{{- end -}}
+
+{{- define "gibson.agentgatewayControllerName" -}}
+{{- /* The name of the agentgateway controller, its Service and its
+       ServiceAccount. The umbrella sets agentgateway.fullnameOverride to
+       this name, and templates/agentgateway/gateway.yaml fails the render
+       when the two differ. The proxy pods dial its xDS port. */ -}}
+agentgateway
+{{- end -}}
 
 {{- define "gibson.connectorOperatorServiceAccountName" -}}
 {{- /* The gibson-operators sub-chart hardcodes this literal in the
@@ -1434,7 +1512,7 @@ the egress-fqdn label must not reach the world entity.
 */}}
 {{- define "gibson.netLabels" -}}
 {{- $roles := list "platform" "datastore" "system" -}}
-{{- $stores := list "postgres" "redis" "openbao" "neo4j" -}}
+{{- $stores := list "postgres" "redis" "openbao" "neo4j" "trace" -}}
 {{- if not (has .role $roles) -}}
 {{- fail (printf "gibson.netLabels: role %v is not one of %s" .role (join ", " $roles)) -}}
 {{- end -}}
@@ -1499,9 +1577,10 @@ this on each render.
   9402  cert-manager
   9464  the dashboard (GET /metrics only)
   9901  the probe listener of the edge (/ready and /stats/prometheus only)
+  8888  the trace collector (GET /metrics only, charts#816)
 */}}
 {{- define "gibson.metricsPorts" -}}
-8080 9003 9090 9187 9402 9464 9901
+8080 8888 9003 9090 9187 9402 9464 9901
 {{- end -}}
 
 {{/*

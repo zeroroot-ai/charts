@@ -114,6 +114,21 @@ metadata:
     pod-security.kubernetes.io/enforce-version: latest
     pod-security.kubernetes.io/warn: privileged
 ---
+# Source: gibson/templates/agentgateway/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gibson-gateway
+  labels:
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: agentgateway
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+
+---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/sandbox-namespace-baseline-netpol.yaml
 # Namespace-wide default-deny for setec-sandboxes.
 #
@@ -240,6 +255,20 @@ spec:
       app.kubernetes.io/instance: gibson
       app.kubernetes.io/component: envoy
 
+---
+# Source: gibson/charts/agentgateway/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agentgateway
+  namespace: gibson
+  labels:
+    helm.sh/chart: agentgateway-v1.7.0
+    agentgateway: agentgateway
+    app.kubernetes.io/name: agentgateway
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v1.7.0"
+    app.kubernetes.io/managed-by: Helm
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/service-account.yaml
 apiVersion: v1
@@ -465,6 +494,22 @@ metadata:
     app.kubernetes.io/version: "0.154.0"
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: helm-test
+automountServiceAccountToken: false
+
+---
+# Source: gibson/charts/gibson-workloads/templates/trace-collector/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gibson-trace-collector
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: trace-collector
 automountServiceAccountToken: false
 
 ---
@@ -1283,6 +1328,82 @@ data:
                             # below) and ext_authz is disabled per-route — OIDC
                             # discovery is public by design (mirrors the in-cluster
                             # cluster_oidc vhost). deploy#661.
+                            # The Model gateway for a sandbox (charts#815). A sandbox reaches
+                            # the cluster only through the Edge, so the Edge forwards
+                            # /gateway/model/ to the model listener of the
+                            # agentgateway Gateway, with the prefix removed, over TLS
+                            # that verifies the component CA. ext_authz stays on: its
+                            # route class "gateway forward" verifies the Capability
+                            # Grant, and the gateway does the full authorization. The
+                            # caller keeps x-capability-grant and the route claim
+                            # (x-gibson-route-tenant, x-gibson-route-provider); the
+                            # four trusted headers of the gateway never pass from the
+                            # caller. No buffer: timeout 0s and idle_timeout 0s, the
+                            # same as the daemon stream routes, so an SSE reply flows
+                            # and the HTTP/2 PINGs of the listener reap a dead one.
+                            # The quota is the class of the daemon agent routes.
+                            - match: { prefix: "/gateway/model/" }
+                              route:
+                                cluster: agentgateway_model
+                                prefix_rewrite: "/"
+                                timeout: 0s
+                                idle_timeout: 0s
+                                rate_limits:
+                                  - actions:
+                                      - generic_key:
+                                          descriptor_key: route
+                                          descriptor_value: api_authenticated
+                                      - request_headers:
+                                          header_name: x-gibson-identity-tenant
+                                          descriptor_key: tenant
+                                          skip_if_absent: false
+                                      - request_headers:
+                                          header_name: x-gibson-identity-subject
+                                          descriptor_key: subject
+                                          skip_if_absent: false
+                              request_headers_to_remove:
+                                - x-gibson-tenant
+                                - x-gibson-subject
+                                - x-gibson-mission
+                                - x-gibson-task
+                            # The Agent gateway for a sandbox (charts#815). A sandbox reaches
+                            # the cluster only through the Edge, so the Edge forwards
+                            # /gateway/agent/ to the agent listener of the
+                            # agentgateway Gateway, with the prefix removed, over TLS
+                            # that verifies the component CA. ext_authz stays on: its
+                            # route class "gateway forward" verifies the Capability
+                            # Grant, and the gateway does the full authorization. The
+                            # caller keeps x-capability-grant and the route claim
+                            # (x-gibson-route-tenant, x-gibson-route-provider); the
+                            # four trusted headers of the gateway never pass from the
+                            # caller. No buffer: timeout 0s and idle_timeout 0s, the
+                            # same as the daemon stream routes, so an SSE reply flows
+                            # and the HTTP/2 PINGs of the listener reap a dead one.
+                            # The quota is the class of the daemon agent routes.
+                            - match: { prefix: "/gateway/agent/" }
+                              route:
+                                cluster: agentgateway_agent
+                                prefix_rewrite: "/"
+                                timeout: 0s
+                                idle_timeout: 0s
+                                rate_limits:
+                                  - actions:
+                                      - generic_key:
+                                          descriptor_key: route
+                                          descriptor_value: api_authenticated
+                                      - request_headers:
+                                          header_name: x-gibson-identity-tenant
+                                          descriptor_key: tenant
+                                          skip_if_absent: false
+                                      - request_headers:
+                                          header_name: x-gibson-identity-subject
+                                          descriptor_key: subject
+                                          skip_if_absent: false
+                              request_headers_to_remove:
+                                - x-gibson-tenant
+                                - x-gibson-subject
+                                - x-gibson-mission
+                                - x-gibson-task
                             - match: { prefix: "/.well-known/openid-configuration" }
                               route:
                                 cluster: zitadel_upstream
@@ -1898,6 +2019,15 @@ data:
                               requires:
                                 allow_missing_or_failed: {}
                             - match: { prefix: "/gibson.harness.v1.HarnessCallbackService/" }
+                              requires:
+                                allow_missing_or_failed: {}
+                            # The gateway forward routes (charts#815): a sandbox
+                            # sends its Capability Grant and no Zitadel JWT, and
+                            # ext_authz verifies the grant.
+                            - match: { prefix: "/gateway/model/" }
+                              requires:
+                                allow_missing_or_failed: {}
+                            - match: { prefix: "/gateway/agent/" }
                               requires:
                                 allow_missing_or_failed: {}
                             # A dispatched component renews its own task grant with
@@ -2829,6 +2959,76 @@ data:
                           address: "gibson-gibson-workloads"
                           port_value: 50001
     
+        # The model listener of the agentgateway Gateway (charts#815). TLS that
+        # verifies the component CA and the name of the proxy Service. The
+        # protocol follows ALPN, so an SSE reply streams over HTTP/1.1 or HTTP/2.
+        - name: agentgateway_model
+          type: STRICT_DNS
+          connect_timeout: 5s
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              auto_config:
+                http2_protocol_options: {}
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+              sni: "gibson-agentgateway.gibson-gateway.svc"
+              common_tls_context:
+                alpn_protocols: ["h2", "http/1.1"]
+                validation_context:
+                  trusted_ca:
+                    filename: /etc/envoy/component-ca/ca.crt
+                  match_typed_subject_alt_names:
+                    - san_type: DNS
+                      matcher:
+                        exact: "gibson-agentgateway.gibson-gateway.svc"
+          load_assignment:
+            cluster_name: agentgateway_model
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: "gibson-agentgateway.gibson-gateway.svc"
+                          port_value: 8080
+    
+        # The agent listener of the agentgateway Gateway (charts#815). TLS that
+        # verifies the component CA and the name of the proxy Service. The
+        # protocol follows ALPN, so an SSE reply streams over HTTP/1.1 or HTTP/2.
+        - name: agentgateway_agent
+          type: STRICT_DNS
+          connect_timeout: 5s
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              auto_config:
+                http2_protocol_options: {}
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+              sni: "gibson-agentgateway.gibson-gateway.svc"
+              common_tls_context:
+                alpn_protocols: ["h2", "http/1.1"]
+                validation_context:
+                  trusted_ca:
+                    filename: /etc/envoy/component-ca/ca.crt
+                  match_typed_subject_alt_names:
+                    - san_type: DNS
+                      matcher:
+                        exact: "gibson-agentgateway.gibson-gateway.svc"
+          load_assignment:
+            cluster_name: agentgateway_agent
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address:
+                          address: "gibson-agentgateway.gibson-gateway.svc"
+                          port_value: 8081
+    
         - name: gibson_dashboard
           type: STRICT_DNS
           connect_timeout: 5s
@@ -3189,6 +3389,8 @@ data:
         type: "file"
         file:
           path: "/etc/gibson-kek/master-key"
+      # The address check of the base_url of a model provider (see values.yaml).
+      allow_private_llm_endpoints: false
       # The platform OpenBao. The start gate of the daemon asks its health
       # (GET /v1/sys/health) and is not Ready until it answers (gibson#1078,
       # gibson#1079). The address is the one every OpenBao client of the
@@ -3514,6 +3716,28 @@ data:
         socket_address: { address: 127.0.0.1, port_value: 9902 }
     static_resources:
       listeners:
+        - name: admin_probe
+          address:
+            socket_address: { address: 0.0.0.0, port_value: 9901 }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: admin_probe
+                    codec_type: AUTO
+                    route_config:
+                      name: admin_probe
+                      virtual_hosts:
+                        - name: admin_probe
+                          domains: ["*"]
+                          routes:
+                            - match: { path: "/ready" }
+                              route: { cluster: envoy_admin_loopback }
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
         - name: mtls_ingress
           address:
             socket_address: { address: 0.0.0.0, port_value: 8081 }
@@ -3559,6 +3783,16 @@ data:
                     stat_prefix: ratelimit_local
                     cluster: ratelimit_local
       clusters:
+        - name: envoy_admin_loopback
+          type: STATIC
+          connect_timeout: 0.25s
+          load_assignment:
+            cluster_name: envoy_admin_loopback
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: 127.0.0.1, port_value: 9902 }
         - name: spire_agent
           type: STATIC
           connect_timeout: 0.25s
@@ -3585,6 +3819,217 @@ data:
                   - endpoint:
                       address:
                         socket_address: { address: 127.0.0.1, port_value: 8082 }
+
+---
+# Source: gibson/charts/gibson-workloads/templates/trace-collector/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gibson-trace-collector
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: trace-collector
+data:
+  collector.yaml: |
+    extensions:
+      file_storage/queue:
+        directory: /var/lib/otelcol/queue
+        create_directory: false
+        timeout: 10s
+        compaction:
+          on_start: true
+          on_rebound: true
+          directory: /var/lib/otelcol/queue
+      health_check:
+        endpoint: 0.0.0.0:13133
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 127.0.0.1:14317
+            max_recv_msg_size_mib: 40
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 20
+    exporters:
+      otlp/daemon:
+        endpoint: 127.0.0.1:15051
+        # Plaintext to the loopback port only. The Envoy sidecar adds SPIFFE
+        # mTLS on the way to the daemon.
+        tls:
+          insecure: true
+        # One span for each request, with no batch: a span can pass 16 MiB,
+        # and the trace listener of the daemon takes 48 MiB. The proxy sends
+        # one span in each export (OTEL_BSP_MAX_EXPORT_BATCH_SIZE=1 in the
+        # AgentgatewayParameters), so a request holds one span.
+        sending_queue:
+          enabled: true
+          storage: file_storage/queue
+          sizer: bytes
+          queue_size: 1610612736
+        retry_on_failure:
+          enabled: true
+          initial_interval: 1s
+          max_interval: 30s
+          max_elapsed_time: 0s
+    service:
+      extensions: [file_storage/queue, health_check]
+      telemetry:
+        logs:
+          level: warn
+        metrics:
+          level: detailed
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: 8888
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter]
+          exporters: [otlp/daemon]
+  envoy.yaml: |
+    admin:
+      address:
+        socket_address: { address: 127.0.0.1, port_value: 9902 }
+    static_resources:
+      listeners:
+        - name: admin_probe
+          address:
+            socket_address: { address: 0.0.0.0, port_value: 9901 }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: admin_probe
+                    codec_type: AUTO
+                    route_config:
+                      name: admin_probe
+                      virtual_hosts:
+                        - name: admin_probe
+                          domains: ["*"]
+                          routes:
+                            - match: { path: "/ready" }
+                              route: { cluster: envoy_admin_loopback }
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+        - name: otlp_mtls_ingress
+          address:
+            socket_address: { address: 0.0.0.0, port_value: 4317 }
+          filter_chains:
+            - transport_socket:
+                name: envoy.transport_sockets.tls
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+                  require_client_certificate: true
+                  common_tls_context:
+                    alpn_protocols: ["h2"]
+                    tls_certificate_sds_secret_configs:
+                      - name: "default"
+                        sds_config: {"api_config_source":{"api_type":"GRPC","grpc_services":[{"envoy_grpc":{"cluster_name":"spire_agent"}}],"transport_api_version":"V3"},"resource_api_version":"V3"}
+                    combined_validation_context:
+                      default_validation_context:
+                        # Only the agentgateway proxy may send spans.
+                        match_typed_subject_alt_names:
+                          - san_type: URI
+                            matcher:
+                              exact: "spiffe://zeroroot.ai/platform/agentgateway"
+                      validation_context_sds_secret_config:
+                        name: "ROOTCA"
+                        sds_config: {"api_config_source":{"api_type":"GRPC","grpc_services":[{"envoy_grpc":{"cluster_name":"spire_agent"}}],"transport_api_version":"V3"},"resource_api_version":"V3"}
+              filters:
+                - name: envoy.filters.network.tcp_proxy
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                    stat_prefix: otlp_local
+                    cluster: otlp_local
+        - name: daemon_egress
+          address:
+            socket_address: { address: 127.0.0.1, port_value: 15051 }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.tcp_proxy
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                    stat_prefix: daemon_mtls
+                    cluster: daemon_mtls
+      clusters:
+        - name: envoy_admin_loopback
+          type: STATIC
+          connect_timeout: 0.25s
+          load_assignment:
+            cluster_name: envoy_admin_loopback
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: 127.0.0.1, port_value: 9902 }
+        - name: spire_agent
+          type: STATIC
+          connect_timeout: 0.25s
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              explicit_http_config:
+                http2_protocol_options: {}
+          load_assignment:
+            cluster_name: spire_agent
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        pipe:
+                          path: /run/spire/sockets/api.sock
+        - name: otlp_local
+          type: STATIC
+          connect_timeout: 0.25s
+          load_assignment:
+            cluster_name: otlp_local
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: 127.0.0.1, port_value: 14317 }
+        - name: daemon_mtls
+          type: STRICT_DNS
+          connect_timeout: 2s
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+              common_tls_context:
+                alpn_protocols: ["h2"]
+                tls_certificate_sds_secret_configs:
+                  - name: "default"
+                    sds_config: {"api_config_source":{"api_type":"GRPC","grpc_services":[{"envoy_grpc":{"cluster_name":"spire_agent"}}],"transport_api_version":"V3"},"resource_api_version":"V3"}
+                combined_validation_context:
+                  default_validation_context:
+                    match_typed_subject_alt_names:
+                      - san_type: URI
+                        matcher:
+                          exact: "spiffe://zeroroot.ai/platform/daemon"
+                  validation_context_sds_secret_config:
+                    name: "ROOTCA"
+                    sds_config: {"api_config_source":{"api_type":"GRPC","grpc_services":[{"envoy_grpc":{"cluster_name":"spire_agent"}}],"transport_api_version":"V3"},"resource_api_version":"V3"}
+          load_assignment:
+            cluster_name: daemon_mtls
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: gibson-gibson-workloads.gibson.svc, port_value: 4317 }
 
 ---
 # Source: gibson/charts/spire/charts/spiffe-oidc-discovery-provider/templates/configmap.yaml
@@ -4173,6 +4618,175 @@ data:
     
 
 ---
+# Source: gibson/charts/agentgateway/templates/role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agentgateway-gibson
+rules:
+# Service discovery information
+- apiGroups: [""]
+  resources:
+  - namespaces
+  - nodes
+  - pods
+  - services
+  - configmaps # Used for reference configs in policies/TLS/API keys, etc
+  - secrets # Used for reference configs in policies/TLS/API keys, etc
+  verbs:
+  - get
+  - list
+  - watch
+
+- apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs:
+  - get
+  - list
+  - watch
+
+# Watches agentgateway configuration resources.
+- apiGroups:
+  - agentgateway.dev
+  resources:
+  - agentgatewaybackends
+  - agentgatewaymodels
+  - agentgatewayparameters
+  - agentgatewaypolicies
+  verbs:
+  - get
+  - list
+  - watch
+
+# Reports reconciliation status on agentgateway configuration resources.
+- apiGroups:
+  - agentgateway.dev
+  resources:
+  - agentgatewaybackends/status
+  - agentgatewaymodels/status
+  - agentgatewayparameters/status
+  - agentgatewaypolicies/status
+  verbs:
+  - get
+  - patch
+  - update
+
+# Detects which optional Kubernetes APIs are installed in the cluster.
+- apiGroups:
+  - apiextensions.k8s.io
+  resources:
+  - customresourcedefinitions
+  verbs:
+  - get
+  - list
+  - watch
+
+# Authenticates proxy service-account tokens presented to the xDS server.
+- apiGroups: [authentication.k8s.io]
+  resources: [tokenreviews]
+  verbs: [create]
+
+# Watches Gateway API configuration used to build proxy configuration.
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - backendtlspolicies
+  - gateways
+  - grpcroutes
+  - httproutes
+  - listenersets
+  - referencegrants
+  - tcproutes
+  - tlsroutes
+  verbs:
+  - get
+  - list
+  - watch
+
+# CA certificates referenced by TLS validation. Only watched if the cluster serves the API.
+- apiGroups:
+  - certificates.k8s.io
+  resources:
+  - clustertrustbundles
+  verbs:
+  - get
+  - list
+  - watch
+
+# Status reports
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - backendtlspolicies/status
+  - gatewayclasses/status
+  - gateways/status
+  - grpcroutes/status
+  - httproutes/status
+  - listenersets/status
+  - tcproutes/status
+  - tlsroutes/status
+  verbs:
+  - patch
+  - update
+
+# Creates and maintains the GatewayClass owned by this controller.
+# Cluster scoped resource so must be in the cluster role.
+- apiGroups: [gateway.networking.k8s.io]
+  resources: [gatewayclasses]
+  verbs: [create, get, list, patch, update, watch]
+
+# Discovers Istio services and workloads when Istio integration is enabled.
+
+# While the deployer uses scoped roles under '-deployer' for writes, we cannot do a scoped watch
+# Without opening N watches. instead, just always watch all which is generally acceptable.
+- apiGroups: [policy]
+  resources: [poddisruptionbudgets]
+  verbs: [get, list, watch]
+- apiGroups: [""]
+  resources: [serviceaccounts, services]
+  verbs: [get, list, watch]
+- apiGroups: [apps]
+  resources:
+  - daemonsets
+  - deployments
+  verbs: [get, list, watch]
+- apiGroups: [autoscaling]
+  resources: [horizontalpodautoscalers]
+  verbs: [get, list, watch]
+---
+# Source: gibson/charts/agentgateway/templates/role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agentgateway-gibson-deployer
+rules:
+# Objects created by the Gateway deployer.
+- apiGroups: [""]
+  resources:
+  - configmaps
+  - secrets
+  - serviceaccounts
+  - services
+  verbs: [create, delete, patch, update]
+- apiGroups: [apps]
+  resources:
+  - daemonsets
+  - deployments
+  verbs: [create, delete, patch, update]
+- apiGroups: [autoscaling]
+  resources: [horizontalpodautoscalers]
+  verbs: [create, delete, patch, update]
+- apiGroups: [policy]
+  resources: [poddisruptionbudgets]
+  verbs: [create, delete, patch, update]
+
+# Publishes warning Events on Gateways when a proxy NACKs xDS configuration.
+- apiGroups: [""]
+  resources: [events]
+  verbs: [create, patch]
+---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/cluster-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -4330,6 +4944,22 @@ rules:
     verbs: ["get", "list", "watch", "update", "patch"]
   - apiGroups: ["gibson.zeroroot.ai"]
     resources: ["connectorinstances/finalizers"]
+    verbs: ["update"]
+
+  # ModelProvider (gibson#1366, gibson#1387). A tenant's model provider,
+  # with its status and finalizers, at cluster scope like the other tenant
+  # kinds. The objects the operator renders for it (backend, route, policy,
+  # credential Secret) live in the gateway namespace only, and the Role
+  # gibson-tenant-operator-gateway (gateway-namespace-rbac.yaml) grants
+  # them there.
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["modelproviders"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["modelproviders/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["modelproviders/finalizers"]
     verbs: ["update"]
 
   # Namespace is inherently cluster-scoped — operator creates per-tenant namespaces.
@@ -4849,6 +5479,20 @@ rules:
       - get
       - list
 ---
+# Source: gibson/charts/agentgateway/templates/serviceaccount.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agentgateway-role-gibson
+subjects:
+- kind: ServiceAccount
+  name: agentgateway
+  namespace: gibson
+roleRef:
+  kind: ClusterRole
+  name: agentgateway-gibson
+  apiGroup: rbac.authorization.k8s.io
+---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/cluster-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -5036,6 +5680,27 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 
 ---
+# Source: gibson/charts/agentgateway/templates/role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agentgateway-gibson-local
+  namespace: gibson
+rules:
+# Coordinates controller leader election in the controller namespace.
+- apiGroups: [coordination.k8s.io]
+  resources: [leases]
+  verbs: [create, get, update]
+# Creates the xDS TLS certificate Secret when it does not already exist.
+- apiGroups: [""]
+  resources: [secrets]
+  verbs: [create]
+# Persists fetched JWKS keysets in the controller namespace.
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [create, delete, patch, update]
+
+---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -5122,6 +5787,26 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/gateway-namespace-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gibson-tenant-operator-gateway
+  namespace: gibson-gateway
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+rules:
+  - apiGroups: ["agentgateway.dev"]
+    resources: ["agentgatewaybackends"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "delete"]
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/release-namespace-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5508,6 +6193,37 @@ rules:
     resourceNames: [spire-bundle]
     verbs: [get, patch, create]
 ---
+# Source: gibson/charts/agentgateway/templates/serviceaccount.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agentgateway-local-role-gibson
+  namespace: gibson
+subjects:
+- kind: ServiceAccount
+  name: agentgateway
+  namespace: gibson
+roleRef:
+  kind: Role
+  name: agentgateway-gibson-local
+  apiGroup: rbac.authorization.k8s.io
+---
+# Source: gibson/charts/agentgateway/templates/serviceaccount.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agentgateway-write-role-gibson
+  namespace: gibson-gateway
+subjects:
+- kind: ServiceAccount
+  name: agentgateway
+  namespace: gibson
+roleRef:
+  kind: ClusterRole
+  name: agentgateway-gibson-deployer
+  apiGroup: rbac.authorization.k8s.io
+
+---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/leader-election-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -5562,6 +6278,25 @@ subjects:
   - kind: ServiceAccount
     name: reloader
     namespace: gibson
+---
+# Source: gibson/charts/gibson-operators/templates/tenant-operator/gateway-namespace-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gibson-tenant-operator-gateway
+  namespace: gibson-gateway
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gibson-tenant-operator-gateway
+subjects:
+  - kind: ServiceAccount
+    name: gibson-tenant-operator
+    namespace: gibson
+
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/release-namespace-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -5884,6 +6619,40 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: spire-bundle
+
+---
+# Source: gibson/charts/agentgateway/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentgateway
+  namespace: gibson
+  labels:
+    helm.sh/chart: agentgateway-v1.7.0
+    agentgateway: agentgateway
+    app.kubernetes.io/name: agentgateway
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v1.7.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  type: ClusterIP
+  ports:
+  - name: grpc-xds-agw
+    protocol: TCP
+    port: 9978
+    targetPort: grpc-xds-agw
+  - name: health
+    protocol: TCP
+    port: 9093
+    targetPort: health
+  - name: metrics
+    protocol: TCP
+    port: 9092
+    targetPort: metrics
+  selector:
+    agentgateway: agentgateway
+    app.kubernetes.io/name: agentgateway
+    app.kubernetes.io/instance: gibson
 
 ---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
@@ -6271,6 +7040,20 @@ spec:
       port: 8086
       targetPort: authz-registry
       protocol: TCP
+    # The A2A listener (gibson#1400). The appProtocol tells agentgateway to
+    # apply its a2a policy: it rewrites the interface URL of an Agent Card
+    # to the gateway and records the A2A method in the trace.
+    - name: a2a
+      port: 8443
+      targetPort: a2a
+      protocol: TCP
+      appProtocol: agentgateway.dev/a2a
+    # The trace listener (charts#816).
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+      protocol: TCP
+      appProtocol: grpc
   selector:
     app.kubernetes.io/name: gibson-workloads
     app.kubernetes.io/instance: gibson
@@ -6302,6 +7085,37 @@ spec:
       targetPort: grpc
       protocol: TCP
       appProtocol: grpc
+
+---
+# Source: gibson/charts/gibson-workloads/templates/trace-collector/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: gibson-trace-collector
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: trace-collector
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/component: trace-collector
+  ports:
+    - name: otlp
+      port: 4317
+      targetPort: otlp
+      protocol: TCP
+      appProtocol: grpc
+    - name: metrics
+      port: 8888
+      targetPort: metrics
+      protocol: TCP
 
 ---
 # Source: gibson/charts/openfga/templates/service.yaml
@@ -6794,6 +7608,125 @@ spec:
             type: DirectoryOrCreate
 
 ---
+# Source: gibson/charts/agentgateway/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentgateway
+  namespace: gibson
+  labels:
+    helm.sh/chart: agentgateway-v1.7.0
+    agentgateway: agentgateway
+    app.kubernetes.io/name: agentgateway
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "v1.7.0"
+    app.kubernetes.io/managed-by: Helm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      agentgateway: agentgateway
+      app.kubernetes.io/name: agentgateway
+      app.kubernetes.io/instance: gibson
+  template:
+    metadata:
+      annotations:
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "9092"
+        prometheus.io/scrape: "true"
+      labels:
+        agentgateway: agentgateway
+        app.kubernetes.io/name: agentgateway
+        app.kubernetes.io/instance: gibson
+        app.kubernetes.io/component: agentgateway-controller
+        gibson.zeroroot.ai/kube-api: "true"
+        gibson.zeroroot.ai/net-role: platform
+    spec:
+      serviceAccountName: agentgateway
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controller
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+              - ALL
+          image: "ghcr.io/zeroroot-ai/mirror/agentgateway-controller:v1.7.0@sha256:87c1363bf0cbc7fdb375866e592294114c8763097d2d0c9fc45fcb1fe00a4ab8"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9978
+              name: grpc-xds-agw
+              protocol: TCP
+            - containerPort: 9093
+              name: health
+              protocol: TCP
+            - containerPort: 9092
+              name: metrics
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 9093
+            initialDelaySeconds: 1
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: 9093
+            initialDelaySeconds: 0
+            periodSeconds: 1
+            
+            failureThreshold: 120
+          env:
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  divisor: "1"
+                  resource: limits.memory
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  divisor: "1"
+                  resource: limits.cpu
+            - name: AGW_PROXY_IMAGE_REGISTRY
+              value: ghcr.io/zeroroot-ai
+            - name: AGW_PROXY_IMAGE_REPOSITORY
+              value: mirror/agentgateway
+            - name: AGW_PROXY_IMAGE_TAG
+              value: "v1.7.0@sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b"
+
+            - name: AGW_LOG_LEVEL
+              value: "info"
+            - name: AGW_XDS_SERVICE_NAME
+              value: agentgateway
+            - name: AGW_AGENTGATEWAY_XDS_SERVICE_PORT
+              value: "9978"
+            - name: AGW_DISCOVERY_NAMESPACE_SELECTORS
+              value: "[]"
+            - name: AGW_ENABLE_AGENTGATEWAY_MODELS
+              value: "true"
+            - name: AGW_XDS_MODE
+              value: "tls"
+            - name: AGW_GATEWAY_CLASS_PARAMETERS_REFS
+              value: "{}"
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          resources:
+            limits:
+              cpu: "2"
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+
+---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -6887,7 +7820,7 @@ spec:
               readOnly: true
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/connector-operator:v0.163.4@sha256:e920d1b45964328d95c6e44a1a4bfac58e531c8ab6f5df72e97ea256f30516b9"
+          image: "ghcr.io/zeroroot-ai/connector-operator:v0.164.0@sha256:2c766311720b8ead53c9cbe46f65bee76e3aa0839d049235c0e1f593c9c4b980"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -7019,7 +7952,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/platform-operator:v0.163.4@sha256:c3f1136d102f33068e1d2679c9e2dc517cbca61ac702342ae67534833ec2c2ed"
+          image: "ghcr.io/zeroroot-ai/platform-operator:v0.164.0@sha256:14ed750dd5eba2f92934296631c7a38986b3ec5c5b19fc8063a9efae3ee5aeb5"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -7510,7 +8443,7 @@ spec:
               memory: 64Mi
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.163.4@sha256:68c7eea142b1229529e4805f5750d2b3af5bbbca92e538b78bcd42dd2302ee95"
+          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.164.0@sha256:2ee42ef5cf338c114500e158214c0b9e4f25fabc51b7a8824fb856a09548e70f"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -7638,10 +8571,26 @@ spec:
             # fixed path platform/daemon.
             - name: GIBSON_DAEMON_SPIFFE_ID
               value: "spiffe://zeroroot.ai/platform/daemon"
+            # The Model gateway (gibson#1366). The operator writes the backend,
+            # the route and the credential Secret of each ModelProvider in the
+            # gateway namespace (gibson.gatewayNamespace) and attaches the route
+            # to the one agentgateway Gateway. It renders no ext-authz: the
+            # chart attaches ext-authz to the Gateway. The operator of the epic
+            # does not start without them.
+            - name: GIBSON_MODEL_GATEWAY_NAMESPACE
+              value: "gibson-gateway"
+            - name: GIBSON_MODEL_GATEWAY_NAME
+              value: "gibson-agentgateway"
+            # The Gateway that the route of each outside agent attaches to
+            # (gibson#1403). One Gateway holds the model listener and the
+            # agent listener, so the value is the same helper as above. The
+            # operator does not start without it.
+            - name: GIBSON_AGENT_GATEWAY_NAME
+              value: "gibson-agentgateway"
             # The image of the belief trainer CronJob of each tenant
             # (gibson#616). The operator exits at start when it is empty.
             - name: BELIEF_TRAINER_IMAGE
-              value: "ghcr.io/zeroroot-ai/gibson:v0.163.5@sha256:583f38b787a17febf5c6c5da3a74c5b809ec0d3a0135dff8d651eaee8dcaba3b"
+              value: "ghcr.io/zeroroot-ai/gibson:v0.164.0@sha256:d0815f46c4006f4bca1dfb7e6f8a915100a9978664fe4d68dbc8df307a4dd7d6"
             # The Neo4j image of each tenant data plane (gibson#1061). The
             # operator exits at start when it is empty or has no digest.
             - name: TENANT_NEO4J_IMAGE
@@ -8341,7 +9290,7 @@ spec:
         # PodVolumeRestores in a preserve backup were volumes like these.
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
-        backup.velero.io/backup-volumes-excludes: "spire-agent-socket,shared-identity,next-cache,tmp"
+        backup.velero.io/backup-volumes-excludes: "node-ca,spire-agent-socket,shared-identity,next-cache,tmp"
         checksum/config: e563bc5ecf6d646d021bd5dc33d7a7dd726b0e8eda1299977e4b43923b0c2089
         checksum/secret: a63fb887766463a15afacd6caaa488d50993cff1c5300f5559dad586b60df704
         # Pod-roll-on-Secret-change is delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). The prior pattern
@@ -8428,6 +9377,40 @@ spec:
             - name: spire-agent-socket
               mountPath: /run/spire/agent
               readOnly: true
+        # The CA bundle of NODE_EXTRA_CA_CERTS: the component CA (the Model
+        # gateway, charts#815) and, when the Edge CA is private, the Edge CA.
+        - name: ca-bundle
+          image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop: ["ALL"]
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              cat /etc/ssl/component-ca/ca.crt > /etc/ssl/node-ca/bundle.crt
+              cat /etc/ssl/envoy-ca/ca.crt >> /etc/ssl/node-ca/bundle.crt
+          volumeMounts:
+            - name: component-ca
+              mountPath: /etc/ssl/component-ca
+              readOnly: true
+            - name: envoy-ca
+              mountPath: /etc/ssl/envoy-ca
+              readOnly: true
+            - name: node-ca
+              mountPath: /etc/ssl/node-ca
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
         - name: wait-for-gibson
           image: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
           securityContext:
@@ -8578,7 +9561,7 @@ spec:
               mountPath: /shared
       containers:
         - name: dashboard
-          image: "ghcr.io/zeroroot-ai/dashboard:v0.135.3@sha256:b8889df513294524ee6df32996c5f73b0cab7e6ffbeb0b641b57b753e591609a"
+          image: "ghcr.io/zeroroot-ai/dashboard:v0.136.0@sha256:0bd73758a96cf8f1dece17e3e75fe61ea73bef1f7a727fba8fcddab08a70656b"
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -8788,15 +9771,19 @@ spec:
                 secretKeyRef:
                   name: gibson-dashboard-oidc
                   key: client_secret
-            # Trust Envoy's edge TLS cert when its CA is NOT in the system
-            # trust bundle (kind selfsigned-ca, vault-issuer). Auth.js's
-            # server-side calls to Zitadel go through Envoy at
-            # https://app.<domain>:30443; Node rejects unknown CAs by
-            # default. NODE_EXTRA_CA_CERTS appends the mounted PEM to Node's
-            # trust store. Letsencrypt / awspca issuers chain to roots
-            # already in the system bundle — no mount needed (deploy#126).
+            # NODE_EXTRA_CA_CERTS appends one PEM file to the trust store of
+            # Node, and Node rejects an unknown CA by default. The init
+            # container ca-bundle writes the file from two CAs:
+            #   - the Edge CA, when it is NOT in the system trust bundle
+            #     (kind selfsigned-ca, vault-issuer). Auth.js's server-side
+            #     calls to Zitadel go through Envoy at https://app.<domain>.
+            #     Letsencrypt / awspca issuers chain to roots already in the
+            #     system bundle, and then this CA is not added (deploy#126).
+            #   - the component CA, always: the Model gateway listener
+            #     (charts#815) has a certificate of the component issuer,
+            #     which is a private CA in every profile.
             - name: NODE_EXTRA_CA_CERTS
-              value: /etc/ssl/envoy-ca/ca.crt
+              value: /etc/ssl/node-ca/bundle.crt
 
             # Gibson Platform Public URL (spec: naming-and-config-standardization).
             # Required by the dashboard to render user-facing links to the platform
@@ -8932,6 +9919,10 @@ spec:
             - name: envoy-ca
               mountPath: /etc/ssl/envoy-ca
               readOnly: true
+            # The CA bundle of NODE_EXTRA_CA_CERTS (init container ca-bundle).
+            - name: node-ca
+              mountPath: /etc/ssl/node-ca
+              readOnly: true
             # SPIRE agent socket — matches SPIFFE_ENDPOINT_SOCKET above.
             # Without this the wait-for-spire-socket init container gated the
             # Pod on a socket the dashboard container could not then reach
@@ -8952,6 +9943,19 @@ spec:
       volumes:
         - name: next-cache
           emptyDir: {}
+        - name: node-ca
+          emptyDir:
+            sizeLimit: 1Mi
+        # The CA of the component issuer, from the Model gateway listener
+        # certificate (charts#815). Only ca.crt: the dashboard never holds
+        # the key of the listener.
+        - name: component-ca
+          secret:
+            secretName: gibson-agentgateway-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 0444
         - name: tmp
           emptyDir: {}
         - name: spire-agent-socket
@@ -9178,7 +10182,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: afec51a1fe72e700764dc6e1912a0e547fede654308848b4aae2c80b99b80986
+        checksum/config: 1d9e8e1564c709017e7dbf6468f1d6ff4f4e26c70dacabb110b9c845f494c22a
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
@@ -9406,6 +10410,11 @@ spec:
             - name: tls
               mountPath: /etc/envoy/tls
               readOnly: true
+            # The component CA, to verify the agentgateway listeners of the
+            # gateway forward routes (charts#815).
+            - name: component-ca
+              mountPath: /etc/envoy/component-ca
+              readOnly: true
             - name: spire-agent-socket
               mountPath: /run/spire/sockets
               readOnly: true
@@ -9491,6 +10500,15 @@ spec:
           secret:
             secretName: gibson-envoy-tls
             defaultMode: 0400
+        # Only ca.crt of the gateway listener certificate: the Edge never
+        # holds the listener key (charts#815).
+        - name: component-ca
+          secret:
+            secretName: gibson-agentgateway-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 0444
         # SPIRE Workload API socket — exposed by the spire-agent DaemonSet
         # via the csi.spiffe.io CSI driver. The hostPath /run/spire/sockets
         # we previously declared doesn't exist on the host: the SPIRE chart
@@ -9552,7 +10570,7 @@ spec:
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,tmp"
         checksum/registry: c1c29512582a893a867405ae14499183f952c17ed756544d689ca1b5877c2c5c
-        checksum/daemon-registry: 78665c066c8bb73140e200aa991c85a11852bb6faba692666c453f3a2dde3026
+        checksum/daemon-registry: 870719a31fd6e57bb621986ae22f91e6cc980558a0f887e8cad0049fe92af8d4
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
         secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc,gibson-ext-authz-health-tls"
     spec:
@@ -9687,7 +10705,7 @@ spec:
               memory: 32Mi
       containers:
         - name: ext-authz
-          image: "ghcr.io/zeroroot-ai/ext-authz:v0.163.4@sha256:b53d1f09eae7a3669399515e95f8aa93ffb6d700393c9572c4a38038512d017b"
+          image: "ghcr.io/zeroroot-ai/ext-authz:v0.164.0@sha256:0540a54a8eada59880c2e13bc06a08184ec64845f8e59b491ceb68c584f81ed0"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -9708,6 +10726,10 @@ spec:
             - name: metrics
               containerPort: 9003
               protocol: TCP
+            # The plaintext probe listener, for the kubelet only.
+            - name: probe
+              containerPort: 9004
+              protocol: TCP
           env:
             - name: EXT_AUTHZ_LOG_LEVEL
               value: "info"
@@ -9717,6 +10739,8 @@ spec:
               value: ":9002"
             - name: EXT_AUTHZ_METRICS_ADDR
               value: ":9003"
+            - name: EXT_AUTHZ_PROBE_ADDR
+              value: ":9004"
             - name: EXT_AUTHZ_FGA_ADDR
               value: "https://gibson-openfga:8080"
             # Redis is required (ADR-0045, charts#397). ext-authz does not start
@@ -9883,6 +10907,10 @@ spec:
             # of the install and the fixed path platform/envoy.
             - name: EXT_AUTHZ_ENVOY_SVID
               value: "spiffe://zeroroot.ai/platform/envoy"
+            # The agentgateway proxy (charts#815). ext-authz accepts it for a
+            # model call and an A2A call only. Unset, no gateway call passes.
+            - name: EXT_AUTHZ_GATEWAY_SVID
+              value: "spiffe://zeroroot.ai/platform/agentgateway"
           volumeMounts:
             # NOTE: sa-identity-map ConfigMap is NOT mounted on ext-authz.
             # The ext-authz binary does not consume it — only the daemon
@@ -9912,46 +10940,43 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
-          # The /healthz endpoint is served over HTTPS with mandatory client
-          # mTLS (RequireAndVerifyClientCert) — the kubelet has no SVID to
-          # present, so httpGet probes fail at the TLS handshake. tcpSocket
-          # checks the port is bound, which is sufficient given the binary
-          # exits on any startup error.
+          # The kubelet probes the plaintext probe listener
+          # (EXT_AUTHZ_PROBE_ADDR, gibson cmd/ext-authz/probe_listener.go). The
+          # health listener on 9002 and the metrics listener on 9003 demand a
+          # client certificate, which the kubelet does not have, and a
+          # tcpSocket probe there opens a TLS port with no handshake. The probe
+          # listener serves GET /healthz (liveness) and GET /readyz (the same
+          # readiness aggregator as the health listener, with the FGA check).
           #
-          # startupProbe disables liveness/readiness until the container has
-          # had time to: (1) wait for SPIRE Agent to register and issue an
-          # SVID, (2) fetch the authz registry from the daemon over mTLS
-          # (deploy#852; retries while the daemon comes up), (3) bind port
-          # 9002. On a cold kind
-          # node or after a host reboot, the SPIFFE CSI mount can take 30-60s
-          # to attach because the CSI driver registers only after
-          # gibson-spire-agent is Ready. Without the startupProbe, the 5s
-          # initialDelaySeconds + 3×10s failureThreshold gave only ~35s total
-          # grace — too tight, causing 2-3 restarts per cluster bringup. See
-          # deploy#142: `Liveness probe failed: dial tcp ...:9002: connect:
-          # connection refused`. With 30×5s=150s of startup budget, kubelet
-          # holds off liveness/readiness until the port is bound, then the
-          # tighter steady-state probes take over.
+          # startupProbe holds off liveness and readiness until the container
+          # had time to wait for the SPIRE SVID, fetch the authz registry from
+          # the daemon (deploy#852) and bind its listeners. On a cold kind
+          # node the SPIFFE CSI mount can take 30-60s (deploy#142). 30 x 5s
+          # gives 150s.
           startupProbe:
-            tcpSocket:
-              port: http
+            httpGet:
+              path: /healthz
+              port: probe
             initialDelaySeconds: 5
             periodSeconds: 5
-            timeoutSeconds: 2
+            timeoutSeconds: 3
             failureThreshold: 30
           livenessProbe:
-            tcpSocket:
-              port: http
+            httpGet:
+              path: /healthz
+              port: probe
             initialDelaySeconds: 5
             periodSeconds: 10
-            timeoutSeconds: 2
+            timeoutSeconds: 3
             failureThreshold: 3
+          # /readyz waits on the FGA check, so 5 seconds (charts#306).
           readinessProbe:
-            tcpSocket:
-              port: http
+            httpGet:
+              path: /readyz
+              port: probe
             initialDelaySeconds: 2
             periodSeconds: 5
-            timeoutSeconds: 2
+            timeoutSeconds: 5
             failureThreshold: 3
           resources:
             limits:
@@ -10045,7 +11070,7 @@ spec:
         # A quota change is a ConfigMap change; roll the pod so ratelimit
         # re-reads it (RUNTIME_WATCH_ROOT is off: watching a projected
         # ConfigMap is racy across the kubelet's symlink swap).
-        checksum/config: 30962682d913a481f7f891c3e6762f82807aa5e3c0f8a1788b5a5fa5564d3c8c
+        checksum/config: ca59a44d9822e7bc78040832ec767ddbeb1388660c2f9e25ccd8de29bfbbc1c6
     spec:
       
       serviceAccountName: gibson-ratelimit
@@ -10234,14 +11259,20 @@ spec:
             - name: grpc
               containerPort: 8081
               protocol: TCP
-          # A tcpSocket probe needs the kernel to accept, nothing more, so 2
-          # is generous. It is declared because the default is 1 (charts#306).
+            # The plaintext probe listener. It serves GET /ready only.
+            - name: probe
+              containerPort: 9901
+              protocol: TCP
+          # The grpc port is SPIFFE mTLS. A tcpSocket probe there opens the
+          # port with no handshake, so the probe asks Envoy /ready through
+          # the probe listener. Envoy answers from memory, so 3 seconds.
           readinessProbe:
-            tcpSocket:
-              port: grpc
+            httpGet:
+              path: /ready
+              port: probe
             initialDelaySeconds: 3
             periodSeconds: 5
-            timeoutSeconds: 2
+            timeoutSeconds: 3
           resources:
             limits:
               cpu: 100m
@@ -13419,7 +14450,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "tmp,spire-agent-socket"
-        checksum/config: 9450c314e816f55c350d94c5dfa6def3f540519e2615054771308a6a413d7e34
+        checksum/config: e2ea339d908b57ba57a8e09aa5ffcee31f18f02d7e4a3bf9c793b3868d9637c4
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy / PRD deploy#255 / slice S7, deploy#263). Consumer envFrom
         # resolution is frozen for the pod's lifetime; Reloader watches the
         # named Secrets and triggers a rolling restart when any changes.
@@ -13607,7 +14638,7 @@ spec:
               memory: 32Mi
       containers:
         - name: gibson
-          image: "ghcr.io/zeroroot-ai/gibson:v0.163.5@sha256:583f38b787a17febf5c6c5da3a74c5b809ec0d3a0135dff8d651eaee8dcaba3b"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.164.0@sha256:d0815f46c4006f4bca1dfb7e6f8a915100a9978664fe4d68dbc8df307a4dd7d6"
           imagePullPolicy: Always
           ports:
             - name: callback
@@ -13634,6 +14665,16 @@ spec:
             # deploy#852: mTLS authz-registry endpoint ext-authz fetches from.
             - name: authz-registry
               containerPort: 8086
+              protocol: TCP
+            # The trace listener (charts#816). Only the trace collector
+            # reaches it (GIBSON_TRACE_COLLECTOR_SVID, the network policy).
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            # The A2A listener (gibson#1400). Only the agentgateway proxy
+            # reaches it (GIBSON_A2A_GATEWAY_SVID, the network policy).
+            - name: a2a
+              containerPort: 8443
               protocol: TCP
           env:
             # the daemon reads FGA store_id + model_id from env
@@ -13846,6 +14887,49 @@ spec:
             # Peer SPIFFE IDs for the harness callback listener allowlist.
             # REQUIRED when SPIFFE is configured — the daemon fails to start
             # otherwise (fail-closed per critical-tls-no-fallbacks Req 1.5).
+            # The Model gateway (charts#815), for the model client of the
+            # daemon: the in-cluster URL and the CA that the daemon trusts for
+            # it and for nothing else. The listener certificate comes from the
+            # component issuer, the issuer of the OpenFGA certificate, so the
+            # CA is the ca.crt that /etc/ssl/fga-ca holds. A sandbox gets the
+            # public pair below in the ResolveModel reply, never this one.
+            - name: GIBSON_MODEL_GATEWAY_URL
+              value: "https://gibson-agentgateway.gibson-gateway.svc:8080"
+            - name: GIBSON_MODEL_GATEWAY_CA_FILE
+              value: "/etc/ssl/fga-ca/ca.crt"
+            # The gateway for an agent in a sandbox (charts#815). A sandbox
+            # reaches the cluster only through the Edge, so these are the
+            # Edge forward routes, on the public API endpoint that the daemon
+            # already gives an agent as its callback address
+            # (gibson.apiEndpoint, callback.advertise_address).
+            - name: GIBSON_MODEL_GATEWAY_PUBLIC_URL
+              value: "https://api.localhost.zeroroot.ai:443/gateway/model"
+            - name: GIBSON_AGENT_GATEWAY_PUBLIC_URL
+              value: "https://api.localhost.zeroroot.ai:443/gateway/agent"
+            # The CA of the Edge certificate when the Edge issuer is private
+            # (selfsigned-ca, openbao-issuer). It is unset when the Edge has
+            # a certificate of a public CA. The daemon mounts it at
+            # /etc/ssl/envoy-ca already.
+            - name: GIBSON_GATEWAY_PUBLIC_CA_FILE
+              value: "/etc/ssl/envoy-ca/ca.crt"
+            # The trace collector (charts#816). The daemon accepts this SVID on
+            # its gRPC port for the OTLP TraceService Export method only, and
+            # adds it to its allowed peers by itself.
+            - name: GIBSON_TRACE_COLLECTOR_SVID
+              value: "spiffe://zeroroot.ai/platform/otel-collector"
+            # The A2A listener (gibson#1400): A2A JSON-RPC and the Agent Cards of
+            # the Gibson agents, behind the agent listener of the gateway. Its
+            # TLS layer accepts the one identity of the agentgateway proxy, the
+            # same value as EXT_AUTHZ_GATEWAY_SVID of ext-authz.
+            - name: GIBSON_A2A_ADDR
+              value: ":8443"
+            - name: GIBSON_A2A_GATEWAY_SVID
+              value: "spiffe://zeroroot.ai/platform/agentgateway"
+            # The listen address of the trace listener. It has its own port
+            # and a message limit of 48 MiB: one span holds the whole request
+            # and response bodies.
+            - name: GIBSON_TRACE_GRPC_ADDR
+              value: ":4317"
             # Comma-separated list built from the paths in .Values.spiffe.callbackPeers.
             - name: GIBSON_CALLBACK_PEER_SVIDS
               value: "spiffe://zeroroot.ai/platform/dashboard,spiffe://zeroroot.ai/platform/envoy,spiffe://zeroroot.ai/platform/daemon"
@@ -14167,6 +15251,234 @@ spec:
           requests:
             storage: 20Gi
 
+
+---
+# Source: gibson/charts/gibson-workloads/templates/trace-collector/statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: gibson-trace-collector
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: trace-collector
+spec:
+  serviceName: gibson-trace-collector
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gibson-workloads
+      app.kubernetes.io/instance: gibson
+      app.kubernetes.io/component: trace-collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gibson-workloads
+        app.kubernetes.io/instance: gibson
+        app.kubernetes.io/component: trace-collector
+        gibson.zeroroot.ai/net-role: datastore
+        gibson.zeroroot.ai/datastore: trace
+        gibson.zeroroot.ai/metrics-port: "8888"
+      annotations:
+        # The socket, the scratch directory and the queue. The queue is not
+        # data of record (see the header).
+        backup.velero.io/backup-volumes-excludes: "queue,spire-agent-socket,tmp"
+        checksum/config: f4520cf04a0cac75507837076543d9a06a110bad7c0bab7c5f50fe822d8a208f
+    spec:
+      
+      serviceAccountName: gibson-trace-collector
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-for-spire-socket
+          image: ghcr.io/zeroroot-ai/mirror/busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+          command: ['sh', '-c']
+          args:
+            - |
+              # deploy#201: SPIRE is required infrastructure. Fail-fast (60s) if the
+              # Workload API socket is not present on this node — a missing socket
+              # means the SPIRE agent DaemonSet is unhealthy and SPIFFE-consuming
+              # workloads MUST NOT proceed (their mTLS / JWT-SVID minting would
+              # silently hang otherwise).
+              SOCK="/run/spire/agent/spire-agent.sock"
+              DEADLINE=$(( $(date +%s) + 60 ))
+              echo "[wait-for-spire-socket] waiting for ${SOCK} (timeout: 60s)..."
+              until [ -S "${SOCK}" ]; do
+                if [ $(date +%s) -ge ${DEADLINE} ]; then
+                  echo "[wait-for-spire-socket] ERROR: ${SOCK} not present after 60s; SPIRE agent DaemonSet is not healthy on this node. Fix the SPIRE control plane before this pod can start." >&2
+                  exit 1
+                fi
+                sleep 1
+              done
+              echo "[wait-for-spire-socket] ok"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+          volumeMounts:
+            - name: spire-agent-socket
+              mountPath: /run/spire/agent
+              readOnly: true
+      containers:
+        - name: collector
+          image: "ghcr.io/zeroroot-ai/mirror/opentelemetry-collector-k8s:0.165.0@sha256:ce55d0a38923c83120e4ba613fbdf446786652d2ce9f29d1cd7879e5d869829f"
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--config=/etc/otelcol/collector.yaml"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+          ports:
+            - name: metrics
+              containerPort: 8888
+              protocol: TCP
+            - name: health
+              containerPort: 13133
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol/collector.yaml
+              subPath: collector.yaml
+              readOnly: true
+            - name: queue
+              mountPath: /var/lib/otelcol/queue
+        - name: envoy
+          image: "ghcr.io/zeroroot-ai/mirror/envoy:v1.34.0@sha256:45d37d848802f98a5647cb7522b4c1c42e0e0e775913d8e253ef3a5856bef986"
+          imagePullPolicy: IfNotPresent
+          args:
+            - "-c"
+            - "/etc/envoy/envoy.yaml"
+            - "--service-cluster"
+            - "gibson-trace-collector"
+            - "--service-node"
+            - "gibson-trace-collector"
+            - "--log-level"
+            - "warn"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 101
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: otlp
+              containerPort: 4317
+              protocol: TCP
+            # The plaintext probe listener. It serves GET /ready only.
+            - name: probe
+              containerPort: 9901
+              protocol: TCP
+          # The otlp port is SPIFFE mTLS. A tcpSocket probe there opens the
+          # port with no handshake, so the probe asks Envoy /ready through
+          # the probe listener. Envoy answers 200 when its listeners and
+          # clusters are ready.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: probe
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            limits:
+              cpu: 200m
+              memory: 128Mi
+            requests:
+              cpu: 25m
+              memory: 48Mi
+          volumeMounts:
+            - name: envoy-bootstrap
+              mountPath: /etc/envoy
+              readOnly: true
+            - name: spire-agent-socket
+              mountPath: /run/spire/sockets
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: gibson-trace-collector
+            items:
+              - key: collector.yaml
+                path: collector.yaml
+        - name: envoy-bootstrap
+          configMap:
+            name: gibson-trace-collector
+            items:
+              - key: envoy.yaml
+                path: envoy.yaml
+        - name: spire-agent-socket
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: queue
+        labels:
+          helm.sh/chart: gibson-workloads-0.2.0
+          app.kubernetes.io/name: gibson-workloads
+          app.kubernetes.io/instance: gibson
+          app.kubernetes.io/version: "0.154.0"
+          app.kubernetes.io/managed-by: Helm
+          app.kubernetes.io/component: trace-collector
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 4Gi
 
 ---
 # Source: gibson/charts/spire/charts/spire-server/templates/server-resource.yaml
@@ -14637,7 +15949,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-fga-init-78665c06
+  name: gibson-gibson-workloads-fga-init-870719a3
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -14704,7 +16016,7 @@ spec:
         # The entrypoint is the gibson binary, so command overrides it to get a
         # shell for the redirect. The runtime image is alpine-based and has one.
         - name: dump-model
-          image: "ghcr.io/zeroroot-ai/gibson:v0.163.5@sha256:583f38b787a17febf5c6c5da3a74c5b809ec0d3a0135dff8d651eaee8dcaba3b"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.164.0@sha256:d0815f46c4006f4bca1dfb7e6f8a915100a9978664fe4d68dbc8df307a4dd7d6"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -16223,6 +17535,395 @@ webhooks:
 #file: noinspection KubernetesUnknownResourcesInspection
 
 ---
+# Source: gibson/templates/agentgateway/gateway.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: gibson-agentgateway
+  namespace: gibson-gateway
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  image:
+    digest: sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b
+    registry: ghcr.io
+    repository: zeroroot-ai/mirror/agentgateway
+    tag: v1.7.0
+  resources:
+    limits:
+      cpu: "2"
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 256Mi
+  logging:
+    format: json
+  # The OpenTelemetry batch span processor of the proxy (agentgateway
+  # v1.7.0 crates/agentgateway/src/telemetry/trc.rs, new_trace_processor)
+  # sends up to 512 spans in one OTLP export by default. A span holds the
+  # whole request and response body, so a batch can pass the 40 MiB that the
+  # trace collector accepts, and the collector refuses the whole batch. One
+  # span in each export keeps each message below that limit. The in-memory
+  # span queue of the proxy is small, because each span can hold 32 MiB.
+  env:
+    - name: OTEL_BSP_MAX_EXPORT_BATCH_SIZE
+      value: "1"
+    - name: OTEL_BSP_MAX_QUEUE_SIZE
+      value: "16"
+  # The proxy gets its X.509-SVID from the SPIRE agent through the CSI
+  # driver, the same socket as the other platform pods. It presents the
+  # SVID to ext-authz (policies.yaml, the backend TLS policy).
+  spiffe:
+    source:
+      csi:
+        driver: csi.spiffe.io
+      mountPath: /run/spire/sockets
+      socketName: api.sock
+  # No public listener: the Service of the proxy is ClusterIP. The upstream
+  # default is LoadBalancer.
+  service:
+    spec:
+      type: ClusterIP
+  deployment:
+    spec:
+      replicas: 2
+      template:
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          # The proxy container of the controller (strategic merge by the
+          # container name). The proxy binds no listener and answers 500 on
+          # /healthz/ready until its first xDS config arrives
+          # (crates/agentgateway/src/app.rs: gw.run() waits for
+          # xds_rx.changed(), and the "state manager" readiness task drops
+          # only then). The upstream startup probe gives 60 x 1 s, so a
+          # controller that starts slowly restarts the proxy. This budget is
+          # gateway.proxy.startupSeconds. The proxy has no liveness probe,
+          # so after its start the kubelet never restarts it for a lost
+          # controller. The readiness probe gets a stated timeout.
+          containers:
+            - name: agentgateway
+              startupProbe:
+                httpGet:
+                  path: /healthz/ready
+                  port: 15021
+                periodSeconds: 5
+                timeoutSeconds: 3
+                failureThreshold: 120
+              readinessProbe:
+                httpGet:
+                  path: /healthz/ready
+                  port: 15021
+                periodSeconds: 10
+                timeoutSeconds: 3
+---
+# Source: gibson/templates/agentgateway/a2a-route.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: gibson-agentgateway-agent-strip
+  namespace: gibson-gateway
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gibson-agentgateway
+      sectionName: agent
+  strategy:
+    inheritance: Override
+  traffic:
+    headerModifiers:
+      request:
+        remove:
+          - x-capability-grant
+          - x-gibson-identity-tenant
+          - x-gibson-identity-subject
+          - x-gibson-identity-issuer
+          - x-gibson-identity-issued-at
+          - x-gibson-identity-credential-type
+---
+# Source: gibson/templates/agentgateway/a2a-route.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: gibson-agentgateway-daemon-a2a-tls
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: gibson-gibson-workloads
+      sectionName: "8443"
+  backend:
+    tls:
+      certificateSource: SPIFFE
+      verifySubjectAltNames:
+        - "spiffe://zeroroot.ai/platform/daemon"
+
+---
+# Source: gibson/templates/agentgateway/policies.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: gibson-agentgateway-ext-authz
+  namespace: gibson-gateway
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gibson-agentgateway
+  strategy:
+    inheritance: Override
+  traffic:
+    phase: PreRouting
+    extAuth:
+      backendRef:
+        name: gibson-ext-authz
+        namespace: gibson
+        port: 9001
+      # The gateway refuses each request when ext-authz is down or errs.
+      failureMode: FailClosed
+      # The Envoy gRPC Authorization/Check protocol, the same as the Edge.
+      # The gRPC check carries the path, the method and every request
+      # header, so ext-authz gets the route claim (x-gibson-route-tenant,
+      # x-gibson-route-provider) and x-capability-grant. ext-authz knows a gateway
+      # call from the SPIFFE ID of the proxy, and it refuses a claimed
+      # tenant that is not the tenant of the Capability Grant, so a caller
+      # of tenant A cannot match a route of tenant B.
+      grpc:
+        # metadata_context.filter_metadata["gibson"].model holds the exact
+        # model name of the call. A filter_metadata value must be a map, so
+        # the expression `json(request.body).model` sits in a map. A request
+        # with no JSON body (GET /v1/models, an A2A GET) sends no entry.
+        requestMetadata:
+          gibson: '{"model": json(request.body).model}'
+    # The trusted headers, kept as request metadata for the trace. The
+    # gateway runs this transformation after ext-authz set the headers and
+    # before routing. The model listener removes the headers before the
+    # provider call, and the trace reads the request as it went upstream, so
+    # a trace field on request.headers would be empty on that listener
+    # (crates/agentgateway/src/proxy/httpproxy.rs: the request header
+    # modifier runs before take_and_snapshot).
+    # The route agent of an A2A call (gibson contract round 8) is kept the
+    # same way: the route of an outside agent removes x-gibson-route-agent
+    # before the call, so the trace reads this copy.
+    transformation:
+      request:
+        metadata:
+          tenant: 'request.headers["x-gibson-tenant"]'
+          subject: 'request.headers["x-gibson-subject"]'
+          mission: 'request.headers["x-gibson-mission"]'
+          task: 'request.headers["x-gibson-task"]'
+          route_agent: 'request.headers["x-gibson-route-agent"]'
+---
+# Source: gibson/templates/agentgateway/policies.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: gibson-agentgateway-ext-authz-tls
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: gibson-ext-authz
+  backend:
+    tls:
+      certificateSource: SPIFFE
+      sni: gibson-ext-authz
+      verifySubjectAltNames:
+        - "spiffe://zeroroot.ai/platform/ext-authz"
+---
+# Source: gibson/templates/agentgateway/policies.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: gibson-agentgateway-trace-tls
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: gibson-trace-collector
+  backend:
+    tls:
+      # The spans hold full prompts: they go over SPIFFE mTLS, and only the
+      # collector SVID is accepted (charts#816).
+      certificateSource: SPIFFE
+      sni: gibson-trace-collector
+      verifySubjectAltNames:
+        - "spiffe://zeroroot.ai/platform/otel-collector"
+---
+# Source: gibson/templates/agentgateway/policies.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: gibson-agentgateway-trace
+  namespace: gibson-gateway
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gibson-agentgateway
+  frontend:
+    http:
+      # gibson#1386 measures the real bodies and sets this number.
+      maxBufferSize: "16Mi"
+    tracing:
+      # A backendRef, not a url: the Service policy below (SPIFFE mTLS)
+      # applies only to a backendRef.
+      backendRef:
+        name: gibson-trace-collector
+        namespace: gibson
+        port: 4317
+      protocol: GRPC
+      # Each request gets a span: the trace is the record of model calls.
+      randomSampling: "true"
+      attributes:
+        add:
+          # The daemon reads these seven attributes by name (gibson#1366 wave
+          # 2). The message content is off by default, and the record needs
+          # the whole request and reply, with the tool calls and the tool
+          # results.
+          - name: gibson.request_body
+            expression: string(request.body)
+          - name: gibson.response_body
+            expression: string(response.body)
+          # The trusted headers, from the metadata that the ext-authz policy
+          # sets after ext-authz ran. A caller copy never reaches the span.
+          - name: gibson.tenant
+            expression: metadata.tenant
+          - name: gibson.subject
+            expression: metadata.subject
+          - name: gibson.mission
+            expression: metadata.mission
+          - name: gibson.task
+            expression: metadata.task
+          # The agent of an A2A call. Empty on the model listener.
+          - name: gibson.route_agent
+            expression: metadata.route_agent
+          # No cost attribute here. The span holds agw.ai.usage.cost.total
+          # and the agw.ai.usage.cost.* parts when the model has a price
+          # (crates/agentgateway/src/telemetry/log.rs, trace_cost_fields).
+---
+# Source: gibson/templates/agentgateway/policies.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: gibson-agentgateway-model-strip
+  namespace: gibson-gateway
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gibson-agentgateway
+      sectionName: model
+  strategy:
+    inheritance: Override
+  traffic:
+    headerModifiers:
+      request:
+        remove:
+          - x-gibson-route-tenant
+          - x-gibson-route-provider
+          - x-gibson-route-agent
+          - x-gibson-route-bank
+          - x-capability-grant
+          - x-gibson-tenant
+          - x-gibson-subject
+          - x-gibson-mission
+          - x-gibson-task
+          - x-gibson-identity-tenant
+          - x-gibson-identity-subject
+          - x-gibson-identity-issuer
+          - x-gibson-identity-issued-at
+          - x-gibson-identity-credential-type
+---
+# Source: gibson/templates/agentgateway/policies.yaml
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: gibson-agentgateway-model-formats
+  namespace: gibson-gateway
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gibson-agentgateway
+      sectionName: model
+  backend:
+    ai:
+      routes:
+        /v1/messages: Messages
+        /v1/responses: Responses
+        /v1/embeddings: Embeddings
+        # The model list passes through unchanged (decision 6 of gibson#1366).
+        /v1/models: Passthrough
+
+---
 # Source: gibson/charts/spire/charts/spiffe-csi-driver/templates/spiffe-csi-driver.yaml
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
@@ -16555,6 +18256,36 @@ spec:
     name: "selfsigned-ca"
     kind: "Issuer"
     group: "cert-manager.io"
+---
+# Source: gibson/charts/gibson-workloads/templates/cert-manager/component-certificates.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gibson-agentgateway-tls
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway-tls
+spec:
+  secretName: gibson-agentgateway-tls
+  duration: 2160h
+  renewBefore: 360h
+  commonName: "gibson-agentgateway.gibson-gateway.svc"
+  dnsNames:
+    - "gibson-agentgateway.gibson-gateway"
+    - "gibson-agentgateway.gibson-gateway.svc"
+    - "gibson-agentgateway.gibson-gateway.svc.cluster.local"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: "selfsigned-ca"
+    kind: "Issuer"
+    group: "cert-manager.io"
 
 ---
 # Source: gibson/charts/gibson-workloads/charts/setec/templates/system-namespace-policy.yaml
@@ -16659,6 +18390,52 @@ spec:
   endpointSelector:
     matchLabels:
       k8s:io.kubernetes.pod.namespace: spire-system
+  enableDefaultDeny:
+    ingress: true
+    egress: true
+  ingress:
+    - {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: '*.cluster.local'
+              - matchPattern: '*.*.cluster.local'
+              - matchPattern: '*.*.*.cluster.local'
+              - matchPattern: '*.*.*.*.cluster.local'
+              - matchPattern: '*.*.*.*.*.cluster.local'
+              - matchPattern: '*.*.*.*.*.*.cluster.local'
+              - matchName: localhost.zeroroot.ai
+              - matchPattern: '*.localhost.zeroroot.ai'
+---
+# Source: gibson/templates/network-policies.yaml
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: gibson-gibson-gateway-default-deny
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-default-deny
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Each pod of the namespace gibson-gateway denies all traffic, except DNS (ADR-0165 rule 4)."
+  endpointSelector:
+    matchLabels:
+      k8s:io.kubernetes.pod.namespace: gibson-gateway
   enableDefaultDeny:
     ingress: true
     egress: true
@@ -16841,6 +18618,338 @@ spec:
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+
+---
+# Source: gibson/templates/agentgateway/network-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-agentgateway
+  namespace: gibson-gateway
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-agentgateway
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "The daemon, the dashboard backend and the Edge reach the listeners of the agentgateway proxy. The proxy reaches ext-authz, its controller, the trace collector, the daemon A2A port, the listed in-cluster providers and public addresses only."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: agentgateway-proxy
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gibson
+            app.kubernetes.io/component: daemon
+            gibson.zeroroot.ai/net-role: platform
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gibson
+            app.kubernetes.io/component: dashboard
+            gibson.zeroroot.ai/net-role: platform
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gibson
+            app.kubernetes.io/component: envoy
+            gibson.zeroroot.ai/net-role: platform
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+            - port: "8081"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gibson
+            app.kubernetes.io/component: ext-authz
+            gibson.zeroroot.ai/net-role: platform
+      toPorts:
+        - ports:
+            - port: "9001"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gibson
+            app.kubernetes.io/component: agentgateway-controller
+            gibson.zeroroot.ai/net-role: platform
+      toPorts:
+        - ports:
+            - port: "9978"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gibson
+            app.kubernetes.io/component: trace-collector
+            gibson.zeroroot.ai/datastore: trace
+      toPorts:
+        - ports:
+            - port: "4317"
+              protocol: TCP
+    # The A2A listener of the daemon (gibson#1400).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: gibson
+            app.kubernetes.io/component: daemon
+            gibson.zeroroot.ai/net-role: platform
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+    # The in-cluster model providers that the operator names
+    # (gateway.inClusterProviders). Each entry names its namespace, its pod
+    # labels and its container ports.
+    # The LLM providers and the outside agents: public addresses only, on
+    # the ports of gateway.publicPorts. A CIDR rule selects no pod and no
+    # node of the cluster.
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except:
+            - 0.0.0.0/8
+            - 10.0.0.0/8
+            - 100.64.0.0/10
+            - 127.0.0.0/8
+            - 169.254.0.0/16
+            - 172.16.0.0/12
+            - 192.0.0.0/24
+            - 192.168.0.0/16
+            - 198.18.0.0/15
+            - 224.0.0.0/4
+            - 240.0.0.0/4
+        - cidr: ::/0
+          except:
+            - ::/128
+            - ::1/128
+            - ::ffff:0:0/96
+            - 64:ff9b::/96
+            - 64:ff9b:1::/48
+            - fc00::/7
+            - fe80::/10
+            - ff00::/8
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: '*'
+  # A deny wins over each allow. The node, the other nodes, the API server
+  # and the private ranges stay closed whatever allow rule is added later.
+  egressDeny:
+    - toEntities:
+        - host
+        - remote-node
+        - kube-apiserver
+    - toCIDRSet:
+        - cidr: 0.0.0.0/8
+        - cidr: 10.0.0.0/8
+        - cidr: 100.64.0.0/10
+        - cidr: 127.0.0.0/8
+        - cidr: 169.254.0.0/16
+        - cidr: 172.16.0.0/12
+        - cidr: 192.0.0.0/24
+        - cidr: 192.168.0.0/16
+        - cidr: 198.18.0.0/15
+        - cidr: 224.0.0.0/4
+        - cidr: 240.0.0.0/4
+        - cidr: ::/128
+        - cidr: ::1/128
+        - cidr: ::ffff:0:0/96
+        - cidr: 64:ff9b::/96
+        - cidr: 64:ff9b:1::/48
+        - cidr: fc00::/7
+        - cidr: fe80::/10
+        - cidr: ff00::/8
+---
+# Source: gibson/templates/agentgateway/network-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-agentgateway
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-agentgateway
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+specs:
+  - description: "The daemon, the dashboard backend and the Edge reach the listeners of the agentgateway proxy."
+    endpointSelector:
+      matchExpressions:
+        - key: app.kubernetes.io/component
+          operator: In
+          values: [daemon, dashboard, envoy]
+        - key: gibson.zeroroot.ai/net-role
+          operator: In
+          values: [platform]
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              app.kubernetes.io/component: agentgateway-proxy
+              k8s:io.kubernetes.pod.namespace: gibson-gateway
+        toPorts:
+          - ports:
+              - port: "8080"
+                protocol: TCP
+              - port: "8081"
+                protocol: TCP
+  - description: "ext-authz accepts the agentgateway proxy on its gRPC port."
+    endpointSelector:
+      matchLabels:
+        app.kubernetes.io/component: ext-authz
+        gibson.zeroroot.ai/net-role: platform
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              app.kubernetes.io/component: agentgateway-proxy
+              k8s:io.kubernetes.pod.namespace: gibson-gateway
+        toPorts:
+          - ports:
+              - port: "9001"
+                protocol: TCP
+  - description: "The agentgateway controller serves xDS to the proxy."
+    endpointSelector:
+      matchLabels:
+        app.kubernetes.io/component: agentgateway-controller
+        gibson.zeroroot.ai/net-role: platform
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              app.kubernetes.io/component: agentgateway-proxy
+              k8s:io.kubernetes.pod.namespace: gibson-gateway
+        toPorts:
+          - ports:
+              - port: "9978"
+                protocol: TCP
+  - description: "The trace collector accepts the agentgateway proxy on its OTLP port, and reaches the trace listener of the daemon."
+    endpointSelector:
+      matchLabels:
+        app.kubernetes.io/component: trace-collector
+        gibson.zeroroot.ai/datastore: trace
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              app.kubernetes.io/component: agentgateway-proxy
+              k8s:io.kubernetes.pod.namespace: gibson-gateway
+        toPorts:
+          - ports:
+              - port: "4317"
+                protocol: TCP
+    egress:
+      - toEndpoints:
+          - matchLabels:
+              app.kubernetes.io/component: daemon
+              gibson.zeroroot.ai/net-role: platform
+        toPorts:
+          - ports:
+              - port: "4317"
+                protocol: TCP
+  - description: "The trace listener of the daemon accepts the trace collector."
+    endpointSelector:
+      matchLabels:
+        app.kubernetes.io/component: daemon
+        gibson.zeroroot.ai/net-role: platform
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              app.kubernetes.io/component: trace-collector
+              gibson.zeroroot.ai/datastore: trace
+        toPorts:
+          - ports:
+              - port: "4317"
+                protocol: TCP
+  - description: "The A2A listener of the daemon accepts the agentgateway proxy."
+    endpointSelector:
+      matchLabels:
+        app.kubernetes.io/component: daemon
+        gibson.zeroroot.ai/net-role: platform
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              app.kubernetes.io/component: agentgateway-proxy
+              k8s:io.kubernetes.pod.namespace: gibson-gateway
+        toPorts:
+          - ports:
+              - port: "8443"
+                protocol: TCP
+---
+# Source: gibson/templates/agentgateway/network-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-daemon-a2a
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-daemon-a2a
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "No pod of the release namespace reaches the A2A port of the daemon. The agentgateway proxy reaches it from its own namespace."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: daemon
+      gibson.zeroroot.ai/net-role: platform
+  ingressDeny:
+    - fromEndpoints:
+        - {}
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+---
+# Source: gibson/templates/agentgateway/network-policy.yaml
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gibson-daemon-trace
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: network-daemon-trace
+  annotations:
+    argocd.argoproj.io/sync-wave: "-20"
+spec:
+  description: "Only the trace collector reaches the trace port of the daemon."
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: daemon
+      gibson.zeroroot.ai/net-role: platform
+  ingressDeny:
+    - fromEndpoints:
+        - matchExpressions:
+            - key: app.kubernetes.io/component
+              operator: NotIn
+              values:
+                - trace-collector
+      toPorts:
+        - ports:
+            - port: "4317"
               protocol: TCP
 
 ---
@@ -17427,6 +19536,19 @@ specs:
           - ports:
               - port: "8080"
                 protocol: TCP
+  - description: "The cluster scraper reaches the metrics port 8888 of the pods that serve metrics there."
+    endpointSelector:
+      matchLabels:
+        gibson.zeroroot.ai/metrics-port: "8888"
+    ingress:
+      - fromEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: "monitoring"
+              app.kubernetes.io/name: prometheus
+        toPorts:
+          - ports:
+              - port: "8888"
+                protocol: TCP
   - description: "The cluster scraper reaches the metrics port 9003 of the pods that serve metrics there."
     endpointSelector:
       matchLabels:
@@ -17742,6 +19864,64 @@ spec:
   workloadSelectorTemplates:
     - "k8s:ns:gibson"
     - "k8s:sa:gibson-ext-authz"
+---
+# Source: gibson/charts/gibson-workloads/templates/spire-server/clusterspiffeids.yaml
+# --- trace collector (charts#816) ---
+# The Envoy sidecar of the trace collector presents this SVID to the daemon
+# when it sends spans, and the agentgateway proxy accepts only it.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-trace-collector
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: "gibson-gibson"
+  spiffeIDTemplate: "spiffe://zeroroot.ai/platform/otel-collector"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: trace-collector
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: gibson
+  workloadSelectorTemplates:
+    - "k8s:ns:gibson"
+    - "k8s:sa:gibson-trace-collector"
+---
+# Source: gibson/charts/gibson-workloads/templates/spire-server/clusterspiffeids.yaml
+# --- agentgateway proxy (charts#815) ---
+# The agentgateway controller starts the proxy pods of the one Gateway, and
+# it names their ServiceAccount after the Gateway. The proxy presents this
+# SVID to ext-authz on each authorization call.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-agentgateway
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: "gibson-gibson"
+  spiffeIDTemplate: "spiffe://zeroroot.ai/platform/agentgateway"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: agentgateway-proxy
+  # The proxy runs in the gateway namespace (gibson.gatewayNamespace).
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: gibson-gateway
+  workloadSelectorTemplates:
+    - "k8s:ns:gibson-gateway"
+    - "k8s:sa:gibson-agentgateway"
 ---
 # Source: gibson/charts/gibson-workloads/templates/spire-server/clusterspiffeids.yaml
 # --- ratelimit (deploy#1657) ---
@@ -18801,6 +20981,114 @@ spec:
   data:
     config: '{"auths":{}}'
 ---
+# Source: gibson/templates/agentgateway/gateway.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: gibson-agentgateway
+  namespace: gibson-gateway
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    # The labels of the proxy pods. The component label selects them in the
+    # network policy and in the ClusterSPIFFEID. The proxy calls each LLM
+    # provider, so it has the egress-internet label.
+    labels:
+      app.kubernetes.io/component: agentgateway-proxy
+      gibson.zeroroot.ai/egress-internet: "true"
+    annotations:
+      # Velero fs-backup skips these: a socket, a token and a ConfigMap.
+      backup.velero.io/backup-volumes-excludes: "spiffe-workload-api,xds-token,config-volume"
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: gibson-agentgateway
+  listeners:
+    - name: model
+      # TLS on each listener: a caller token never crosses the pod network
+      # in clear text. The certificate comes from the component issuer
+      # (gibson-workloads cert-manager/component-certificates.yaml).
+      protocol: HTTPS
+      port: 8080
+      tls:
+        mode: Terminate
+        # The Certificate lives in the release namespace, where its issuer
+        # is (an Issuer is namespaced). The ReferenceGrant below lets this
+        # Gateway name the Secret there.
+        certificateRefs:
+          - kind: Secret
+            group: ""
+            name: gibson-agentgateway-tls
+            namespace: gibson
+      allowedRoutes:
+        kinds:
+          - kind: HTTPRoute
+        # The tenant-operator writes the route of each ModelProvider in the
+        # gateway namespace (gibson#1387), so only that namespace attaches.
+        namespaces:
+          from: Same
+    - name: agent
+      # TLS on each listener: a caller token never crosses the pod network
+      # in clear text. The certificate comes from the component issuer
+      # (gibson-workloads cert-manager/component-certificates.yaml).
+      protocol: HTTPS
+      port: 8081
+      tls:
+        mode: Terminate
+        # The Certificate lives in the release namespace, where its issuer
+        # is (an Issuer is namespaced). The ReferenceGrant below lets this
+        # Gateway name the Secret there.
+        certificateRefs:
+          - kind: Secret
+            group: ""
+            name: gibson-agentgateway-tls
+            namespace: gibson
+      allowedRoutes:
+        kinds:
+          - kind: HTTPRoute
+        # The tenant-operator writes the route of each ModelProvider in the
+        # gateway namespace (gibson#1387), so only that namespace attaches.
+        namespaces:
+          from: Same
+---
+# Source: gibson/templates/agentgateway/a2a-route.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gibson-agentgateway-agents
+  namespace: gibson-gateway
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: gibson-agentgateway
+      sectionName: agent
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: gibson-gibson-workloads
+          namespace: gibson
+          port: 8443
+---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/webhook.yaml
 apiVersion: cert-manager.io/v1
 kind: Issuer
@@ -19568,6 +21856,148 @@ spec:
               pods, the SPIFFE mTLS sidecar, and gibson-redis-stack.
 
 ---
+# Source: gibson/charts/gibson-workloads/templates/trace-collector/alertrule.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gibson-trace-collector-alerts
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: trace-collector
+spec:
+  groups:
+    - name: trace-collector
+      rules:
+        - alert: TraceExportFailing
+          expr: |
+            sum(increase(otelcol_exporter_send_failed_spans_total{exporter="otlp/daemon"}[10m])) > 0
+          for: 10m
+          labels:
+            severity: page
+            component: trace-collector
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/trace-collector.md#traceexportfailing"
+            summary: "The trace collector cannot send spans to the daemon"
+            description: |
+              The trace collector failed to send spans to the daemon for 10
+              minutes. The persistent queue keeps them, so no model call is
+              lost yet. The record of model calls and the token counts fall
+              behind until the export works again.
+        - alert: TraceQueueFilling
+          expr: |
+            max(otelcol_exporter_queue_size{exporter="otlp/daemon"})
+              / max(otelcol_exporter_queue_capacity{exporter="otlp/daemon"}) > 0.5
+          for: 10m
+          labels:
+            severity: page
+            component: trace-collector
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/trace-collector.md#tracequeuefilling"
+            summary: "The trace collector queue is more than half full"
+            description: |
+              The persistent queue of the trace collector holds more than half
+              of its bytes for 10 minutes. When it is full, the collector
+              refuses new spans and the gateway drops them, so model calls go
+              unrecorded.
+        - alert: TraceExportDelayed
+          expr: |
+            max(otelcol_exporter_queue_size{exporter="otlp/daemon"})
+              / clamp_min(
+                  sum(rate(otelcol_exporter_enqueue_size_bytes_sum{exporter="otlp/daemon"}[10m]))
+                    - deriv(max(otelcol_exporter_queue_size{exporter="otlp/daemon"})[10m:1m]),
+                  1)
+              > 900
+          for: 10m
+          labels:
+            severity: page
+            component: trace-collector
+          annotations:
+            runbook_url: "https://github.com/zeroroot-ai/charts/blob/main/docs/runbooks/alerts/trace-collector.md#traceexportdelayed"
+            summary: "Spans wait more than 15 minutes in the trace collector"
+            description: |
+              A span waits more than 15 minutes in the queue of the trace
+              collector before the daemon gets it, for 10 minutes. The record
+              of model calls and the token counts are that late.
+
+---
+# Source: gibson/templates/agentgateway/gateway.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata:
+  name: gibson-agentgateway-gateway
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: gibson-gateway
+  to:
+    - group: ""
+      kind: Secret
+      name: gibson-agentgateway-tls
+---
+# Source: gibson/templates/agentgateway/gateway.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata:
+  name: gibson-agentgateway-policy
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  from:
+    - group: agentgateway.dev
+      kind: AgentgatewayPolicy
+      namespace: gibson-gateway
+  to:
+    - group: ""
+      kind: Service
+      name: gibson-ext-authz
+    - group: ""
+      kind: Service
+      name: gibson-trace-collector
+---
+# Source: gibson/templates/agentgateway/gateway.yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: ReferenceGrant
+metadata:
+  name: gibson-agentgateway-route
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-0.1.0
+    app.kubernetes.io/name: gibson
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: agentgateway
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: gibson-gateway
+  to:
+    - group: ""
+      kind: Service
+      name: gibson-gibson-workloads
+
+---
 # Source: gibson/charts/gibson-operators/templates/connector-operator/monitoring.yaml
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -19761,6 +22191,31 @@ spec:
   # only filter that matters.
   namespaceSelector:
     any: true
+
+---
+# Source: gibson/charts/gibson-workloads/templates/trace-collector/servicemonitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gibson-trace-collector
+  namespace: gibson
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: trace-collector
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gibson-workloads
+      app.kubernetes.io/instance: gibson
+      app.kubernetes.io/component: trace-collector
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
 
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/clusterspiffeid-scope-admission.yaml
@@ -20263,6 +22718,45 @@ spec:
         a privileged container holds the node, which is the outcome the
         Sandbox boundary exists to prevent.
 ---
+# Source: gibson/charts/gibson-workloads/templates/setec/sandbox-namespace-label-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: gibson-sandbox-namespace-label
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: sandbox
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["namespaces"]
+  variables:
+    - name: newValue
+      expression: >-
+        has(object.metadata.labels) && "setec.zeroroot.ai/sandbox-namespace" in object.metadata.labels
+          ? object.metadata.labels["setec.zeroroot.ai/sandbox-namespace"] : ''
+    - name: oldValue
+      expression: >-
+        request.operation == 'UPDATE' && has(oldObject.metadata.labels)
+          && "setec.zeroroot.ai/sandbox-namespace" in oldObject.metadata.labels
+          ? oldObject.metadata.labels["setec.zeroroot.ai/sandbox-namespace"] : ''
+  validations:
+    - expression: >-
+        variables.newValue == variables.oldValue
+          || request.userInfo.username in ["system:serviceaccount:setec-system:setec-frontend","system:serviceaccount:argocd:argocd-application-controller"]
+      reason: Forbidden
+      messageExpression: >-
+        'only the setec frontend and the installer set the label setec.zeroroot.ai/sandbox-namespace on a Namespace; ' +
+        request.userInfo.username + ' may not change it on ' + object.metadata.name + ' (charts#815)'
+---
 # Source: gibson/charts/gibson-workloads/templates/spire-server/platform-identity-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -20305,8 +22799,8 @@ spec:
           : 'default'
     - name: claimsPlatformIdentity
       expression: >-
-        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","platform-operator","envoy","openbao","frontend"]
-          || variables.sa in ["setec-frontend","gibson","gibson-ext-authz","gibson-dashboard","gibson-tenant-operator","gibson-connector-operator","gibson-platform-operator","gibson-envoy","gibson-ratelimit","gibson-openbao"]
+        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","platform-operator","envoy","openbao","frontend","agentgateway-proxy","trace-collector"]
+          || variables.sa in ["setec-frontend","gibson","gibson-ext-authz","gibson-dashboard","gibson-tenant-operator","gibson-connector-operator","gibson-platform-operator","gibson-envoy","gibson-ratelimit","gibson-openbao","gibson-agentgateway","gibson-trace-collector"]
   validations:
     - expression: >-
         !variables.claimsPlatformIdentity
@@ -20378,11 +22872,18 @@ spec:
           : 'default'
     - name: claimsPlatformIdentity
       expression: >-
-        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","platform-operator","envoy","openbao","frontend"]
-          || variables.sa in ["setec-frontend","gibson","gibson-ext-authz","gibson-dashboard","gibson-tenant-operator","gibson-connector-operator","gibson-platform-operator","gibson-envoy","gibson-ratelimit","gibson-openbao"]
+        variables.component in ["daemon","ext-authz","ratelimit","dashboard","tenant-operator","connector-operator","platform-operator","envoy","openbao","frontend","agentgateway-proxy","trace-collector"]
+          || variables.sa in ["setec-frontend","gibson","gibson-ext-authz","gibson-dashboard","gibson-tenant-operator","gibson-connector-operator","gibson-platform-operator","gibson-envoy","gibson-ratelimit","gibson-openbao","gibson-agentgateway","gibson-trace-collector"]
     # A restart-only UPDATE by Reloader: the pod template's spec and labels are
     # unchanged, only template annotations moved. Nothing new claims an
     # identity, so the admitted creator's template is simply re-issued.
+    # The agentgateway controller writes the proxy Deployment of the one
+    # Gateway, with exactly that component and that ServiceAccount.
+    - name: agentgatewayProxy
+      expression: >-
+        request.userInfo.username == "system:serviceaccount:gibson:agentgateway"
+          && variables.component == 'agentgateway-proxy'
+          && variables.sa == "gibson-agentgateway"
     - name: restartOnly
       expression: >-
         request.operation == 'UPDATE'
@@ -20396,6 +22897,7 @@ spec:
     - expression: >-
         !variables.claimsPlatformIdentity
           || request.userInfo.username in ["system:serviceaccount:kube-system:deployment-controller","system:serviceaccount:kube-system:cronjob-controller","system:serviceaccount:argocd:argocd-application-controller"]
+          || variables.agentgatewayProxy
           || variables.restartOnly
       reason: Forbidden
       messageExpression: >-
@@ -20555,6 +23057,23 @@ spec:
         setec.zeroroot.ai/sandbox-namespace: "true"
 
 ---
+# Source: gibson/charts/gibson-workloads/templates/setec/sandbox-namespace-label-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: gibson-sandbox-namespace-label
+  labels:
+    helm.sh/chart: gibson-workloads-0.2.0
+    app.kubernetes.io/name: gibson-workloads
+    app.kubernetes.io/instance: gibson
+    app.kubernetes.io/version: "0.154.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/component: sandbox
+spec:
+  policyName: gibson-sandbox-namespace-label
+  validationActions: ["Deny"]
+
+---
 # Source: gibson/charts/gibson-workloads/templates/spire-server/platform-identity-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -20574,8 +23093,9 @@ spec:
   # report, not a control.
   validationActions: ["Deny"]
   matchResources:
-    # Scoped to the two namespaces the platform ClusterSPIFFEIDs select on:
-    # the release namespace and the setec namespace (the frontend identity).
+    # Scoped to the three namespaces the platform ClusterSPIFFEIDs select on:
+    # the release namespace, the setec namespace (the frontend identity) and
+    # the gateway namespace (the agentgateway proxy, charts#815).
     # Their namespaceSelector is `kubernetes.io/metadata.name: <ns>`, and
     # that label is apiserver-managed (NamespaceDefaultLabelName), not
     # settable by a namespace author — so the two scopes cannot be made to
@@ -20584,7 +23104,7 @@ spec:
       matchExpressions:
         - key: kubernetes.io/metadata.name
           operator: In
-          values: ["gibson", "setec-system"]
+          values: ["gibson", "setec-system", "gibson-gateway"]
 ---
 # Source: gibson/charts/gibson-workloads/templates/spire-server/platform-identity-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -20606,7 +23126,7 @@ spec:
       matchExpressions:
         - key: kubernetes.io/metadata.name
           operator: In
-          values: ["gibson", "setec-system"]
+          values: ["gibson", "setec-system", "gibson-gateway"]
 
 ---
 # Source: gibson/charts/gibson-workloads/templates/external-secrets/postgres-logins.yaml
@@ -22270,7 +24790,7 @@ spec:
       # The daemon image itself — same repo@digest the StatefulSet runs — so
       # `gibson --version` reports the toolchain the DEPLOYED binary was built
       # with, not some proxy. The runtime image is alpine-based (has /bin/sh).
-      image: "ghcr.io/zeroroot-ai/gibson:v0.163.5@sha256:583f38b787a17febf5c6c5da3a74c5b809ec0d3a0135dff8d651eaee8dcaba3b"
+      image: "ghcr.io/zeroroot-ai/gibson:v0.164.0@sha256:d0815f46c4006f4bca1dfb7e6f8a915100a9978664fe4d68dbc8df307a4dd7d6"
       imagePullPolicy: Always
       command: ["/bin/sh", "-c"]
       args:
@@ -23441,7 +25961,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: first-admin
-          image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-78ef343@sha256:ea11082c7cd9e71b237540e44718fcc0bc495dce6d5f57eeab35aad921a36355"
+          image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-fa05448@sha256:2413c573371a1220ce4519c1f65d1d05ff7c1bda8616109ba50ba552eaf65bfe"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

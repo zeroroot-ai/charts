@@ -82,6 +82,22 @@ rules:
     resources: ["connectorinstances/finalizers"]
     verbs: ["update"]
 
+  # ModelProvider (gibson#1366, gibson#1387). A tenant's model provider,
+  # with its status and finalizers, at cluster scope like the other tenant
+  # kinds. The objects the operator renders for it (backend, route, policy,
+  # credential Secret) live in the gateway namespace only, and the Role
+  # gibson-tenant-operator-gateway (gateway-namespace-rbac.yaml) grants
+  # them there.
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["modelproviders"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["modelproviders/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["modelproviders/finalizers"]
+    verbs: ["update"]
+
   # Namespace is inherently cluster-scoped — operator creates per-tenant namespaces.
   - apiGroups: [""]
     resources: ["namespaces"]

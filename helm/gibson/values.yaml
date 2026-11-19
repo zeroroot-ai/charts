@@ -1834,6 +1834,196 @@ spire:
           repository: "zeroroot-ai/mirror/chainguard-min-toolkit-debug"
           tag: "sha256:6ba4fb1b19bb35fa0b7e6bf08b308379a5b865727e50b7b3068efb824b39ebba"
 
+# The agentgateway controller (gibson#1366, charts#815). It reconciles the one
+# Gateway of templates/agentgateway/ and starts the proxy pods of it. The
+# platform settings of that Gateway are in the `gateway:` block below.
+agentgateway:
+  # A fixed name. gibson.agentgatewayControllerName (gibson-common) holds the
+  # same name for the admission policy and the network policy, and
+  # templates/agentgateway/gateway.yaml fails the render when the two differ.
+  fullnameOverride: agentgateway
+  # The install registry mirror, pinned by digest (ADR-0165 rule 5). The
+  # controller image renders as <registry>/<repository>:<tag>.
+  image:
+    registry: "ghcr.io/zeroroot-ai"
+  controller:
+    image:
+      registry: "ghcr.io/zeroroot-ai"
+      repository: "mirror/agentgateway-controller"
+      tag: "v1.7.0@sha256:87c1363bf0cbc7fdb375866e592294114c8763097d2d0c9fc45fcb1fe00a4ab8"
+    # The controller signs the xDS connection of each proxy with TLS.
+    xds:
+      mode: tls
+  # The default proxy image of a Gateway that names no parameters. The
+  # controller gets it as AGW_PROXY_IMAGE_TAG and uses the tag as it is, so
+  # the tag carries the digest. The one Gateway of this chart names its
+  # parameters, which pin the same image by digest (gateway.proxy.image
+  # below). check-agentgateway.py fails when the two differ.
+  proxy:
+    image:
+      registry: "ghcr.io/zeroroot-ai"
+      repository: "mirror/agentgateway"
+      tag: "v1.7.0@sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b"
+  # The deployer writes (Deployments, Services, ServiceAccounts, Secrets,
+  # ConfigMaps and the rest of the proxy) only in the gateway namespace, by a
+  # RoleBinding there (upstream narrow mode). The list must be exactly
+  # gibson.gatewayNamespace, "<release namespace>-gateway", and
+  # templates/agentgateway/gateway.yaml fails the render when it is not. A
+  # values file cannot name the release namespace, so an install in a
+  # namespace other than "gibson" sets this list.
+  #
+  # The cluster-wide ClusterRole of the upstream chart stays. It reads
+  # Gateway API objects and the agentgateway kinds in each namespace, so a
+  # tenant route can attach to the Gateway (gibson#1387), and it patches only
+  # the status subresources of those kinds. Its Secret read stays
+  # cluster-wide: v1.7.0 has no value to narrow it
+  # (owner-credential-readers.yaml).
+  rbac:
+    gatewayNamespaces:
+      - gibson-gateway
+  # The controller sets GOMEMLIMIT from limits.memory and GOMAXPROCS from
+  # limits.cpu (the upstream deployment.yaml, resourceFieldRef). With no
+  # limit, the Go runtime takes the memory and the CPU count of the node.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: "2"
+      memory: 512Mi
+  # The cluster has no Istio. The upstream default grants RBAC on Istio kinds.
+  istio:
+    enabled: false
+  # The network labels of the pod (ADR-0165 rule 4, D76; gibson.netLabels).
+  # The controller reads the API server and serves xDS to the proxy pods.
+  podLabels:
+    gibson.zeroroot.ai/net-role: platform
+    gibson.zeroroot.ai/kube-api: "true"
+    app.kubernetes.io/component: agentgateway-controller
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  # The chart emits hook-in resources only. The upstream monitoring templates
+  # stay off: a ServiceMonitor here would not be gated on the capability.
+  monitoring:
+    enabled: false
+
+# The one agentgateway Gateway (gibson#1366, charts#815). It carries two
+# route sets:
+#   Model gateway  the routes from Gibson to each LLM provider, on the
+#                  listener `model`.
+#   Agent gateway  the MCP and A2A routes between components in the cluster,
+#                  on the listener `agent`.
+# The chart owns the Gateway, its parameters and the policies that attach to
+# it. The tenant-operator renders the routes and backends of each tenant
+# (gibson#1387). The Gateway is cluster-internal: its Service is ClusterIP,
+# and the Edge never routes to it.
+gateway:
+  # The proxy image, pinned by digest. The AgentgatewayParameters of the
+  # Gateway carry it (spec.image).
+  proxy:
+    image:
+      registry: "ghcr.io"
+      repository: "zeroroot-ai/mirror/agentgateway"
+      tag: "v1.7.0"
+      digest: "sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b"
+    replicas: 2
+    # The most finished spans that the proxy keeps in memory before it sends
+    # them to the trace collector (OTEL_BSP_MAX_QUEUE_SIZE, read by the batch
+    # span processor of opentelemetry_sdk 0.33.1 that agentgateway v1.7.0
+    # uses). The proxy drops a span when this queue is full. A span can hold
+    # two buffers (maxBufferSize x 2, 32 MiB), so 16 spans hold at most 512
+    # MiB, half of the memory limit below. check-agentgateway.py fails when
+    # the queue can hold more than half of the limit.
+    spanQueueSize: 16
+    # The startup budget of the proxy, in seconds. The proxy is not Ready
+    # and serves no listener until the controller sends its first xDS
+    # config. A cluster start can keep the controller away for minutes, and
+    # the upstream budget of 60 seconds then restarts the proxy.
+    startupSeconds: 600
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: "2"
+        memory: 1Gi
+  # The model providers in the cluster that the proxy may reach, for example
+  # a model server that a tenant runs in its own namespace, or the mock
+  # provider of an exit test. The proxy reaches no other pod, and no private
+  # address (templates/agentgateway/network-policy.yaml). Each entry names a
+  # namespace, the labels of the provider pods and their container ports (the
+  # port of the pod, not of the Service). Empty by default. Example:
+  #   - namespace: models
+  #     podLabels: {app: model-server}
+  #     ports: [8443]
+  inClusterProviders: []
+  # The TCP ports that the proxy may dial on a public address: the port of
+  # each LLM provider and of each outside agent. An outside agent on another
+  # port needs its port here.
+  publicPorts: [443]
+  # The largest request or response body that the proxy buffers. The trace
+  # policy and the ext-authz model name read the whole body, so a larger body
+  # loses its trace fields and its model name. gibson#1386 measures the real
+  # bodies and sets this number. The upstream default is 2 MiB.
+  maxBufferSize: 16Mi
+  # The trace of each request goes as OTLP over gRPC to the trace collector
+  # of gibson-workloads (gibson.traceCollectorName, charts#816), over SPIFFE
+  # mTLS. The record of model calls is read from it.
+  # The request headers that the Model gateway removes before the provider
+  # call. The provider must never get the tenant, the subject, the mission,
+  # the task, the route claim or the Capability Grant. The CRD takes exact
+  # names only (no prefix) and 16 at most. scripts/check-agentgateway.py
+  # fails when a chart file names an x-gibson-* header that is not on this
+  # list, and when x-capability-grant or a route header is missing.
+  # The request headers that the Agent gateway removes before the call to the
+  # daemon A2A listener. It is the opposite of the model listener: the
+  # daemon reads the trusted headers and the route claim, and never the
+  # grant or the Edge quota headers (gibson contract round 7).
+  # scripts/check-agentgateway.py fails when a kept header is on this list.
+  agentStripRequestHeaders:
+    - x-capability-grant
+    # The identity headers of the Edge. The daemon A2A listener reads none
+    # of them (gibson v0.164.0 internal/server/a2aserver).
+    - x-gibson-identity-tenant
+    - x-gibson-identity-subject
+    - x-gibson-identity-issuer
+    - x-gibson-identity-issued-at
+    - x-gibson-identity-credential-type
+  # Exactly the list of gibson gatewayheaders.Removed() (gibson v0.164.0
+  # internal/server/extauthz/gatewayheaders), so the chart and the routes
+  # of the tenant-operator remove the same headers.
+  # scripts/check-agentgateway.py holds the same list and fails on a
+  # difference.
+  stripRequestHeaders:
+    # The route claim. The caller sends the two headers, each route matches
+    # on them, and ext-authz refuses a claimed tenant that is not the
+    # tenant of the Capability Grant (gibson internal/server/extauthz/
+    # modelcall/modelcall.go, HeaderRouteTenant and HeaderRouteProvider).
+    - x-gibson-route-tenant
+    - x-gibson-route-provider
+    # The route claim of an agent call (gibson agentcall.HeaderRouteAgent
+    # and HeaderRouteBank). A model provider never needs it.
+    - x-gibson-route-agent
+    - x-gibson-route-bank
+    # The Capability Grant of the caller. ext-authz reads it.
+    - x-capability-grant
+    # The trusted headers that ext-authz sets. ext-authz overwrites a caller
+    # copy, so only its own value reaches this point.
+    - x-gibson-tenant
+    - x-gibson-subject
+    - x-gibson-mission
+    - x-gibson-task
+    # The identity headers of the Edge. The gateway forward class of
+    # ext-authz sets two of them on the Edge, and the gateway forwards them
+    # (gibson#1388).
+    - x-gibson-identity-tenant
+    - x-gibson-identity-subject
+    - x-gibson-identity-issuer
+    - x-gibson-identity-issued-at
+    - x-gibson-identity-credential-type
+
 cert-manager:
   # The install registry mirror, pinned by digest (ADR-0165 rule 5, charts#400).
   image:

@@ -1,0 +1,29 @@
+{{- /*
+The trace collector Service (charts#816). ClusterIP only. The agentgateway
+proxy sends OTLP over SPIFFE mTLS to the otlp port, which the Envoy sidecar
+of the pod terminates. The metrics port serves GET /metrics only.
+*/}}
+{{- $p := .Values.traceCollector.ports }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gibson.traceCollectorName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: trace-collector
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "gibson.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: trace-collector
+  ports:
+    - name: otlp
+      port: {{ $p.otlp }}
+      targetPort: otlp
+      protocol: TCP
+      appProtocol: grpc
+    - name: metrics
+      port: {{ $p.metrics }}
+      targetPort: metrics
+      protocol: TCP

@@ -27,27 +27,28 @@
 # THIS IS AN EARLY WARNING, NOT A PROOF. The proof that a chart installs is an
 # install, and scripts/baseline-up.sh does one on a cluster.
 #
-# The estimate here is the manifest plus the chart's own templates and files,
-# gzipped and base64-scaled. Helm stores rather more: the manifest sits
-# uncompressed inside a JSON document that also holds the chart metadata and
-# the resolved values, and the whole document is gzipped. So the estimate runs
-# LOW, and by a factor that depends on the shape of the chart rather than its
-# size — a chart that is mostly manifest lands near 1.3, one with many small
-# top-level templates near 2.1, a tiny chart near 4.5 where the fixed overhead
-# dominates.
+# HOW IT MEASURES (charts#815). scripts/helm-record.py builds the record the
+# way Helm 3 stores it: a JSON document with the rendered manifest, the
+# templates and files of the TOP-LEVEL chart (base64 inside the JSON), its
+# values and its metadata, then gzip, then base64. The files of a dependency
+# are not in the record, only what it renders into the manifest.
 #
-# A single fudge factor therefore cannot work: applied high enough to protect
-# the umbrella it fails the operator CRDs, which are nowhere near the cap.
-# So each chart carries its OWN factor, measured by installing it on a kind
-# cluster and reading the Secret back. Every number below is a measurement,
-# not a guess, and it is dated. A chart with no entry uses the worst factor
-# seen, and says so.
+# The check used to multiply a manifest-only estimate by a factor for each
+# chart, measured on kind. That factor depended on the shape of the chart. A
+# new dependency (the agentgateway and Gateway API CRDs in gibson-crds) made
+# the old factor of gibson-crds wrong by a factor of three, and only a new
+# kind install could correct it. The encoding has no factor to re-measure.
 #
-#   measured 2026-09-14, kind, helm 3.18.4    estimate   actual   factor
-#     gibson                                    283 KB   594 KB     2.10
-#     gibson-crds                                43 KB   136 KB     3.16
-#     gibson-operator-crds                      520 KB   699 KB     1.34
-#     gibson-velero                              11 KB    49 KB     4.45
+# One safety factor stays. The kind measurements of 2026-09-14 read 1.14 to
+# 1.34 times the encoded size of the same charts, possibly because they read
+# the Secret as kubectl prints it, base64 a second time. SAFETY applies the
+# largest ratio, so the check never reports less than kind measured.
+#
+#   measured 2026-09-14, kind, helm 3.18.4    actual
+#     gibson                                   594 KB
+#     gibson-crds                              136 KB
+#     gibson-operator-crds                     699 KB
+#     gibson-velero                             49 KB
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,34 +80,22 @@ fi
 CAP=1048576
 MARGIN_PCT="${MARGIN_PCT:-80}"
 
-# The charts that are PUBLISHED and therefore installed by helm, each with the
-# factor measured for it (see the header). A chart that only ever renders
-# through Argo is not listed, because Argo writes no record.
-CHARTS=(gibson gibson-crds gibson-operator-crds gibson-velero)
-FACTOR_gibson=210
-FACTOR_gibson_crds=316
-FACTOR_gibson_operator_crds=134
-FACTOR_gibson_velero=445
-# Used for a chart nobody has measured yet. The worst seen, so a new chart is
-# over-reported rather than under-reported, and the message says to measure it.
-FACTOR_DEFAULT=445
+# The largest ratio of a kind measurement to the encoded size, in hundredths.
+SAFETY=134
 
-# record_bytes <chart-dir> [values-file] — the manifest as Helm would store
-# it: gzip, then base64. Prints the byte count.
+# The charts that are PUBLISHED and therefore installed by helm. A chart that
+# only ever renders through Argo is not listed, because Argo writes no record.
+CHARTS=(gibson gibson-crds gibson-operator-crds gibson-velero)
+
+# record_bytes <chart-dir> [values-file...] — the record as Helm stores it.
+# Prints the byte count.
 #
 # The render must SUCCEED or the number is a lie: the umbrella refuses to
-# render without a profile, and a failed render gzips to twenty bytes, which
+# render without a profile, and a failed render encodes to a few bytes, which
 # would read as a chart comfortably under the cap. That is the exact shape of
 # the bug this file exists to catch, so it is a hard failure here.
 record_bytes() { # <chart dir> [values file...]
-  local out chart="$1"; shift
-  local args=() f
-  for f in "$@"; do args+=(-f "$f"); done
-  # --namespace gibson: the umbrella names the release namespace in the setec
-  # namespace policy (setec.systemPolicy.frontendCallers) and refuses another.
-  out="$(helm template release "$chart" "${args[@]}" --namespace gibson)" || return 1
-  [ -n "$out" ] || return 1
-  printf '%s' "$out" | gzip -9 | wc -c | awk '{printf "%d", $1 * 4 / 3}'
+  python3 "$HERE/helm-record.py" "$@"
 }
 
 # values_for <chart> — the profile a chart needs to render at all. Only the
@@ -129,18 +118,11 @@ for chart in "${CHARTS[@]}"; do
     echo "✗ check-helm-record-size: helm template failed for $chart, so its record size is unknown" >&2
     exit 2
   fi
-  # The chart's own measured factor, in hundredths.
-  var="FACTOR_${chart//-/_}"
-  factor="${!var:-}"
-  measured=yes
-  if [ -z "$factor" ]; then factor="$FACTOR_DEFAULT"; measured=no; fi
-  estimate=$(( bytes * factor / 100 ))
+  estimate=$(( bytes * SAFETY / 100 ))
   pct=$(( estimate * 100 / CAP ))
   mark=" "
   if [ "$pct" -ge "$MARGIN_PCT" ]; then mark="✗"; fail=1; fi
-  note=""
-  [ "$measured" = no ] && note="  (no measured factor; using the worst seen — install it once and record its own)"
-  printf '  %s %-22s %7d KB %6d%%%s\n' "$mark" "$chart" "$((estimate / 1024))" "$pct" "$note"
+  printf '  %s %-22s %7d KB %6d%%\n' "$mark" "$chart" "$((estimate / 1024))" "$pct"
 done
 
 if [ "$fail" = 1 ]; then

@@ -1,0 +1,251 @@
+{{- /*
+The trace collector config (charts#816).
+
+collector.yaml — the OpenTelemetry Collector.
+  receiver   OTLP gRPC on 127.0.0.1 only. The Envoy sidecar is the only
+             peer.
+  queue      the exporter keeps each request in a persistent queue
+             (file_storage, the PVC `queue`), so a daemon restart or an
+             outage loses no span. It retries without an end: the daemon
+             deduplicates on the call ID, so a retry is safe. The queue is
+             limited in bytes (traceCollector.queue.capacityMiB), because
+             one span can hold about 32 MiB.
+  telemetry  metrics at level detailed, so the collector reports
+             otelcol_exporter_enqueue_size_bytes. The delay alert
+             (alertrule.yaml) reads it.
+  exporter   OTLP gRPC to the daemon, through the loopback port of the Envoy
+             sidecar, which adds SPIFFE mTLS.
+  No debug exporter, and logs at warn: a span holds full prompts and tool
+  results, and a log line must never hold one.
+
+envoy.yaml — the bootstrap of the Envoy mTLS sidecar, in the shape of the
+  ratelimit sidecar (templates/ratelimit/configmap.yaml).
+  in   SPIFFE mTLS through SPIRE SDS on the otlp port. It requires a client
+       certificate and pins the client SAN to platform/agentgateway, then
+       tcp_proxies to the receiver.
+  out  a plaintext listener on 127.0.0.1 that tcp_proxies to the trace
+       listener of the daemon (gibson.daemonTracePort) over SPIFFE mTLS. It presents the SVID platform/otel-collector
+       and accepts only the SAN platform/daemon.
+  probe a plaintext listener on the probe port that forwards GET /ready to
+       the loopback admin and answers 404 to each other path. The kubelet
+       probes it. A probe of the otlp port opens a TLS port with no
+       handshake, and Envoy logs each one as a failed handshake.
+*/}}
+{{- $p := .Values.traceCollector.ports -}}
+{{- $q := .Values.traceCollector.queue -}}
+{{- if not (regexMatch "^[0-9]+Gi$" (toString $q.size)) }}
+{{- fail (printf "traceCollector.queue.size must be a whole number of Gi, got %v" $q.size) }}
+{{- end }}
+{{- $pvcMiB := mul (trimSuffix "Gi" (toString $q.size) | int) 1024 -}}
+{{- if gt (add (mul (int $q.capacityMiB) 2) 512) $pvcMiB }}
+{{- fail (printf "traceCollector.queue.capacityMiB %v does not fit the PVC of %v: a compaction writes a second copy of the queue, so capacityMiB x 2 + 512 must not pass %d MiB" $q.capacityMiB $q.size $pvcMiB) }}
+{{- end }}
+{{- $td := include "gibson.trustDomain" . -}}
+{{- /* The daemon host, and its trace listener (gibson.daemonTracePort),
+       which takes a message of 48 MiB. The main gRPC port takes 16 MiB. */ -}}
+{{- $daemon := list (include "gibson.daemonAddress" . | splitList ":" | first) (include "gibson.daemonTracePort" .) -}}
+{{- $sds := dict "resource_api_version" "V3" "api_config_source" (dict "api_type" "GRPC" "transport_api_version" "V3" "grpc_services" (list (dict "envoy_grpc" (dict "cluster_name" "spire_agent")))) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gibson.traceCollectorName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: trace-collector
+data:
+  collector.yaml: |
+    extensions:
+      file_storage/queue:
+        directory: /var/lib/otelcol/queue
+        create_directory: false
+        timeout: 10s
+        compaction:
+          on_start: true
+          on_rebound: true
+          directory: /var/lib/otelcol/queue
+      health_check:
+        endpoint: 0.0.0.0:13133
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 127.0.0.1:{{ $p.local }}
+            max_recv_msg_size_mib: {{ .Values.traceCollector.maxRecvMsgSizeMiB }}
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 80
+        spike_limit_percentage: 20
+    exporters:
+      otlp/daemon:
+        endpoint: 127.0.0.1:{{ $p.daemon }}
+        # Plaintext to the loopback port only. The Envoy sidecar adds SPIFFE
+        # mTLS on the way to the daemon.
+        tls:
+          insecure: true
+        # One span for each request, with no batch: a span can pass 16 MiB,
+        # and the trace listener of the daemon takes 48 MiB. The proxy sends
+        # one span in each export (OTEL_BSP_MAX_EXPORT_BATCH_SIZE=1 in the
+        # AgentgatewayParameters), so a request holds one span.
+        sending_queue:
+          enabled: true
+          storage: file_storage/queue
+          sizer: bytes
+          queue_size: {{ mul (int $q.capacityMiB) 1048576 }}
+        retry_on_failure:
+          enabled: true
+          initial_interval: 1s
+          max_interval: 30s
+          max_elapsed_time: 0s
+    service:
+      extensions: [file_storage/queue, health_check]
+      telemetry:
+        logs:
+          level: warn
+        metrics:
+          level: detailed
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: {{ $p.metrics }}
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter]
+          exporters: [otlp/daemon]
+  envoy.yaml: |
+    admin:
+      address:
+        socket_address: { address: 127.0.0.1, port_value: 9902 }
+    static_resources:
+      listeners:
+        - name: admin_probe
+          address:
+            socket_address: { address: 0.0.0.0, port_value: {{ $p.probe }} }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: admin_probe
+                    codec_type: AUTO
+                    route_config:
+                      name: admin_probe
+                      virtual_hosts:
+                        - name: admin_probe
+                          domains: ["*"]
+                          routes:
+                            - match: { path: "/ready" }
+                              route: { cluster: envoy_admin_loopback }
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+        - name: otlp_mtls_ingress
+          address:
+            socket_address: { address: 0.0.0.0, port_value: {{ $p.otlp }} }
+          filter_chains:
+            - transport_socket:
+                name: envoy.transport_sockets.tls
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+                  require_client_certificate: true
+                  common_tls_context:
+                    alpn_protocols: ["h2"]
+                    tls_certificate_sds_secret_configs:
+                      - name: "default"
+                        sds_config: {{ toJson $sds }}
+                    combined_validation_context:
+                      default_validation_context:
+                        # Only the agentgateway proxy may send spans.
+                        match_typed_subject_alt_names:
+                          - san_type: URI
+                            matcher:
+                              exact: "spiffe://{{ $td }}/platform/agentgateway"
+                      validation_context_sds_secret_config:
+                        name: "ROOTCA"
+                        sds_config: {{ toJson $sds }}
+              filters:
+                - name: envoy.filters.network.tcp_proxy
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                    stat_prefix: otlp_local
+                    cluster: otlp_local
+        - name: daemon_egress
+          address:
+            socket_address: { address: 127.0.0.1, port_value: {{ $p.daemon }} }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.tcp_proxy
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                    stat_prefix: daemon_mtls
+                    cluster: daemon_mtls
+      clusters:
+        - name: envoy_admin_loopback
+          type: STATIC
+          connect_timeout: 0.25s
+          load_assignment:
+            cluster_name: envoy_admin_loopback
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: 127.0.0.1, port_value: 9902 }
+        - name: spire_agent
+          type: STATIC
+          connect_timeout: 0.25s
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              explicit_http_config:
+                http2_protocol_options: {}
+          load_assignment:
+            cluster_name: spire_agent
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        pipe:
+                          path: /run/spire/sockets/api.sock
+        - name: otlp_local
+          type: STATIC
+          connect_timeout: 0.25s
+          load_assignment:
+            cluster_name: otlp_local
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: 127.0.0.1, port_value: {{ $p.local }} }
+        - name: daemon_mtls
+          type: STRICT_DNS
+          connect_timeout: 2s
+          transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+              common_tls_context:
+                alpn_protocols: ["h2"]
+                tls_certificate_sds_secret_configs:
+                  - name: "default"
+                    sds_config: {{ toJson $sds }}
+                combined_validation_context:
+                  default_validation_context:
+                    match_typed_subject_alt_names:
+                      - san_type: URI
+                        matcher:
+                          exact: "spiffe://{{ $td }}/platform/daemon"
+                  validation_context_sds_secret_config:
+                    name: "ROOTCA"
+                    sds_config: {{ toJson $sds }}
+          load_assignment:
+            cluster_name: daemon_mtls
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: {{ first $daemon }}, port_value: {{ last $daemon }} }

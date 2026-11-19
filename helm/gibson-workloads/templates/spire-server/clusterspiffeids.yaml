@@ -143,6 +143,54 @@ spec:
     - "k8s:ns:{{ $ns }}"
     - "k8s:sa:{{ include "gibson.extAuthzServiceAccountName" . }}"
 ---
+# --- trace collector (charts#816) ---
+# The Envoy sidecar of the trace collector presents this SVID to the daemon
+# when it sends spans, and the agentgateway proxy accepts only it.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-trace-collector
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/otel-collector"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: trace-collector
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ $ns }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ $ns }}"
+    - "k8s:sa:{{ include "gibson.traceCollectorName" . }}"
+---
+# --- agentgateway proxy (charts#815) ---
+# The agentgateway controller starts the proxy pods of the one Gateway, and
+# it names their ServiceAccount after the Gateway. The proxy presents this
+# SVID to ext-authz on each authorization call.
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: gibson-platform-agentgateway
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spire-controller-manager
+spec:
+  className: {{ $className | quote }}
+  spiffeIDTemplate: "spiffe://{{ $trustDomain }}/platform/agentgateway"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: agentgateway-proxy
+  # The proxy runs in the gateway namespace (gibson.gatewayNamespace).
+  namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ include "gibson.gatewayNamespace" . }}
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ include "gibson.gatewayNamespace" . }}"
+    - "k8s:sa:{{ include "gibson.agentgatewayName" . }}"
+---
 # --- ratelimit (deploy#1657) ---
 # The pod's Envoy mTLS sidecar presents this SVID to the edge Envoy, whose
 # ratelimit_grpc cluster pins the SAN to exactly platform/ratelimit.

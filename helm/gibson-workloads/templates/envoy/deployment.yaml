@@ -287,6 +287,11 @@ spec:
             - name: tls
               mountPath: /etc/envoy/tls
               readOnly: true
+            # The component CA, to verify the agentgateway listeners of the
+            # gateway forward routes (charts#815).
+            - name: component-ca
+              mountPath: /etc/envoy/component-ca
+              readOnly: true
             {{- if .Values.envoy.spiffe.enabled }}
             - name: spire-agent-socket
               mountPath: /run/spire/sockets
@@ -369,6 +374,15 @@ spec:
           secret:
             secretName: {{ .Values.envoy.tls.secretName | default "gibson-envoy-tls" }}
             defaultMode: 0400
+        # Only ca.crt of the gateway listener certificate: the Edge never
+        # holds the listener key (charts#815).
+        - name: component-ca
+          secret:
+            secretName: {{ include "gibson.agentgatewayTLSSecretName" . }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+            defaultMode: 0444
         {{- if .Values.envoy.spiffe.enabled }}
         # SPIRE Workload API socket — exposed by the spire-agent DaemonSet
         # via the csi.spiffe.io CSI driver. The hostPath /run/spire/sockets

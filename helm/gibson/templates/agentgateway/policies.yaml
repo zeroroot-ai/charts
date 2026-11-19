@@ -1,0 +1,216 @@
+{{/*
+The policies that the platform attaches to the one agentgateway Gateway
+(charts#815). Each field below names its CRD path in agentgateway v1.7.0
+(agentgateway.dev_agentgatewaypolicies.yaml). scripts/check-agentgateway.py
+proves each policy on each render.
+
+  ext-authz     spec.traffic.extAuth, phase PreRouting, on the Gateway. It
+                runs before the route is chosen, for each request on each
+                listener, so no route can skip it. A route policy cannot set
+                a PreRouting field (only a Gateway or a ListenerSet can), and
+                inheritance Override keeps a listener policy from replacing it.
+  ext-authz TLS spec.backend.tls on the ext-authz Service. The proxy presents
+                its SPIFFE SVID, and it accepts only the SVID of ext-authz.
+  trace TLS     spec.backend.tls on the trace collector Service: SPIFFE mTLS,
+                and only the collector SVID is accepted.
+  trace         spec.frontend.tracing and spec.frontend.http.maxBufferSize, on
+                the Gateway. The span holds the bodies, the four trusted
+                headers and the route agent under the gibson.* names that
+                the daemon reads.
+  strip         spec.traffic.headerModifiers.request.remove, on the listener
+                `model`, with inheritance Override, so a tenant route cannot
+                replace it. The provider request holds no x-gibson-* header.
+  formats       spec.backend.ai.routes, on the listener `model`. A path with
+                no entry reads its body as Chat Completions.
+*/}}
+{{- $name := include "gibson.agentgatewayName" . }}
+{{- $gw := .Values.gateway }}
+{{- $extAuthzPort := ((((index .Values "gibson-workloads") | default dict).extAuthz | default dict).ports | default dict).grpc | default 9001 }}
+{{- $traceCollector := (index .Values "gibson-workloads").traceCollector }}
+{{- /* The policies on the Gateway live in its namespace
+       (gibson.gatewayNamespace). The two TLS policies on a Service live in the
+       release namespace with their Service: a targetRef names an object of
+       the namespace of the policy. */}}
+{{- $gatewayRef := dict "group" "gateway.networking.k8s.io" "kind" "Gateway" "name" $name }}
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $name }}-ext-authz
+  namespace: {{ include "gibson.gatewayNamespace" . }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - {{ toYaml $gatewayRef | nindent 6 | trim }}
+  strategy:
+    inheritance: Override
+  traffic:
+    phase: PreRouting
+    extAuth:
+      backendRef:
+        name: {{ include "gibson.extAuthzServiceName" . }}
+        namespace: {{ .Release.Namespace }}
+        port: {{ $extAuthzPort }}
+      # The gateway refuses each request when ext-authz is down or errs.
+      failureMode: FailClosed
+      # The Envoy gRPC Authorization/Check protocol, the same as the Edge.
+      # The gRPC check carries the path, the method and every request
+      # header, so ext-authz gets the route claim (x-gibson-route-tenant,
+      # x-gibson-route-provider) and x-capability-grant. ext-authz knows a gateway
+      # call from the SPIFFE ID of the proxy, and it refuses a claimed
+      # tenant that is not the tenant of the Capability Grant, so a caller
+      # of tenant A cannot match a route of tenant B.
+      grpc:
+        # metadata_context.filter_metadata["gibson"].model holds the exact
+        # model name of the call. A filter_metadata value must be a map, so
+        # the expression `json(request.body).model` sits in a map. A request
+        # with no JSON body (GET /v1/models, an A2A GET) sends no entry.
+        requestMetadata:
+          gibson: '{"model": json(request.body).model}'
+    # The trusted headers, kept as request metadata for the trace. The
+    # gateway runs this transformation after ext-authz set the headers and
+    # before routing. The model listener removes the headers before the
+    # provider call, and the trace reads the request as it went upstream, so
+    # a trace field on request.headers would be empty on that listener
+    # (crates/agentgateway/src/proxy/httpproxy.rs: the request header
+    # modifier runs before take_and_snapshot).
+    # The route agent of an A2A call (gibson contract round 8) is kept the
+    # same way: the route of an outside agent removes x-gibson-route-agent
+    # before the call, so the trace reads this copy.
+    transformation:
+      request:
+        metadata:
+          {{- range $f := list "tenant" "subject" "mission" "task" }}
+          {{ $f }}: 'request.headers["x-gibson-{{ $f }}"]'
+          {{- end }}
+          route_agent: 'request.headers["x-gibson-route-agent"]'
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $name }}-ext-authz-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: {{ include "gibson.extAuthzServiceName" . }}
+  backend:
+    tls:
+      certificateSource: SPIFFE
+      sni: {{ include "gibson.extAuthzServiceName" . }}
+      verifySubjectAltNames:
+        - {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/ext-authz") | quote }}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $name }}-trace-tls
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - group: ""
+      kind: Service
+      name: {{ include "gibson.traceCollectorName" . }}
+  backend:
+    tls:
+      # The spans hold full prompts: they go over SPIFFE mTLS, and only the
+      # collector SVID is accepted (charts#816).
+      certificateSource: SPIFFE
+      sni: {{ include "gibson.traceCollectorName" . }}
+      verifySubjectAltNames:
+        - {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/otel-collector") | quote }}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $name }}-trace
+  namespace: {{ include "gibson.gatewayNamespace" . }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - {{ toYaml $gatewayRef | nindent 6 | trim }}
+  frontend:
+    http:
+      # gibson#1386 measures the real bodies and sets this number.
+      maxBufferSize: {{ $gw.maxBufferSize | quote }}
+    tracing:
+      # A backendRef, not a url: the Service policy below (SPIFFE mTLS)
+      # applies only to a backendRef.
+      backendRef:
+        name: {{ include "gibson.traceCollectorName" . }}
+        namespace: {{ .Release.Namespace }}
+        port: {{ $traceCollector.ports.otlp }}
+      protocol: GRPC
+      # Each request gets a span: the trace is the record of model calls.
+      randomSampling: "true"
+      attributes:
+        add:
+          # The daemon reads these seven attributes by name (gibson#1366 wave
+          # 2). The message content is off by default, and the record needs
+          # the whole request and reply, with the tool calls and the tool
+          # results.
+          - name: gibson.request_body
+            expression: string(request.body)
+          - name: gibson.response_body
+            expression: string(response.body)
+          # The trusted headers, from the metadata that the ext-authz policy
+          # sets after ext-authz ran. A caller copy never reaches the span.
+          {{- range $f := list "tenant" "subject" "mission" "task" }}
+          - name: gibson.{{ $f }}
+            expression: metadata.{{ $f }}
+          {{- end }}
+          # The agent of an A2A call. Empty on the model listener.
+          - name: gibson.route_agent
+            expression: metadata.route_agent
+          # No cost attribute here. The span holds agw.ai.usage.cost.total
+          # and the agw.ai.usage.cost.* parts when the model has a price
+          # (crates/agentgateway/src/telemetry/log.rs, trace_cost_fields).
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $name }}-model-strip
+  namespace: {{ include "gibson.gatewayNamespace" . }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - {{ toYaml (merge (dict "sectionName" "model") $gatewayRef) | nindent 6 | trim }}
+  strategy:
+    inheritance: Override
+  traffic:
+    headerModifiers:
+      request:
+        remove:
+          {{- toYaml $gw.stripRequestHeaders | nindent 10 }}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ $name }}-model-formats
+  namespace: {{ include "gibson.gatewayNamespace" . }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agentgateway
+spec:
+  targetRefs:
+    - {{ toYaml (merge (dict "sectionName" "model") $gatewayRef) | nindent 6 | trim }}
+  backend:
+    ai:
+      routes:
+        /v1/messages: Messages
+        /v1/responses: Responses
+        /v1/embeddings: Embeddings
+        # The model list passes through unchanged (decision 6 of gibson#1366).
+        /v1/models: Passthrough

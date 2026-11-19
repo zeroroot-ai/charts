@@ -42,11 +42,12 @@ Each policy applies in wave -20, before each hook Job (check-netpol-before-hooks
 {{- $ns := .Release.Namespace }}
 {{- $rel := .Release.Name }}
 {{- $role := "gibson.zeroroot.ai/net-role" }}
-{{- /* The default deny covers the release namespace and the namespace of the
-       SPIRE node components (hosted#438). The SPIRE agent runs on the host
-       network, so no policy applies to it. The CSI driver talks to the
-       kubelet and the agent over unix sockets and needs no network. */}}
-{{- range $i, $dns := list $ns .Values.global.spire.namespaces.system.name }}
+{{- /* The default deny covers the release namespace, the namespace of the
+       SPIRE node components (hosted#438) and the gateway namespace
+       (charts#815). The SPIRE agent runs on the host network, so no policy
+       applies to it. The CSI driver talks to the kubelet and the agent over
+       unix sockets and needs no network. */}}
+{{- range $i, $dns := list $ns .Values.global.spire.namespaces.system.name (include "gibson.gatewayNamespace" .) }}
 {{- if $i }}
 ---
 {{- end }}

@@ -1,0 +1,22 @@
+{{- /* The trace collector ServiceMonitor (charts#816). The queue alerts read
+       its series. It renders only where the cluster serves
+       monitoring.coreos.com/v1 (ADR-0087). */}}
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}-trace-collector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: trace-collector
+spec:
+  selector:
+    matchLabels:
+      {{- include "gibson.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: trace-collector
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+{{- end }}

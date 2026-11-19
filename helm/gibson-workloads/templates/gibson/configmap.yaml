@@ -69,6 +69,12 @@ data:
           role: {{ $vk.role | quote }}
           {{- end }}
         {{- end }}
+      # The address check of the base_url of a model provider (see values.yaml).
+      {{- $allowPrivateLLM := $sec.allow_private_llm_endpoints | default false }}
+      {{- if not (kindIs "bool" $allowPrivateLLM) }}
+      {{- fail "gibson.config.security.allow_private_llm_endpoints must be true or false" }}
+      {{- end }}
+      allow_private_llm_endpoints: {{ $allowPrivateLLM }}
       # The platform OpenBao. The start gate of the daemon asks its health
       # (GET /v1/sys/health) and is not Ready until it answers (gibson#1078,
       # gibson#1079). The address is the one every OpenBao client of the
@@ -349,3 +355,20 @@ data:
         # agent workload can carry a different isolation posture.
         agent_sandbox_class: {{ . | quote }}
         {{- end }}
+    {{- /* The Shared Agent Skills that the operator offers to each tenant
+           (epic gibson#1364). Each entry is a name and a digest reference;
+           the daemon pulls each one at start. An empty list renders no key,
+           as the daemon struct has omitempty. */}}
+    {{- with ((.Values.gibson.config).sharedAgentSkills) }}
+    shared_agent_skills:
+      {{- range $s := . }}
+      {{- if not (and $s.name $s.reference) }}
+      {{- fail "gibson.config.sharedAgentSkills: each entry needs a name and a reference" }}
+      {{- end }}
+      {{- if not (regexMatch "@sha256:[0-9a-f]{64}$" $s.reference) }}
+      {{- fail (printf "gibson.config.sharedAgentSkills: the reference of %s must end in @sha256:<64 hex>; the daemon refuses a tag" $s.name) }}
+      {{- end }}
+      - name: {{ $s.name | quote }}
+        reference: {{ $s.reference | quote }}
+      {{- end }}
+    {{- end }}

@@ -1,0 +1,6 @@
+# check-backup-coverage.py and check-velero-volume-excludes.sh: a claim that
+# is not data of record, so Velero skips it. Keyed by content.
+# Each line: <Kind>/<name>:<claim> <reason>. A line that matches no rendered
+# claim fails as stale, and so does a listed claim that the pod does not
+# exclude.
+StatefulSet/gibson-trace-collector:queue The export queue of the trace collector (charts#816). The daemon holds the record of each model call. A restored queue would send old spans again, and each span holds full prompts.

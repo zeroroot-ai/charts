@@ -68,6 +68,14 @@ dependencies:
     version: "31.0.1"
     repository: "https://prometheus-community.github.io/helm-charts"
     condition: prometheus-operator-crds.enabled
+  # The CRDs of agentgateway and of the Gateway API (charts#815). The umbrella
+  # renders a Gateway, an AgentgatewayParameters and AgentgatewayPolicy
+  # objects, so their CRDs install here. They are vendored files of a
+  # first-party subchart (scripts/vendor-gateway-crds.py), so each one carries
+  # helm.sh/resource-policy: keep and counts once in the release record.
+  - name: gibson-gateway-crd-files
+    version: "0.1.0"
+    repository: "file://../gibson-gateway-crd-files"
   # gibson-operator-crds IS NOT A DEPENDENCY. It is its own release, and the
   # reason is a hard limit rather than taste.
   #

@@ -5,7 +5,7 @@
 # kubebuilder markers of its controllers. check-operator-rbac-covers.py fails
 # the build when the chart grants the operator less than this.
 #
-# Source: zeroroot-ai/gibson @ v0.163.5
+# Source: zeroroot-ai/gibson @ v0.164.0
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -36,6 +36,7 @@ rules:
   - gibson.zeroroot.ai
   resources:
   - agentenrollments
+  - modelproviders
   - oidcclients
   - tenantdataplanes
   - tenantgrants
@@ -56,6 +57,7 @@ rules:
   resources:
   - agentenrollments/finalizers
   - connectorinstances/finalizers
+  - modelproviders/finalizers
   - tenantdataplanes/finalizers
   - tenantgrants/finalizers
   - tenantidentities/finalizers
@@ -68,6 +70,7 @@ rules:
   - gibson.zeroroot.ai
   resources:
   - agentenrollments/status
+  - modelproviders/status
   - tenantdataplanes/status
   - tenantgrants/status
   - tenantidentities/status

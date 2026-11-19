@@ -1,0 +1,54 @@
+{{- /*
+The tenant-operator in the gateway namespace (charts#815, gibson#1387).
+
+For each ModelProvider the operator writes, in the gateway namespace
+(gibson.gatewayNamespace):
+  - one AgentgatewayBackend (two for Bedrock) and one HTTPRoute,
+  - the credential Secret mp-<tenant>-<name>-credential, with the value that
+    the daemon returns from GetModelProviderCredential. It writes it again on
+    each resync and deletes it in the finalizer.
+
+The chart owns each AgentgatewayPolicy, so the operator gets no rule for
+them. The grant is a Role in that namespace, never at cluster scope. The
+operator reads the backends and routes as unstructured objects outside its
+cache, and Secrets without the cache, so it needs no list or watch at
+cluster scope (gibson contract round 7, section 6). The gateway
+namespace holds no platform Secret, so the Secret verbs here reach only the
+provider credentials (the reason the gateway has a namespace of its own).
+*/ -}}
+{{- $gwNs := include "gibson.gatewayNamespace" . }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gibson-tenant-operator-gateway
+  namespace: {{ $gwNs }}
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+rules:
+  - apiGroups: ["agentgateway.dev"]
+    resources: ["agentgatewaybackends"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gibson-tenant-operator-gateway
+  namespace: {{ $gwNs }}
+  labels:
+    app.kubernetes.io/name: gibson-tenant-operator
+    app.kubernetes.io/part-of: gibson
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gibson-tenant-operator-gateway
+subjects:
+  - kind: ServiceAccount
+    name: gibson-tenant-operator
+    namespace: {{ .Values.tenantOperator.namespace | default .Release.Namespace }}

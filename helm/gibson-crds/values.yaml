@@ -59,3 +59,12 @@ prometheus-operator-crds:
 # described behaviour the file did not have.
 #
 # `enabled` now lives with the toggles, in the one block.
+
+# The Gateway API CRDs (charts#815). Operator-substitution seam: it selects
+# WHOSE Gateway API CRDs the cluster runs, never WHETHER it runs them. A
+# cluster that already owns them (OpenShift, GKE, an install of Cilium or
+# Istio) sets this false and keeps its own copy. The agentgateway CRDs have no
+# seam: no other product owns them.
+gibson-gateway-crd-files:
+  gatewayApi:
+    enabled: true

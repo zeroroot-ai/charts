@@ -13,7 +13,9 @@ collects each image it names:
 
   - the image field of a container and of an init container,
   - the value of an env var named *_IMAGE,
-  - the value of a flag --<name>-image=<ref> in command or args.
+  - the value of a flag --<name>-image=<ref> in command or args,
+  - the image object of an AgentgatewayParameters (charts#815), from which
+    the agentgateway controller starts the proxy pods.
 
 It fails on each first-party or mirror reference (ghcr.io/zeroroot-ai/...)
 that airgap/images.txt does not list.
@@ -52,6 +54,15 @@ def images(docs) -> set[str]:
     for d in docs:
         if not isinstance(d, dict):
             continue
+        if d.get("kind") == "AgentgatewayParameters":
+            # The agentgateway controller starts the proxy from this image
+            # object (charts#815): <registry>/<repository>:<tag>@<digest>.
+            img = (d.get("spec") or {}).get("image") or {}
+            if img.get("repository"):
+                ref = "/".join(p for p in (img.get("registry"), img.get("repository")) if p)
+                ref += f":{img['tag']}" if img.get("tag") else ""
+                ref += f"@{img['digest']}" if img.get("digest") else ""
+                out.add(ref)
         for ps in pod_specs(d):
             for c in (ps.get("containers") or []) + (ps.get("initContainers") or []):
                 if c.get("image"):
@@ -93,14 +104,17 @@ def selftest() -> int:
     launcher = next((i for i in rendered if "/setec-launcher:" in i), None)
     builder = next((i for i in rendered if "/setec-disk-builder:" in i), None)
     velero = next((i for i in rendered if "/mirror/velero:" in i), None)
-    if not launcher or not builder or not velero:
-        print("SELFTEST FAIL: the render names no setec launcher, disk builder or Velero image: the check is blind")
+    proxy = next((i for i in rendered if "/mirror/agentgateway:" in i), None)
+    if not launcher or not builder or not velero or not proxy:
+        print("SELFTEST FAIL: the render names no setec launcher, disk builder, Velero or agentgateway proxy image: "
+              "the check is blind")
         return 1
-    for drop in (launcher, builder, velero):
+    for drop in (launcher, builder, velero, proxy):
         if missing(rendered, full - {drop}) != [drop]:
             print(f"SELFTEST FAIL: a list without {drop} must fail on it")
             return 1
-    print("  ✓ selftest: a list without the setec launcher, the disk builder or Velero fails, the committed list passes")
+    print("  ✓ selftest: a list without the setec launcher, the disk builder, Velero or the agentgateway proxy fails, "
+          "the committed list passes")
     return 0
 
 

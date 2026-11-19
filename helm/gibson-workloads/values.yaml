@@ -341,7 +341,7 @@ gibson:
     # on the SPIRE socket — so the fga-init Job hangs in dump-model until
     # its deadline and the whole install wedges. Verified on this digest:
     # `gibson dump-fga-model` exits 0 in under a second with the model.
-    tag: "v0.163.5@sha256:583f38b787a17febf5c6c5da3a74c5b809ec0d3a0135dff8d651eaee8dcaba3b"
+    tag: "v0.164.0@sha256:d0815f46c4006f4bca1dfb7e6f8a915100a9978664fe4d68dbc8df307a4dd7d6"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     # Empty by default: first-party pins are hand-committed in the combined
@@ -396,6 +396,12 @@ gibson:
     logging:
       level: info
 
+    # The Shared Agent Skills that the operator offers to each tenant (epic
+    # gibson#1364). Each entry is {name, reference}. The name equals the
+    # name in SKILL.md, and the reference is <registry>/<repository>@sha256:<hex>:
+    # the render fails on a tag. The daemon pulls each one at start.
+    sharedAgentSkills: []
+
     # Secrets / KEK provider — required (one-code-path) and
     # (daemon-no-K8s-API). The previous `type: kubernetes` was
     # removed by gibson#212 / S10: the daemon now reads the master KEK
@@ -411,6 +417,12 @@ gibson:
           # The chart mounts the gibson-master-key Secret as a volume
           # at /etc/gibson-kek/master-key (templates/gibson/statefulset.yaml).
           path: /etc/gibson-kek/master-key
+      # The daemon checks the base_url of a tenant model provider when a
+      # tenant saves it. The check refuses a host that resolves to a private,
+      # loopback, link-local or metadata address, and a host that does not
+      # resolve. True turns the check off. Set it true only for an install
+      # that serves models from inside the cluster or a private network.
+      allow_private_llm_endpoints: false
 
     # Prometheus metrics listener (Spec security-hardening R20 + week-2 task 18).
     #
@@ -791,7 +803,7 @@ dashboard:
     # kind keeps a moving :main tag (values-kind.yaml), exempt on purpose.
     # Bump: scripts/bump-image-digest.py --image dashboard --ref v<x.y.z> \
     #         --digest "$(HEAD /v2/zeroroot-ai/dashboard/manifests/v<x.y.z>)"
-    tag: "v0.135.3@sha256:b8889df513294524ee6df32996c5f73b0cab7e6ffbeb0b641b57b753e591609a"
+    tag: "v0.136.0@sha256:0bd73758a96cf8f1dece17e3e75fe61ea73bef1f7a727fba8fcddab08a70656b"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -1310,7 +1322,7 @@ extAuthz:
     # EXT_AUTHZ_CGJWT_KEYS_URL. It moves in lockstep with the daemon pin above
     # and with the https/:8086 value in ext-authz/deployment.yaml (deploy#1386)
     # — the three are one change, in both directions.
-    tag: "v0.163.4@sha256:b53d1f09eae7a3669399515e95f8aa93ffb6d700393c9572c4a38038512d017b"
+    tag: "v0.164.0@sha256:0540a54a8eada59880c2e13bc06a08184ec64845f8e59b491ceb68c584f81ed0"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -1324,6 +1336,10 @@ extAuthz:
   ports:
     grpc: 9001
     http: 9002
+    # The plaintext probe listener (EXT_AUTHZ_PROBE_ADDR): GET /healthz and
+    # GET /readyz only, for the kubelet. No Service port names it, and no
+    # network policy admits a peer to it.
+    probe: 9004
   service:
     type: ClusterIP
   resources:
@@ -2333,6 +2349,62 @@ fgaInit:
 # to the ratelimit gRPC port on loopback. Same image, same SDS pattern as the
 # edge — no spiffe-helper, no restart-on-rotation.
 # -----------------------------------------------------------------------------
+# The trace collector (charts#816, gibson#1366). The agentgateway proxy sends
+# one span for each request to it, and it sends the spans on to the daemon,
+# which records each model call. A file-backed queue on a PVC keeps the spans
+# while the daemon is down. The spans hold full prompts and tool results: the
+# collector has no debug exporter and logs at warn.
+traceCollector:
+  image:
+    # The Kubernetes distribution of the OpenTelemetry Collector. It holds
+    # the OTLP receiver and exporter, the file storage extension and the
+    # memory limiter. Mirrored by zeroroot-ai/.github mirror-list.yaml.
+    repository: ghcr.io/zeroroot-ai/mirror/opentelemetry-collector-k8s
+    tag: "0.165.0@sha256:ce55d0a38923c83120e4ba613fbdf446786652d2ce9f29d1cd7879e5d869829f"
+    pullPolicy: IfNotPresent
+  ports:
+    # The mTLS port of the Envoy sidecar. The Service targets it.
+    otlp: 4317
+    # The plaintext OTLP gRPC receiver of the collector, on 127.0.0.1 only.
+    local: 14317
+    # The plaintext loopback port of the Envoy sidecar that carries the
+    # export to the daemon over SPIFFE mTLS.
+    daemon: 15051
+    # The metrics of the collector (GET /metrics only).
+    metrics: 8888
+    # The plaintext probe listener of the Envoy sidecar (GET /ready only).
+    probe: 9901
+  queue:
+    # The size of the PVC of the persistent queue, in Gi.
+    size: 4Gi
+    # The most bytes that the queue holds, in MiB (sizer: bytes). One span
+    # can hold about 32 MiB (the request body and the response body), so a
+    # count limit cannot stop a full disk. The queue keeps its data in one
+    # bbolt file, and a compaction writes a second copy of the live data
+    # beside it. The limit leaves room for that copy and 512 MiB more:
+    # capacityMiB x 2 + 512 must not pass the PVC size, and the render fails
+    # when it does (trace-collector/configmap.yaml).
+    capacityMiB: 1536
+  # The largest OTLP message that the receiver accepts. A span holds the
+  # whole request body and response body (gateway.maxBufferSize, 16 MiB).
+  maxRecvMsgSizeMiB: 40
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  sidecar:
+    # The Envoy mTLS terminator. Reuses envoy.image.
+    resources:
+      requests:
+        cpu: 25m
+        memory: 48Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
+
 ratelimit:
   image:
     # Docker Hub carries commit-sha tags only. 8fe6ea42 = master 2026-08-24.
@@ -2348,6 +2420,8 @@ ratelimit:
     local: 8082
     # ratelimit's HTTP port: /healthcheck for probes.
     http: 8080
+    # The plaintext probe listener of the Envoy sidecar (GET /ready only).
+    probe: 9901
     # ratelimit's own Prometheus endpoint (/metrics): quota hits, over-limit
     # counts, Redis pool health. Also what keeps its stats out of the log.
     metrics: 9090
@@ -3313,9 +3387,10 @@ bootstrap:
     # reached Ready with no first admin (staging, 2026-09-23). Since
     # gibson#224 it dials Zitadel by Service name and claims the host by
     # header (ADR-0092), and it needs ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN.
-    # sha-78ef343 is the v0.160.1 release commit: from gibson#1091 the owner
-    # bootstrap sends the OpenFGA preshared key (GIBSON_FGA_KEY_DIR, charts#637).
-    tag: "sha-78ef343@sha256:ea11082c7cd9e71b237540e44718fcc0bc495dce6d5f57eeab35aad921a36355"
+    # From gibson#1091 (v0.160.1) the owner bootstrap sends the OpenFGA
+    # preshared key (GIBSON_FGA_KEY_DIR, charts#637). sha-fa05448 is the
+    # v0.164.0 release commit, which also cut gibson-bootstrap 2.0.0.
+    tag: "sha-fa05448@sha256:2413c573371a1220ce4519c1f65d1d05ff7c1bda8616109ba50ba552eaf65bfe"
     pullPolicy: IfNotPresent
 
   # activeDeadlineSeconds caps the Job runtime. 10 min covers a fresh

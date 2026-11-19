@@ -40,29 +40,29 @@ chart:
 
 # The gibson commit whose component catalog the dispatchTime group is
 # derived from (airgap/gibson-catalog.ref).
-gibsonCatalogRef: 6c9e8742703b2d46ef2909b54e7436b071bbce05
+gibsonCatalogRef: fa054485ba2a674c9dea209d78a7b6a3242a2b90
 
 # First-party platform images (private; ELv2 + the closed billing seam).
 firstParty:
-  - ref: ghcr.io/zeroroot-ai/connector-operator:v0.163.4@sha256:e920d1b45964328d95c6e44a1a4bfac58e531c8ab6f5df72e97ea256f30516b9
+  - ref: ghcr.io/zeroroot-ai/connector-operator:v0.164.0@sha256:2c766311720b8ead53c9cbe46f65bee76e3aa0839d049235c0e1f593c9c4b980
     digest: ""
     role: ""
-  - ref: ghcr.io/zeroroot-ai/dashboard:v0.135.3@sha256:b8889df513294524ee6df32996c5f73b0cab7e6ffbeb0b641b57b753e591609a
+  - ref: ghcr.io/zeroroot-ai/dashboard:v0.136.0@sha256:0bd73758a96cf8f1dece17e3e75fe61ea73bef1f7a727fba8fcddab08a70656b
     digest: ""
     role: "web UI (Next.js)"
   - ref: ghcr.io/zeroroot-ai/docs-site:v0.6.20@sha256:c8f0cd7fc01489eb8f45dacc2f225a4b717aaad28f1b58f08e3418859071a5ba
     digest: ""
     role: "customer documentation site"
-  - ref: ghcr.io/zeroroot-ai/ext-authz:v0.163.4@sha256:b53d1f09eae7a3669399515e95f8aa93ffb6d700393c9572c4a38038512d017b
+  - ref: ghcr.io/zeroroot-ai/ext-authz:v0.164.0@sha256:0540a54a8eada59880c2e13bc06a08184ec64845f8e59b491ceb68c584f81ed0
     digest: ""
     role: "Envoy ext_authz (auth edge — DO NOT replace with Istio AuthZ)"
-  - ref: ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-78ef343@sha256:ea11082c7cd9e71b237540e44718fcc0bc495dce6d5f57eeab35aad921a36355
+  - ref: ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-fa05448@sha256:2413c573371a1220ce4519c1f65d1d05ff7c1bda8616109ba50ba552eaf65bfe
     digest: ""
     role: ""
-  - ref: ghcr.io/zeroroot-ai/gibson:v0.163.5@sha256:583f38b787a17febf5c6c5da3a74c5b809ec0d3a0135dff8d651eaee8dcaba3b
+  - ref: ghcr.io/zeroroot-ai/gibson:v0.164.0@sha256:d0815f46c4006f4bca1dfb7e6f8a915100a9978664fe4d68dbc8df307a4dd7d6
     digest: ""
     role: "daemon (run/execute + platform RPCs)"
-  - ref: ghcr.io/zeroroot-ai/platform-operator:v0.163.4@sha256:c3f1136d102f33068e1d2679c9e2dc517cbca61ac702342ae67534833ec2c2ed
+  - ref: ghcr.io/zeroroot-ai/platform-operator:v0.164.0@sha256:14ed750dd5eba2f92934296631c7a38986b3ec5c5b19fc8063a9efae3ee5aeb5
     digest: ""
     role: "platform operator (Zitadel OIDC apps, FGA aggregate root)"
   - ref: ghcr.io/zeroroot-ai/setec-device-plugin:v0.129.0@sha256:04ec0fd1c238584743e58c4c4a9dfe41faebaf6ce5f785e890550945c1ade18b
@@ -80,7 +80,7 @@ firstParty:
   - ref: ghcr.io/zeroroot-ai/setec:v0.129.0@sha256:69bd5bf3c95dde483839ccb5dc8a6175e5c2212f8c561951d19c3c266669a5c7
     digest: ""
     role: "setec microVM operator (untrusted-exec boundary)"
-  - ref: ghcr.io/zeroroot-ai/tenant-operator:v0.163.4@sha256:68c7eea142b1229529e4805f5750d2b3af5bbbca92e538b78bcd42dd2302ee95
+  - ref: ghcr.io/zeroroot-ai/tenant-operator:v0.164.0@sha256:2ee42ef5cf338c114500e158214c0b9e4f25fabc51b7a8824fb856a09548e70f
     digest: ""
     role: "tenant operator"
   - ref: ghcr.io/zeroroot-ai/zitadel-login:v4.19.4@sha256:52211a61b1e60e88d462f317d10f6b6ec95d0fdacc2eb944637279fbcafa32da
@@ -91,6 +91,12 @@ firstParty:
 # Upstream sources live in zeroroot-ai/.github :: mirror-list.yaml — mirror
 # from there when standing up a fresh pull-through mirror.
 mirrored:
+  - ref: ghcr.io/zeroroot-ai/mirror/agentgateway-controller:v1.7.0@sha256:87c1363bf0cbc7fdb375866e592294114c8763097d2d0c9fc45fcb1fe00a4ab8
+    digest: ""
+    role: "agentgateway controller (Gateway API)"
+  - ref: ghcr.io/zeroroot-ai/mirror/agentgateway:v1.7.0@sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b
+    digest: ""
+    role: "Model gateway and Agent gateway proxy (the controller starts it from AgentgatewayParameters)"
   - ref: ghcr.io/zeroroot-ai/mirror/alpine-k8s:1.33.0@sha256:60333a52c38e9a8df0a9b93a5a24a4870f0db2c7ea3266b185386bd0a500d7dc
     digest: ""
     role: "kubectl/curl/jq job + init tooling"
@@ -157,6 +163,9 @@ mirrored:
   - ref: ghcr.io/zeroroot-ai/mirror/openfga:v1.21.0@sha256:2113c664a486b5da8d7a2cdab479e0d4e30639c80fd2c000540f645c1dbc1e55
     digest: ""
     role: "OpenFGA authz"
+  - ref: ghcr.io/zeroroot-ai/mirror/opentelemetry-collector-k8s:0.165.0@sha256:ce55d0a38923c83120e4ba613fbdf446786652d2ce9f29d1cd7879e5d869829f
+    digest: ""
+    role: "trace collector between the agentgateway proxy and the daemon (persistent queue)"
   - ref: ghcr.io/zeroroot-ai/mirror/ratelimit:8fe6ea42@sha256:a61547259607d40aff153050c2a87873ca1676d1d9f5f06937d412000dcc2df1
     digest: ""
     role: "shared per-client edge quota service"
@@ -210,7 +219,7 @@ dispatchTime:
   - ref: ghcr.io/zeroroot-ai/cve-triage@sha256:c08484bffd87d768809a257d8ab81f0393510027b5a3caffa09c1b401abde276
     digest: ""
     role: "CVE triage agent"
-  - ref: ghcr.io/zeroroot-ai/gibson-executor@sha256:08da3c8d28970b3304cfaed7345494c9a00d18d3c9642eccda1db0c46896a533
+  - ref: ghcr.io/zeroroot-ai/gibson-executor@sha256:12826078d28168d9c83a9f6b728bb9c63a1b07d84f61bd5f7e1f09754f8e0c05
     digest: ""
     role: "tool runner: one image hosting every CLI parser (nmap, nuclei, trivy, ...)"
   - ref: ghcr.io/zeroroot-ai/gibson-plugin-github@sha256:f26b84c74b3c5f79ea030f573e397c9aea8e5cb465f7c34ab73932d215ecce6d
