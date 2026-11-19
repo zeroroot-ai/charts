@@ -50748,9 +50748,9 @@ spec:
                       type: string
                     count:
                       description: |-
-                        Count is how many passes in a row made this same record. One pending
-                        record stands for all of them, so the status stays small while the
-                        daemon does not exist.
+                        Count is how many records an overflow record stands for. The pending
+                        list has a fixed size, and one overflow record at its end counts the
+                        records that did not fit.
                       format: int32
                       type: integer
                     fields:
@@ -52587,6 +52587,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
+    "helm.sh/resource-policy": keep
     controller-gen.kubebuilder.io/version: v0.20.1
   name: tenantmembers.gibson.zeroroot.ai
 spec:
@@ -53065,14 +53066,6 @@ spec:
                 - Failed
                 - Terminating
                 - Terminated
-                type: string
-              stripeCustomerId:
-                description: |-
-                  StripeCustomerID is the Stripe customer created for this tenant by the
-                  CreateStripeCustomer saga step. Lives in status (controller-populated,
-                  persisted by the reconciler's Status().Patch) — it was previously a
-                  spec field whose mid-saga write was silently discarded, so every
-                  reconcile created a fresh Stripe customer (tenant-operator#354).
                 type: string
               zitadelOrgID:
                 description: |-
