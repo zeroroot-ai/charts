@@ -11,6 +11,10 @@ The proxy pod meets the restricted level: the controller gives it a safe
 sysctl (net.ipv4.ip_unprivileged_port_start) and the parameters give it
 runAsNonRoot and RuntimeDefault seccomp. The default deny of
 network-policies.yaml covers it.
+
+Its sync wave is the lowest wave of each object that lives in it (the
+network policy of the proxy, wave -20), so a sync by wave never applies an
+object before its namespace. scripts/check-namespace-wave.py keeps this.
 */ -}}
 apiVersion: v1
 kind: Namespace
@@ -23,4 +27,4 @@ metadata:
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest
   annotations:
-    argocd.argoproj.io/sync-wave: "-10"
+    argocd.argoproj.io/sync-wave: "-20"
