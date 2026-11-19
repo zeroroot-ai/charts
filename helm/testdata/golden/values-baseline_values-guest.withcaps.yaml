@@ -3714,6 +3714,28 @@ data:
         socket_address: { address: 127.0.0.1, port_value: 9902 }
     static_resources:
       listeners:
+        - name: admin_probe
+          address:
+            socket_address: { address: 0.0.0.0, port_value: 9901 }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: admin_probe
+                    codec_type: AUTO
+                    route_config:
+                      name: admin_probe
+                      virtual_hosts:
+                        - name: admin_probe
+                          domains: ["*"]
+                          routes:
+                            - match: { path: "/ready" }
+                              route: { cluster: envoy_admin_loopback }
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
         - name: mtls_ingress
           address:
             socket_address: { address: 0.0.0.0, port_value: 8081 }
@@ -3759,6 +3781,16 @@ data:
                     stat_prefix: ratelimit_local
                     cluster: ratelimit_local
       clusters:
+        - name: envoy_admin_loopback
+          type: STATIC
+          connect_timeout: 0.25s
+          load_assignment:
+            cluster_name: envoy_admin_loopback
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: 127.0.0.1, port_value: 9902 }
         - name: spire_agent
           type: STATIC
           connect_timeout: 0.25s
@@ -3867,6 +3899,28 @@ data:
         socket_address: { address: 127.0.0.1, port_value: 9902 }
     static_resources:
       listeners:
+        - name: admin_probe
+          address:
+            socket_address: { address: 0.0.0.0, port_value: 9901 }
+          filter_chains:
+            - filters:
+                - name: envoy.filters.network.http_connection_manager
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                    stat_prefix: admin_probe
+                    codec_type: AUTO
+                    route_config:
+                      name: admin_probe
+                      virtual_hosts:
+                        - name: admin_probe
+                          domains: ["*"]
+                          routes:
+                            - match: { path: "/ready" }
+                              route: { cluster: envoy_admin_loopback }
+                    http_filters:
+                      - name: envoy.filters.http.router
+                        typed_config:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
         - name: otlp_mtls_ingress
           address:
             socket_address: { address: 0.0.0.0, port_value: 4317 }
@@ -3908,6 +3962,16 @@ data:
                     stat_prefix: daemon_mtls
                     cluster: daemon_mtls
       clusters:
+        - name: envoy_admin_loopback
+          type: STATIC
+          connect_timeout: 0.25s
+          load_assignment:
+            cluster_name: envoy_admin_loopback
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: { address: 127.0.0.1, port_value: 9902 }
         - name: spire_agent
           type: STATIC
           connect_timeout: 0.25s
@@ -10995,7 +11059,7 @@ spec:
         # A quota change is a ConfigMap change; roll the pod so ratelimit
         # re-reads it (RUNTIME_WATCH_ROOT is off: watching a projected
         # ConfigMap is racy across the kubelet's symlink swap).
-        checksum/config: 30962682d913a481f7f891c3e6762f82807aa5e3c0f8a1788b5a5fa5564d3c8c
+        checksum/config: ca59a44d9822e7bc78040832ec767ddbeb1388660c2f9e25ccd8de29bfbbc1c6
     spec:
       
       serviceAccountName: gibson-ratelimit
@@ -11184,14 +11248,20 @@ spec:
             - name: grpc
               containerPort: 8081
               protocol: TCP
-          # A tcpSocket probe needs the kernel to accept, nothing more, so 2
-          # is generous. It is declared because the default is 1 (charts#306).
+            # The plaintext probe listener. It serves GET /ready only.
+            - name: probe
+              containerPort: 9901
+              protocol: TCP
+          # The grpc port is SPIFFE mTLS. A tcpSocket probe there opens the
+          # port with no handshake, so the probe asks Envoy /ready through
+          # the probe listener. Envoy answers from memory, so 3 seconds.
           readinessProbe:
-            tcpSocket:
-              port: grpc
+            httpGet:
+              path: /ready
+              port: probe
             initialDelaySeconds: 3
             periodSeconds: 5
-            timeoutSeconds: 2
+            timeoutSeconds: 3
           resources:
             limits:
               cpu: 100m
@@ -15206,7 +15276,7 @@ spec:
         # The socket, the scratch directory and the queue. The queue is not
         # data of record (see the header).
         backup.velero.io/backup-volumes-excludes: "queue,spire-agent-socket,tmp"
-        checksum/config: 74349b5197f96c9e4c349b50518d91e23c8a033d078729947d518c5233f21383
+        checksum/config: 38ba1951ee09295788d3733715ced8537bd8420cf3396adb0fe2cea2d1b4c957
     spec:
       
       serviceAccountName: gibson-trace-collector
@@ -15333,12 +15403,21 @@ spec:
             - name: otlp
               containerPort: 4317
               protocol: TCP
+            # The plaintext probe listener. It serves GET /ready only.
+            - name: probe
+              containerPort: 9901
+              protocol: TCP
+          # The otlp port is SPIFFE mTLS. A tcpSocket probe there opens the
+          # port with no handshake, so the probe asks Envoy /ready through
+          # the probe listener. Envoy answers 200 when its listeners and
+          # clusters are ready.
           readinessProbe:
-            tcpSocket:
-              port: otlp
+            httpGet:
+              path: /ready
+              port: probe
             initialDelaySeconds: 3
             periodSeconds: 5
-            timeoutSeconds: 2
+            timeoutSeconds: 3
           resources:
             limits:
               cpu: 200m
@@ -17496,6 +17575,31 @@ spec:
             runAsNonRoot: true
             seccompProfile:
               type: RuntimeDefault
+          # The proxy container of the controller (strategic merge by the
+          # container name). The proxy binds no listener and answers 500 on
+          # /healthz/ready until its first xDS config arrives
+          # (crates/agentgateway/src/app.rs: gw.run() waits for
+          # xds_rx.changed(), and the "state manager" readiness task drops
+          # only then). The upstream startup probe gives 60 x 1 s, so a
+          # controller that starts slowly restarts the proxy. This budget is
+          # gateway.proxy.startupSeconds. The proxy has no liveness probe,
+          # so after its start the kubelet never restarts it for a lost
+          # controller. The readiness probe gets a stated timeout.
+          containers:
+            - name: agentgateway
+              startupProbe:
+                httpGet:
+                  path: /healthz/ready
+                  port: 15021
+                periodSeconds: 5
+                timeoutSeconds: 3
+                failureThreshold: 120
+              readinessProbe:
+                httpGet:
+                  path: /healthz/ready
+                  port: 15021
+                periodSeconds: 10
+                timeoutSeconds: 3
 ---
 # Source: gibson/templates/agentgateway/a2a-route.yaml
 apiVersion: agentgateway.dev/v1alpha1

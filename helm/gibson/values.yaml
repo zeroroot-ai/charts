@@ -1908,6 +1908,11 @@ gateway:
       tag: "v1.7.0"
       digest: "sha256:60216aafb03d37f94e952ff3d51d2f630a65b10ecaebdc0a864882f92610c45b"
     replicas: 2
+    # The startup budget of the proxy, in seconds. The proxy is not Ready
+    # and serves no listener until the controller sends its first xDS
+    # config. A cluster start can keep the controller away for minutes, and
+    # the upstream budget of 60 seconds then restarts the proxy.
+    startupSeconds: 600
     resources:
       requests:
         cpu: 200m

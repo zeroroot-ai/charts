@@ -116,6 +116,31 @@ spec:
             runAsNonRoot: true
             seccompProfile:
               type: RuntimeDefault
+          # The proxy container of the controller (strategic merge by the
+          # container name). The proxy binds no listener and answers 500 on
+          # /healthz/ready until its first xDS config arrives
+          # (crates/agentgateway/src/app.rs: gw.run() waits for
+          # xds_rx.changed(), and the "state manager" readiness task drops
+          # only then). The upstream startup probe gives 60 x 1 s, so a
+          # controller that starts slowly restarts the proxy. This budget is
+          # gateway.proxy.startupSeconds. The proxy has no liveness probe,
+          # so after its start the kubelet never restarts it for a lost
+          # controller. The readiness probe gets a stated timeout.
+          containers:
+            - name: agentgateway
+              startupProbe:
+                httpGet:
+                  path: /healthz/ready
+                  port: 15021
+                periodSeconds: 5
+                timeoutSeconds: 3
+                failureThreshold: {{ div $gw.proxy.startupSeconds 5 }}
+              readinessProbe:
+                httpGet:
+                  path: /healthz/ready
+                  port: 15021
+                periodSeconds: 10
+                timeoutSeconds: 3
 ---
 {{- /* The cross-namespace references of the gateway namespace into the
        release namespace: the listener certificate Secret, the ext-authz and
