@@ -110,7 +110,8 @@ TRUSTED = ("tenant", "subject", "mission", "task")
 # route agent of an A2A call (gibson contract round 8). The route of an
 # outside agent removes x-gibson-route-agent before the trace snapshot, so
 # the trace reads the copy.
-META_COPY = {**{f: f'request.headers["x-gibson-{f}"]' for f in TRUSTED}}
+META_COPY = {**{f: f'request.headers["x-gibson-{f}"]' for f in TRUSTED},
+             "route_agent": 'request.headers["x-gibson-route-agent"]'}
 # The trace attributes that the daemon reads, by name, with their expression.
 TRACE_FIELDS = {
     "gibson.request_body": "string(request.body)",
@@ -642,6 +643,14 @@ def selftest() -> int:
                      "traffic": {"extAuth": {"backendRef": {"name": "other", "port": 1}, "grpc": {},
                                              "failureMode": "FailOpen"}}}}),
         "a trace with the default buffer": lambda ds: pol(ds, "-trace")["spec"]["frontend"].pop("http"),
+        "a trace with no route agent": lambda ds: pol(ds, "-trace")["spec"]["frontend"]["tracing"][
+            "attributes"].update(add=[a for a in pol(ds, "-trace")["spec"]["frontend"]["tracing"]["attributes"][
+                "add"] if a["name"] != "gibson.route_agent"]),
+        "a route agent field that reads the header": lambda ds: next(
+            a for a in pol(ds, "-trace")["spec"]["frontend"]["tracing"]["attributes"]["add"]
+            if a["name"] == "gibson.route_agent").update(expression='request.headers["x-gibson-route-agent"]'),
+        "no metadata copy of the route agent": lambda ds: pol(ds, "-ext-authz")["spec"]["traffic"][
+            "transformation"]["request"]["metadata"].pop("route_agent"),
         "a proxy policy that allows a private range": lambda ds: [c["except"].remove("10.0.0.0/8")
                                                                for c in proxy_egress(ds, "toCIDRSet")
                                                                if c["cidr"] == "0.0.0.0/0"],
