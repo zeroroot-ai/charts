@@ -22,8 +22,8 @@ NOTE: Kubernetes ResourceQuota's scopeSelector only supports the built-in
 "NotBestEffort" / "CrossNamespacePodAffinity" operators on the upstream
 "object" axis. To filter by an arbitrary pod label we use a per-namespace
 ResourceQuota in combination with a separate LimitRange that caps any
-single tenant pod's memory limit (already enforced by the chart's
-tenantNeo4j.tiers.* values).
+single tenant pod's memory limit (already set by the chart's
+tenantNeo4j.size value, or by the size on the Tenant).
 
 For label-scoped quotas at namespace granularity, the ResourceQuota's
 hard.{count,pods,memory} fields apply to ALL pods in the namespace. Since
@@ -37,8 +37,7 @@ single-namespace dev mode.
 ---
 # Cluster-scoped PriorityClass referenced by:
 #   (a) every per-tenant Neo4j StatefulSet pod (set by the operator's
-#       Go-built StatefulSets today; moves into the tenant-neo4j-template
-#       ConfigMap once Task 22 renders it — deploy#1437), and
+#       Go-built StatefulSets), and
 #   (b) the ResourceQuota's scopeSelector below (kind only).
 # Rendered unconditionally so the PriorityClass exists in every overlay,
 # even when the kind quota is not active.

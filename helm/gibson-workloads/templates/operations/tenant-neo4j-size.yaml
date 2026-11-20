@@ -1,0 +1,43 @@
+{{/*
+The default size of a tenant Neo4j, delivered to the tenant-operator.
+
+WHAT IT CARRIES
+
+Three keys: `storage`, `cpu` and `memory`. They come from `tenantNeo4j.size`.
+No plan is a key. One size applies to each tenant that sets no size of its
+own, and a Tenant sets its own size in `spec.resources.neo4j` (gibson#1526).
+
+`memory` is one number used for BOTH the request and the limit of the
+container. The operator pins the JVM heap to a quarter of it and the page
+cache to an eighth, so a request and a limit that disagreed would size the JVM
+against memory the container may not get.
+
+WHAT READS IT
+
+gibson operators/tenant/internal/dataplane/neo4j.go, once for each provision.
+A key that is missing or that does not parse FAILS the provision. The operator
+uses its built-in size only when this ConfigMap does not exist, so each key is
+`required` here and the ConfigMap renders on every profile.
+
+A values file that still sets the deleted `tenantNeo4j.tiers` FAILS the
+render. Helm would otherwise ignore the key, and each new tenant would get the
+default size with no message.
+
+It lives in the release namespace, not a tenant namespace: it is one size for
+the whole platform.
+*/}}
+{{- if hasKey .Values.tenantNeo4j "tiers" -}}
+{{- fail "tenantNeo4j.tiers was deleted (gibson#1526). No plan selects the size of a tenant Neo4j. Set the one default size in tenantNeo4j.size (storage, cpu, memory) and remove tenantNeo4j.tiers from your values." -}}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tenant-neo4j-size
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gibson.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tenant-neo4j
+data:
+  storage: {{ required "tenantNeo4j.size.storage is required: the operator refuses a default size with no storage" .Values.tenantNeo4j.size.storage | quote }}
+  cpu: {{ required "tenantNeo4j.size.cpu is required: the operator refuses a default size with no cpu" .Values.tenantNeo4j.size.cpu | quote }}
+  memory: {{ required "tenantNeo4j.size.memory is required: the operator refuses a default size with no memory" .Values.tenantNeo4j.size.memory | quote }}
