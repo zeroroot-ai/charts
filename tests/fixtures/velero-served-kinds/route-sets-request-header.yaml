@@ -1,0 +1,38 @@
+# Fixture of scripts/check-velero-reads-served-kinds.py (--selftest).
+# Two routes in namespaces that the Schedule includes. Each one sets or adds a
+# request header to a literal value. The ClusterRole velero-server reads these
+# kinds, so a Backup would hold the value. The check must fail on each one.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: provider
+  namespace: tenant-acme
+spec:
+  rules:
+    - filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            set:
+              - name: Authorization
+                value: Bearer fixture-not-a-credential
+      backendRefs:
+        - name: provider
+          port: 443
+---
+# No namespace: the render puts it in the release namespace, which the
+# Schedule includes. The filter is on the backendRef.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: provider
+spec:
+  rules:
+    - backendRefs:
+        - name: provider
+          port: 443
+          filters:
+            - type: RequestHeaderModifier
+              requestHeaderModifier:
+                add:
+                  - name: x-api-key
+                    value: fixture-not-a-credential
