@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.155.0](https://github.com/zeroroot-ai/charts/compare/v0.154.11...v0.155.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* route model and agent traffic through agentgateway and pin gibson v0.164.0 ([#818](https://github.com/zeroroot-ai/charts/issues/818))
+
+### Features
+
+* route a2a inbound calls through the edge to the daemon and pin gibson v0.165.0 ([#820](https://github.com/zeroroot-ai/charts/issues/820)) ([06a72d0](https://github.com/zeroroot-ai/charts/commit/06a72d0eb8f4dda2ed3342f405f43fe5e1cfef8a))
+* route model and agent traffic through agentgateway and pin gibson v0.164.0 ([#818](https://github.com/zeroroot-ai/charts/issues/818)) ([e56e5be](https://github.com/zeroroot-ai/charts/commit/e56e5be47fe2124a455ea4692ebf618f65c33b1e))
+
+
+### Bug Fixes
+
+* pin gibson images to v0.165.1 ([#821](https://github.com/zeroroot-ai/charts/issues/821)) ([3217c8e](https://github.com/zeroroot-ai/charts/commit/3217c8ee44b07d52733591e2f43d5af20abee508))
+* pin the gibson images to v0.165.1 ([3217c8e](https://github.com/zeroroot-ai/charts/commit/3217c8ee44b07d52733591e2f43d5af20abee508))
+
 ## [0.154.11](https://github.com/zeroroot-ai/charts/compare/v0.154.10...v0.154.11) (2026-11-04)
 
 
