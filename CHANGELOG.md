@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.155.1](https://github.com/zeroroot-ai/charts/compare/v0.155.0...v0.155.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* **rework:** let velero read the gateway kinds so a backup completes ([#825](https://github.com/zeroroot-ai/charts/issues/825)) ([8f11b33](https://github.com/zeroroot-ai/charts/commit/8f11b33be7496dbb65d0017cb67201bdc5cf3d9b))
+* **velero:** let a backup list the gateway kinds and derive the guard from the shipped crds ([8f11b33](https://github.com/zeroroot-ai/charts/commit/8f11b33be7496dbb65d0017cb67201bdc5cf3d9b))
+
 ## [0.155.0](https://github.com/zeroroot-ai/charts/compare/v0.154.11...v0.155.0) (2026-11-20)
 
 
