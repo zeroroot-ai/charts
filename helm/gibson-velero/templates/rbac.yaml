@@ -238,8 +238,18 @@ rules:
   #
   #   gateway.networking.k8s.io  Read. The six namespaced kinds of the
   #                              vendored Gateway API CRDs are routing
-  #                              config. A field that needs a credential
-  #                              names a Secret, and no field holds a value.
+  #                              config. A TLS field names a Secret. One
+  #                              field can hold a literal: an HTTPRoute or a
+  #                              GRPCRoute can set a request header to a
+  #                              fixed value (`requestHeaderModifier`), and
+  #                              that value can be a credential. The grant
+  #                              is correct while no route in a backed-up
+  #                              namespace does that. The chart and the
+  #                              tenant-operator write each route into the
+  #                              gateway namespace, which no Backup
+  #                              includes, and the guard fails on a rendered
+  #                              route in a backed-up namespace that sets a
+  #                              request header.
   #                              `gatewayclasses` is cluster-scoped and the
   #                              Schedule does not name it, so no Backup
   #                              lists it.
