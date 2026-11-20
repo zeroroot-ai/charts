@@ -7,7 +7,7 @@ metadata:
   namespace: gibson
   annotations:
     # gitops#297: this role-creating job (gibson_platform/tenant_admin
-    # roles + DBs, pg_trgm seed, tenant_neo4j_endpoints registry) MUST run
+    # roles + DBs, pg_trgm seed) MUST run
     # BEFORE anything that logs in with those roles — the zitadel-init Sync hook
     # at wave -4 and every DB-consuming service. As a post-install/PostSync hook
     # it deadlocked: consumers (Sync) waited for roles this job had not yet
@@ -59,25 +59,7 @@ done
 # later own the public schema as pg_database_owner and grant no CREATE to
 # others. Its platform-db migrations create tables there.
 echo "[postgres-db] tenant_admin may create in the public schema of postgres..."
-"${PSQL[@]}" -d postgres -c "GRANT CREATE, USAGE ON SCHEMA public TO tenant_admin;"
-
-# tenant-operator#69: the Neo4j data-plane step writes one row per tenant
-# into tenant_neo4j_endpoints, in the postgres database tenant_admin
-# connects to. The operator does not run that migration at startup, so the
-# table is created here.
-echo "[neo4j-registry] tenant_neo4j_endpoints..."
-"${PSQL[@]}" -d postgres <<'SQL'
-CREATE TABLE IF NOT EXISTS tenant_neo4j_endpoints (
-    tenant_id   TEXT        PRIMARY KEY,
-    bolt_uri    TEXT        NOT NULL,
-    secret_name TEXT        NOT NULL,
-    tier        TEXT        NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    ready_at    TIMESTAMPTZ,
-    version     INT         NOT NULL DEFAULT 1
-);
-GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_neo4j_endpoints TO tenant_admin;
-SQL` }}
+"${PSQL[@]}" -d postgres -c "GRANT CREATE, USAGE ON SCHEMA public TO tenant_admin;"` }}
 spec:
   backoffLimit: 20
   ttlSecondsAfterFinished: 600

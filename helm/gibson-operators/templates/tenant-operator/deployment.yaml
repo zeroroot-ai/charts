@@ -388,8 +388,7 @@ spec:
             # NEO4J_URI / NEO4J_USER / NEO4J_PASSWORD intentionally omitted.
             # The shared Neo4j cluster is gone (spec graphrag-tenant-scope).
             # The operator provisions per-tenant Neo4j StatefulSets from its
-            # Go-built resources (the tenant-neo4j-template ConfigMap read
-            # falls back to NotFound until Task 22 renders it — deploy#1437);
+            # Go-built resources, at the size of the tenant-neo4j-size ConfigMap;
             # per-tenant credentials are written to the per-tenant Vault
             # namespace at provisioning time (see internal/dataplane/neo4j.go).
             # SPIFFE workload API — the operator authenticates to the dashboard

@@ -1847,9 +1847,7 @@ envoy:
 # -----------------------------------------------------------------------------
 # The shared in-chart Neo4j subchart was removed in spec graphrag-tenant-scope.
 # Per-tenant Neo4j Community StatefulSets are provisioned by the tenant-operator
-# (Go-built today — the tenant-neo4j-template ConfigMap it is meant to read is
-# not yet rendered by this chart, deploy#1437; see the tenantNeo4j: block below
-# for tier sizing). The keys here only select the daemon's Neo4jEndpointResolver
+# (see the tenantNeo4j: block below for the size). The keys here only select the daemon's Neo4jEndpointResolver
 # implementation; nothing in this block describes a shared cluster anymore.
 neo4j:
   # tenant_mode — selects the daemon's Neo4jEndpointResolver implementation.
@@ -2825,25 +2823,15 @@ dataPlane:
     kindRootToken: false
 
 # =============================================================================
-# tenantNeo4j — per-tenant Neo4j Community StatefulSet sizing & image.
-# Spec: per-tenant-data-plane-completion Task 23 / Req 5.7, 6.4 (D7).
+# tenantNeo4j — per-tenant Neo4j Community StatefulSet size and image.
 #
-# INTENDED CONSUMER, NOT YET BUILT (deploy#1437): no template in this
-# Tier -> resources mapping lives HERE in the chart, NOT in the operator.
-# SREs change sizing by editing values; the operator only resolves which
-# tier a tenant is on (from the Tenant CRD) and builds the shape.
+# `size` is the DEFAULT size of a tenant Neo4j. No plan selects a size
+# (gibson#1526). A Tenant that needs a different size sets it in
+# `spec.resources.neo4j` (storage, cpu, memory), and a field that it does not
+# set keeps the default here.
 #
-# These values are delivered by templates/operations/tenant-neo4j-template.yaml,
-# which renders the `tenant-neo4j-template` ConfigMap the operator reads.
-#
-# THEY WERE NOT DELIVERED UNTIL THAT TEMPLATE EXISTED. The operator read the
-# ConfigMap and threw its content away, so its own inline table was not a
-# fallback — it was the only path, and staging and production ran the
-# dev-shaped `team` sizing while this table sat here unread.
-#
-# THE KEYS ARE THE TIER IDS A Tenant CR CARRIES: team, org, enterprise. They
-# used to be small/medium/large, which named the same three things a second
-# way and matched nothing the operator resolves.
+# templates/operations/tenant-neo4j-size.yaml delivers `size` to the
+# tenant-operator in the `tenant-neo4j-size` ConfigMap.
 #
 # THE SHAPE IS WHAT THE OPERATOR APPLIES: one storage request, one CPU
 # request, and one memory number used for BOTH the request and the limit.
@@ -2851,11 +2839,16 @@ dataPlane:
 # request and limit that disagreed would size the JVM against memory the
 # container may not get. That is why there is no requests/limits split here.
 #
-# WHICH RUNG GETS WHICH SIZE (ADR-0090). The table below is the floor:
-# `team` at the smallest size a non-backed-up Neo4j is measured to run at,
-# which is what baseline, developer and CI install. staging and production
-# raise `team` to Neo4j's own stated minimum in their environment values,
-# where environment sizing belongs.
+# WHICH RUNG GETS WHICH SIZE (ADR-0090). The default below is the floor: the
+# smallest size a non-backed-up Neo4j is measured to run at, which is what
+# baseline, developer and CI install. An environment that can afford more
+# raises `size` in its environment values, where environment sizing belongs.
+#
+# AN INSTANCE THAT RUNS DOES NOT SHRINK. The operator applies `storage` only
+# when it creates the volume. It keeps the CPU and the memory of a running
+# instance when `size` is smaller, and it raises them when `size` is larger.
+# Only a size on the Tenant reduces the CPU or the memory of a running
+# instance.
 # =============================================================================
 tenantNeo4j:
   image:
@@ -2871,38 +2864,15 @@ tenantNeo4j:
   # values-kind.yaml sets this to 8Gi to fence runaway provisioning on a
   # tiny dev node.
   kindResourceCap: ""
-  tiers:
-    # The measured floor. 100m/1Gi is what every exit test has provisioned a
-    # team tenant at, on a single node, with the heap pinned — so it is the
-    # smallest size this is known to work at rather than the smallest number
-    # someone was willing to write. Neo4j's own chart refuses to render below
-    # 500m/2Gi; this runs under that only because the operator pins the heap
-    # and page cache instead of letting Neo4j size itself from what it detects.
-    team:
-      storage: 10Gi
-      cpu: 100m
-      memory: 1Gi
-    # org and enterprise are the chart's existing sizes, which are already at
-    # or above Neo4j's stated minimum, so they are the same on every rung.
-    org:
-      storage: 50Gi
-      cpu: 500m
-      memory: 4Gi
-    enterprise:
-      storage: 200Gi
-      cpu: "1"
-      memory: 8Gi
-    # enterprise-deploy is the plan of the first tenant that every self-hosted
-    # install seeds (global.firstTenant.tier in the umbrella). It starts at the
-    # measured floor, the same as team, so a fresh install fits one small node.
-    # Before charts#157 that tenant was team and ran at this size. With no row
-    # here the operator fell back to its built-in 1 CPU / 8Gi, the tenant Neo4j
-    # pod stayed Pending with "Insufficient cpu", and the tenant never reached
-    # Ready. A production install raises this tier in its own values.
-    enterprise-deploy:
-      storage: 10Gi
-      cpu: 100m
-      memory: 1Gi
+  # The measured floor. 100m/1Gi is what every exit test has provisioned a
+  # tenant at, on a single node, with the heap pinned. So it is the smallest
+  # size this is known to work at. Neo4j's own chart refuses to render below
+  # 500m/2Gi; this runs under that only because the operator pins the heap
+  # and page cache instead of letting Neo4j size itself from what it detects.
+  size:
+    storage: 10Gi
+    cpu: 100m
+    memory: 1Gi
 
 # =============================================================================
 # reservedNames — chart-managed denylist consumed by:

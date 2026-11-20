@@ -290,7 +290,7 @@ includes the daemon hits the check.
        on it. The previous `tenantOperator.enabled=true` assertion has been
        deleted along with the value. */ -}}
 {{- if not $tenantNeo4jTag -}}
-{{- fail "validateTenantStoresConfigured: neo4j.tenant_mode=\"instance\" requires tenantNeo4j.image.tag to be set (the per-tenant StatefulSet image comes from this value — via the operator's Go-built resources today; via the tenant-neo4j-template ConfigMap once Task 22 renders it, deploy#1437).\nSpec: per-tenant-data-plane-completion Tasks 22, 23." -}}
+{{- fail "validateTenantStoresConfigured: neo4j.tenant_mode=\"instance\" requires tenantNeo4j.image.tag to be set (the per-tenant StatefulSet image comes from this value, through the Go-built resources of the operator).\nSpec: per-tenant-data-plane-completion Tasks 22, 23." -}}
 {{- end -}}
 {{- else if eq $tenantMode "multi-db" -}}
 {{- $sharedURI := "" -}}

@@ -45,8 +45,7 @@ description: >
 # Source: gibson/charts/gibson-workloads/templates/operations/tenant-neo4j-resource-quota.yaml
 # Cluster-scoped PriorityClass referenced by:
 #   (a) every per-tenant Neo4j StatefulSet pod (set by the operator's
-#       Go-built StatefulSets today; moves into the tenant-neo4j-template
-#       ConfigMap once Task 22 renders it — deploy#1437), and
+#       Go-built StatefulSets), and
 #   (b) the ResourceQuota's scopeSelector below (kind only).
 # Rendered unconditionally so the PriorityClass exists in every overlay,
 # even when the kind quota is not active.
@@ -4574,11 +4573,11 @@ data:
     kyverno-
 
 ---
-# Source: gibson/charts/gibson-workloads/templates/operations/tenant-neo4j-template.yaml
+# Source: gibson/charts/gibson-workloads/templates/operations/tenant-neo4j-size.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: tenant-neo4j-template
+  name: tenant-neo4j-size
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -4588,23 +4587,9 @@ metadata:
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/component: tenant-neo4j
 data:
-  tiers.yaml: |
-    enterprise:
-      storage: "200Gi"
-      cpu: "1"
-      memory: "8Gi"
-    enterprise-deploy:
-      storage: "10Gi"
-      cpu: "100m"
-      memory: "1Gi"
-    org:
-      storage: "50Gi"
-      cpu: "500m"
-      memory: "4Gi"
-    team:
-      storage: "10Gi"
-      cpu: "100m"
-      memory: "1Gi"
+  storage: "10Gi"
+  cpu: "100m"
+  memory: "1Gi"
 
 ---
 # Source: gibson/charts/gibson-workloads/templates/ratelimit/configmap.yaml
@@ -6377,7 +6362,7 @@ rules:
   - apiGroups: [""]
     resources:
       - secrets                  # DB creds, Vault transit, Neo4j auth
-      - configmaps               # tenant-neo4j-template read (NotFound + Go fallback until Task 22 renders it, deploy#1437)
+      - configmaps               # tenant-neo4j-size read (the default size of a tenant Neo4j)
       - services                 # per-tenant DB Services
       - persistentvolumeclaims   # per-tenant DB PVCs
       - resourcequotas           # per-tenant quota
@@ -12621,8 +12606,7 @@ spec:
             # NEO4J_URI / NEO4J_USER / NEO4J_PASSWORD intentionally omitted.
             # The shared Neo4j cluster is gone (spec graphrag-tenant-scope).
             # The operator provisions per-tenant Neo4j StatefulSets from its
-            # Go-built resources (the tenant-neo4j-template ConfigMap read
-            # falls back to NotFound until Task 22 renders it — deploy#1437);
+            # Go-built resources, at the size of the tenant-neo4j-size ConfigMap;
             # per-tenant credentials are written to the per-tenant Vault
             # namespace at provisioning time (see internal/dataplane/neo4j.go).
             # SPIFFE workload API — the operator authenticates to the dashboard
@@ -30613,7 +30597,7 @@ metadata:
   namespace: gibson
   annotations:
     # gitops#297: this role-creating job (gibson_platform/tenant_admin
-    # roles + DBs, pg_trgm seed, tenant_neo4j_endpoints registry) MUST run
+    # roles + DBs, pg_trgm seed) MUST run
     # BEFORE anything that logs in with those roles — the zitadel-init Sync hook
     # at wave -4 and every DB-consuming service. As a post-install/PostSync hook
     # it deadlocked: consumers (Sync) waited for roles this job had not yet
@@ -30751,24 +30735,6 @@ spec:
           # others. Its platform-db migrations create tables there.
           echo "[postgres-db] tenant_admin may create in the public schema of postgres..."
           "${PSQL[@]}" -d postgres -c "GRANT CREATE, USAGE ON SCHEMA public TO tenant_admin;"
-          
-          # tenant-operator#69: the Neo4j data-plane step writes one row per tenant
-          # into tenant_neo4j_endpoints, in the postgres database tenant_admin
-          # connects to. The operator does not run that migration at startup, so the
-          # table is created here.
-          echo "[neo4j-registry] tenant_neo4j_endpoints..."
-          "${PSQL[@]}" -d postgres <<'SQL'
-          CREATE TABLE IF NOT EXISTS tenant_neo4j_endpoints (
-              tenant_id   TEXT        PRIMARY KEY,
-              bolt_uri    TEXT        NOT NULL,
-              secret_name TEXT        NOT NULL,
-              tier        TEXT        NOT NULL,
-              created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-              ready_at    TIMESTAMPTZ,
-              version     INT         NOT NULL DEFAULT 1
-          );
-          GRANT SELECT, INSERT, UPDATE, DELETE ON tenant_neo4j_endpoints TO tenant_admin;
-          SQL
           echo "[postgres-setup] ALL_ROLES_SETUP_OK"
 
 ---
