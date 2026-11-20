@@ -1,0 +1,21 @@
+# Fixture of scripts/check-velero-reads-served-kinds.py (--selftest).
+# A namespaced CRD that the ClusterRole velero-server cannot read and that the
+# Schedule does not exclude. The check must fail on it. This is the shape of
+# charts#818: a new CRD file in the tree and no change in helm/gibson-velero.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.fixture.zeroroot.test
+spec:
+  group: fixture.zeroroot.test
+  scope: Namespaced
+  names:
+    kind: Widget
+    plural: widgets
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object

@@ -194,7 +194,8 @@ velero-home: ## The Velero server keeps HOME on an emptyDir, so its read-only ro
 	@python3 scripts/check-velero-home.py --selftest
 	@python3 scripts/check-velero-home.py
 
-velero-reads-served-kinds: ## The Velero server can list each served kind a Backup lists, even one the Schedule excludes (charts#660, charts#684)
+velero-reads-served-kinds: ## Each namespaced kind of the shipped CRDs is readable by the Velero server or excluded by the Schedule, so a Backup completes (charts#660, charts#684, charts#818)
+	@$(MAKE) -s repack
 	@python3 scripts/check-velero-reads-served-kinds.py --selftest
 	@python3 scripts/check-velero-reads-served-kinds.py
 
