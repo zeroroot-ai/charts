@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.156.0](https://github.com/zeroroot-ai/charts/compare/v0.155.2...v0.156.0) (2026-11-20)
+
+
+### Features
+
+* **tenant-neo4j:** one default size and no plan table ([#824](https://github.com/zeroroot-ai/charts/issues/824)) ([3a68bd5](https://github.com/zeroroot-ai/charts/commit/3a68bd5919f061ae7104870720561478c038d187))
+
 ## [0.155.2](https://github.com/zeroroot-ai/charts/compare/v0.155.1...v0.155.2) (2026-11-20)
 
 
