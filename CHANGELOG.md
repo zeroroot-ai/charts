@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.155.2](https://github.com/zeroroot-ai/charts/compare/v0.155.1...v0.155.2) (2026-11-20)
+
+
+### Bug Fixes
+
+* **rework:** close three gaps in the velero served-kinds guard ([#827](https://github.com/zeroroot-ai/charts/issues/827)) ([e2cf019](https://github.com/zeroroot-ai/charts/commit/e2cf0191230927b48f1e4d52831f579c0e2e5363))
+* **velero:** close three gaps in the served-kinds guard ([e2cf019](https://github.com/zeroroot-ai/charts/commit/e2cf0191230927b48f1e4d52831f579c0e2e5363))
+
 ## [0.155.1](https://github.com/zeroroot-ai/charts/compare/v0.155.0...v0.155.1) (2026-11-20)
 
 
