@@ -3795,6 +3795,45 @@ rules:
   - apiGroups: ["external-secrets.io"]
     resources: ["externalsecrets", "pushsecrets", "secretstores"]
     verbs: ["get", "list", "watch"]
+  # The kinds of the Model gateway and the Agent gateway (charts#818), read
+  # for the same enumeration reason. charts#818 shipped their CRDs and did not
+  # change this role, so each Backup on chart 0.155.0 ended PartiallyFailed
+  # and the tenant-operator refused each tenant delete. The rule for each
+  # kind, which scripts/check-velero-reads-served-kinds.py now derives from
+  # the shipped CRD files:
+  #
+  #   gateway.networking.k8s.io  Read. The six namespaced kinds of the
+  #                              vendored Gateway API CRDs are routing
+  #                              config. A field that needs a credential
+  #                              names a Secret, and no field holds a value.
+  #                              `gatewayclasses` is cluster-scoped and the
+  #                              Schedule does not name it, so no Backup
+  #                              lists it.
+  #   modelproviders             Read, and no `create`. The tenant-operator
+  #                              makes each one from the provider records
+  #                              of the daemon, and makes it again after a
+  #                              restore. It names its credential Secret
+  #                              and holds no value. No Restore names it.
+  #   agentgateway.dev           DELIBERATELY absent, the secrets treatment.
+  #                              AgentgatewayBackend, AgentgatewayModel and
+  #                              AgentgatewayPolicy have the field
+  #                              `auth.key`, an inline API key, and
+  #                              AgentgatewayParameters has `rawConfig`,
+  #                              which can hold the same. No verb here, and
+  #                              the Schedule excludes the group by glob
+  #                              (templates/schedule.yaml).
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources:
+      - backendtlspolicies
+      - gateways
+      - grpcroutes
+      - httproutes
+      - listenersets
+      - referencegrants
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["gibson.zeroroot.ai"]
+    resources: ["modelproviders"]
+    verbs: ["get", "list", "watch"]
   # The kinds the rest of the bringup registers, read for the same enumeration
   # reason. They are NOT in the platform's CRD chart, so the list above missed
   # them and every backup of the whole platform ended PartiallyFailed:
@@ -4574,6 +4613,14 @@ spec:
       # holds no verb on the group (templates/rbac.yaml), and this glob keeps
       # the item collector from even asking, so the phase stays Completed.
       - "*.generators.external-secrets.io"
+      # The agentgateway kinds get the same treatment (charts#818). An
+      # AgentgatewayBackend, an AgentgatewayModel and an AgentgatewayPolicy
+      # can hold an inline API key (`auth.key`), and an
+      # AgentgatewayParameters can hold one in `rawConfig`. The RBAC holds no
+      # verb on the group. These objects are also derived state: Argo CD
+      # applies the ones of the chart, and the tenant-operator renders the
+      # others from each ModelProvider.
+      - "*.agentgateway.dev"
       # k3s ships its own kinds: HelmChart and HelmChartConfig in
       # helm.cattle.io, and Addon in k3s.cattle.io. They are the distribution's
       # own install records, not platform state, and the RBAC grants no verb on

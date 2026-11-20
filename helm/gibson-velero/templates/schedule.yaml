@@ -20,11 +20,12 @@ a `velero.schedules` value. The spec is the option C decision from CONTEXT.md
     cluster-scoped items (the PV behind a backed-up PVC) still ride along:
     the item collector bypasses the filter for plugin-added related items
     (pkg/backup/item_backupper.go, itemInclusionChecks).
-  * `excludedNamespaceScopedResources` names `secrets` and the ESO
-    generator kinds, the two places secret material can live. The RBAC
-    denies both (no verb on secrets anywhere, no verb on the
-    generators.external-secrets.io group), so a spec that asks for them ends
-    PartiallyFailed instead of Completed. The RBAC is the control. These
+  * `excludedNamespaceScopedResources` names `secrets`, the ESO generator
+    kinds and the agentgateway kinds, the three places secret material can
+    live. The RBAC denies each (no verb on secrets anywhere, no verb on the
+    generators.external-secrets.io group, no verb on the agentgateway.dev
+    group), so a spec that asks for them ends PartiallyFailed instead of
+    Completed. The RBAC is the control. These
     lines keep the phase honest.
   * Desired state opts out with the label
     `velero.io/exclude-from-backup: "true"`. That is Velero's own item-level
@@ -127,6 +128,14 @@ spec:
       # holds no verb on the group (templates/rbac.yaml), and this glob keeps
       # the item collector from even asking, so the phase stays Completed.
       - "*.generators.external-secrets.io"
+      # The agentgateway kinds get the same treatment (charts#818). An
+      # AgentgatewayBackend, an AgentgatewayModel and an AgentgatewayPolicy
+      # can hold an inline API key (`auth.key`), and an
+      # AgentgatewayParameters can hold one in `rawConfig`. The RBAC holds no
+      # verb on the group. These objects are also derived state: Argo CD
+      # applies the ones of the chart, and the tenant-operator renders the
+      # others from each ModelProvider.
+      - "*.agentgateway.dev"
       # k3s ships its own kinds: HelmChart and HelmChartConfig in
       # helm.cattle.io, and Addon in k3s.cattle.io. They are the distribution's
       # own install records, not platform state, and the RBAC grants no verb on
