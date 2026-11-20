@@ -19,9 +19,16 @@ A key that is missing or that does not parse FAILS the provision. The operator
 uses its built-in size only when this ConfigMap does not exist, so each key is
 `required` here and the ConfigMap renders on every profile.
 
+A values file that still sets the deleted `tenantNeo4j.tiers` FAILS the
+render. Helm would otherwise ignore the key, and each new tenant would get the
+default size with no message.
+
 It lives in the release namespace, not a tenant namespace: it is one size for
 the whole platform.
 */}}
+{{- if hasKey .Values.tenantNeo4j "tiers" -}}
+{{- fail "tenantNeo4j.tiers was deleted (gibson#1526). No plan selects the size of a tenant Neo4j. Set the one default size in tenantNeo4j.size (storage, cpu, memory) and remove tenantNeo4j.tiers from your values." -}}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
