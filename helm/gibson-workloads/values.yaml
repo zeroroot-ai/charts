@@ -97,7 +97,7 @@ serviceAccounts:
 # -----------------------------------------------------------------------------
 # gibson daemon is structural infrastructure (one-code-path /
 # deploy#188): it is the orchestrator that every dashboard call,
-# tenant-operator Entitlements check, callback agent, and tool runner
+# tenant-operator call, callback agent, and tool runner
 # routes through. The previous `enabled: true|false` substitution
 # toggle has been deleted — the platform cannot run without it.
 # Sub-feature toggles on this block
@@ -191,35 +191,6 @@ gibson:
   podDisruptionBudget:
     enabled: ~        # auto-on when replicas > 1
   topologySpreadConstraints: ~  # falls back to chart-default zone-spread.
-
-  # Entitlements seam knob (/ deploy#1032).
-  # The deployment-profile seam for the EntitlementsService gRPC boundary.
-  #
-  # Unset (default, self-hosted profile): the daemon uses the embedded OSS
-  # ConfigProvider (no-op, unlimited). No entitlements workload is deployed.
-  #
-  # Set (SaaS profile, via the gitops SaaS overlay): the daemon dials the
-  # remote EntitlementsService at this address over SPIFFE mTLS. The SaaS
-  # overlay chart (helm/saas-overlay/entitlements-svc) deploys the actual
-  # Service and sets this knob via gitops composition.
-  #
-  # Format: "<service-name>:<port>" (e.g. "gibson-entitlements-svc:9091")
-  # Leave empty for self-hosted installs — do NOT set a no-op literal value.
-  entitlementsEndpoint: ""
-
-  # Entitlements-required guard (/ deploy#1055, gibson#1097+#1098).
-  #
-  # SaaS profile ONLY. When true the daemon refuses to serve if the
-  # entitlements seam fails to wire at boot — it fails closed instead of
-  # silently falling back to the unlimited OSS ConfigProvider. Never set this
-  # on a self-hosted install; the fail-open unlimited posture is correct there.
-  #
-  # INVARIANT (deploy#1055 guard): if entitlementsEndpoint is set, this MUST
-  # be true. Nothing enforces it at render time.
-  #
-  # Maps to GIBSON_ENTITLEMENTS_REQUIRED env on the daemon StatefulSet.
-  # Leave unset (empty) for self-hosted installs (the default here).
-  entitlementsRequired: false
 
   # Capability-Grant JWT signing key (GHSA-3957, gibson#1288).
   #
@@ -341,7 +312,7 @@ gibson:
     # on the SPIRE socket — so the fga-init Job hangs in dump-model until
     # its deadline and the whole install wedges. Verified on this digest:
     # `gibson dump-fga-model` exits 0 in under a second with the model.
-    tag: "v0.166.0@sha256:b461b0488f1d38faadae61576a796c6e6b7939d8e5bb05d4f10eb872e30ee5cf"
+    tag: "v0.167.0@sha256:fba66283b7c3632d573752c5061a0843db5e74e44b6f47434c04c4953255c3e0"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     # Empty by default: first-party pins are hand-committed in the combined
@@ -1322,7 +1293,7 @@ extAuthz:
     # EXT_AUTHZ_CGJWT_KEYS_URL. It moves in lockstep with the daemon pin above
     # and with the https/:8086 value in ext-authz/deployment.yaml (deploy#1386)
     # — the three are one change, in both directions.
-    tag: "v0.166.0@sha256:4a4c8f827a4a6929a8b64d439765ce1d35f3ae25cd148d009509187cc2c4e0ad"
+    tag: "v0.167.0@sha256:2c420b262f9fde9109718b89a4c4522e93fcbf4c6cba61a518dc9a5b809e1d5a"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -1860,29 +1831,6 @@ neo4j:
   # Required ONLY when tenant_mode == "multi-db". Ignored for "instance".
   # Example: "neo4j+s://aura-cluster.example.com:7687"
   shared_cluster_uri: ""
-
-# -----------------------------------------------------------------------------
-# Entitlements seam (/ deploy#1032).
-#
-# The entitlements-svc workload has been RE-HOMED to the SaaS overlay
-# (helm/saas-overlay/entitlements-svc). The core umbrella carries ZERO
-# closed/SaaS image references; the overlay supplies the entitlements-svc
-# Deployment + Service + ClusterSPIFFEID + NetworkPolicy.
-#
-# The only entitlements surface in the core chart is the daemon's seam knob:
-#   gibson.entitlementsEndpoint  (defined in the gibson: section above)
-#
-# Self-hosted profile: leave gibson.entitlementsEndpoint empty (default).
-#   Daemon uses the embedded OSS ConfigProvider (no-op, unlimited).
-#
-# SaaS profile: the gitops SaaS overlay composition (envs/{staging,prod}/
-#   saas-overlay-values.yaml) sets gibson.entitlementsEndpoint to point at
-#   the in-cluster entitlements-svc Service deployed by the overlay chart.
-#
-# The no-closed-refs render guard (chart-bats-tests CI) asserts this chart
-# rendered with the self-hosted profile contains zero ghcr.io/zeroroot-ai/billing
-# references (deploy#1032).
-# -----------------------------------------------------------------------------
 
 
 # mailpit: kind dev-only delivering SMTP sink (signup-email-delivery, the
@@ -3434,10 +3382,10 @@ bootstrap:
     # gibson#224 it dials Zitadel by Service name and claims the host by
     # header (ADR-0092), and it needs ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN.
     # From gibson#1091 (v0.160.1) the owner bootstrap sends the OpenFGA
-    # preshared key (GIBSON_FGA_KEY_DIR, charts#637). sha-8894268 is the
-    # v0.166.0 release commit. gibson-bootstrap 2.0.0 is unchanged since
-    # v0.164.0.
-    tag: "sha-8894268@sha256:b69d6970612dfda7d9878c9ed7e356265f403997bf87ba09eed6fc5bcc60e080"
+    # preshared key (GIBSON_FGA_KEY_DIR, charts#637). sha-f6bbb39 is the
+    # v0.167.0 release commit. Since gibson#1555 the owner bootstrap keeps an
+    # empty tier empty and no longer defaults it to `team`.
+    tag: "sha-f6bbb39@sha256:50ca50a679b3908e1d4c0cf590082f184a00d7f9bb1c490f0c841d5cd1b612a4"
     pullPolicy: IfNotPresent
 
   # activeDeadlineSeconds caps the Job runtime. 10 min covers a fresh

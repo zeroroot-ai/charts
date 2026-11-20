@@ -1339,11 +1339,13 @@ data:
 
 ---
 # Source: gibson/charts/gibson-operators/templates/tenant-operator/plans-configmap.yaml
-# gibson-tenant-operator-plans — canonical plan registry mounted into the
-# operator pod. Rendered from the chart-local files/plans.yaml at chart
-# render time via `.Files.Get`. That file mirrors plans/plans.yaml in
-# zeroroot-ai/billing. Changing pricing is a PR to the plan registry
-# followed by a helm upgrade; no operator image rebuild is required.
+# gibson-tenant-operator-plans — the plan registry, rendered from the
+# chart-local files/plans.yaml at chart render time via `.Files.Get`. No gibson
+# component reads it (gibson#1525). Its one reader in a cluster is the billing
+# webhook of the private billing component (hosted
+# gitops/saas-overlay/billing-webhook), which reads the Stripe lookup key and
+# the trial days of a plan. It goes with the card step (gibson#1527). The www
+# and dashboard generators read files/plans.yaml from this repository.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6176,7 +6178,7 @@ rules:
     resources: ["secrets"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
 
-  # ConfigMaps — FGA model, plans-configmap, sa-identity-map, and operator's
+  # ConfigMaps — FGA model, sa-identity-map, and operator's
   # own Lease for leader election. PlatformBootstrap writes gibson-sa-identity-map;
   # cluster-scoped so the operator can read/write ConfigMaps in any namespace.
   - apiGroups: [""]
@@ -11752,7 +11754,7 @@ spec:
               readOnly: true
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/connector-operator:v0.166.0@sha256:1cf2a274d8875514494db652a47586437618de8165d1e42007f44d4677b89d8b"
+          image: "ghcr.io/zeroroot-ai/connector-operator:v0.167.0@sha256:a623e1bd5a6fa4f2f72e95f970f832db8915a508d48fad9c0c0eee6e6ca0703e"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -11884,7 +11886,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/platform-operator:v0.166.0@sha256:b088d4d79fe86c7ca781c165aab7c55b51185b167668d954b4b8cab573cd08af"
+          image: "ghcr.io/zeroroot-ai/platform-operator:v0.167.0@sha256:8e2f62efe881dcc2db44838e41ad5d87fe7b76c2f10f0301b295ad5bf5e0356c"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -12375,7 +12377,7 @@ spec:
               memory: 64Mi
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.166.0@sha256:23c0878a7922d631ed24dde7c1d38743e14626dad44d18c93b593f594e02715e"
+          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.167.0@sha256:235031465df8d5f0dcd666b2028f9fd099b51f30c8dea92efa981e5103352446"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -12389,13 +12391,7 @@ spec:
             - --health-probe-bind-address=:8081
             # --dev-mode flag deleted in deploy#205 (one-code-path epic):
             # the operator binary boots identically in every environment.
-            # --plans-file removed: the consolidated monorepo operator
-            # (operators/tenant) generates its valid-tier set from
-            # plans.yaml at BUILD time (validTiers constant / generated enum),
-            # so the binary no longer defines a -plans-file flag. The chart was
-            # still passing it, so every operator pod exited 2 ("flag provided
-            # but not defined: -plans-file") and stalled the daemon's prereq
-            # wait. Tiers are baked in; no runtime plans file is read.
+            # The operator reads no plan file and knows no plan (gibson#1525).
             - --webhook-cert-path=/var/run/webhook-serving-certs
             - --webhook-cert-name=tls.crt
             - --webhook-cert-key=tls.key
@@ -12529,7 +12525,7 @@ spec:
             # The image of the belief trainer CronJob of each tenant
             # (gibson#616). The operator exits at start when it is empty.
             - name: BELIEF_TRAINER_IMAGE
-              value: "ghcr.io/zeroroot-ai/gibson:v0.166.0@sha256:b461b0488f1d38faadae61576a796c6e6b7939d8e5bb05d4f10eb872e30ee5cf"
+              value: "ghcr.io/zeroroot-ai/gibson:v0.167.0@sha256:fba66283b7c3632d573752c5061a0843db5e74e44b6f47434c04c4953255c3e0"
             # The Neo4j image of each tenant data plane (gibson#1061). The
             # operator exits at start when it is empty or has no digest.
             - name: TENANT_NEO4J_IMAGE
@@ -12577,14 +12573,6 @@ spec:
               value: "Primary Workspace"
             - name: FIRST_TENANT_OWNER_EMAIL
               value: "admin@localhost.zeroroot.ai"
-            # The operator has always read FIRST_TENANT_TIER; the chart never
-            # rendered it, so every seed enqueued an empty tier and the daemon
-            # defaulted it to a PAID plan. On a cluster that enforces billing
-            # the daemon then withheld the tenant from the provisioning drain
-            # for ever, and the first-admin Job waited on a tenant that could
-            # never arrive. See global.firstTenant.tier in values.yaml.
-            - name: FIRST_TENANT_TIER
-              value: "enterprise-deploy"
             # One-code-path slice deploy#195: FGA is a hard dependency.
             # FGA_URL must be set in the chart values; render fails loud when empty.
             # FGA_STORE_ID / FGA_MODEL_ID are mounted from gibson-fga-config.
@@ -12880,8 +12868,6 @@ spec:
             - name: openbao-ca
               mountPath: /etc/gibson/openbao-ca
               readOnly: true
-            # plans mount removed alongside the --plans-file arg above: the
-            # monorepo operator bakes tiers in at build time.
             # System-tenant KEK mount (one-code-path: deploy#194 —
             # file mount only; legacy env injection removed).
             - name: system-tenant-kek
@@ -12946,10 +12932,6 @@ spec:
               - key: key_previous
                 path: key_previous
             defaultMode: 0444
-        # plans ConfigMap volume removed: the operator binary no longer reads a
-        # runtime plans file (tiers generated at build time). The
-        # gibson-tenant-operator-plans ConfigMap is still rendered for the plans
-        # migration Job; orphan-audit tracked separately.
         # System-tenant KEK Secret as a file mount (one-code-path:
         # deploy#194). Always present; same Secret the daemon's k8s
         # key_provider reads via the Kubernetes API. Raw 32-byte
@@ -13654,8 +13636,7 @@ spec:
                   name: gibson-dashboard-oidc
                   key: client_id
             # Service-account client_credentials for the dashboard's
-            # server-side service-acting calls (e.g. daemon entitlements
-            # RPCs invoked from the entitlements-provisioning route).
+            # server-side service-acting calls to the daemon.
             # Materialized by templates/auth/zitadel-service-accounts-secret.yaml
             # with REPLACE_ME_* placeholders; the post-install bootstrap Job
             # mints real Zitadel client_credentials and patches them in.
@@ -14486,7 +14467,7 @@ spec:
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,tmp"
         checksum/registry: c1c29512582a893a867405ae14499183f952c17ed756544d689ca1b5877c2c5c
-        checksum/daemon-registry: 182a3b6b9afda49d0482ab1bb30340a433eb7d8046aa44124288f9d38d660503
+        checksum/daemon-registry: c039f0de568b6ba178b8e0d4fef886a5ac14a20b40e41328c1f108a975f6d274
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
         secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc,gibson-ext-authz-health-tls"
     spec:
@@ -14621,7 +14602,7 @@ spec:
               memory: 32Mi
       containers:
         - name: ext-authz
-          image: "ghcr.io/zeroroot-ai/ext-authz:v0.166.0@sha256:4a4c8f827a4a6929a8b64d439765ce1d35f3ae25cd148d009509187cc2c4e0ad"
+          image: "ghcr.io/zeroroot-ai/ext-authz:v0.167.0@sha256:2c420b262f9fde9109718b89a4c4522e93fcbf4c6cba61a518dc9a5b809e1d5a"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -18555,7 +18536,7 @@ spec:
               memory: 32Mi
       containers:
         - name: gibson
-          image: "ghcr.io/zeroroot-ai/gibson:v0.166.0@sha256:b461b0488f1d38faadae61576a796c6e6b7939d8e5bb05d4f10eb872e30ee5cf"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.167.0@sha256:fba66283b7c3632d573752c5061a0843db5e74e44b6f47434c04c4953255c3e0"
           imagePullPolicy: Always
           ports:
             - name: callback
@@ -18902,29 +18883,6 @@ spec:
             # Absent: closed. "approval": approval. "true": open.
             - name: SIGNUP_SELF_SERVE
               value: "true"
-            # ----------------------------------------------------------------
-            # Entitlements provider seam knob (/ deploy#1032).
-            # ENTITLEMENTS_ENDPOINT set → daemon dials a remote
-            # EntitlementsService over SPIFFE mTLS.
-            # Unset (default) → OSS embedded ConfigProvider (no-op, unlimited).
-            #
-            # The seam knob: .Values.gibson.entitlementsEndpoint (string, empty
-            # by default). The SaaS overlay (helm/saas-overlay/entitlements-svc)
-            # deploys the actual Service and sets this knob via the gitops
-            # overlay composition. Self-hosted installs leave this unset.
-            #
-            # The core umbrella carries ZERO closed/SaaS image references.
-            # The closed billing image lives exclusively in the SaaS overlay.
-            # ----------------------------------------------------------------
-            # Entitlements-required fail-closed guard (/ deploy#1055,
-            # gibson#1097+#1098). SaaS profile ONLY.
-            # When true, the daemon refuses boot if the entitlements seam fails
-            # to wire — it fails closed instead of silently serving unlimited.
-            # NEVER set on self-hosted installs; the OSS fail-open is correct.
-            # Invariant: if ENTITLEMENTS_ENDPOINT is set, this MUST also be set.
-            # Enforced at RENDER time by validateEntitlementsCoherence below,
-            # not only by the umbrella's signup-seam.bats CI fixtures — the
-            # dangerous overlay is the one this repo never sees (GHSA-455w).
             # ----------------------------------------------------------------
             # Setec sandbox wiring.
             #
@@ -19872,7 +19830,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-fga-init-182a3b6b
+  name: gibson-gibson-workloads-fga-init-c039f0de
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -19939,7 +19897,7 @@ spec:
         # The entrypoint is the gibson binary, so command overrides it to get a
         # shell for the redirect. The runtime image is alpine-based and has one.
         - name: dump-model
-          image: "ghcr.io/zeroroot-ai/gibson:v0.166.0@sha256:b461b0488f1d38faadae61576a796c6e6b7939d8e5bb05d4f10eb872e30ee5cf"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.167.0@sha256:fba66283b7c3632d573752c5061a0843db5e74e44b6f47434c04c4953255c3e0"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -21726,8 +21684,8 @@ webhooks:
         scope: Cluster
     # Fail-closed — invalid Tenant slugs (e.g. starting with a digit, the
     # daemon admin API rejects those) MUST be blocked at admission. Letting
-    # one through means the saga runs 10 steps before failing at the
-    # Entitlements step, which the dashboard sees as a hung provisioning.
+    # one through means the saga runs several steps before it fails, which
+    # the dashboard sees as a hung provisioning.
     failurePolicy: Fail
     sideEffects: None
     timeoutSeconds: 3
@@ -25958,10 +25916,6 @@ spec:
       name: "gibson-openbao-keys"
       key: "VAULT_ADMIN_TOKEN"
     keyName: "master-kek"
-  planSync:
-    plansConfigMapRef:
-      name: "gibson-tenant-operator-plans"
-      key: "plans.yaml"
   masterKey:
     secretName: "gibson-master-key"
     namespace: "gibson"
@@ -29487,7 +29441,7 @@ spec:
       # The daemon image itself — same repo@digest the StatefulSet runs — so
       # `gibson --version` reports the toolchain the DEPLOYED binary was built
       # with, not some proxy. The runtime image is alpine-based (has /bin/sh).
-      image: "ghcr.io/zeroroot-ai/gibson:v0.166.0@sha256:b461b0488f1d38faadae61576a796c6e6b7939d8e5bb05d4f10eb872e30ee5cf"
+      image: "ghcr.io/zeroroot-ai/gibson:v0.167.0@sha256:fba66283b7c3632d573752c5061a0843db5e74e44b6f47434c04c4953255c3e0"
       imagePullPolicy: Always
       command: ["/bin/sh", "-c"]
       args:
@@ -30658,7 +30612,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: first-admin
-          image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-8894268@sha256:b69d6970612dfda7d9878c9ed7e356265f403997bf87ba09eed6fc5bcc60e080"
+          image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-f6bbb39@sha256:50ca50a679b3908e1d4c0cf590082f184a00d7f9bb1c490f0c841d5cd1b612a4"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

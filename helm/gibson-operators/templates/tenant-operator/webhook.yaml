@@ -162,8 +162,8 @@ webhooks:
         scope: Cluster
     # Fail-closed — invalid Tenant slugs (e.g. starting with a digit, the
     # daemon admin API rejects those) MUST be blocked at admission. Letting
-    # one through means the saga runs 10 steps before failing at the
-    # Entitlements step, which the dashboard sees as a hung provisioning.
+    # one through means the saga runs several steps before it fails, which
+    # the dashboard sees as a hung provisioning.
     failurePolicy: Fail
     sideEffects: None
     timeoutSeconds: 3

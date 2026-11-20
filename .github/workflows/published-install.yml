@@ -445,8 +445,6 @@ jobs:
           restart_pods "$NS" deployment/gibson-tenant-operator 300
 
           echo "▶ a second tenant, provisioned with no edge"
-          tier="$(kubectl get tenant primary -o jsonpath='{.spec.tier}')"
-          [ -n "$tier" ] || { echo "::error::the tenant primary has no spec.tier to copy"; exit 1; }
           cat > "$RUNNER_TEMP/edgeless-tenant.yaml" <<YAML
           apiVersion: gibson.zeroroot.ai/v1alpha1
           kind: Tenant
@@ -455,7 +453,6 @@ jobs:
           spec:
             displayName: Edgeless exit test
             owner: edgeless@localhost.zeroroot.ai
-            tier: ${tier}
           YAML
           # The Tenant webhook is served by the tenant-operator, which this step
           # restarted a moment ago. A finished restart says that the pods are

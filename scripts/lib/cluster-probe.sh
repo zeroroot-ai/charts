@@ -98,14 +98,15 @@ require_workload() {
 #
 # Echoes "saas" or "self-hosted". Exits 2 when indeterminate.
 #
-# The discriminator is the presence of the SaaS-only entitlements-svc Service.
-# Per ADR-0074 the SaaS overlay is a separate set of charts composed on top of
-# the core umbrella, and entitlements-svc is one of its deployables — so its
-# Service existing is the cleanest deployment-profile signal available
-# in-cluster.
+# The discriminator is the presence of the SaaS-only Service
+# gibson-billing-webhook. Per ADR-0074 the SaaS overlay is a separate set of
+# charts composed on top of the core umbrella. The billing webhook is its one
+# deployable in the platform namespace (hosted gitops/saas-overlay), so its
+# Service is the deployment-profile signal in the cluster.
 #
-# It used to be www-svc. That stopped working when the marketing site became an
-# off-cluster surface (ADR-0077): www-svc exists in NEITHER audience now, so
+# It was entitlements-svc until the entitlements service was deleted
+# (gibson#1525). Before that it was www-svc. That stopped working when the
+# marketing site became an off-cluster surface (ADR-0077): www-svc exists in NEITHER audience now, so
 # every cluster would have reported "self-hosted" and every SaaS suite would
 # have refused to run — silently, because require_profile skips rather than
 # fails on a mismatch.
@@ -119,7 +120,7 @@ require_workload() {
 detect_profile() {
   local ns="$1" svc
 
-  svc="$(kubectl -n "$ns" get svc -o name 2>/dev/null | grep -c 'entitlements-svc')"
+  svc="$(kubectl -n "$ns" get svc -o name 2>/dev/null | grep -cx 'service/gibson-billing-webhook')"
   if ! kubectl -n "$ns" get svc -o name >/dev/null 2>&1; then
     return 1
   fi

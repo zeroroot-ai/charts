@@ -141,13 +141,7 @@ spec:
             - --health-probe-bind-address=:8081
             # --dev-mode flag deleted in deploy#205 (one-code-path epic):
             # the operator binary boots identically in every environment.
-            # --plans-file removed: the consolidated monorepo operator
-            # (operators/tenant) generates its valid-tier set from
-            # plans.yaml at BUILD time (validTiers constant / generated enum),
-            # so the binary no longer defines a -plans-file flag. The chart was
-            # still passing it, so every operator pod exited 2 ("flag provided
-            # but not defined: -plans-file") and stalled the daemon's prereq
-            # wait. Tiers are baked in; no runtime plans file is read.
+            # The operator reads no plan file and knows no plan (gibson#1525).
             {{- if .Values.tenantOperator.webhook.enabled }}
             - --webhook-cert-path=/var/run/webhook-serving-certs
             - --webhook-cert-name=tls.crt
@@ -334,14 +328,6 @@ spec:
               value: {{ .Values.global.firstTenant.displayName | default "Default Workspace" | quote }}
             - name: FIRST_TENANT_OWNER_EMAIL
               value: {{ required "global.firstTenant.ownerEmail is REQUIRED when global.firstTenant.enabled (gibson#1496)." .Values.global.firstTenant.ownerEmail | quote }}
-            # The operator has always read FIRST_TENANT_TIER; the chart never
-            # rendered it, so every seed enqueued an empty tier and the daemon
-            # defaulted it to a PAID plan. On a cluster that enforces billing
-            # the daemon then withheld the tenant from the provisioning drain
-            # for ever, and the first-admin Job waited on a tenant that could
-            # never arrive. See global.firstTenant.tier in values.yaml.
-            - name: FIRST_TENANT_TIER
-              value: {{ required "global.firstTenant.tier is REQUIRED when global.firstTenant.enabled: an empty tier is withheld from the provisioning drain." .Values.global.firstTenant.tier | quote }}
             {{- end }}
             # One-code-path slice deploy#195: FGA is a hard dependency.
             # FGA_URL must be set in the chart values; render fails loud when empty.
@@ -675,8 +661,6 @@ spec:
               value: "/etc/spire-bundle/bundle.spiffe"
           volumeMounts:
             {{- include "gibson.openbaoCAMount" . | nindent 12 }}
-            # plans mount removed alongside the --plans-file arg above: the
-            # monorepo operator bakes tiers in at build time.
             # System-tenant KEK mount (one-code-path: deploy#194 —
             # file mount only; legacy env injection removed).
             - name: system-tenant-kek
@@ -729,10 +713,6 @@ spec:
                 path: ca.crt
             defaultMode: 0444
         {{- include "gibson.fgaKey.volume" $ | nindent 8 }}
-        # plans ConfigMap volume removed: the operator binary no longer reads a
-        # runtime plans file (tiers generated at build time). The
-        # gibson-tenant-operator-plans ConfigMap is still rendered for the plans
-        # migration Job; orphan-audit tracked separately.
         # System-tenant KEK Secret as a file mount (one-code-path:
         # deploy#194). Always present; same Secret the daemon's k8s
         # key_provider reads via the Kubernetes API. Raw 32-byte

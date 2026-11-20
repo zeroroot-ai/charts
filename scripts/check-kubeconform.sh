@@ -63,10 +63,17 @@ if [ "${1:-}" = "--selftest" ]; then
   # THE FIXTURE THIS EXISTS FOR: a core kind with a field of the wrong type.
   printf 'apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: x}\nspec:\n  replicas: "two"\n  selector: {matchLabels: {a: b}}\n  template: {metadata: {labels: {a: b}}, spec: {containers: [{name: c, image: i}]}}\n' > "$WORK/bad.yaml"
   if validate "$WORK/bad.yaml" >/dev/null 2>&1; then echo "SELFTEST FAIL: replicas: \"two\" must be refused"; exit 1; fi
-  # A custom resource with an unknown field under strict validation.
-  printf 'apiVersion: gibson.zeroroot.ai/v1alpha1\nkind: Tenant\nmetadata: {name: t}\nspec: {displayName: T, owner: o@example.test, notAField: 1}\n' > "$WORK/badcr.yaml"
-  if validate "$WORK/badcr.yaml" >/dev/null 2>&1; then echo "SELFTEST FAIL: an unknown Tenant field must be refused under the CRD schema"; exit 1; fi
-  echo "OK: a mistyped core field and an unknown CRD field are refused"
+  # A custom resource with a field of the wrong type under its CRD schema.
+  # It used to carry an unknown field and no spec.tier. Only the missing
+  # required tier made it fail: kubeconform does not refuse an unknown field
+  # that the CRD schema does not close. When spec.tier became optional
+  # (gibson#1525), that fixture passed.
+  printf 'apiVersion: gibson.zeroroot.ai/v1alpha1\nkind: Tenant\nmetadata: {name: t}\nspec: {displayName: {a: 1}, owner: o@example.test}\n' > "$WORK/badcr.yaml"
+  if validate "$WORK/badcr.yaml" >/dev/null 2>&1; then echo "SELFTEST FAIL: a mistyped Tenant field must be refused under the CRD schema"; exit 1; fi
+  # The same Tenant with the right type passes, so the refusal above is the type.
+  printf 'apiVersion: gibson.zeroroot.ai/v1alpha1\nkind: Tenant\nmetadata: {name: t}\nspec: {displayName: T, owner: o@example.test}\n' > "$WORK/goodcr.yaml"
+  if ! validate "$WORK/goodcr.yaml" >/dev/null 2>&1; then echo "SELFTEST FAIL: a valid Tenant must pass under the CRD schema"; exit 1; fi
+  echo "OK: a mistyped core field and a mistyped CRD field are refused, a valid Tenant passes"
 fi
 
 helm template gibson "$ROOT/helm/gibson" -f "$ROOT/helm/gibson/values-baseline.yaml" -f "$ROOT/helm/testdata/render-inputs/gibson.yaml" --namespace gibson > "$WORK/umbrella.yaml"
