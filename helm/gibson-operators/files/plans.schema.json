@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://zeroroot.ai/schemas/plans.schema.json",
   "title": "Gibson plan registry",
-  "description": "Canonical definition of every Gibson plan. Consumed by the tenant-operator (Go) and the dashboard prebuild script (TS). Schema simplified by spec plans-and-quotas-simplification.",
+  "description": "The schema of plans.yaml. There is one plan, and it sets no limit on a tenant. The billing webhook and the www and dashboard generators read plans.yaml.",
   "type": "object",
   "required": ["version", "plans"],
   "additionalProperties": false,
@@ -15,24 +15,36 @@
     "plans": {
       "type": "array",
       "minItems": 1,
+      "maxItems": 1,
       "items": { "$ref": "#/$defs/plan" }
     }
   },
   "$defs": {
     "plan": {
       "type": "object",
-      "required": ["id", "displayName", "tagline", "pricing", "quotas"],
+      "required": ["id", "displayName", "tagline", "pricing", "stripeProductId", "lookupKey", "trialDays"],
       "additionalProperties": false,
       "properties": {
         "id": {
           "type": "string",
-          "enum": ["team", "enterprise", "enterprise-deploy"]
+          "enum": ["team"]
         },
         "displayName": { "type": "string", "minLength": 1 },
         "tagline": { "type": "string", "minLength": 1 },
         "stripeProductId": {
-          "type": ["string", "null"],
-          "description": "Stripe product ID for self-serve plans; null for contact-only plans."
+          "type": "string",
+          "minLength": 1,
+          "description": "The Stripe product id of the plan."
+        },
+        "lookupKey": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The Stripe price lookup key. It is the same in every Stripe account and in test and live mode."
+        },
+        "trialDays": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The trial length of the card step at signup."
         },
         "pricing": {
           "type": "object",
@@ -43,23 +55,6 @@
             "annualUSD": { "type": "number", "minimum": 0 },
             "annualSavingsPct": { "type": "number", "minimum": 0, "maximum": 100 },
             "contactSales": { "type": "boolean" }
-          }
-        },
-        "quotas": {
-          "type": "object",
-          "required": ["concurrent_missions", "concurrent_agents"],
-          "additionalProperties": false,
-          "properties": {
-            "concurrent_missions": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "Max missions in non-terminal execution state at any moment; 0 = unlimited."
-            },
-            "concurrent_agents": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "Max agents bound to in-flight mission tasks at any moment; 0 = unlimited. Idle-but-connected agents do NOT count."
-            }
           }
         }
       }

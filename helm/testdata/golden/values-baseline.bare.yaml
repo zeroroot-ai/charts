@@ -1357,26 +1357,24 @@ metadata:
     app.kubernetes.io/component: tenant-operator
 data:
   plans.yaml: |-
-    # Canonical Gibson plan registry.
+    # The plan of the hosted service. There is one plan, and it sets no limit on a
+    # tenant (gibson#1525).
     #
-    # Source of truth for: operator reconcile (quotas), dashboard /pricing
-    # rendering, in-app quota UX, Stripe product mapping, Tenant CRD enum,
-    # validating webhook.
+    # Readers:
+    #   - the billing webhook of the private billing component, through the
+    #     ConfigMap gibson-tenant-operator-plans. The signup step reads the Stripe
+    #     lookup key and the trial days of the plan that a signup names.
+    #   - the gen-plans generators of www and dashboard, which render the price.
     #
-    # Schema (spec plans-and-quotas-simplification):
-    #   - id            : team | org | enterprise | enterprise-deploy
-    #   - displayName   : marketing label
-    #   - tagline       : short marketing copy
-    #   - pricing       : { monthlyUSD?, annualUSD?, annualSavingsPct?, contactSales? }
-    #   - stripeProductId : Stripe product id (null until Stripe setup runs)
-    #   - trialDays     : card-first signup trial length (epic card-first-signup,
-    #                     tenant-operator#357). Required >0 on every self-serve
-    #                     paid tier; forbidden on contactSales plans (unbilled —
-    #                     no Stripe subscription, nothing to trial).
-    #   - quotas        : { concurrent_missions, concurrent_agents, concurrent_connectors }
-    #
-    # Quota value 0 means "unlimited" — the daemon treats 0 as no enforcement.
-    # This is the only convention; -1 (the legacy sentinel) is no longer used.
+    # Fields:
+    #   - id              : the plan id. Billing resolves a signup by this id.
+    #   - displayName     : the name on the price page
+    #   - tagline         : short text on the price page
+    #   - pricing         : { monthlyUSD?, annualUSD?, annualSavingsPct?, contactSales? }
+    #   - stripeProductId : the Stripe product id
+    #   - lookupKey       : the Stripe price lookup key. It is the same in every
+    #                       Stripe account and in test and live mode.
+    #   - trialDays       : the trial length of the card step at signup
     version: v1
     plans:
       - id: team
@@ -1385,52 +1383,8 @@ data:
         pricing:
           monthlyUSD: 799
         stripeProductId: prod_UUghrBirQfk8sn
-        # Stable across every Stripe account and test/live mode (no env var needed).
         lookupKey: gibson_team_monthly_usd
         trialDays: 14
-        quotas:
-          concurrent_missions: 10
-          concurrent_agents: 100
-          concurrent_connectors: 5
-    
-      - id: org
-        displayName: Org
-        tagline: For security organizations running coverage across multiple AI surfaces
-        pricing:
-          monthlyUSD: 4999
-        stripeProductId: prod_UUghpmfCDlbOyn
-        # Stable across every Stripe account and test/live mode (no env var needed).
-        lookupKey: gibson_org_monthly_usd
-        trialDays: 14
-        quotas:
-          concurrent_missions: 50
-          concurrent_agents: 250
-          concurrent_connectors: 20
-    
-      - id: enterprise
-        displayName: Enterprise
-        tagline: For platform teams operating Gibson at scale across business units
-        pricing:
-          monthlyUSD: 9999
-        stripeProductId: prod_UUghAQW2znkSrb
-        # Stable across every Stripe account and test/live mode (no env var needed).
-        lookupKey: gibson_enterprise_monthly_usd
-        trialDays: 14
-        quotas:
-          concurrent_missions: 75
-          concurrent_agents: 0
-          concurrent_connectors: 0
-    
-      - id: enterprise-deploy
-        displayName: Enterprise (On-Prem & Federal)
-        tagline: Run the full platform inside your own boundary
-        pricing:
-          contactSales: true
-        stripeProductId: null
-        quotas:
-          concurrent_missions: 0
-          concurrent_agents: 0
-          concurrent_connectors: 0
     
 
 ---
