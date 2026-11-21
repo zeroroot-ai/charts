@@ -101,10 +101,9 @@ spec:
               value: {{ include "gibson-operators.spireOidcJwksURL" . | quote }}
             # The pod and the Service ranges of the cluster, a comma list
             # (global.networkPolicy.clusterCIDRs). The egress policy of each
-            # connector denies them. Empty adds no range to the private
-            # ranges that the policy always denies.
+            # connector denies them. The operator refuses an empty value.
             - name: CONNECTOR_CLUSTER_CIDRS
-              value: {{ join "," (((.Values.global).networkPolicy | default dict).clusterCIDRs | default list) | quote }}
+              value: {{ include "gibson-operators.clusterCIDRs" . | quote }}
             # SPIRE Workload API socket the X509Source streams SVIDs from.
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"

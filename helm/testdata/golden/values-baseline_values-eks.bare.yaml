@@ -11717,10 +11717,9 @@ spec:
               value: "https://gibson-spiffe-oidc-discovery-provider.gibson.svc.cluster.local/keys"
             # The pod and the Service ranges of the cluster, a comma list
             # (global.networkPolicy.clusterCIDRs). The egress policy of each
-            # connector denies them. Empty adds no range to the private
-            # ranges that the policy always denies.
+            # connector denies them. The operator refuses an empty value.
             - name: CONNECTOR_CLUSTER_CIDRS
-              value: ""
+              value: "10.244.0.0/16,10.96.0.0/12"
             # SPIRE Workload API socket the X509Source streams SVIDs from.
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"

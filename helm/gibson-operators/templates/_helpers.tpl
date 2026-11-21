@@ -86,3 +86,25 @@ reads the provider namespace from this URL and refuses any host that is not
 {{- $domain := (((.Values.global).k8s).clusterDomain) | default "cluster.local" -}}
 {{- ((.Values.vault).jwtAuth).spireOidcJwksURL | default (printf "https://%s-spiffe-oidc-discovery-provider.%s.svc.%s/keys" .Release.Name .Release.Namespace $domain) -}}
 {{- end -}}
+
+{{/*
+gibson-operators.clusterCIDRs joins global.networkPolicy.clusterCIDRs with
+commas for CONNECTOR_CLUSTER_CIDRS. The render fails on an empty list and on
+an entry that is not an address with a prefix length. The connector operator
+parses each entry again at start.
+*/}}
+{{- define "gibson-operators.clusterCIDRs" -}}
+{{- $cidrs := ((.Values.global).networkPolicy | default dict).clusterCIDRs | default list -}}
+{{- if not (kindIs "slice" $cidrs) -}}
+{{- fail "global.networkPolicy.clusterCIDRs must be a list of CIDRs." -}}
+{{- end -}}
+{{- if empty $cidrs -}}
+{{- fail "global.networkPolicy.clusterCIDRs is required: set the pod range and the Service range of the cluster, for example [10.244.0.0/16, 10.96.0.0/12] on kind or [10.42.0.0/16, 10.43.0.0/16] on k3s. The connector operator does not start without them." -}}
+{{- end -}}
+{{- range $cidrs -}}
+{{- if not (and (kindIs "string" .) (regexMatch "^[0-9A-Fa-f.:]+/[0-9]{1,3}$" .)) -}}
+{{- fail (printf "global.networkPolicy.clusterCIDRs: %v is not a CIDR." .) -}}
+{{- end -}}
+{{- end -}}
+{{- join "," $cidrs -}}
+{{- end -}}

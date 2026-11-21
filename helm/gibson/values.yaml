@@ -146,20 +146,22 @@ global:
     # allowed, the ENI addresses answered and the ClusterIP timed out, and
     # OpenBao's Kubernetes-auth TokenReview died with it.
     apiServerCIDRs: []
-    # The pod range and the Service range of the cluster. The connector
-    # operator reads them as CONNECTOR_CLUSTER_CIDRS, and the egress policy of
-    # each connector denies them. A connector then cannot reach a pod or a
-    # Service of the cluster through a public name that resolves to a cluster
-    # address. The policy always denies the private ranges (RFC 1918, CGNAT,
-    # link-local and loopback), so an empty list is safe on a cluster whose
-    # ranges are private. List the ranges when one of them is not private.
-    # A value that is not a CIDR stops the connector operator at start.
-    # The estate sets them from the facts that define the cluster:
+    # The pod range and the Service range of the cluster. REQUIRED: the
+    # render fails when the list is empty. The connector operator reads them
+    # as CONNECTOR_CLUSTER_CIDRS and stops at start without them. The egress
+    # policy of each connector denies them, so a connector cannot reach a pod
+    # or a Service of the cluster through a public name that resolves to a
+    # cluster address. A value that is not a CIDR stops the operator too.
+    # No profile of this chart can know the ranges of a cluster, so the
+    # installer sets them on every profile (baseline, guest, eks and each
+    # rung). The ranges of the known substrates:
     #   kind (helm/kind-config.yaml)  10.244.0.0/16 and 10.96.0.0/12
-    #   kind (kind defaults)          10.244.0.0/16 and 10.96.0.0/16
-    #   k3s (defaults)                10.42.0.0/16 and 10.43.0.0/16
-    #   EKS                           the VPC CIDR and service_ipv4_cidr
-    # scripts/baseline-up.sh passes CLUSTER_CIDRS here when it is set.
+    #   kind (the kind defaults)      10.244.0.0/16 and 10.96.0.0/16
+    #   k3s and k3d (the defaults)    10.42.0.0/16 and 10.43.0.0/16, or the
+    #                                 --cluster-cidr and --service-cidr of k3s
+    #   EKS with Cilium ENI IPAM      the VPC CIDR and service_ipv4_cidr
+    # scripts/baseline-up.sh passes CLUSTER_CIDRS here and refuses to start
+    # without it.
     clusterCIDRs: []
     # The namespace of the CloudNativePG operator of the cluster, on a guest
     # profile (cnpg.enabled false). The Postgres rule admits that operator on
