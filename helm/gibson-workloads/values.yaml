@@ -312,7 +312,7 @@ gibson:
     # on the SPIRE socket — so the fga-init Job hangs in dump-model until
     # its deadline and the whole install wedges. Verified on this digest:
     # `gibson dump-fga-model` exits 0 in under a second with the model.
-    tag: "v0.167.0@sha256:fba66283b7c3632d573752c5061a0843db5e74e44b6f47434c04c4953255c3e0"
+    tag: "v0.168.0@sha256:960e3275a84e8968ec39d2047bf5d7f03752a742718f08114db6f632d3bd886f"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     # Empty by default: first-party pins are hand-committed in the combined
@@ -1293,7 +1293,7 @@ extAuthz:
     # EXT_AUTHZ_CGJWT_KEYS_URL. It moves in lockstep with the daemon pin above
     # and with the https/:8086 value in ext-authz/deployment.yaml (deploy#1386)
     # — the three are one change, in both directions.
-    tag: "v0.167.0@sha256:2c420b262f9fde9109718b89a4c4522e93fcbf4c6cba61a518dc9a5b809e1d5a"
+    tag: "v0.168.0@sha256:6b18c952cfa551f5ebeeae308b0087e82156ff4299582d41dea78e12dcd3e7b9"
     # digest (deploy#1066) — see .Values.gibson.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -1588,10 +1588,10 @@ envoy:
     # (maxTokens, tokensPerFill) for all of them together. The fuse also
     # consumes a token on each request (always_consume_default_token_bucket),
     # so a flood from many addresses stops at the fuse. Each message starts a
-    # mission, the daemon runs at most 50 at once (harness
-    # DefaultSpawnLimits), and a caller adds an Agent Card read and a task
-    # poll about once each second for each. Route: 100 rps sustained, 200
-    # burst. One address: 20 rps sustained, 40 burst.
+    # mission, and a caller adds an Agent Card read and a task poll about
+    # once each second for each. The daemon sets no count limit on missions,
+    # so these rates are the only bound on the load. Route: 100 rps
+    # sustained, 200 burst. One address: 20 rps sustained, 40 burst.
     a2aInbound:
       maxTokens: 200
       tokensPerFill: 100
@@ -1604,9 +1604,9 @@ envoy:
       # LRU cache). An address that drops out gets a full bucket again.
       maxDynamicDescriptors: 10000
     # /gateway/model/ and /gateway/agent/, one limiter for each route.
-    # perAddress: at most 50 missions with up to 10 agents each
-    # (MaxChildMissions), and an agent waits for each model call, so about
-    # one call each second for each agent: 500 rps for the whole cluster.
+    # perAddress: the daemon sets no count limit on missions or agents. The
+    # rate is sized for about 500 agents that each wait for a model call, so
+    # about one call each second for each agent: 500 rps for the whole cluster.
     # The sandboxes of a cluster can all leave through one address (a NAT
     # gateway, a node), so one address gets twice that: 1000 rps sustained,
     # 2000 burst. The route fuse (maxTokens, tokensPerFill: 4000 rps
@@ -3382,10 +3382,9 @@ bootstrap:
     # gibson#224 it dials Zitadel by Service name and claims the host by
     # header (ADR-0092), and it needs ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN.
     # From gibson#1091 (v0.160.1) the owner bootstrap sends the OpenFGA
-    # preshared key (GIBSON_FGA_KEY_DIR, charts#637). sha-f6bbb39 is the
-    # v0.167.0 release commit. Since gibson#1555 the owner bootstrap keeps an
-    # empty tier empty and no longer defaults it to `team`.
-    tag: "sha-f6bbb39@sha256:50ca50a679b3908e1d4c0cf590082f184a00d7f9bb1c490f0c841d5cd1b612a4"
+    # preshared key (GIBSON_FGA_KEY_DIR, charts#637). sha-513a6c2 is the
+    # v0.168.0 release commit. The owner bootstrap sets no tier on the tenant.
+    tag: "sha-513a6c2@sha256:5f46a8407932b1d0a1652d40eaf59e6b4a0300085fad9b101e78cbbad5e1008b"
     pullPolicy: IfNotPresent
 
   # activeDeadlineSeconds caps the Job runtime. 10 min covers a fresh

@@ -18,9 +18,6 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.tier
-      name: Tier
-      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -73,7 +70,7 @@ spec:
               owner:
                 description: |-
                   Owner is the email address of the tenant owner. Used as the admin user
-                  in Zitadel (via Auth.js) and as billing contact in Stripe.
+                  in Zitadel (via Auth.js).
                 format: email
                 type: string
               resources:
@@ -132,12 +129,6 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
-              tier:
-                description: |-
-                  Tier is the optional plan id of the tenant. Gibson does not read it and
-                  refuses no value. The field stays while the chart and the dashboard
-                  still write it. Step 2 of gibson#1531 deletes it.
-                type: string
             required:
             - displayName
             - owner
@@ -149,7 +140,7 @@ spec:
                 description: |-
                   Conditions represent the current state of the Tenant resource.
                   Standard condition types: Ready, NamespaceProvisioned, ZitadelOrgReady,
-                  StripeReady, FGAReady, RedisReady, Terminating.
+                  FGAReady, RedisReady, Terminating.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

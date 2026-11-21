@@ -940,18 +940,12 @@ static_resources:
                         #      default-denied every request — it could not
                         #      succeed.
                         #   2. The dashboard serves no handler under
-                        #      /api/admin/provisioning/ any more (the
-                        #      entitlements endpoints were retired).
-                        #   3. Its only caller, the tenant operator's
-                        #      EntitlementsHTTPClient, posted straight at the
-                        #      dashboard Service (formerly DASHBOARD_URL,
-                        #      http://gibson-dashboard:3000, in helm/
-                        #      gibson-operators/templates/tenant-operator/
-                        #      deployment.yaml — that env var has since been
-                        #      replaced by GIBSON_APP_URL, which the
-                        #      tenant-operator now uses only for its
-                        #      human-facing email links). It never traversed
-                        #      this edge.
+                        #      /api/admin/provisioning/.
+                        #   3. Its only caller, a client in the tenant
+                        #      operator, posted straight at the dashboard
+                        #      Service and never traversed this edge. The
+                        #      service behind that client is deleted
+                        #      (gibson#1525).
                         #
                         # Deleting it drops an unreachable dashboard-admin
                         # prefix off the public api host; requests now fall to
