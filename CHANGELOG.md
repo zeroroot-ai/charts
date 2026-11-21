@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.158.0](https://github.com/zeroroot-ai/charts/compare/v0.157.0...v0.158.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* the chart no longer ships the Tenant tier field or the PlatformBootstrap planSync field.
+
+### Features
+
+* pin dashboard v0.139.0 with one plan and no tier ([#836](https://github.com/zeroroot-ai/charts/issues/836)) ([edaf0a9](https://github.com/zeroroot-ai/charts/commit/edaf0a948d4afd6e0d4e399a851ead45805a7d78))
+* pin gibson v0.168.0 and drop the tier and count-limit inputs ([#834](https://github.com/zeroroot-ai/charts/issues/834)) ([36400e6](https://github.com/zeroroot-ai/charts/commit/36400e62e1e006ebb14d89792aff75d834631f25))
+
 ## [0.157.0](https://github.com/zeroroot-ai/charts/compare/v0.156.0...v0.157.0) (2026-11-21)
 
 
