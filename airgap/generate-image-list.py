@@ -129,7 +129,7 @@ NOTES: dict[str, dict[str, str]] = {
     "ghcr.io/zeroroot-ai/setec-device-plugin": {"role": "setec KVM device plugin"},
     "ghcr.io/zeroroot-ai/setec-node-agent": {"role": "setec node agent (snapshots, off by default)"},
     "ghcr.io/zeroroot-ai/billing": {
-        "role": "closed Stripe entitlements provider (OPTIONAL — bypassable on-prem)",
+        "role": "closed Stripe billing webhook (OPTIONAL — absent on-prem)",
         "hardening": "closed seam; federal/air-gap typically disables billing (no-op provider)",
     },
     "ghcr.io/zeroroot-ai/mirror/envoy": {"role": "edge proxy (auth chain)"},

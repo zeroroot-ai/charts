@@ -691,52 +691,6 @@ here: anything above 65535 is the default wearing a number.
 {{- end -}}
 {{- end -}}
 
-{{/* =========================================================================
-gibson.validateEntitlementsCoherence
-
-GHSA-455w — fails the render when the entitlements seam is wired half-way.
-
- gives the platform two deployment profiles, and the daemon reads them
-from two independent knobs:
-
-  gibson.entitlementsEndpoint  — dial a remote EntitlementsService (SaaS)
-  gibson.entitlementsRequired  — fail CLOSED when that seam does not wire
-
-Set together they are the SaaS profile. Both unset they are the self-hosted
-profile, and the OSS unlimited ConfigProvider is the correct answer —
-says on-prem must work with no billing backend at all, so `required` must stay
-false there and this validator never fires.
-
-The dangerous shape is the third one: endpoint set, required false. The daemon
-does `enforceBilling := entitlements.Required()` and short-circuits
-withholdPendingTenant when that is false, so the fail-closed quota check
-gibson#1270 landed never runs. A transiently-unavailable or misconfigured
-entitlements-svc then silently degrades to unlimited — paid tiers provision with
-no billing record, in a paying environment, with nothing in the logs that reads
-as a failure. Fail-OPEN is the one posture a billing seam must never take.
-
-That shape is not hypothetical: it is what helm/gibson-workloads/values.yaml
-defaults to (required: false), and it is what any overlay produces by wiring the
-endpoint and forgetting the flag. The umbrella's signup-seam.bats guards the
-CI profile fixtures; this guards every real overlay, including ones this repo
-never sees.
-
-The inverse (required true, endpoint empty) is also incoherent — the daemon
-fails closed with nothing to dial — and fails here too.
-
-Invoked from templates/gibson/statefulset.yaml, where both values are consumed.
-========================================================================= */}}
-{{- define "gibson.validateEntitlementsCoherence" -}}
-{{- $endpoint := trim (default "" .Values.gibson.entitlementsEndpoint) -}}
-{{- $required := .Values.gibson.entitlementsRequired -}}
-{{- if and $endpoint (not (eq $required true)) -}}
-{{- fail (printf "validateEntitlementsCoherence: gibson.entitlementsEndpoint is set (%q) but gibson.entitlementsRequired is %v. That is the SaaS profile with the fail-closed guard OFF: the daemon computes enforceBilling from entitlementsRequired, so withholdPendingTenant is skipped and a failed or unavailable entitlements-svc silently provisions paid tiers with no billing record (GHSA-455w, gibson#1270 §5). Set gibson.entitlementsRequired: true alongside the endpoint. If you meant the self-hosted profile, clear gibson.entitlementsEndpoint instead — on-prem is supposed to run with no billing backend and the unlimited ConfigProvider is correct there." $endpoint $required) -}}
-{{- end -}}
-{{- include "gibson.assertKeysDeleted" (dict "ctx" . "keys" (list "gibson.entitlementsBillingSVID") "use" "nothing: the chart builds the ID from global.spire.trustDomain and the path platform/entitlements-svc (ADR-0164)") -}}
-{{- if and (eq $required true) (not $endpoint) -}}
-{{- fail "validateEntitlementsCoherence: gibson.entitlementsRequired is true but gibson.entitlementsEndpoint is empty. The daemon would fail closed on every provision with no EntitlementsService to dial — a total signup outage, not a safe default. Set the endpoint, or set entitlementsRequired: false for the self-hosted profile." -}}
-{{- end -}}
-{{- end -}}
 
 {{/* =========================================================================
 gibson.validateSetecDispatch

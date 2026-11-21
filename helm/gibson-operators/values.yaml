@@ -57,7 +57,7 @@ tenantOperator:
     # Since v0.163.0 the pin holds gibson#1324: a failed last tenant backup is taken again,
     # so a tenant delete does not stop for ever and keep the CPU of the tenant
     # (zeroroot-ai/hosted#23).
-    tag: "v0.166.0@sha256:23c0878a7922d631ed24dde7c1d38743e14626dad44d18c93b593f594e02715e"
+    tag: "v0.167.0@sha256:235031465df8d5f0dcd666b2028f9fd099b51f30c8dea92efa981e5103352446"
     # digest (deploy#1066) — when set, gibson.image renders "<repository>@<digest>"
     # and ignores tag entirely. Accepts bare hex or a "sha256:"-prefixed value.
     digest: ""
@@ -74,7 +74,7 @@ tenantOperator:
   beliefTrainer:
     image:
       repository: ghcr.io/zeroroot-ai/gibson
-      tag: "v0.166.0@sha256:b461b0488f1d38faadae61576a796c6e6b7939d8e5bb05d4f10eb872e30ee5cf"
+      tag: "v0.167.0@sha256:fba66283b7c3632d573752c5061a0843db5e74e44b6f47434c04c4953255c3e0"
       # digest: when set, gibson.image renders "<repository>@<digest>".
       digest: ""
   # The Neo4j of each tenant data plane (gibson#1061, charts#608). The
@@ -207,7 +207,7 @@ platformOperator:
     # deploy#789: digest-pinned for staging/prod immutability.
     # The digest below is the current `latest`. kind keeps :main, exempt.
     # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/platform-operator/versions
-    tag: "v0.166.0@sha256:b088d4d79fe86c7ca781c165aab7c55b51185b167668d954b4b8cab573cd08af"
+    tag: "v0.167.0@sha256:8e2f62efe881dcc2db44838e41ad5d87fe7b76c2f10f0301b295ad5bf5e0356c"
     # digest (deploy#1066) — see tenantOperator.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -258,7 +258,7 @@ connectorOperator:
     # name:tag@digest reference kubelet pulls by digest; the `main` tag is
     # cosmetic). kind keeps the floating :main tag (values-kind.yaml), exempt.
     # Re-resolve: gh api /orgs/zeroroot-ai/packages/container/connector-operator/versions
-    tag: "v0.166.0@sha256:1cf2a274d8875514494db652a47586437618de8165d1e42007f44d4677b89d8b"
+    tag: "v0.167.0@sha256:a623e1bd5a6fa4f2f72e95f970f832db8915a508d48fad9c0c0eee6e6ca0703e"
     # digest (deploy#1066) — see tenantOperator.image.digest for semantics.
     digest: ""
     pullPolicy: IfNotPresent
@@ -542,12 +542,6 @@ platformBootstrap:
       key: "VAULT_ADMIN_TOKEN"
     keyName: "master-kek"
 
-  # Plan-sync.
-  planSync:
-    plansConfigMapRef:
-      name: "gibson-tenant-operator-plans"
-      key: "plans.yaml"
-
   # Master-key Secret the operator owns — STRUCTURAL (no skip toggle).
   # Idempotent generation replaces the per-chart helm `randAlphaNum`
   # dance and the ad-hoc ExternalSecret in kind-dev-secrets. Overlays
@@ -626,10 +620,10 @@ reloader:
       - gibson-zitadel
       - gibson-zitadel-login
     # The Deployments of another release in this namespace that carry a
-    # reload annotation, for example the billing-webhook and the
-    # entitlements service of the private billing component (hosted), which
-    # restart on a new Postgres login role (ADR-0171). This chart does not
-    # render them, so scripts/check-reloader-namespaced.py does not see them.
+    # reload annotation, for example the billing-webhook of the private
+    # billing component (hosted), which restarts on a new Postgres login role
+    # (ADR-0171). This chart does not render them, so
+    # scripts/check-reloader-namespaced.py does not see them.
     extraDeployments: []
     statefulsets:
       - gibson-gibson-workloads

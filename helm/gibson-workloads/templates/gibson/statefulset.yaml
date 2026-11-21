@@ -752,47 +752,6 @@ spec:
             - name: SIGNUP_SELF_SERVE
               value: {{ . | quote }}
             {{- end }}
-            # ----------------------------------------------------------------
-            # Entitlements provider seam knob (/ deploy#1032).
-            # ENTITLEMENTS_ENDPOINT set → daemon dials a remote
-            # EntitlementsService over SPIFFE mTLS.
-            # Unset (default) → OSS embedded ConfigProvider (no-op, unlimited).
-            #
-            # The seam knob: .Values.gibson.entitlementsEndpoint (string, empty
-            # by default). The SaaS overlay (helm/saas-overlay/entitlements-svc)
-            # deploys the actual Service and sets this knob via the gitops
-            # overlay composition. Self-hosted installs leave this unset.
-            #
-            # The core umbrella carries ZERO closed/SaaS image references.
-            # The closed billing image lives exclusively in the SaaS overlay.
-            {{- if .Values.gibson.entitlementsEndpoint }}
-            - name: ENTITLEMENTS_ENDPOINT
-              value: {{ .Values.gibson.entitlementsEndpoint | quote }}
-            # The one SPIFFE ID the daemon accepts as the entitlements server:
-            # the trust domain of the install and the fixed path of the
-            # billing component, platform/entitlements-svc (ADR-0164). The
-            # billing chart issues that ID. No env writes the trust domain.
-            - name: ENTITLEMENTS_BILLING_SVID
-              value: {{ include "gibson.spiffeID" (dict "ctx" . "path" "platform/entitlements-svc") | quote }}
-            # The grpcProvider opens a SPIRE X509Source for daemon→entitlements
-            # mTLS. Its WorkloadAPISocket option is empty, so go-spiffe reads
-            # the socket from SPIFFE_ENDPOINT_SOCKET (the daemon's other mTLS
-            # uses GIBSON_SPIFFE_* config, not this env). Without it the
-            # provider construction fails and falls back to ConfigProvider.
-            - name: SPIFFE_ENDPOINT_SOCKET
-              value: "unix:///run/spire/sockets/api.sock"
-            {{- end }}
-            # ----------------------------------------------------------------
-            # Entitlements-required fail-closed guard (/ deploy#1055,
-            # gibson#1097+#1098). SaaS profile ONLY.
-            # When true, the daemon refuses boot if the entitlements seam fails
-            # to wire — it fails closed instead of silently serving unlimited.
-            # NEVER set on self-hosted installs; the OSS fail-open is correct.
-            # Invariant: if ENTITLEMENTS_ENDPOINT is set, this MUST also be set.
-            # Enforced at RENDER time by validateEntitlementsCoherence below,
-            # not only by the umbrella's signup-seam.bats CI fixtures — the
-            # dangerous overlay is the one this repo never sees (GHSA-455w).
-            {{- include "gibson.validateEntitlementsCoherence" . }}
             {{- /* The neutral connection points of the platform (ADR-0060,
                    charts#375). A private component (billing) uses them; each
                    is empty by default, and an empty caller identity accepts
@@ -811,10 +770,6 @@ spec:
             - name: GIBSON_TENANT_ACTIVATION_SVID
               value: {{ include "gibson.spiffeID" (dict "ctx" $ "path" .tenantActivationPath) | quote }}
             {{- end }}
-            {{- end }}
-            {{- if .Values.gibson.entitlementsRequired }}
-            - name: GIBSON_ENTITLEMENTS_REQUIRED
-              value: "true"
             {{- end }}
             # ----------------------------------------------------------------
             # Setec sandbox wiring.

@@ -272,15 +272,6 @@ spec:
       namespace: {{ . | quote }}
       {{- end }}
     keyName: {{ ((.Values.platformBootstrap.vaultTransit).keyName) | default "master-kek" | quote }}
-  {{- with .Values.platformBootstrap.planSync }}
-  planSync:
-    plansConfigMapRef:
-      name: {{ .plansConfigMapRef.name | default "gibson-tenant-operator-plans" | quote }}
-      key: {{ .plansConfigMapRef.key | default "plans.yaml" | quote }}
-      {{- if .plansConfigMapRef.namespace }}
-      namespace: {{ .plansConfigMapRef.namespace | quote }}
-      {{- end }}
-  {{- end }}
   {{- /*
     Master-key Secret is structural . The previous
     `{{- if .secretName }}` skip gate has been deleted; the operator
