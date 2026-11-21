@@ -241,7 +241,7 @@ jobs:
           # that made it. baseline-up.sh passes them to the chart as
           # global.networkPolicy.clusterCIDRs.
           cidrs="$(awk -F'"' '/^  (podSubnet|serviceSubnet):/ {print $2}' helm/kind-config.yaml | paste -sd, -)"
-          [ "$(tr ',' '\n' <<<"$cidrs" | grep -c /)" -eq 2 ] \
+          [[ "$cidrs" =~ ^[^,]+/[0-9]+,[^,]+/[0-9]+$ ]] \
             || { echo "::error::helm/kind-config.yaml gives no podSubnet and serviceSubnet (read: '$cidrs')"; exit 1; }
           echo "CLUSTER_CIDRS=$cidrs" >> "$GITHUB_ENV"
           echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
