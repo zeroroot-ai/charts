@@ -152,9 +152,10 @@ global:
     # policy of each connector denies them, so a connector cannot reach a pod
     # or a Service of the cluster through a public name that resolves to a
     # cluster address. A value that is not a CIDR stops the operator too.
-    # No profile of this chart can know the ranges of a cluster, so the
-    # installer sets them on every profile (baseline, guest, eks and each
-    # rung). The ranges of the known substrates:
+    # The baseline, guest and eks profiles cannot know the ranges of a
+    # cluster, so the installer sets them there. The developer and CI rungs
+    # carry the ranges of kind (helm/kind-config.yaml). The ranges of the
+    # known substrates:
     #   kind (helm/kind-config.yaml)  10.244.0.0/16 and 10.96.0.0/12
     #   kind (the kind defaults)      10.244.0.0/16 and 10.96.0.0/16
     #   k3s and k3d (the defaults)    10.42.0.0/16 and 10.43.0.0/16, or the
