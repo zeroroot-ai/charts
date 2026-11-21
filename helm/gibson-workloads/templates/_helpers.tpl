@@ -241,3 +241,30 @@ charts#397). One helper keeps the two the same. It runs as a secure pod
       cpu: 100m
       memory: 32Mi
 {{- end }}
+
+{{/*
+gibson.connectorInstallPatterns renders gibson.connectorInstallPatterns as the
+JSON of GIBSON_CONNECTOR_INSTALL_PATTERNS. The render fails on a key that is
+not <connector>/<variable> and on a value that is not a list of patterns. The
+daemon checks each pattern against the manifest at start.
+*/}}
+{{- define "gibson.connectorInstallPatterns" -}}
+{{- $m := .Values.gibson.connectorInstallPatterns | default dict -}}
+{{- if not (kindIs "map" $m) -}}
+{{- fail "gibson.connectorInstallPatterns must be a map of <connector>/<variable> to a list of patterns." -}}
+{{- end -}}
+{{- range $k, $v := $m -}}
+{{- if not (regexMatch "^[^/[:space:]]+/[^/[:space:]]+$" $k) -}}
+{{- fail (printf "gibson.connectorInstallPatterns: the key %q is not <connector>/<variable>." $k) -}}
+{{- end -}}
+{{- if or (not (kindIs "slice" $v)) (empty $v) -}}
+{{- fail (printf "gibson.connectorInstallPatterns: the value of %q must be a list of one or more patterns." $k) -}}
+{{- end -}}
+{{- range $v -}}
+{{- if or (not (kindIs "string" .)) (empty .) -}}
+{{- fail (printf "gibson.connectorInstallPatterns: each pattern of %q must be a string that is not empty." $k) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $m -}}
+{{- end -}}

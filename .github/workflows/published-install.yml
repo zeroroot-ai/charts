@@ -237,6 +237,13 @@ jobs:
           # next, with the one pin and the kind values of hosted (hosted#436).
           sed "s|__KIND_PV_DIR__|$KIND_PV_DIR|" helm/kind-config.yaml \
             | kind create cluster --name gibson --config -
+          # The pod and the Service ranges of this cluster, from the file
+          # that made it. baseline-up.sh passes them to the chart as
+          # global.networkPolicy.clusterCIDRs.
+          cidrs="$(awk -F'"' '/^  (podSubnet|serviceSubnet):/ {print $2}' helm/kind-config.yaml | paste -sd, -)"
+          [ "$(tr ',' '\n' <<<"$cidrs" | grep -c /)" -eq 2 ] \
+            || { echo "::error::helm/kind-config.yaml gives no podSubnet and serviceSubnet (read: '$cidrs')"; exit 1; }
+          echo "CLUSTER_CIDRS=$cidrs" >> "$GITHUB_ENV"
           echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
           # shellcheck source=/dev/null
           . ./hosted/scripts/lib/cilium.sh

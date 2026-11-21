@@ -40,6 +40,11 @@
 #   TRUST_DOMAIN   the SPIFFE trust domain              (default: the profile's
 #                  global.spire.trustDomain). A running install keeps its own.
 #   OVERLAY        a substrate overlay: guest or eks    (default: none)
+#   CLUSTER_CIDRS  the pod and the Service ranges of the cluster, a comma
+#                  list, for global.networkPolicy.clusterCIDRs (default: none).
+#                  The egress policy of each connector denies them. The
+#                  private ranges are always denied, so set it when a range
+#                  of the cluster is not private.
 # Sensitive values pass through this script. An xtrace (bash -x, set -x, or
 # xtrace in an exported SHELLOPTS) prints each expanded command to stderr,
 # value included, so the script turns it off first
@@ -243,6 +248,9 @@ if [ -n "$RUNNING_TD" ]; then
   TRUST_DOMAIN="$RUNNING_TD"
   echo "trust domain: ${TRUST_DOMAIN} (kept from the running install)"
 fi
+CLUSTER_CIDRS="${CLUSTER_CIDRS:-}"
+CLUSTER_CIDR_ARGS=()
+[ -n "$CLUSTER_CIDRS" ] && CLUSTER_CIDR_ARGS=(--set "global.networkPolicy.clusterCIDRs={${CLUSTER_CIDRS}}")
 TRUST_DOMAIN_ARGS=()
 [ -n "$TRUST_DOMAIN" ] && TRUST_DOMAIN_ARGS=(--set "global.spire.trustDomain=${TRUST_DOMAIN}")
 # The apiserver egress the OpenBao policy must allow. Its Kubernetes auth
@@ -533,6 +541,7 @@ helm upgrade --install "$RELEASE" "${GIBSON_CHART[@]}" \
   "${BUCKET_ARGS[@]}" \
   "${SETEC_ARGS[@]}" \
   "${TRUST_DOMAIN_ARGS[@]}" \
+  "${CLUSTER_CIDR_ARGS[@]}" \
   --set-json "gibson-workloads.spire.identityAdmission.workloadCreators=[\"${PRINCIPAL}\"]" \
   --set "global.networkPolicy.apiServerCIDRs={${API_CIDRS}}" \
   --namespace "$NS" --timeout 30m
