@@ -6,9 +6,9 @@
 # viper drops an unbound key in silence, so a ConfigMap line absent from
 # this list configures nothing (gibson#599).
 #
-# 1412 leaf name(s) and 367 dotted path(s).
+# 1490 leaf name(s) and 384 dotted path(s).
 #
-# Source: zeroroot-ai/gibson @ v0.168.0
+# Source: zeroroot-ai/gibson @ v0.169.0
 #
 # [leaves]
 a
@@ -51,12 +51,14 @@ agent_run_id
 agent_run_timeout
 agent_runs
 agent_sandbox_class
+agent_seconds
 agent_skill_loads
 agent_timeout
 agent_tool_calls
 agents
 aggregator
 alert_id
+alert_key
 alerts
 alg
 allOf
@@ -87,6 +89,7 @@ app_role_secret_id
 applicationType
 applied
 appliedTuples
+approval
 approval_timeout
 args
 arguments
@@ -99,6 +102,7 @@ attested
 attrs
 aud
 audit_record_id
+audit_record_ids
 auth
 authMethodTypes
 author
@@ -140,6 +144,7 @@ beta
 bets
 bin_path
 bins
+blastRadius
 blast_radius
 blobs
 blocked_node_types
@@ -169,16 +174,20 @@ callback
 callback_address
 candidates
 capabilities
+capability
 capability_name
 card_skills
 catalog
 catalog_id
 categories
 category
+causes
 cert_path
 chain_seq
 changeDate
 changed
+check
+check_kind
 checked_at
 checked_at_unix
 checkpoint
@@ -191,6 +200,7 @@ chosen_provider
 ciphertext
 citation_id
 claim
+class
 claude_session_id
 clientID
 clientId
@@ -201,6 +211,7 @@ client_id
 client_ip
 client_name
 client_secret
+client_secret_name
 clock_skew
 closed_at
 cloud
@@ -234,6 +245,7 @@ configured_by
 connect_timeout
 connection
 connector
+connector_class
 connector_id
 connectors
 considered
@@ -261,6 +273,9 @@ cost_cents
 cost_usd_cents
 count
 counted_token_calls
+countermeasure_tactics
+countermeasures
+counters
 coverage
 cpds
 cpu
@@ -271,8 +286,10 @@ created_at_unix
 created_by
 created_mission_id
 creationDate
+credentialHeader
 credentialSecret
 credentialSecretName
+credential_header
 credential_secret
 credentials
 credentials_masked
@@ -297,7 +314,6 @@ dashboard_postgres
 data
 dataPlane
 data_plane_ready
-data_sources
 database
 databases
 db_index
@@ -340,6 +356,7 @@ depth
 description
 description_contains
 destination
+destructive
 destructive_actions
 detail
 details
@@ -386,6 +403,7 @@ embedding_models
 enabled
 enablement_edges
 encryption
+end
 end_labels
 end_props
 end_time
@@ -393,6 +411,8 @@ end_time_unix
 end_unix_nano
 end_unix_nanos
 endpoint
+endpointPatterns
+endpoint_patterns
 endpoints
 enforced_by
 enrolled_by
@@ -463,13 +483,19 @@ finding_critical
 finding_high
 finding_id
 finding_ids
+finding_key
 findings
 findings_by_level
 findings_by_severity
 findings_count
 finish_reason
+first
 firstAt
 firstName
+fix
+fix_blocked_reason
+fixes
+flaws
 flight_recorder_policy
 force_semantic_only
 force_structured_only
@@ -478,6 +504,7 @@ forkable
 format
 found
 fragment_json
+frame
 from
 fromAddress
 fromName
@@ -493,12 +520,16 @@ givenName
 goal
 grant
 grantTypes
+grant_object
+grant_relation
 grant_types
 grantedOrganizationId
 grantedOrganizationIdFilter
 grantedRoleKeys
 granted_at_unix
+granted_by
 granted_by_user_id
+grantor
 grants
 grantsAppliedCount
 grants_revoked
@@ -517,10 +548,12 @@ has_tokens
 header
 headers
 health
+health_signal
 health_status
 healthy
 help
 high
+history
 hmac
 home_dir
 host
@@ -543,13 +576,16 @@ idle
 ids
 iid
 image
+imagePullSecret
 image_key
+image_pull_secret
 inProjectIdsFilter
 inUserIds
 in_graph
 in_node
 in_tenant_catalog
 in_vector
+incident_key
 include_evidence
 include_near_expiry_only
 include_remediation
@@ -571,6 +607,7 @@ input_tokens_details
 input_type
 inputs
 insecure_mode
+installPatterns
 install_months
 installed_at
 instance_id
@@ -621,6 +658,7 @@ kid
 kill_switches
 kind
 knob
+known
 kty
 kv_mount
 label
@@ -628,6 +666,7 @@ labelled
 labels
 language
 large_object_threshold
+last
 lastError
 lastName
 last_active_at
@@ -665,6 +704,7 @@ logging
 loginBranding
 low
 machine
+mapped_control_ids
 mapping_rules
 masterKey
 matrix
@@ -695,6 +735,9 @@ max_tokens_per_call
 maximum
 mean_predicted
 media_type
+median_agent_seconds
+median_seconds
+median_wait_seconds
 member
 memberCommand
 member_count
@@ -702,6 +745,11 @@ member_id
 members
 memory
 memory_continuity
+merge_request
+merge_request_key
+merge_request_url
+merge_slots
+merged
 message
 message_count
 messages
@@ -736,7 +784,6 @@ mission_run_id
 mission_scope
 mission_state
 missions
-mitre_atlas
 mitre_attack
 mode
 model
@@ -756,7 +803,6 @@ name
 nameQuery
 name_filter
 namespace
-needs_review
 neo4j
 neo4jProvisioned
 network
@@ -773,6 +819,7 @@ next_observation_id
 next_page_token
 next_rotation
 next_subdomain_id
+nist_controls
 node
 node_beliefs
 node_count
@@ -790,11 +837,14 @@ note
 notified
 number
 o
+oauthClient
 oauthScope
+oauth_client
+oauth_client_id
+oauth_client_secret_name
 object
 object_deriver
 object_type
-objective
 objects
 observations
 observedGeneration
@@ -810,6 +860,8 @@ ok
 oneOf
 ontology
 ontology_proposals
+ontology_sha256
+ontology_url
 op
 op_id
 op_type
@@ -817,7 +869,6 @@ open_ports
 opened_at
 ops
 optional
-order
 org
 org_id
 organization
@@ -858,6 +909,7 @@ parameter_size
 parameters
 parameters_json
 params
+parent
 parent_mission_id
 parent_task_id
 parts
@@ -871,17 +923,20 @@ path
 path_prefix
 path_with_namespace
 pattern
+patterns
 payload
 pending
 pendingAuditRecords
 pending_nodes
 percent_complete
 period_reset_at_unix
+period_seconds
 phase
 pid
 place_key
 place_label
 placeholder
+places
 plane
 planes
 platformOwner
@@ -889,7 +944,6 @@ platformOwnerLinkConfirmedSMTPActive
 platformOwnerUserID
 platformRegistration
 platform_ca_file
-platforms
 plugin
 plugin_calls
 plugin_id
@@ -905,6 +959,7 @@ postgres
 postgresBundle
 postgresConnectionLimit
 postgresProvisioned
+predicate
 predicate_type
 predicates
 preferredLanguage
@@ -912,6 +967,9 @@ preferredLoginName
 preferred_locale
 prefix
 prev_hash
+previous
+previous_count
+previous_median_seconds
 previous_run_id
 previous_run_status
 primaryDomain
@@ -956,9 +1014,12 @@ pull_request_body
 pull_request_title
 queries
 query
+raised
+rate
 rate_limits
 rationale
 reachable
+reached
 read
 read_enabled
 read_timeout
@@ -984,6 +1045,7 @@ ref
 reference
 references
 refresh_token
+refused
 region
 register
 registration
@@ -999,10 +1061,13 @@ rel_type
 related_ids
 relation
 relations
+release
+release_date
 reload_interval
 remediation
 remove
 replaces
+replay_seq
 replyToAddress
 repo
 report
@@ -1019,6 +1084,7 @@ resource_id
 resource_type
 resources
 response
+responseActions
 responseTypes
 response_format
 response_length
@@ -1041,6 +1107,7 @@ retry_policy
 retryable
 returnCode
 reversibility
+reverted
 reviewer
 reviews
 revocation_endpoint
@@ -1100,6 +1167,7 @@ senderName
 sentinel_addrs
 sentinel_master
 seq
+service
 service_name
 services
 session_id
@@ -1121,6 +1189,7 @@ shared_cluster_uri
 shutdown
 sighting_count
 similarity
+since
 since_seq
 size
 size_bytes
@@ -1155,6 +1224,7 @@ stale
 stale_as_of_unix
 stale_reason
 stargazers
+start
 start_labels
 start_props
 start_time
@@ -1175,7 +1245,6 @@ step_number
 step_started_at_unix
 step_token
 step_url
-steps
 stop
 stop_reason
 stopped_at
@@ -1215,7 +1284,6 @@ systemClient
 tactic
 tactic_id
 tactic_name
-tactics
 tag
 tags
 target
@@ -1223,6 +1291,7 @@ targetEnv
 targetID
 targetType
 target_asset
+target_belief
 target_env
 target_id
 target_ids
@@ -1230,7 +1299,6 @@ target_kind
 target_match
 target_object
 target_principal_id
-target_ref
 target_type
 target_types
 target_user_id
@@ -1271,6 +1339,8 @@ threshold
 threshold_value
 tier
 time
+timeline_seq
+timeline_total
 timeout
 timeout_ms
 timestamp
@@ -1304,7 +1374,9 @@ tool_call_id
 tool_call_ids
 tool_calls
 tool_choice
+tool_class
 tool_count
+tool_id
 tool_name
 tool_results
 tools
@@ -1317,6 +1389,7 @@ total_cost_usd
 total_findings
 total_findings_all_runs
 total_nodes
+total_seconds
 total_tokens
 total_uses
 trace_count
@@ -1324,6 +1397,7 @@ trace_id
 tracking
 transport
 true_branch
+truncated
 trust_domain
 trustedClusterDomain
 ttl_ms
@@ -1336,6 +1410,7 @@ types
 u2f
 u2f_cleared
 unauthenticated
+undo
 unix_nanos
 unread_only
 unschedulable
@@ -1380,6 +1455,8 @@ vector_score
 vector_weight
 vendor
 verdict
+verified
+verified_by
 verified_session_token
 version
 visibility
@@ -1388,6 +1465,8 @@ voi_plans
 volume
 vulnerability_id
 w
+wait_seconds
+waited_seconds
 warning_context
 warning_crossed
 warning_message
@@ -1413,7 +1492,6 @@ written
 x
 x5c
 y
-yaml_source
 zitadel
 zitadelMembershipID
 zitadelOrgID
@@ -1480,6 +1558,7 @@ callback.credential.denied
 callback.tls.peer_accepted
 callback.tls.unauthorized_peer
 capabilitygrant.service
+check.rerun
 component.credential.denied
 component.enrolled_by_agent
 condition.false
@@ -1495,6 +1574,9 @@ datapool.admin
 dbms.security.procedures.allowlist
 decision.completed
 decision.requested
+default.conf
+deploy.observed
+destructive_action.consumed
 destructive_action.decided
 destructive_action.requested
 domain.observed
@@ -1506,10 +1588,17 @@ extauthz.issuer_mismatch
 extauthz.session_gate_denied
 extauthz.user_session_gate_denied
 finding.discovered
+finding.fix_claim_expired
+finding.fix_claim_released
+finding.fix_claimed
+finding.fix_link_refused
+finding.prioritized
 finding.raised
 finding.status_changed
 findings.by_severity
 findings.submissions
+fix.revert_requested
+fix.reverted
 flight_recorder.policy_set
 flight_recorder.retention_swept
 gateway.networking.k8s.io
@@ -1639,6 +1728,8 @@ harness.sandboxed.fork_agent
 harness.sandboxed.fork_sandbox
 harness.sandboxed.launch_agent
 harness.sandboxed.launch_from_snapshot
+health.observed
+health.unavailable
 host.observed
 http.response.status_code
 hypothesis.observed
@@ -1650,6 +1741,10 @@ label.applied
 llm_call.observed
 logo.svg
 mark.svg
+merge_request.granted
+merge_request.observed
+merge_request.queued
+merge_request.slot_expired
 mission.completed
 mission.created
 mission.done
