@@ -40,11 +40,11 @@ chart:
 
 # The gibson commit whose component catalog the dispatchTime group is
 # derived from (airgap/gibson-catalog.ref).
-gibsonCatalogRef: 513a6c219518dc16b2ae14e0c914a79a4d1b68d0
+gibsonCatalogRef: 2c4d868c303ae1cd80ed6d73ad1e9d83709ca6a4
 
 # First-party platform images (private; ELv2 + the closed billing seam).
 firstParty:
-  - ref: ghcr.io/zeroroot-ai/connector-operator:v0.168.0@sha256:967b63a666049e98af06de6e18ea9ebdf526bd31573b2087fa762e9955ce411e
+  - ref: ghcr.io/zeroroot-ai/connector-operator:v0.169.0@sha256:19ff684d2bfef57be40d416a32696f2f3b91524cd8cb37a812c3666c93e782db
     digest: ""
     role: ""
   - ref: ghcr.io/zeroroot-ai/dashboard:v0.139.0@sha256:a3370421b6d71152f8d3189ddae358af79238fa441208f1ee4b8bca5845802b4
@@ -53,16 +53,16 @@ firstParty:
   - ref: ghcr.io/zeroroot-ai/docs-site:v0.6.20@sha256:c8f0cd7fc01489eb8f45dacc2f225a4b717aaad28f1b58f08e3418859071a5ba
     digest: ""
     role: "customer documentation site"
-  - ref: ghcr.io/zeroroot-ai/ext-authz:v0.168.0@sha256:6b18c952cfa551f5ebeeae308b0087e82156ff4299582d41dea78e12dcd3e7b9
+  - ref: ghcr.io/zeroroot-ai/ext-authz:v0.169.0@sha256:a88eeb667b665d668b5ed60d1e9dd3be68d014594d64303db9bac044a6ce1d43
     digest: ""
     role: "Envoy ext_authz (auth edge — DO NOT replace with Istio AuthZ)"
-  - ref: ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-513a6c2@sha256:5f46a8407932b1d0a1652d40eaf59e6b4a0300085fad9b101e78cbbad5e1008b
+  - ref: ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-2c4d868@sha256:1fab7d2da1077ef8a5f7b3431c1050364db4e31ee33b67c784c31aafe26ca859
     digest: ""
     role: ""
-  - ref: ghcr.io/zeroroot-ai/gibson:v0.168.0@sha256:960e3275a84e8968ec39d2047bf5d7f03752a742718f08114db6f632d3bd886f
+  - ref: ghcr.io/zeroroot-ai/gibson:v0.169.0@sha256:0215737f271574e332bd6247cb6001995515a089ee73349b20a835f922a58412
     digest: ""
     role: "daemon (run/execute + platform RPCs)"
-  - ref: ghcr.io/zeroroot-ai/platform-operator:v0.168.0@sha256:d48b68ee6337357dc807192f34ab0dcab6b0a5cebdd233ea73c8b82840ba2f41
+  - ref: ghcr.io/zeroroot-ai/platform-operator:v0.169.0@sha256:e46887cd4322bc6811ccfd9e44e6f1fd4d1ebf171855561986b8b6278d3052ce
     digest: ""
     role: "platform operator (Zitadel OIDC apps, FGA aggregate root)"
   - ref: ghcr.io/zeroroot-ai/setec-device-plugin:v0.129.0@sha256:04ec0fd1c238584743e58c4c4a9dfe41faebaf6ce5f785e890550945c1ade18b
@@ -80,7 +80,7 @@ firstParty:
   - ref: ghcr.io/zeroroot-ai/setec:v0.129.0@sha256:69bd5bf3c95dde483839ccb5dc8a6175e5c2212f8c561951d19c3c266669a5c7
     digest: ""
     role: "setec microVM operator (untrusted-exec boundary)"
-  - ref: ghcr.io/zeroroot-ai/tenant-operator:v0.168.0@sha256:d03018b9c460625c9597f564568526a457478564880fd683ffb0262ff68ac228
+  - ref: ghcr.io/zeroroot-ai/tenant-operator:v0.169.0@sha256:7a3268df565bf2871bc9d618c2316fbb67633e0ca8453a3bfcc4dbb89c1f7fc2
     digest: ""
     role: "tenant operator"
   - ref: ghcr.io/zeroroot-ai/zitadel-login:v4.19.4@sha256:52211a61b1e60e88d462f317d10f6b6ec95d0fdacc2eb944637279fbcafa32da
@@ -216,16 +216,46 @@ mirrored:
 # Named by the daemon's component catalog, pulled by setec when a mission
 # dispatches a tool, an agent or a connector. Absent from every render.
 dispatchTime:
+  - ref: ghcr.io/zeroroot-ai/connectors-crowdstrike@sha256:8e86c461328c03a050c615ba0bd676f2b949120ecbe4af911d3921763b7268de
+    digest: ""
+    role: ""
+  - ref: ghcr.io/zeroroot-ai/connectors-defender-endpoint@sha256:87e8bed6356316b2780b26c25e6940768a2665ab41f2f27023af9eef9d007bde
+    digest: ""
+    role: ""
+  - ref: ghcr.io/zeroroot-ai/connectors-entra-id@sha256:649970bd5b42411999cd93efbd5fe58e67b0ffb0180231ec081023a179e2ac69
+    digest: ""
+    role: ""
+  - ref: ghcr.io/zeroroot-ai/connectors-github-fixloop@sha256:2120b5e92b8430e4815921d7f39ace987a4b1967b61a8569511bd864e3383d87
+    digest: ""
+    role: ""
+  - ref: ghcr.io/zeroroot-ai/connectors-gitlab-fixloop@sha256:75b6ba566e4314dcb0329af2bb83033ce3be9c65bbb40d9c6ab27f3c9572092d
+    digest: ""
+    role: ""
+  - ref: ghcr.io/zeroroot-ai/connectors-okta@sha256:fdb00b175f5ee055805dbc00834cac4947ab821a428e6d5478d49060574f5066
+    digest: ""
+    role: ""
+  - ref: ghcr.io/zeroroot-ai/connectors-prometheus@sha256:2c446640cf65884b509319f0cc9166abc1f7fe9f5c286c7b3517605b9b319bff
+    digest: ""
+    role: ""
+  - ref: ghcr.io/zeroroot-ai/connectors-puppet@sha256:a321b6e3f7871fd30baab4cf38991b4b79cbb5695c0bdce2d4d0890ae1272b6f
+    digest: ""
+    role: ""
+  - ref: ghcr.io/zeroroot-ai/connectors-qualys@sha256:64701b13f99993b77e5494fca938d4adc499c02f03315b486449d26ee0c6cfc3
+    digest: ""
+    role: ""
+  - ref: ghcr.io/zeroroot-ai/connectors-sentinelone@sha256:c4c48e268c91bafbd76af19514f612674f1c2f07259387c9d7b2ca2b176076c8
+    digest: ""
+    role: ""
   - ref: ghcr.io/zeroroot-ai/cve-triage@sha256:c08484bffd87d768809a257d8ab81f0393510027b5a3caffa09c1b401abde276
     digest: ""
     role: "CVE triage agent"
   - ref: ghcr.io/zeroroot-ai/gibson-executor@sha256:12826078d28168d9c83a9f6b728bb9c63a1b07d84f61bd5f7e1f09754f8e0c05
     digest: ""
     role: "tool runner: one image hosting every CLI parser (nmap, nuclei, trivy, ...)"
-  - ref: ghcr.io/zeroroot-ai/gibson-plugin-github@sha256:53551eed3d41fe3adfee4a51707846e153231f7246559dc09813c706e91b071a
+  - ref: ghcr.io/zeroroot-ai/gibson-plugin-github@sha256:f7bcf71da1bb2d541dad4a058d750d8bfaa30d4f8a988bbdea673bc5219e7b6e
     digest: ""
     role: ""
-  - ref: ghcr.io/zeroroot-ai/gibson-plugin-gitlab@sha256:8d129ff5b16cde4fdfec59d95171ab728f8b41d198e87c0407c5b8b329a0ca74
+  - ref: ghcr.io/zeroroot-ai/gibson-plugin-gitlab@sha256:f2ee8718481a8140a774122148acace49c63fd0b609e11a1c628ab42029112dd
     digest: ""
     role: ""
   - ref: ghcr.io/zeroroot-ai/zerocool-agent@sha256:4c2c27f6b94926d0f8148f22b4baa3be1793460c4a8687df42fa6c325ddc3b46
@@ -235,3 +265,6 @@ dispatchTime:
     digest: ""
     role: "zerocool sandbox agent (Claude Code)"
     hardening: "needs api.anthropic.com or a claude.ai login at run time; no in-perimeter option"
+  - ref: quay.io/crowdstrike/falcon-mcp@sha256:4d932ad6252fef828b1be646091586f4704ede5ac1a225dfaa6e83eda26087ad
+    digest: ""
+    role: ""

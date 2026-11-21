@@ -209,6 +209,16 @@ platformPostgres:
 # no credential. The chart refuses plaintext with a credential, so this pair
 # cannot reach a cloud profile by a copy.
 global:
+  # The pod and the Service ranges of the cluster (global.networkPolicy.
+  # clusterCIDRs), from podSubnet and serviceSubnet of helm/kind-config.yaml.
+  # These are kind's values, so they live in kind's rungs and never in the
+  # baseline. 10.96.0.0/12 also holds 10.96.0.0/16, the Service range of a
+  # kind cluster with the kind defaults. A k3d cluster has other ranges:
+  # scripts/baseline-up.sh sets CLUSTER_CIDRS, which overrides these.
+  networkPolicy:
+    clusterCIDRs:
+      - 10.244.0.0/16
+      - 10.96.0.0/12
   email:
     provider: "smtp"
     from: "no-reply@localhost.zeroroot.ai"

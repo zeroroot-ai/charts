@@ -752,6 +752,11 @@ spec:
             - name: SIGNUP_SELF_SERVE
               value: {{ . | quote }}
             {{- end }}
+            # The host patterns of the connectors of a server that the
+            # customer hosts, as JSON (gibson.connectorInstallPatterns). The
+            # platform owner sets them. "{}" sets none.
+            - name: GIBSON_CONNECTOR_INSTALL_PATTERNS
+              value: {{ include "gibson.connectorInstallPatterns" . | quote }}
             {{- /* The neutral connection points of the platform (ADR-0060,
                    charts#375). A private component (billing) uses them; each
                    is empty by default, and an empty caller identity accepts

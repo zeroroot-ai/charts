@@ -24,3 +24,12 @@ gibson-workloads:
     auditExport:
       bucket: "example-durable-bucket"
       lockMode: "GOVERNANCE"
+
+# The pod and the Service ranges of the cluster (global.networkPolicy.
+# clusterCIDRs). Every installer sets them, and the render fails without them.
+# These are the ranges of helm/kind-config.yaml.
+global:
+  networkPolicy:
+    clusterCIDRs:
+      - 10.244.0.0/16
+      - 10.96.0.0/12
