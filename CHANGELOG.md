@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.157.0](https://github.com/zeroroot-ai/charts/compare/v0.156.0...v0.157.0) (2026-11-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* the chart ignores gibson.entitlementsEndpoint, gibson.entitlementsRequired, global.firstTenant.tier and platformBootstrap.planSync. The first tenant gets no tier.
+
+### Features
+
+* pin gibson v0.167.0 and drop the entitlements and plan inputs ([#830](https://github.com/zeroroot-ai/charts/issues/830)) ([c324dbf](https://github.com/zeroroot-ai/charts/commit/c324dbfb207f21fc5db8c004683be375349f6ebd))
+
 ## [0.156.0](https://github.com/zeroroot-ai/charts/compare/v0.155.2...v0.156.0) (2026-11-20)
 
 
