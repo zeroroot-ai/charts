@@ -90,8 +90,8 @@ reads the provider namespace from this URL and refuses any host that is not
 {{/*
 gibson-operators.clusterCIDRs joins global.networkPolicy.clusterCIDRs with
 commas for CONNECTOR_CLUSTER_CIDRS. The render fails on an empty list and on
-an entry that is not an address with a prefix length. The connector operator
-parses each entry again at start.
+an entry that is not a CIDR (gibson-operators.validCIDR). The connector
+operator parses each entry again at start.
 */}}
 {{- define "gibson-operators.clusterCIDRs" -}}
 {{- $cidrs := ((.Values.global).networkPolicy | default dict).clusterCIDRs | default list -}}
@@ -102,9 +102,49 @@ parses each entry again at start.
 {{- fail "global.networkPolicy.clusterCIDRs is required: set the pod range and the Service range of the cluster, for example [10.244.0.0/16, 10.96.0.0/12] on kind or [10.42.0.0/16, 10.43.0.0/16] on k3s. The connector operator does not start without them." -}}
 {{- end -}}
 {{- range $cidrs -}}
-{{- if not (and (kindIs "string" .) (regexMatch "^[0-9A-Fa-f.:]+/[0-9]{1,3}$" .)) -}}
-{{- fail (printf "global.networkPolicy.clusterCIDRs: %v is not a CIDR." .) -}}
+{{- if ne (include "gibson-operators.validCIDR" .) "true" -}}
+{{- fail (printf "global.networkPolicy.clusterCIDRs: %v is not a CIDR. Give an IPv4 address with a prefix of 0 to 32, or an IPv6 address with a prefix of 0 to 128." .) -}}
 {{- end -}}
 {{- end -}}
 {{- join "," $cidrs -}}
+{{- end -}}
+
+{{/*
+gibson-operators.validCIDR returns "true" for an IPv4 or an IPv6 CIDR. Sprig
+has no CIDR parser, so it checks each part. IPv4: four decimal octets of 0 to
+255 and a prefix of 0 to 32, with no leading zero. IPv6: groups of one to
+four hex digits, at most one "::", eight groups without "::" and fewer with
+it, and a prefix of 0 to 128. An IPv6 address with an IPv4 tail is refused.
+tests/cluster-cidrs.bats holds the fixtures.
+*/}}
+{{- define "gibson-operators.validCIDR" -}}
+{{- $ok := false -}}
+{{- if kindIs "string" . -}}
+{{- if regexMatch "^(0|[1-9][0-9]{0,2})(\\.(0|[1-9][0-9]{0,2})){3}/(0|[1-9][0-9]?)$" . -}}
+{{- $parts := splitList "/" . -}}
+{{- $ok = le (atoi (index $parts 1)) 32 -}}
+{{- range splitList "." (index $parts 0) -}}
+{{- if gt (atoi .) 255 -}}{{- $ok = false -}}{{- end -}}
+{{- end -}}
+{{- else if regexMatch "^[0-9A-Fa-f:]+/(0|[1-9][0-9]{0,2})$" . -}}
+{{- $parts := splitList "/" . -}}
+{{- $addr := index $parts 0 -}}
+{{- $double := sub (len (splitList "::" $addr)) 1 -}}
+{{- $groups := list -}}
+{{- range splitList ":" (replace "::" ":" $addr) -}}
+{{- if . -}}{{- $groups = append $groups . -}}{{- end -}}
+{{- end -}}
+{{- $ok = and (le (atoi (index $parts 1)) 128) (le $double 1) (not (contains ":::" $addr)) -}}
+{{- if eq $double 0 -}}
+{{- $ok = and $ok (eq (len $groups) 8) (not (hasPrefix ":" $addr)) (not (hasSuffix ":" $addr)) -}}
+{{- else -}}
+{{- $rest := replace "::" "" $addr -}}
+{{- $ok = and $ok (le (len $groups) 7) (not (hasPrefix ":" $rest)) (not (hasSuffix ":" $rest)) -}}
+{{- end -}}
+{{- range $groups -}}
+{{- if gt (len .) 4 -}}{{- $ok = false -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $ok -}}
 {{- end -}}
