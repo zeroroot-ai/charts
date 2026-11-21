@@ -1344,8 +1344,9 @@ data:
 # component reads it (gibson#1525). Its one reader in a cluster is the billing
 # webhook of the private billing component (hosted
 # gitops/saas-overlay/billing-webhook), which reads the Stripe lookup key and
-# the trial days of a plan. It goes with the card step (gibson#1527). The www
-# generator reads files/plans.yaml from this repository.
+# the trial days of a plan. The ConfigMap stays: the billing webhook reads it
+# for the one plan `team`. The www generator reads files/plans.yaml from this
+# repository.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11687,7 +11688,7 @@ spec:
               readOnly: true
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/connector-operator:v0.167.0@sha256:a623e1bd5a6fa4f2f72e95f970f832db8915a508d48fad9c0c0eee6e6ca0703e"
+          image: "ghcr.io/zeroroot-ai/connector-operator:v0.168.0@sha256:967b63a666049e98af06de6e18ea9ebdf526bd31573b2087fa762e9955ce411e"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -11819,7 +11820,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/platform-operator:v0.167.0@sha256:8e2f62efe881dcc2db44838e41ad5d87fe7b76c2f10f0301b295ad5bf5e0356c"
+          image: "ghcr.io/zeroroot-ai/platform-operator:v0.168.0@sha256:d48b68ee6337357dc807192f34ab0dcab6b0a5cebdd233ea73c8b82840ba2f41"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -12310,7 +12311,7 @@ spec:
               memory: 64Mi
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.167.0@sha256:235031465df8d5f0dcd666b2028f9fd099b51f30c8dea92efa981e5103352446"
+          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.168.0@sha256:d03018b9c460625c9597f564568526a457478564880fd683ffb0262ff68ac228"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -12458,7 +12459,7 @@ spec:
             # The image of the belief trainer CronJob of each tenant
             # (gibson#616). The operator exits at start when it is empty.
             - name: BELIEF_TRAINER_IMAGE
-              value: "ghcr.io/zeroroot-ai/gibson:v0.167.0@sha256:fba66283b7c3632d573752c5061a0843db5e74e44b6f47434c04c4953255c3e0"
+              value: "ghcr.io/zeroroot-ai/gibson:v0.168.0@sha256:960e3275a84e8968ec39d2047bf5d7f03752a742718f08114db6f632d3bd886f"
             # The Neo4j image of each tenant data plane (gibson#1061). The
             # operator exits at start when it is empty or has no digest.
             - name: TENANT_NEO4J_IMAGE
@@ -14400,7 +14401,7 @@ spec:
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,tmp"
         checksum/registry: c1c29512582a893a867405ae14499183f952c17ed756544d689ca1b5877c2c5c
-        checksum/daemon-registry: c039f0de568b6ba178b8e0d4fef886a5ac14a20b40e41328c1f108a975f6d274
+        checksum/daemon-registry: 44b31521a49274b477bb7ab566cc050ad80293d6792b63714d744fc39ca96cfe
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
         secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc,gibson-ext-authz-health-tls"
     spec:
@@ -14535,7 +14536,7 @@ spec:
               memory: 32Mi
       containers:
         - name: ext-authz
-          image: "ghcr.io/zeroroot-ai/ext-authz:v0.167.0@sha256:2c420b262f9fde9109718b89a4c4522e93fcbf4c6cba61a518dc9a5b809e1d5a"
+          image: "ghcr.io/zeroroot-ai/ext-authz:v0.168.0@sha256:6b18c952cfa551f5ebeeae308b0087e82156ff4299582d41dea78e12dcd3e7b9"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -18469,7 +18470,7 @@ spec:
               memory: 32Mi
       containers:
         - name: gibson
-          image: "ghcr.io/zeroroot-ai/gibson:v0.167.0@sha256:fba66283b7c3632d573752c5061a0843db5e74e44b6f47434c04c4953255c3e0"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.168.0@sha256:960e3275a84e8968ec39d2047bf5d7f03752a742718f08114db6f632d3bd886f"
           imagePullPolicy: Always
           ports:
             - name: callback
@@ -19763,7 +19764,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-fga-init-c039f0de
+  name: gibson-gibson-workloads-fga-init-44b31521
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -19830,7 +19831,7 @@ spec:
         # The entrypoint is the gibson binary, so command overrides it to get a
         # shell for the redirect. The runtime image is alpine-based and has one.
         - name: dump-model
-          image: "ghcr.io/zeroroot-ai/gibson:v0.167.0@sha256:fba66283b7c3632d573752c5061a0843db5e74e44b6f47434c04c4953255c3e0"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.168.0@sha256:960e3275a84e8968ec39d2047bf5d7f03752a742718f08114db6f632d3bd886f"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -28524,7 +28525,7 @@ spec:
       # The daemon image itself — same repo@digest the StatefulSet runs — so
       # `gibson --version` reports the toolchain the DEPLOYED binary was built
       # with, not some proxy. The runtime image is alpine-based (has /bin/sh).
-      image: "ghcr.io/zeroroot-ai/gibson:v0.167.0@sha256:fba66283b7c3632d573752c5061a0843db5e74e44b6f47434c04c4953255c3e0"
+      image: "ghcr.io/zeroroot-ai/gibson:v0.168.0@sha256:960e3275a84e8968ec39d2047bf5d7f03752a742718f08114db6f632d3bd886f"
       imagePullPolicy: Always
       command: ["/bin/sh", "-c"]
       args:
@@ -29695,7 +29696,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: first-admin
-          image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-f6bbb39@sha256:50ca50a679b3908e1d4c0cf590082f184a00d7f9bb1c490f0c841d5cd1b612a4"
+          image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-513a6c2@sha256:5f46a8407932b1d0a1652d40eaf59e6b4a0300085fad9b101e78cbbad5e1008b"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

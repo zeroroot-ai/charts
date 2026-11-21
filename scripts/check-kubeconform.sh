@@ -66,7 +66,7 @@ if [ "${1:-}" = "--selftest" ]; then
   # A custom resource with a field of the wrong type under its CRD schema.
   # It used to carry an unknown field and no spec.tier. Only the missing
   # required tier made it fail: kubeconform does not refuse an unknown field
-  # that the CRD schema does not close. When spec.tier became optional
+  # that the CRD schema does not close. When spec.tier was deleted
   # (gibson#1525), that fixture passed.
   printf 'apiVersion: gibson.zeroroot.ai/v1alpha1\nkind: Tenant\nmetadata: {name: t}\nspec: {displayName: {a: 1}, owner: o@example.test}\n' > "$WORK/badcr.yaml"
   if validate "$WORK/badcr.yaml" >/dev/null 2>&1; then echo "SELFTEST FAIL: a mistyped Tenant field must be refused under the CRD schema"; exit 1; fi

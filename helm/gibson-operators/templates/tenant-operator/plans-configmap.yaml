@@ -8,8 +8,9 @@
 # component reads it (gibson#1525). Its one reader in a cluster is the billing
 # webhook of the private billing component (hosted
 # gitops/saas-overlay/billing-webhook), which reads the Stripe lookup key and
-# the trial days of a plan. It goes with the card step (gibson#1527). The www
-# generator reads files/plans.yaml from this repository.
+# the trial days of a plan. The ConfigMap stays: the billing webhook reads it
+# for the one plan `team`. The www generator reads files/plans.yaml from this
+# repository.
 apiVersion: v1
 kind: ConfigMap
 metadata:

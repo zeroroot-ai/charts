@@ -51043,37 +51043,6 @@ spec:
                   - secretRef
                   type: object
                 type: array
-              planSync:
-                description: |-
-                  PlanSync is ignored. The operator has no plan-sync step (gibson#1531).
-                  The field stays while the chart still renders it. Step 2 of
-                  gibson#1531 deletes it.
-                properties:
-                  plansConfigMapRef:
-                    description: |-
-                      PlansConfigMapRef points at the ConfigMap + key holding the gibson
-                      plans data. The reconciler hashes the content and re-syncs only
-                      when the hash changes.
-                    properties:
-                      key:
-                        description: Key is the entry within the ConfigMap's data
-                          map.
-                        minLength: 1
-                        type: string
-                      name:
-                        description: Name is the ConfigMap name.
-                        minLength: 1
-                        type: string
-                      namespace:
-                        description: Namespace overrides the default namespace.
-                        type: string
-                    required:
-                    - key
-                    - name
-                    type: object
-                required:
-                - plansConfigMapRef
-                type: object
               platformOwner:
                 description: |-
                   PlatformOwner declares the ONE human Zitadel administrator this install
@@ -52843,9 +52812,6 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.tier
-      name: Tier
-      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -52898,7 +52864,7 @@ spec:
               owner:
                 description: |-
                   Owner is the email address of the tenant owner. Used as the admin user
-                  in Zitadel (via Auth.js) and as billing contact in Stripe.
+                  in Zitadel (via Auth.js).
                 format: email
                 type: string
               resources:
@@ -52957,12 +52923,6 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
-              tier:
-                description: |-
-                  Tier is the optional plan id of the tenant. Gibson does not read it and
-                  refuses no value. The field stays while the chart and the dashboard
-                  still write it. Step 2 of gibson#1531 deletes it.
-                type: string
             required:
             - displayName
             - owner
@@ -52974,7 +52934,7 @@ spec:
                 description: |-
                   Conditions represent the current state of the Tenant resource.
                   Standard condition types: Ready, NamespaceProvisioned, ZitadelOrgReady,
-                  StripeReady, FGAReady, RedisReady, Terminating.
+                  FGAReady, RedisReady, Terminating.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
