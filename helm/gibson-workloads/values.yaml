@@ -129,6 +129,18 @@ gibson:
   # tenant-operator deploys (gibson#815).
   platformTenant: ""
 
+  # The host patterns of the connectors of a server that the customer hosts
+  # (GIBSON_CONNECTOR_INSTALL_PATTERNS). The platform owner of the install
+  # sets them. A tenant never does. Each key is <connector>/<variable> of a
+  # manifest that sets installPatterns: true. Each value is a list of
+  # patterns for that variable. Example:
+  #   connectorInstallPatterns:
+  #     gitlab-fixloop/base_url: ["https://gitlab.customer.example"]
+  # Empty by default. With no pattern, a tenant cannot enable a connector to a
+  # self-hosted Git host or a self-hosted Prometheus. The platform owner must
+  # set a pattern first. A bad key or a bad pattern stops the daemon at start.
+  connectorInstallPatterns: {}
+
   # Audit export to the durable bucket (ADR-0113, charts#446). The daemon
   # writes each audit record to audit/<tenant>/ in this bucket, with an object
   # lock, and retention removes only rows it exported. On prem, name the

@@ -11731,6 +11731,11 @@ spec:
               value: "https://gibson-spiffe-oidc-discovery-provider"
             - name: CONNECTOR_PROXY_JWKS_URL
               value: "https://gibson-spiffe-oidc-discovery-provider.gibson.svc.cluster.local/keys"
+            # The pod and the Service ranges of the cluster, a comma list
+            # (global.networkPolicy.clusterCIDRs). The egress policy of each
+            # connector denies them. The operator refuses an empty value.
+            - name: CONNECTOR_CLUSTER_CIDRS
+              value: "10.244.0.0/16,10.96.0.0/12"
             # SPIRE Workload API socket the X509Source streams SVIDs from.
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"
@@ -18832,6 +18837,11 @@ spec:
             # Absent: closed. "approval": approval. "true": open.
             - name: SIGNUP_SELF_SERVE
               value: "true"
+            # The host patterns of the connectors of a server that the
+            # customer hosts, as JSON (gibson.connectorInstallPatterns). The
+            # platform owner sets them. "{}" sets none.
+            - name: GIBSON_CONNECTOR_INSTALL_PATTERNS
+              value: "{}"
             # ----------------------------------------------------------------
             # Setec sandbox wiring.
             #
