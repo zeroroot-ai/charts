@@ -1826,18 +1826,12 @@ data:
                             #      default-denied every request — it could not
                             #      succeed.
                             #   2. The dashboard serves no handler under
-                            #      /api/admin/provisioning/ any more (the
-                            #      entitlements endpoints were retired).
-                            #   3. Its only caller, the tenant operator's
-                            #      EntitlementsHTTPClient, posted straight at the
-                            #      dashboard Service (formerly DASHBOARD_URL,
-                            #      http://gibson-dashboard:3000, in helm/
-                            #      gibson-operators/templates/tenant-operator/
-                            #      deployment.yaml — that env var has since been
-                            #      replaced by GIBSON_APP_URL, which the
-                            #      tenant-operator now uses only for its
-                            #      human-facing email links). It never traversed
-                            #      this edge.
+                            #      /api/admin/provisioning/.
+                            #   3. Its only caller, a client in the tenant
+                            #      operator, posted straight at the dashboard
+                            #      Service and never traversed this edge. The
+                            #      service behind that client is deleted
+                            #      (gibson#1525).
                             #
                             # Deleting it drops an unreachable dashboard-admin
                             # prefix off the public api host; requests now fall to
@@ -10369,7 +10363,7 @@ spec:
         # scripts/check-velero-volume-excludes.sh keeps this list equal to
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "config-rendered,spire-agent-socket,tmp,wasm"
-        checksum/config: 93255d3c5213ba94e95641d5a806236cb8e09e55f0b87dad5206f4e9a9b917d7
+        checksum/config: cb60774e681de5a234ef4b6508948d88c94509d3abdd9c6aa608f15961995bc8
         # Pod-roll-on-Secret-change delegated to Stakater Reloader (deploy#127,
         # parent deploy#123 — envoy-cert-unify slice D).
         #
