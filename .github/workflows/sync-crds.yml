@@ -11,6 +11,7 @@
 # subdirs of zeroroot-ai/gibson, so their generated CRDs live at:
 #   operators/tenant/config/crd/bases/    (tenant primitives + agentenrollments)
 #   operators/platform/config/crd/bases/  (oidcclients + platformbootstraps)
+#   operators/connector/config/crd/bases/ (connectorinstances)
 #
 # Firing the dispatch (from gibson CI):
 #
@@ -68,8 +69,11 @@ jobs:
           fi
           echo "repo=${SOURCE}" >> "$GITHUB_OUTPUT"
 
-          # The two operator CRD-base subdirs inside the gibson monorepo.
-          echo "crd_dirs=operators/tenant/config/crd/bases operators/platform/config/crd/bases" >> "$GITHUB_OUTPUT"
+          # The operator CRD-base subdirs inside the gibson monorepo. The
+          # connector operator owns ConnectorInstance. It was missing here, so
+          # that CRD was copied by hand and fell behind (spec.caBundleSecret,
+          # gibson#1641).
+          echo "crd_dirs=operators/tenant/config/crd/bases operators/platform/config/crd/bases operators/connector/config/crd/bases" >> "$GITHUB_OUTPUT"
 
           REF="${{ github.event.client_payload.source_ref }}"
           echo "ref=${REF:-main}" >> "$GITHUB_OUTPUT"
