@@ -24,6 +24,7 @@ reads 27 literal names, and that is checked by this script finding them.
   gen-env-readers.py --write            refresh helm/contracts/
   gen-env-readers.py --check            exit 1 when the committed copy is stale
   gen-env-readers.py --write docs-site  refresh one service's contract only
+  gen-env-readers.py --selftest         prove, offline, that a syscall constant is not a reader
 
 Naming services limits the run to them. The version fan-out of one service
 (zeroroot-ai/.github#275) clones only that service beside this checkout, so
@@ -81,11 +82,14 @@ SERVICES: dict[str, dict] = {
 # counts as a reader — and buys the property that matters: anything this gate
 # reports as unread is unread.
 ENV_SHAPED = re.compile(r'''['"`]([A-Z][A-Z0-9_]{2,})['"`]''')
-# A validated-env object reads names as PROPERTIES, not string literals:
-# `env.ADMIN_ENVOY_BASE_URL`. Without this the dashboard's whole config layer
-# looks like it reads nothing. Matching a bare property is loose, which is the
-# safe direction here.
-ENV_PROP = re.compile(r'\.([A-Z][A-Z0-9_]{2,})\b')
+# Go reads an env var only through a string: os.Getenv, os.LookupEnv or a
+# repo-local helper all take one, so a string literal is the whole reader set.
+# A selector such as `unix.ENOENT`, `syscall.O_CLOEXEC` or `io.EOF` is a Go
+# identifier, never an env name. An earlier pattern also matched each `.NAME`
+# selector, for the validated-env object of the dashboard (`env.X`). The
+# dashboard now publishes its own reader set, and in Go that pattern added
+# about 70 false names such as ENOENT and O_CLOEXEC to the setec contract
+# (charts#849).
 SH_READ = re.compile(r'\$\{?([A-Z][A-Z0-9_]*)')
 
 SKIP_DIRS = {".git", "node_modules", ".next", "vendor", "dist", "build", ".worktrees",
@@ -109,6 +113,29 @@ def _strip_comments(text: str, ext: str) -> str:
     return text
 
 
+def go_readers(source: str) -> set[str]:
+    """Env names in Go source with comments already stripped: each env-shaped
+    string literal, and no selector such as unix.ENOENT."""
+    return set(ENV_SHAPED.findall(source))
+
+
+def selftest() -> int:
+    """Offline. A Go file that reads one env var and uses syscall constants
+    must give that one env var and no constant (charts#849)."""
+    src = _strip_comments(
+        'package x\n'
+        'import ("io"; "os"; "golang.org/x/sys/unix")\n'
+        '// NOT_READ appears in a comment only\n'
+        'func f() { _ = os.Getenv("SETEC_NODE_NAME"); _ = unix.ENOENT; _ = unix.O_CLOEXEC; _ = io.EOF }\n',
+        ".go")
+    got = go_readers(src)
+    if got != {"SETEC_NODE_NAME"}:
+        print(f"::error::selftest: want {{'SETEC_NODE_NAME'}}, got {sorted(got)}")
+        return 1
+    print("ok: selftest: a Go env read is found; unix.ENOENT, unix.O_CLOEXEC, io.EOF and a comment are not")
+    return 0
+
+
 def readers(service: str, repo_root: Path) -> set[str]:
     """Env names this service's code reads. Comments are stripped first: a name
     mentioned only in a comment is not a reader, and counting one is how
@@ -120,7 +147,7 @@ def readers(service: str, repo_root: Path) -> set[str]:
             if p.name.endswith("_test.go"):
                 continue
             t = _strip_comments(p.read_text(errors="replace"), ".go")
-            found |= set(ENV_SHAPED.findall(t)) | set(ENV_PROP.findall(t))
+            found |= go_readers(t)
     elif spec["lang"] == "artifact":
         f = repo_root / spec["artifact"]
         if not f.is_file():
@@ -160,6 +187,8 @@ def render(service: str, names: set[str], tag: str) -> str:
 
 
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
     write = "--write" in sys.argv
     check = "--check" in sys.argv
     if not (write or check):
