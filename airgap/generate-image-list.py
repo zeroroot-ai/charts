@@ -297,9 +297,63 @@ def render_images() -> dict[str, set[str]]:
             found.setdefault(repo_of(m.group(1)), set()).add(m.group(1))
     for ref in env_images(out):
         found.setdefault(repo_of(ref), set()).add(ref)
+    # An opt-in component renders in no profile, but an operator can turn it
+    # on. Its image is pinned in values, so it is read from there (charts#850).
+    for ref in values_images():
+        found.setdefault(repo_of(ref), set()).add(ref)
     return found
 
 
+# The values files of each chart of this repo. An image pinned here can start
+# when an operator turns its component on, even when no profile renders it.
+VALUES_GLOB = "helm/*/values*.yaml"
+
+
+def values_images() -> set[str]:
+    """Each first-party or mirror image pinned in a values file of this repo."""
+    import yaml  # noqa: PLC0415
+
+    refs: set[str] = set()
+    for path in sorted(ROOT.glob(VALUES_GLOB)):
+        for doc in yaml.safe_load_all(path.read_text(encoding="utf-8")):
+            refs |= pinned_images(doc)
+    return refs
+
+
+def pinned_images(doc: object) -> set[str]:
+    """Each ghcr.io/zeroroot-ai image that a values tree pins, in any of the
+    three forms the values of this repo use:
+
+      - an object {[registry,] repository, tag[, digest]},
+      - a string under a key named image or *Image (redis.backup.awsCliImage).
+
+    The setec node agent is one: its DaemonSet is off by default, so no
+    profile renders it (charts#850)."""
+    refs: set[str] = set()
+    stack = [doc]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            repo, tag, digest = node.get("repository"), node.get("tag"), node.get("digest")
+            registry = node.get("registry")
+            if isinstance(repo, str) and isinstance(registry, str) and registry and not repo.startswith(registry + "/"):
+                repo = f"{registry}/{repo}"
+            if isinstance(repo, str) and FIRST_PARTY_OR_MIRROR_RX.match(repo) and isinstance(tag, str) and tag:
+                ref = f"{repo}@{tag}" if tag.startswith("sha256:") else f"{repo}:{tag}"
+                if isinstance(digest, str) and digest and "@" not in ref:
+                    ref += f"@{digest}"
+                refs.add(ref)
+            for key, value in node.items():
+                if (isinstance(key, str) and (key == "image" or key.endswith("Image"))
+                        and isinstance(value, str) and FIRST_PARTY_OR_MIRROR_RX.match(value)):
+                    refs.add(value)
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    return refs
+
+
+FIRST_PARTY_OR_MIRROR_RX = re.compile(r"^ghcr\.io/zeroroot-ai/")
 ENV_IMAGE_NAME_RX = re.compile(r"^[A-Z0-9_]+_IMAGE$")
 ARG_IMAGE_RX = re.compile(r"^--[a-z0-9-]+-image=(\S+)$")
 IMAGE_REF_RX = re.compile(r"^ghcr\.io/[^\s:@]+(?::[^\s@]+)?(?:@sha256:[0-9a-f]{64})?$")
@@ -486,6 +540,10 @@ HEADER_TXT = """\
 # self-hosted), so the list is a superset — a mirror that omits an image
 # because one profile does not use it breaks the next profile.
 #
+# It also holds each image pinned in a values file of this repo. An opt-in
+# component, such as the setec node agent, renders in no profile, but an
+# operator can turn it on (charts#850).
+#
 # Digests are NOT resolved here. Almost every image is private now
 # (ghcr.io/zeroroot-ai/*, mirror included), so pinning needs registry auth:
 # run `./resolve-digests.sh` after `docker login ghcr.io` at mirror time.
@@ -632,6 +690,23 @@ def selftest() -> int:
             failures.append(f"{name} was accepted as a pin")
         except SystemExit:
             pass
+    agent = "ghcr.io/zeroroot-ai/setec-node-agent"
+    off = {"setec": {"nodeAgent": {"enabled": False, "image": {
+        "repository": agent, "tag": "v0.130.1@sha256:" + "c" * 64}}}}
+    if pinned_images(off) != {f"{agent}:v0.130.1@sha256:" + "c" * 64}:
+        failures.append("FAILING FIXTURE: the image of a component that is off by default "
+                        "was not read from values")
+    split = {"image": {"repository": "ghcr.io/zeroroot-ai/mirror/x", "tag": "v1", "digest": "sha256:" + "d" * 64}}
+    if pinned_images(split) != {"ghcr.io/zeroroot-ai/mirror/x:v1@sha256:" + "d" * 64}:
+        failures.append("a tag and a separate digest were not joined into one reference")
+    cli = "ghcr.io/zeroroot-ai/mirror/aws-cli:2.17.50@sha256:" + "e" * 64
+    if pinned_images({"backup": {"enabled": False, "awsCliImage": cli}}) != {cli}:
+        failures.append("FAILING FIXTURE: an image written as a string under a *Image key was not read")
+    reg = {"image": {"registry": "ghcr.io", "repository": "zeroroot-ai/mirror/spire-server", "tag": "1.14.5"}}
+    if pinned_images(reg) != {"ghcr.io/zeroroot-ai/mirror/spire-server:1.14.5"}:
+        failures.append("FAILING FIXTURE: a registry and a repository in two fields were not joined")
+    if pinned_images({"image": {"repository": "docker.io/library/x", "tag": "v1"}}):
+        failures.append("an image off ghcr.io/zeroroot-ai was read from values")
     if catalog_ref_problems(tag_sha, tag, tag_sha):
         failures.append("the commit of the pinned tag was refused")
     if not catalog_ref_problems(main_sha, tag, tag_sha):
@@ -642,7 +717,9 @@ def selftest() -> int:
             print(f"[selftest] {f}", file=sys.stderr)
         return 1
     print("[airgap-image-list] selftest OK: one release tag is the pin; two tags, an untagged "
-          "digest, a mutable tag and no image fail; a catalog ref from gibson main fails")
+          "digest, a mutable tag and no image fail; a catalog ref from gibson main fails; "
+          "the image of an off-by-default component is read from values, as an object, "
+          "as a split registry and as a string")
     return 0
 
 

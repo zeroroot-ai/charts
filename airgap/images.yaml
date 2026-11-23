@@ -77,6 +77,9 @@ firstParty:
   - ref: ghcr.io/zeroroot-ai/setec-launcher:v0.130.1@sha256:af20a53fd42f73e91761161aab4641cda412a6a93a21daa408a3ed47646c9f33
     digest: ""
     role: "setec launcher (Firecracker machine of each sandbox)"
+  - ref: ghcr.io/zeroroot-ai/setec-node-agent:v0.130.1@sha256:ac9fcaaf1b6b01c6e6f544de6e88e61942d2083eaf12bf1a75681ebe708d7c73
+    digest: ""
+    role: "setec node agent (snapshots, off by default)"
   - ref: ghcr.io/zeroroot-ai/setec:v0.130.1@sha256:57c451321fb010eb4b9cb5033151f3af63f5683c736c3a7465e95c317bcf40b0
     digest: ""
     role: "setec microVM operator (untrusted-exec boundary)"
@@ -103,6 +106,9 @@ mirrored:
   - ref: ghcr.io/zeroroot-ai/mirror/alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
     digest: ""
     role: "shell base for init containers"
+  - ref: ghcr.io/zeroroot-ai/mirror/aws-cli:2.17.50@sha256:ac68e76ae4bbb804b0c36d56c6fdc8e6800adb46d29867ac2b73280225a7b719
+    digest: ""
+    role: "Redis backup CronJob"
   - ref: ghcr.io/zeroroot-ai/mirror/bitnami-postgresql:16.4.0-debian-12-r0@sha256:be51b3aeaacc600f3eb2b596427be538b1bc17284111a1fe147030e8422c3184
     digest: ""
     role: "psql client for setup Jobs"
@@ -151,6 +157,10 @@ mirrored:
   - ref: ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
     digest: ""
     role: "kubectl for hook Jobs and helm tests"
+  - ref: ghcr.io/zeroroot-ai/mirror/mailpit:v1.28.3@sha256:27cfb8893806ed676042a00f4db70325a0d57cc5217349d210b6dd903e1a7e67
+    digest: ""
+    role: "SMTP capture"
+    hardening: "DEV/TEST ONLY — exclude from a federal mirror"
   - ref: ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community@sha256:5a015e53de1895e7eee1574ae0325cf8c4b89587222778108c594bdd45a474b5
     digest: ""
     role: "graph store of each tenant data plane (the tenant operator deploys it, TENANT_NEO4J_IMAGE)"
@@ -169,6 +179,9 @@ mirrored:
   - ref: ghcr.io/zeroroot-ai/mirror/ratelimit:8fe6ea42@sha256:a61547259607d40aff153050c2a87873ca1676d1d9f5f06937d412000dcc2df1
     digest: ""
     role: "shared per-client edge quota service"
+  - ref: ghcr.io/zeroroot-ai/mirror/redis-exporter:v1.63.0@sha256:8dde0136b66ec4dfb25802283fe89852a405368b095b3893841d90499a8d4e17
+    digest: ""
+    role: "Redis metrics exporter"
   - ref: ghcr.io/zeroroot-ai/mirror/redis-stack-server:7.4.0-v1@sha256:72035434f455ecd897090d3dd83ec357d34857287f159378b965a7006312a797
     digest: ""
     role: "Redis (RediSearch catalog/vector store)"

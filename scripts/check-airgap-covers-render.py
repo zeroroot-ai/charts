@@ -95,8 +95,43 @@ def goldens() -> set[str]:
     return found
 
 
+def pinned(doc) -> set[str]:
+    """Each ghcr.io/zeroroot-ai image in a values tree: an object
+    {[registry,] repository, tag[, digest]}, or a string under a key named
+    image or *Image. An opt-in component, such as the setec node agent, renders in
+    no golden, but an operator can turn it on (charts#850)."""
+    out, stack = set(), [doc]
+    while stack:
+        n = stack.pop()
+        if isinstance(n, dict):
+            r, t, dg, rg = n.get("repository"), n.get("tag"), n.get("digest"), n.get("registry")
+            if isinstance(r, str) and isinstance(rg, str) and rg and not r.startswith(rg + "/"):
+                r = f"{rg}/{r}"
+            if isinstance(r, str) and OURS.match(r) and isinstance(t, str) and t:
+                ref = f"{r}@{t}" if t.startswith("sha256:") else f"{r}:{t}"
+                if isinstance(dg, str) and dg and "@" not in ref:
+                    ref += f"@{dg}"
+                out.add(ref)
+            # A string under a key named image or *Image (redis.backup.awsCliImage).
+            for k, v in n.items():
+                if isinstance(k, str) and (k == "image" or k.endswith("Image")) and isinstance(v, str) and OURS.match(v):
+                    out.add(v)
+            stack.extend(n.values())
+        elif isinstance(n, list):
+            stack.extend(n)
+    return out
+
+
+def values_pins() -> set[str]:
+    found = set()
+    for f in sorted(glob.glob(os.path.join(ROOT, "helm", "*", "values*.yaml"))):
+        for d in yaml.safe_load_all(open(f)):
+            found |= pinned(d)
+    return found
+
+
 def selftest() -> int:
-    rendered = goldens()
+    rendered = goldens() | values_pins()
     full = listed(LIST)
     if missing(rendered, full):
         print(f"SELFTEST FAIL: the committed list must cover the render: {missing(rendered, full)}")
@@ -109,19 +144,31 @@ def selftest() -> int:
         print("SELFTEST FAIL: the render names no setec launcher, disk builder, Velero or agentgateway proxy image: "
               "the check is blind")
         return 1
-    for drop in (launcher, builder, velero, proxy):
+    agent = next((i for i in values_pins() if "/setec-node-agent:" in i), None)
+    cli = next((i for i in values_pins() if "/mirror/aws-cli:" in i), None)
+    if not agent or not cli or agent in goldens() or cli in goldens():
+        print("SELFTEST FAIL: the setec node agent (an image object) and aws-cli (a string) must be pinned "
+              "in values and absent from every golden: the fixture no longer proves the values pass")
+        return 1
+    # Every split-registry image of today is also in a golden, so only a
+    # synthetic fixture proves the join of registry and repository.
+    split = {"image": {"registry": "ghcr.io", "repository": "zeroroot-ai/mirror/spire-server", "tag": "1.14.5"}}
+    if pinned(split) != {"ghcr.io/zeroroot-ai/mirror/spire-server:1.14.5"}:
+        print("SELFTEST FAIL: a registry and a repository in two fields must join into one reference")
+        return 1
+    for drop in (launcher, builder, velero, proxy, agent, cli):
         if missing(rendered, full - {drop}) != [drop]:
             print(f"SELFTEST FAIL: a list without {drop} must fail on it")
             return 1
-    print("  ✓ selftest: a list without the setec launcher, the disk builder, Velero or the agentgateway proxy fails, "
-          "the committed list passes")
+    print("  ✓ selftest: a list without the setec launcher, the disk builder, Velero, the agentgateway proxy "
+          "or an off-by-default image of values (the setec node agent, aws-cli) fails, the committed list passes")
     return 0
 
 
 def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
-    rendered = goldens()
+    rendered = goldens() | values_pins()
     if not rendered:
         print("no golden render names a first-party image: this check is blind", file=sys.stderr)
         return 1
