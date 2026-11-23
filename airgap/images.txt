@@ -11,6 +11,10 @@
 # self-hosted), so the list is a superset — a mirror that omits an image
 # because one profile does not use it breaks the next profile.
 #
+# It also holds each image pinned in a values file of this repo. An opt-in
+# component, such as the setec node agent, renders in no profile, but an
+# operator can turn it on (charts#850).
+#
 # Digests are NOT resolved here. Almost every image is private now
 # (ghcr.io/zeroroot-ai/*, mirror included), so pinning needs registry auth:
 # run `./resolve-digests.sh` after `docker login ghcr.io` at mirror time.
@@ -54,6 +58,7 @@ ghcr.io/zeroroot-ai/setec-device-plugin:v0.130.1@sha256:6afd96fce27240f23a076a49
 ghcr.io/zeroroot-ai/setec-disk-builder:v0.130.1@sha256:da7a5cc1a08c7f6a04313c7157170fb9de41667cfc4e67390de0085024121151
 ghcr.io/zeroroot-ai/setec-frontend:v0.130.1@sha256:84c0b96eb4ff04b4254cb147e7a424df69fb449e02201a0f5f2da8bc690e5dee
 ghcr.io/zeroroot-ai/setec-launcher:v0.130.1@sha256:af20a53fd42f73e91761161aab4641cda412a6a93a21daa408a3ed47646c9f33
+ghcr.io/zeroroot-ai/setec-node-agent:v0.130.1@sha256:ac9fcaaf1b6b01c6e6f544de6e88e61942d2083eaf12bf1a75681ebe708d7c73
 ghcr.io/zeroroot-ai/setec:v0.130.1@sha256:57c451321fb010eb4b9cb5033151f3af63f5683c736c3a7465e95c317bcf40b0
 ghcr.io/zeroroot-ai/tenant-operator:v0.172.0@sha256:d2e490aaef04ebde5e9278daf1b0106cb1a13d38ce7549ddc1669604b7a3eb05
 ghcr.io/zeroroot-ai/zitadel-login:v4.19.4@sha256:52211a61b1e60e88d462f317d10f6b6ec95d0fdacc2eb944637279fbcafa32da
@@ -81,12 +86,15 @@ ghcr.io/zeroroot-ai/mirror/envoy:v1.34.0@sha256:45d37d848802f98a5647cb7522b4c1c4
 ghcr.io/zeroroot-ai/mirror/external-dns:v0.21.0@sha256:f53faaf71cb270d1ca9dce6ea0c94bfebf1a18696263487f0fbc74b9bf2bd7ff
 ghcr.io/zeroroot-ai/mirror/external-secrets:v2.10.0@sha256:814117b0fd6d121b03e8ba3b6db1cecbe7449a354fc0fc9c4faf73a37aa221b1
 ghcr.io/zeroroot-ai/mirror/kubectl:1.31.4@sha256:64614ef8290f3fb27fed5164b338debeeb79a1e5e26c93eb920770b71abd7c48
+# DEV/TEST ONLY — exclude from a federal mirror
+ghcr.io/zeroroot-ai/mirror/mailpit:v1.28.3@sha256:27cfb8893806ed676042a00f4db70325a0d57cc5217349d210b6dd903e1a7e67
 ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community@sha256:5a015e53de1895e7eee1574ae0325cf8c4b89587222778108c594bdd45a474b5
 ghcr.io/zeroroot-ai/mirror/oidc-discovery-provider:1.14.5@sha256:553704280654f49ba58bf52d5e84d8deca8daf5d91ff8b34dbd47dd3cc325eca
 ghcr.io/zeroroot-ai/mirror/openbao:2.5.3@sha256:fdc6da21ca6963560c32336fd7feb9cf2d5e52668f1a1647205a4b41171f0806
 ghcr.io/zeroroot-ai/mirror/openfga:v1.21.0@sha256:2113c664a486b5da8d7a2cdab479e0d4e30639c80fd2c000540f645c1dbc1e55
 ghcr.io/zeroroot-ai/mirror/opentelemetry-collector-k8s:0.165.0@sha256:ce55d0a38923c83120e4ba613fbdf446786652d2ce9f29d1cd7879e5d869829f
 ghcr.io/zeroroot-ai/mirror/ratelimit:8fe6ea42@sha256:a61547259607d40aff153050c2a87873ca1676d1d9f5f06937d412000dcc2df1
+ghcr.io/zeroroot-ai/mirror/redis-exporter:v1.63.0@sha256:8dde0136b66ec4dfb25802283fe89852a405368b095b3893841d90499a8d4e17
 ghcr.io/zeroroot-ai/mirror/redis-stack-server:7.4.0-v1@sha256:72035434f455ecd897090d3dd83ec357d34857287f159378b965a7006312a797
 ghcr.io/zeroroot-ai/mirror/redis:7.4.1-alpine@sha256:c1e88455c85225310bbea54816e9c3f4b5295815e6dbf80c34d40afc6df28275
 ghcr.io/zeroroot-ai/mirror/reloader:v1.4.6@sha256:fa2d03a1b36738e7c7420fd0fbfe601339875a38d24e8a27f5f1883139055c2b

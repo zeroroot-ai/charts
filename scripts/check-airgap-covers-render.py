@@ -95,8 +95,36 @@ def goldens() -> set[str]:
     return found
 
 
+def pinned(doc) -> set[str]:
+    """Each image object {repository, tag[, digest]} on ghcr.io/zeroroot-ai in a
+    values tree. An opt-in component, such as the setec node agent, renders in
+    no golden, but an operator can turn it on (charts#850)."""
+    out, stack = set(), [doc]
+    while stack:
+        n = stack.pop()
+        if isinstance(n, dict):
+            r, t, dg = n.get("repository"), n.get("tag"), n.get("digest")
+            if isinstance(r, str) and OURS.match(r) and isinstance(t, str) and t:
+                ref = f"{r}@{t}" if t.startswith("sha256:") else f"{r}:{t}"
+                if isinstance(dg, str) and dg and "@" not in ref:
+                    ref += f"@{dg}"
+                out.add(ref)
+            stack.extend(n.values())
+        elif isinstance(n, list):
+            stack.extend(n)
+    return out
+
+
+def values_pins() -> set[str]:
+    found = set()
+    for f in sorted(glob.glob(os.path.join(ROOT, "helm", "*", "values*.yaml"))):
+        for d in yaml.safe_load_all(open(f)):
+            found |= pinned(d)
+    return found
+
+
 def selftest() -> int:
-    rendered = goldens()
+    rendered = goldens() | values_pins()
     full = listed(LIST)
     if missing(rendered, full):
         print(f"SELFTEST FAIL: the committed list must cover the render: {missing(rendered, full)}")
@@ -109,19 +137,24 @@ def selftest() -> int:
         print("SELFTEST FAIL: the render names no setec launcher, disk builder, Velero or agentgateway proxy image: "
               "the check is blind")
         return 1
-    for drop in (launcher, builder, velero, proxy):
+    agent = next((i for i in values_pins() if "/setec-node-agent:" in i), None)
+    if not agent or agent in goldens():
+        print("SELFTEST FAIL: the setec node agent must be pinned in values and absent from every golden: "
+              "the fixture no longer proves the values pass")
+        return 1
+    for drop in (launcher, builder, velero, proxy, agent):
         if missing(rendered, full - {drop}) != [drop]:
             print(f"SELFTEST FAIL: a list without {drop} must fail on it")
             return 1
-    print("  ✓ selftest: a list without the setec launcher, the disk builder, Velero or the agentgateway proxy fails, "
-          "the committed list passes")
+    print("  ✓ selftest: a list without the setec launcher, the disk builder, Velero, the agentgateway proxy "
+          "or the off-by-default setec node agent fails, the committed list passes")
     return 0
 
 
 def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
-    rendered = goldens()
+    rendered = goldens() | values_pins()
     if not rendered:
         print("no golden render names a first-party image: this check is blind", file=sys.stderr)
         return 1
