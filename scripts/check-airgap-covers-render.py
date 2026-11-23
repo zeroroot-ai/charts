@@ -150,6 +150,12 @@ def selftest() -> int:
         print("SELFTEST FAIL: the setec node agent (an image object) and aws-cli (a string) must be pinned "
               "in values and absent from every golden: the fixture no longer proves the values pass")
         return 1
+    # Every split-registry image of today is also in a golden, so only a
+    # synthetic fixture proves the join of registry and repository.
+    split = {"image": {"registry": "ghcr.io", "repository": "zeroroot-ai/mirror/spire-server", "tag": "1.14.5"}}
+    if pinned(split) != {"ghcr.io/zeroroot-ai/mirror/spire-server:1.14.5"}:
+        print("SELFTEST FAIL: a registry and a repository in two fields must join into one reference")
+        return 1
     for drop in (launcher, builder, velero, proxy, agent, cli):
         if missing(rendered, full - {drop}) != [drop]:
             print(f"SELFTEST FAIL: a list without {drop} must fail on it")
