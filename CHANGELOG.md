@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.160.0](https://github.com/zeroroot-ai/charts/compare/v0.159.0...v0.160.0) (2026-11-23)
+
+
+### Features
+
+* **gibson:** pin v0.170.0 with the Cilium read and plugin cluster ranges ([#841](https://github.com/zeroroot-ai/charts/issues/841)) ([b9dc922](https://github.com/zeroroot-ai/charts/commit/b9dc922d9d5731fd6b42670a62d4abd6b88dc861))
+
 ## [0.159.0](https://github.com/zeroroot-ai/charts/compare/v0.158.0...v0.159.0) (2026-11-21)
 
 
