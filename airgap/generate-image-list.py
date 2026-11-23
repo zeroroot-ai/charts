@@ -321,20 +321,32 @@ def values_images() -> set[str]:
 
 
 def pinned_images(doc: object) -> set[str]:
-    """Each image object {repository, tag[, digest]} of a values tree whose
-    repository is on ghcr.io/zeroroot-ai. The setec node agent is one: its
-    DaemonSet is off by default, so no profile renders it (charts#850)."""
+    """Each ghcr.io/zeroroot-ai image that a values tree pins, in any of the
+    three forms the values of this repo use:
+
+      - an object {[registry,] repository, tag[, digest]},
+      - a string under a key named image or *Image (redis.backup.awsCliImage).
+
+    The setec node agent is one: its DaemonSet is off by default, so no
+    profile renders it (charts#850)."""
     refs: set[str] = set()
     stack = [doc]
     while stack:
         node = stack.pop()
         if isinstance(node, dict):
             repo, tag, digest = node.get("repository"), node.get("tag"), node.get("digest")
+            registry = node.get("registry")
+            if isinstance(repo, str) and isinstance(registry, str) and registry and not repo.startswith(registry + "/"):
+                repo = f"{registry}/{repo}"
             if isinstance(repo, str) and FIRST_PARTY_OR_MIRROR_RX.match(repo) and isinstance(tag, str) and tag:
                 ref = f"{repo}@{tag}" if tag.startswith("sha256:") else f"{repo}:{tag}"
                 if isinstance(digest, str) and digest and "@" not in ref:
                     ref += f"@{digest}"
                 refs.add(ref)
+            for key, value in node.items():
+                if (isinstance(key, str) and (key == "image" or key.endswith("Image"))
+                        and isinstance(value, str) and FIRST_PARTY_OR_MIRROR_RX.match(value)):
+                    refs.add(value)
             stack.extend(node.values())
         elif isinstance(node, list):
             stack.extend(node)
@@ -687,6 +699,12 @@ def selftest() -> int:
     split = {"image": {"repository": "ghcr.io/zeroroot-ai/mirror/x", "tag": "v1", "digest": "sha256:" + "d" * 64}}
     if pinned_images(split) != {"ghcr.io/zeroroot-ai/mirror/x:v1@sha256:" + "d" * 64}:
         failures.append("a tag and a separate digest were not joined into one reference")
+    cli = "ghcr.io/zeroroot-ai/mirror/aws-cli:2.17.50@sha256:" + "e" * 64
+    if pinned_images({"backup": {"enabled": False, "awsCliImage": cli}}) != {cli}:
+        failures.append("FAILING FIXTURE: an image written as a string under a *Image key was not read")
+    reg = {"image": {"registry": "ghcr.io", "repository": "zeroroot-ai/mirror/spire-server", "tag": "1.14.5"}}
+    if pinned_images(reg) != {"ghcr.io/zeroroot-ai/mirror/spire-server:1.14.5"}:
+        failures.append("FAILING FIXTURE: a registry and a repository in two fields were not joined")
     if pinned_images({"image": {"repository": "docker.io/library/x", "tag": "v1"}}):
         failures.append("an image off ghcr.io/zeroroot-ai was read from values")
     if catalog_ref_problems(tag_sha, tag, tag_sha):
@@ -700,7 +718,8 @@ def selftest() -> int:
         return 1
     print("[airgap-image-list] selftest OK: one release tag is the pin; two tags, an untagged "
           "digest, a mutable tag and no image fail; a catalog ref from gibson main fails; "
-          "the image of an off-by-default component is read from values")
+          "the image of an off-by-default component is read from values, as an object, "
+          "as a split registry and as a string")
     return 0
 
 
