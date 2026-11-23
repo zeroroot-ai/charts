@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.163.0](https://github.com/zeroroot-ai/charts/compare/v0.162.0...v0.163.0) (2026-11-23)
+
+
+### Features
+
+* **gibson:** pin v0.172.0 and drop get on the Cilium agent pods ([#853](https://github.com/zeroroot-ai/charts/issues/853)) ([dcbba2a](https://github.com/zeroroot-ai/charts/commit/dcbba2a8b3c8f1043c3ff82df4489e6360aeb5a4))
+
 ## [0.162.0](https://github.com/zeroroot-ai/charts/compare/v0.161.0...v0.162.0) (2026-11-23)
 
 
