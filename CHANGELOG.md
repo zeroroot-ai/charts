@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.164.0](https://github.com/zeroroot-ai/charts/compare/v0.163.0...v0.164.0) (2026-11-23)
+
+
+### Features
+
+* **gibson:** pin gibson v0.173.0 ([#858](https://github.com/zeroroot-ai/charts/issues/858)) ([10b7558](https://github.com/zeroroot-ai/charts/commit/10b7558c87df540a3128c2790def2573c7914c50))
+
+
+### Bug Fixes
+
+* **airgap:** list each image pinned in values, so opt-in components get mirrored ([#855](https://github.com/zeroroot-ai/charts/issues/855)) ([7bffb17](https://github.com/zeroroot-ai/charts/commit/7bffb17c11dcb2890ddbd6ea33c260407e1b581e))
+* **contracts:** read only string literals as Go env readers ([#856](https://github.com/zeroroot-ai/charts/issues/856)) ([6c4bcaf](https://github.com/zeroroot-ai/charts/commit/6c4bcaf092c7c39aa1bdc7620984b53978e3dccf)), closes [#849](https://github.com/zeroroot-ai/charts/issues/849)
+
 ## [0.163.0](https://github.com/zeroroot-ai/charts/compare/v0.162.0...v0.163.0) (2026-11-23)
 
 
