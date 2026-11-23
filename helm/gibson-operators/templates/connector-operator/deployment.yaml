@@ -104,6 +104,13 @@ spec:
             # connector denies them. The operator refuses an empty value.
             - name: CONNECTOR_CLUSTER_CIDRS
               value: {{ include "gibson-operators.clusterCIDRs" . | quote }}
+            # Where the Cilium agent runs (global.cilium.daemonSet). The
+            # operator reads the DaemonSet at start and refuses a Cilium
+            # release below the fix of CVE-2024-47825.
+            - name: CILIUM_DAEMONSET_NAME
+              value: {{ include "gibson-operators.ciliumDaemonSetName" . | quote }}
+            - name: CILIUM_DAEMONSET_NAMESPACE
+              value: {{ include "gibson-operators.ciliumDaemonSetNamespace" . | quote }}
             # SPIRE Workload API socket the X509Source streams SVIDs from.
             - name: SPIFFE_ENDPOINT_SOCKET
               value: "unix:///run/spire/sockets/api.sock"

@@ -110,6 +110,22 @@ operator parses each entry again at start.
 {{- end -}}
 
 {{/*
+gibson-operators.ciliumDaemonSetName and gibson-operators.ciliumDaemonSetNamespace
+name the Cilium agent DaemonSet (global.cilium.daemonSet). The tenant operator
+and the connector operator read them as CILIUM_DAEMONSET_NAME and
+CILIUM_DAEMONSET_NAMESPACE. Each one reads the DaemonSet at start and refuses to
+start below the Cilium release that fixes CVE-2024-47825. The Role of
+cilium-read-rbac.yaml follows both values.
+*/}}
+{{- define "gibson-operators.ciliumDaemonSetName" -}}
+{{- (((.Values.global).cilium).daemonSet).name | default "cilium" -}}
+{{- end -}}
+
+{{- define "gibson-operators.ciliumDaemonSetNamespace" -}}
+{{- (((.Values.global).cilium).daemonSet).namespace | default "kube-system" -}}
+{{- end -}}
+
+{{/*
 gibson-operators.validCIDR returns "true" for an IPv4 or an IPv6 CIDR. Sprig
 has no CIDR parser, so it checks each part. IPv4: four decimal octets of 0 to
 255 and a prefix of 0 to 32, with no leading zero. IPv6: groups of one to

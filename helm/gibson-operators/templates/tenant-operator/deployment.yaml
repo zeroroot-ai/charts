@@ -311,6 +311,19 @@ spec:
               value: {{ include "gibson.waitForSpireSocketImage" . | quote }}
             - name: PLUGIN_ENVOY_CA_FILE
               value: {{ if .Values.envoy.tls.secretName }}"/etc/ssl/envoy-ca/envoy-ca.crt"{{ else }}""{{ end }}
+            # The pod and the Service ranges of the cluster, a comma list
+            # (global.networkPolicy.clusterCIDRs, the value of
+            # CONNECTOR_CLUSTER_CIDRS). The egress policy of each plugin denies
+            # them. The operator refuses an empty value.
+            - name: PLUGIN_CLUSTER_CIDRS
+              value: {{ include "gibson-operators.clusterCIDRs" . | quote }}
+            # Where the Cilium agent runs (global.cilium.daemonSet). The
+            # operator reads the DaemonSet at start and refuses a Cilium
+            # release below the fix of CVE-2024-47825.
+            - name: CILIUM_DAEMONSET_NAME
+              value: {{ include "gibson-operators.ciliumDaemonSetName" . | quote }}
+            - name: CILIUM_DAEMONSET_NAMESPACE
+              value: {{ include "gibson-operators.ciliumDaemonSetNamespace" . | quote }}
             # First-tenant seed (gibson#1496): on a self-hosted install with no
             # signup, the operator enqueues the first tenant over its SPIFFE
             # identity via EnqueueTenantProvisioning — the session-less path,
