@@ -1,0 +1,54 @@
+{{- /*
+Read of the Cilium agent for the tenant operator and the connector operator.
+
+Each operator reads the Cilium agent DaemonSet and lists the agent pods at
+start (operators/internal/ciliumegress, gibson#1600). It refuses to start when
+the Cilium release is below the fix of CVE-2024-47825. The agent runs in
+another namespace than the operators, so a Role in that namespace grants the
+read. It follows global.cilium.daemonSet (CILIUM_DAEMONSET_NAME and
+CILIUM_DAEMONSET_NAMESPACE).
+
+The rules match the Role that controller-gen writes in
+operators/{tenant,connector}/config/rbac/role.yaml of gibson. The pod list has
+no resourceNames, because a list cannot name a pod. The Role is namespaced and
+holds no other kind.
+*/ -}}
+{{- $ns := include "gibson-operators.ciliumDaemonSetNamespace" . }}
+{{- $name := include "gibson-operators.ciliumDaemonSetName" . }}
+{{- $role := printf "gibson-operators-read-%s" $name | trunc 63 | trimSuffix "-" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $role }}
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: gibson-operators
+    app.kubernetes.io/part-of: gibson
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    resourceNames: [{{ $name | quote }}]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $role }}
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/name: gibson-operators
+    app.kubernetes.io/part-of: gibson
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $role }}
+subjects:
+  - kind: ServiceAccount
+    name: gibson-tenant-operator
+    namespace: {{ .Values.tenantOperator.namespace | default "gibson" }}
+  - kind: ServiceAccount
+    name: {{ .Values.connectorOperator.serviceAccount.name | default "gibson-connector-operator" }}
+    namespace: {{ .Release.Namespace }}

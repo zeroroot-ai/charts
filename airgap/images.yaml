@@ -40,11 +40,11 @@ chart:
 
 # The gibson commit whose component catalog the dispatchTime group is
 # derived from (airgap/gibson-catalog.ref).
-gibsonCatalogRef: 2c4d868c303ae1cd80ed6d73ad1e9d83709ca6a4
+gibsonCatalogRef: 9041bab23398df4f3ae3a5cb4c73bdcc2a732949
 
 # First-party platform images (private; ELv2 + the closed billing seam).
 firstParty:
-  - ref: ghcr.io/zeroroot-ai/connector-operator:v0.169.0@sha256:19ff684d2bfef57be40d416a32696f2f3b91524cd8cb37a812c3666c93e782db
+  - ref: ghcr.io/zeroroot-ai/connector-operator:v0.170.0@sha256:57a0e65eacce1b460143a8e6c36487a8e822df1509af5d4d8264e50aa07f6eaf
     digest: ""
     role: ""
   - ref: ghcr.io/zeroroot-ai/dashboard:v0.139.0@sha256:a3370421b6d71152f8d3189ddae358af79238fa441208f1ee4b8bca5845802b4
@@ -53,16 +53,16 @@ firstParty:
   - ref: ghcr.io/zeroroot-ai/docs-site:v0.6.20@sha256:c8f0cd7fc01489eb8f45dacc2f225a4b717aaad28f1b58f08e3418859071a5ba
     digest: ""
     role: "customer documentation site"
-  - ref: ghcr.io/zeroroot-ai/ext-authz:v0.169.0@sha256:a88eeb667b665d668b5ed60d1e9dd3be68d014594d64303db9bac044a6ce1d43
+  - ref: ghcr.io/zeroroot-ai/ext-authz:v0.170.0@sha256:3a94253c96a38375d5b559af26419ce4c736377f48917ccadbcbe34014abf6cf
     digest: ""
     role: "Envoy ext_authz (auth edge — DO NOT replace with Istio AuthZ)"
-  - ref: ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-2c4d868@sha256:1fab7d2da1077ef8a5f7b3431c1050364db4e31ee33b67c784c31aafe26ca859
+  - ref: ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-9041bab@sha256:c254c8d0c13e89fd559ca97c955b2b39a8b3d6cee8d41bd658c9dfcec9d59a8e
     digest: ""
     role: ""
-  - ref: ghcr.io/zeroroot-ai/gibson:v0.169.0@sha256:0215737f271574e332bd6247cb6001995515a089ee73349b20a835f922a58412
+  - ref: ghcr.io/zeroroot-ai/gibson:v0.170.0@sha256:052dc3c888fe9eb21e4e66d4c6ab898dd8cf5960bd2e6c430c35aa3fa8ee92d5
     digest: ""
     role: "daemon (run/execute + platform RPCs)"
-  - ref: ghcr.io/zeroroot-ai/platform-operator:v0.169.0@sha256:e46887cd4322bc6811ccfd9e44e6f1fd4d1ebf171855561986b8b6278d3052ce
+  - ref: ghcr.io/zeroroot-ai/platform-operator:v0.170.0@sha256:c56c62ac8692b601c00a7c1d63aca1743acb7d1a67ac13bd473924fd152ab66f
     digest: ""
     role: "platform operator (Zitadel OIDC apps, FGA aggregate root)"
   - ref: ghcr.io/zeroroot-ai/setec-device-plugin:v0.129.0@sha256:04ec0fd1c238584743e58c4c4a9dfe41faebaf6ce5f785e890550945c1ade18b
@@ -80,7 +80,7 @@ firstParty:
   - ref: ghcr.io/zeroroot-ai/setec:v0.129.0@sha256:69bd5bf3c95dde483839ccb5dc8a6175e5c2212f8c561951d19c3c266669a5c7
     digest: ""
     role: "setec microVM operator (untrusted-exec boundary)"
-  - ref: ghcr.io/zeroroot-ai/tenant-operator:v0.169.0@sha256:7a3268df565bf2871bc9d618c2316fbb67633e0ca8453a3bfcc4dbb89c1f7fc2
+  - ref: ghcr.io/zeroroot-ai/tenant-operator:v0.170.0@sha256:ed0c78fa332b862438f9f414ab76286c0e8a8ccb89590043f994097535f73c93
     digest: ""
     role: "tenant operator"
   - ref: ghcr.io/zeroroot-ai/zitadel-login:v4.19.4@sha256:52211a61b1e60e88d462f317d10f6b6ec95d0fdacc2eb944637279fbcafa32da
@@ -249,13 +249,16 @@ dispatchTime:
   - ref: ghcr.io/zeroroot-ai/cve-triage@sha256:c08484bffd87d768809a257d8ab81f0393510027b5a3caffa09c1b401abde276
     digest: ""
     role: "CVE triage agent"
-  - ref: ghcr.io/zeroroot-ai/gibson-executor@sha256:12826078d28168d9c83a9f6b728bb9c63a1b07d84f61bd5f7e1f09754f8e0c05
-    digest: ""
-    role: "tool runner: one image hosting every CLI parser (nmap, nuclei, trivy, ...)"
-  - ref: ghcr.io/zeroroot-ai/gibson-plugin-github@sha256:f7bcf71da1bb2d541dad4a058d750d8bfaa30d4f8a988bbdea673bc5219e7b6e
+  - ref: ghcr.io/zeroroot-ai/fix-agent@sha256:8e55b40a467dff1ecfc07d2f55f04bd0888fdf6d07ccbd5062016b81c9f83b3a
     digest: ""
     role: ""
-  - ref: ghcr.io/zeroroot-ai/gibson-plugin-gitlab@sha256:f2ee8718481a8140a774122148acace49c63fd0b609e11a1c628ab42029112dd
+  - ref: ghcr.io/zeroroot-ai/gibson-executor@sha256:14d500c02066672253f2a6c6e1b5c9f4e3aaa6a8b2568468e85404cbcd54b7de
+    digest: ""
+    role: "tool runner: one image hosting every CLI parser (nmap, nuclei, trivy, ...)"
+  - ref: ghcr.io/zeroroot-ai/gibson-plugin-github@sha256:222a941d1ce2786521d9bcca74ae13d8fd7786a0dea8d6cbdebc1b77588556c0
+    digest: ""
+    role: ""
+  - ref: ghcr.io/zeroroot-ai/gibson-plugin-gitlab@sha256:0ab8a949e358c4af3e103f9e12cd87ae68df080d0b555fedf3e75687acd023cd
     digest: ""
     role: ""
   - ref: ghcr.io/zeroroot-ai/zerocool-agent@sha256:4c2c27f6b94926d0f8148f22b4baa3be1793460c4a8687df42fa6c325ddc3b46

@@ -211,6 +211,17 @@ global:
   # file that still sets either one fails the render and names the key
   # (gibson.assertSecretKnobsDeleted).
 
+  # The Cilium agent DaemonSet. The tenant operator and the connector operator
+  # read it at start (CILIUM_DAEMONSET_NAME and CILIUM_DAEMONSET_NAMESPACE) and
+  # refuse to start when its Cilium release is below the fix of CVE-2024-47825.
+  # The chart renders a Role in this namespace that grants each operator a read
+  # of this DaemonSet and a list of the agent pods. The defaults are what a
+  # Cilium install gives the agent. Change them only when the cluster runs
+  # Cilium under another name or namespace.
+  cilium:
+    daemonSet:
+      name: cilium
+      namespace: kube-system
   # First-tenant seed (gibson#1496) — headless first-admin bring-up for a
   # self-hosted install that has no self-serve signup. `global` so BOTH
   # subcharts read ONE identity: the tenant-operator (gibson-operators) enqueues
