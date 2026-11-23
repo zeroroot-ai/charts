@@ -11723,7 +11723,7 @@ spec:
               readOnly: true
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/connector-operator:v0.173.0@sha256:5868ea375f8aeeb05089e772a97fe42f2547fb198f239eea376ae6dbf1f09789"
+          image: "ghcr.io/zeroroot-ai/connector-operator:v0.174.0@sha256:0d4df716835b4b06ad6362ec2f7e47411013d0ffcf9f7c5aa9c0620705a631bc"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -11867,7 +11867,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/platform-operator:v0.173.0@sha256:ef5c5bd8a17461a791b59d26bfdedc21fa4641276b9e1a9fa7fa6cf53289e0a7"
+          image: "ghcr.io/zeroroot-ai/platform-operator:v0.174.0@sha256:c22696b15a09285a8e3c55c11edccf15cdb288426983cebdd078f36d5c653be6"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -12358,7 +12358,7 @@ spec:
               memory: 64Mi
       containers:
         - name: manager
-          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.173.0@sha256:056a7e0b0cba0f2ff1fe54930e7e40b7a26b5d20d9c274456a022585707dc475"
+          image: "ghcr.io/zeroroot-ai/tenant-operator:v0.174.0@sha256:807df046f489a7100801357650982eaa529816b8ca20d665db7c2909e60105fd"
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect=true
@@ -12506,7 +12506,7 @@ spec:
             # The image of the belief trainer CronJob of each tenant
             # (gibson#616). The operator exits at start when it is empty.
             - name: BELIEF_TRAINER_IMAGE
-              value: "ghcr.io/zeroroot-ai/gibson:v0.173.0@sha256:f1d595b61b0dfca9f076da2fe4bf0ad593f91935319afbb192cb3f1b55e4103a"
+              value: "ghcr.io/zeroroot-ai/gibson:v0.174.0@sha256:315b077c73d7dcd0d820615deb0e5b3ec2b95841cb78c54e1ee41c91a6e8e29a"
             # The Neo4j image of each tenant data plane (gibson#1061). The
             # operator exits at start when it is empty or has no digest.
             - name: TENANT_NEO4J_IMAGE
@@ -14483,7 +14483,7 @@ spec:
         # the pod's emptyDir and CSI-ephemeral volumes.
         backup.velero.io/backup-volumes-excludes: "spire-agent-socket,tmp"
         checksum/registry: c1c29512582a893a867405ae14499183f952c17ed756544d689ca1b5877c2c5c
-        checksum/daemon-registry: 4ccb45dacd52bacc04b73e952df2dd88f2373e9bed71a1b07a5ca731f9460eaf
+        checksum/daemon-registry: 3e44392e2e7062b08ba4c4f2916e1b001e4385b11abedcbe0641d77b6579e631
         configmap.reloader.stakater.com/reload: "gibson-fga-config"
         secret.reloader.stakater.com/reload: "gibson-dashboard-oidc,gibson-native-login-oidc,gibson-ext-authz-health-tls"
     spec:
@@ -14618,7 +14618,7 @@ spec:
               memory: 32Mi
       containers:
         - name: ext-authz
-          image: "ghcr.io/zeroroot-ai/ext-authz:v0.173.0@sha256:6fb5e31c1055b3be680503b3a9f0efab2352b4a2a6381a4279c22fbb545bf5e5"
+          image: "ghcr.io/zeroroot-ai/ext-authz:v0.174.0@sha256:f3962d6dc5aa30ef8d0c7ef679ab011d7e97dc1cc059e57bac8d13d4149e9c46"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -18551,7 +18551,7 @@ spec:
               memory: 32Mi
       containers:
         - name: gibson
-          image: "ghcr.io/zeroroot-ai/gibson:v0.173.0@sha256:f1d595b61b0dfca9f076da2fe4bf0ad593f91935319afbb192cb3f1b55e4103a"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.174.0@sha256:315b077c73d7dcd0d820615deb0e5b3ec2b95841cb78c54e1ee41c91a6e8e29a"
           imagePullPolicy: Always
           ports:
             - name: callback
@@ -19863,7 +19863,7 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: gibson-gibson-workloads-fga-init-4ccb45da
+  name: gibson-gibson-workloads-fga-init-3e44392e
   namespace: gibson
   labels:
     helm.sh/chart: gibson-workloads-0.2.0
@@ -19930,7 +19930,7 @@ spec:
         # The entrypoint is the gibson binary, so command overrides it to get a
         # shell for the redirect. The runtime image is alpine-based and has one.
         - name: dump-model
-          image: "ghcr.io/zeroroot-ai/gibson:v0.173.0@sha256:f1d595b61b0dfca9f076da2fe4bf0ad593f91935319afbb192cb3f1b55e4103a"
+          image: "ghcr.io/zeroroot-ai/gibson:v0.174.0@sha256:315b077c73d7dcd0d820615deb0e5b3ec2b95841cb78c54e1ee41c91a6e8e29a"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -29255,7 +29255,7 @@ spec:
       # The daemon image itself — same repo@digest the StatefulSet runs — so
       # `gibson --version` reports the toolchain the DEPLOYED binary was built
       # with, not some proxy. The runtime image is alpine-based (has /bin/sh).
-      image: "ghcr.io/zeroroot-ai/gibson:v0.173.0@sha256:f1d595b61b0dfca9f076da2fe4bf0ad593f91935319afbb192cb3f1b55e4103a"
+      image: "ghcr.io/zeroroot-ai/gibson:v0.174.0@sha256:315b077c73d7dcd0d820615deb0e5b3ec2b95841cb78c54e1ee41c91a6e8e29a"
       imagePullPolicy: Always
       command: ["/bin/sh", "-c"]
       args:
@@ -30426,7 +30426,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: first-admin
-          image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-3d1e3b8@sha256:61d352650c532503feb97644f80692eaa6bcbcd2ad75074ccd2a06a3570473e7"
+          image: "ghcr.io/zeroroot-ai/gibson-bootstrap-runner:sha-33ba07d@sha256:81b3165053b19d1f8be323f57bf3a4f2808cbc16ec4f1574afbf696b9fd6769f"
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
