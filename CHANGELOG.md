@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.162.0](https://github.com/zeroroot-ai/charts/compare/v0.161.0...v0.162.0) (2026-11-23)
+
+
+### Features
+
+* **setec:** pin v0.130.1 for file delivery to the sandbox ([#847](https://github.com/zeroroot-ai/charts/issues/847)) ([f656cf0](https://github.com/zeroroot-ai/charts/commit/f656cf0b4e3b9b977533998ba5b4e0655d938796))
+
+
+### Bug Fixes
+
+* **crds:** sync the ConnectorInstance CRD from the connector operator ([#845](https://github.com/zeroroot-ai/charts/issues/845)) ([f184d95](https://github.com/zeroroot-ai/charts/commit/f184d955a56da9d6bdb7e19a1f8acf2e4a5f0269))
+
 ## [0.161.0](https://github.com/zeroroot-ai/charts/compare/v0.160.0...v0.161.0) (2026-11-23)
 
 
