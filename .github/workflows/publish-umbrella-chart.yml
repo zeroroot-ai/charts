@@ -49,7 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e  # v5
         with:
           # The Helm of Argo CD 3.5.6, as ci.yml: the smoke render of the
           # pulled package tests the renderer that deploys it (charts#789).
@@ -76,7 +76,7 @@ jobs:
         # re-anchors the package to this repository.
         run: echo "${{ secrets.GHCR_PUBLISH_PAT }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532  # v4.1.3
         with:
           cosign-release: "v2.4.1"
 
