@@ -274,6 +274,7 @@ values-consumed: ## No values key that no template reads (ADR-0094, charts#292)
 
 env-consumed: ## No env var injected into a first-party container that the service never reads (ADR-0094, charts#294)
 	@python3 scripts/check-env-consumed.py --selftest
+	@python3 scripts/gen-env-readers.py --selftest
 	@python3 scripts/check-env-consumed.py
 
 env-contract-sync: ## Refresh helm/contracts/ from each service's sibling clone, at the tag the chart pins
