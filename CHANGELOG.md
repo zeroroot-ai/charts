@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.165.0](https://github.com/zeroroot-ai/charts/compare/v0.164.0...v0.165.0) (2026-11-24)
+
+
+### Features
+
+* **gibson:** pin gibson v0.174.0 ([#859](https://github.com/zeroroot-ai/charts/issues/859)) ([5ebe829](https://github.com/zeroroot-ai/charts/commit/5ebe829d9d11b1406c22d8068264ab745e0982f1))
+
 ## [0.164.0](https://github.com/zeroroot-ai/charts/compare/v0.163.0...v0.164.0) (2026-11-23)
 
 
